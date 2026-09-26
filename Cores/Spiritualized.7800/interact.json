@@ -1,0 +1,69 @@
+{
+    "interact": {
+        "magic": "APF_VER_1",
+        "variables": [
+            {
+                "name": "Swap Controllers",
+                "id": 3,
+                "type": "check",
+                "enabled": true,
+				"persist": true,
+				"writeonly": true,
+                "address": "0x10000260",
+				"defaultval": 0,
+                "value": 1,
+                "mask": "0xFFFFFFFE"
+            },			
+			{
+                "name": "L Diff A",
+                "id": 4,
+                "type": "radio",
+                "group": 201,
+                "enabled": true,
+				"persist": true,
+				"writeonly": true,
+				"address": "0x10000264",
+				"value": 0,
+                "mask": "0xFFFF0000"
+            },
+            {
+                "name": "L Diff B",
+                "id": 5,
+                "type": "radio",
+                "group": 201,
+                "enabled": true,
+				"persist": true,
+				"writeonly": true,
+                "address": "0x10000264",
+				"defaultval": 1,
+                "value": "1",
+                "mask": "0xFFFF0000"
+            },            			
+			{
+                "name": "R Diff A",
+                "id": 6,
+                "type": "radio",
+                "group": 202,
+                "enabled": true,
+				"persist": true,
+				"writeonly": true,
+				"address": "0x10000268",
+				"value": 0,
+                "mask": "0xFFFF0000"
+            },
+            {
+                "name": "R Diff B",
+                "id": 7,
+                "type": "radio",
+                "group": 202,
+                "enabled": true,
+				"persist": true,
+				"writeonly": true,
+                "address": "0x10000268",
+				"defaultval": 1,
+                "value": "1",
+                "mask": "0xFFFF0000"
+            }
+        ]
+    }
+}

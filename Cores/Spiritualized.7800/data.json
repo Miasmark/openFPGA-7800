@@ -1,0 +1,31 @@
+{
+  "data": {
+    "magic": "APF_VER_1",
+    "data_slots": [
+      {
+        "name": "Cartridge",
+        "id": "0x100",
+        "required": true,
+        "parameters": 129,
+        "extensions": [
+			"a78"
+        ],
+        "size_exact": 0,
+        "size_maximum": 262144,
+        "address": "0x00000000"
+      },
+      {
+        "name": "Atari 7800 BIOS",
+        "id": "0x103",
+        "required": true,
+        "filename": "7800bios.bin",
+        "parameters": 137,
+        "extensions": [
+          "bin"
+        ],
+        "size_exact": 4096,
+        "address": "0x00080000"
+      }
+    ]
+  }
+}

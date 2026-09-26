@@ -1,0 +1,36 @@
+{
+    "core": {
+        "magic": "APF_VER_1",
+        "metadata": {
+            "platform_ids": [
+                "7800"
+            ],
+            "shortname": "7800",
+            "description": "Atari 7800 core",
+            "author": "Spiritualized",
+			"url": "",
+            "version": "1.0.2",
+            "date_release": "2022-10-18"
+        },
+        "framework": {
+            "target_product": "Analogue Pocket",
+            "version_required": "1.1",
+            "sleep_supported": false,
+            "dock": {
+                "supported": true,
+                "analog_output": false
+            },
+            "hardware": {
+                "link_port": false,
+                "cartridge_adapter": -1
+            }
+        },
+        "cores": [
+            {
+                "name": "default",
+                "id": 0,
+                "filename": "a78.rev"
+            }
+        ]
+    }
+}
