@@ -6,16 +6,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Quartus runs in the raetro/quartus:21.1 image through docker run. The job
+# itself stays on the runner: that image's glibc is too old for the Node
+# runtime that actions/checkout and actions/upload-artifact need.
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: raetro/quartus:21.1
     steps:
       - uses: actions/checkout@v4
 
       - name: Quartus compile
-        working-directory: src/fpga
-        run: quartus_sh --flow compile ap_core
+        run: |
+          docker run --rm -v "$PWD:/build" -w /build/src/fpga raetro/quartus:21.1 \
+            quartus_sh --flow compile ap_core
+          sudo chown -R "$(id -u):$(id -g)" src/fpga
 
       - name: Check timing
         working-directory: src/fpga
