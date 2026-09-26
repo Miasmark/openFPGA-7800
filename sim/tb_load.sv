@@ -20,6 +20,8 @@ module tb_load;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0;
+	logic pokey_irq_on = 1'b0;
+	initial pokey_irq_on = $test$plusargs("pokeyirq");
 	logic [15:0] joy0 = 16'd0;
 	logic [1:0] hsc_setting = 2'd0;
 
@@ -52,7 +54,7 @@ module tb_load;
 		.ioctl_wr(ioctl_wr & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(1'b0),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
-		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
+		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.joy0(joy0), .joy1(16'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal),
@@ -178,6 +180,42 @@ module tb_load;
 				i2c_txt = {i2c_txt, $sformatf(" %02x%0s", i2c_sh[8:1], i2c_sh[0] ? "n" : "a")};
 				i2c_bits = 0;
 			end
+		end
+	end
+
+	// ---------------- POKEY write log (+pokeylog) ----------------
+	// Every CPU write to the POKEY at $4000 (mirrored through $7FFF), as
+	// "ms register value", in pokey_writes.txt.
+	int pk_fd = 0; logic [15:0] pk_old_a = 0; logic pk_old_w = 0;
+	always @(posedge clk_sys) if (recording && pk_fd != 0) begin
+		pk_old_a <= dut.bios_addr; pk_old_w <= !dut.RW;
+		if (!dut.RW && dut.bios_addr[15:14] == 2'b01 && (dut.bios_addr != pk_old_a || !pk_old_w))
+			begin $fdisplay(pk_fd, "%0d %x %02x", $time / 1000000, dut.bios_addr[3:0], dut.din); $fflush(pk_fd); end
+	end
+
+	// ---------------- SDRAM refresh coverage (+refreshstat) ----------------
+	// The MiSTer sdram.sv never refreshes on a timer. A read of the same
+	// 16 bit word as the previous request becomes an AUTO REFRESH (one row
+	// from the chip's counter); any other read or write activates row
+	// addr[13:1]. Per 64 ms: refresh commands issued, and rows (of 8192)
+	// that were neither activated in the window nor could be covered.
+	longint rf_last_t [8192];
+	logic [23:0] rf_last_w = '1; logic rf_old_rd = 0;
+	int rf_refresh = 0, rf_win = 0; longint rf_win_start = 0;
+	initial for (int i = 0; i < 8192; i++) rf_last_t[i] = 0;
+	always @(posedge clk_sdram) if (recording && $test$plusargs("refreshstat")) begin
+		rf_old_rd <= dut.sdram.ch0_rd;
+		if (dut.sdram.ch0_rd && !rf_old_rd) begin
+			if (dut.sdram.ch0_addr[24:1] == rf_last_w) rf_refresh++;
+			else rf_last_t[dut.sdram.ch0_addr[13:1]] = $time;
+			rf_last_w <= dut.sdram.ch0_addr[24:1];
+		end
+		if ($time - rf_win_start >= 64000000) begin
+			automatic int stale = 0;
+			for (int i = 0; i < 8192; i++) if ($time - rf_last_t[i] > 64000000) stale++;
+			if (rf_win < 400) $display("REFRESH window %0d (%0d ms): %0d auto refreshes, %0d rows not activated in 64 ms",
+				rf_win, $time / 1000000, rf_refresh, stale);
+			rf_win++; rf_refresh = 0; rf_win_start = $time;
 		end
 	end
 
@@ -350,6 +388,7 @@ module tb_load;
 			join_none
 			recording = 1;
 			i2c_on = $test$plusargs("i2ctrace");
+			if ($test$plusargs("pokeylog")) pk_fd = $fopen("pokey_writes.txt", "w");
 			// +dumpat=MS +dump=N: capture N frames starting MS into the recording
 			if ($value$plusargs("dumpat=%d", dump_at)) fork
 				begin
