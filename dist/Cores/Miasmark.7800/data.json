@@ -53,6 +53,44 @@
         ],
         "size_maximum": "0x8000",
         "address": "0x30000000"
+      },
+      {
+        "name": "High Score Cart firmware",
+        "id": "0x106",
+        "required": false,
+        "filename": "highscor.rom",
+        "parameters": "0x89",
+        "extensions": [
+          "rom",
+          "bin"
+        ],
+        "size_maximum": "0x4000",
+        "address": "0x04000000"
+      },
+      {
+        "name": "Supercharger BIOS",
+        "id": "0x107",
+        "required": false,
+        "filename": "supercharger.bin",
+        "parameters": "0x89",
+        "extensions": [
+          "bin",
+          "rom"
+        ],
+        "size_maximum": "0x4000",
+        "address": "0x06000000"
+      },
+      {
+        "name": "High Score Cart firmware (A78)",
+        "id": "0x108",
+        "required": false,
+        "filename": "hsc.a78",
+        "parameters": "0x89",
+        "extensions": [
+          "a78"
+        ],
+        "size_maximum": "0x4080",
+        "address": "0x08000000"
       }
     ]
   }

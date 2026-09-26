@@ -18,7 +18,9 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Two upstream files are modified, and the POKEY is swapped for an older one.
+Six upstream files are modified (`top.sv`, `Maria/DMA.sv`, and for the
+firmware switch `cart.sv`, `cart2600.sv`, `banks2600.sv`), two firmware images
+are removed, and the POKEY is swapped for an older one.
 
 ### POKEY: Mark Watson's VHDL instead of upstream's rtl/Pokey
 
@@ -56,16 +58,32 @@ commit is kept.
 
 ### `rtl/top.sv`: build switches
 
-Two build switches were added next to upstream's own `NO_ARM_MAPPER`:
+Three build switches were added next to upstream's own `NO_ARM_MAPPER`:
 
 | Macro        | Effect |
 |--------------|--------|
 | `NO_DDRAM`   | Leaves out the DDR3 bridge (`ddram`). Both of its client channels read back idle. The Pocket has no DDR3. |
 | `NO_BUPCHIP` | Leaves out the BupChip player (`bupchip_subsystem`): an ARM program with DDR-resident assets. Souper carts still run; their music channel is silent. |
+| `EXTERNAL_FIRMWARE` | Builds the HSC and Supercharger firmware ROMs empty, with a load port (see below). |
 
-The Pocket build defines all three (`NO_ARM_MAPPER`, `NO_DDRAM`,
-`NO_BUPCHIP`) in `../ap_core.qsf`. Without the macros `top.sv` is identical
-to upstream in behaviour.
+The Pocket build defines all four (`NO_ARM_MAPPER`, `NO_DDRAM`,
+`NO_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`. Without the macros
+the changed files are identical to upstream in behaviour.
+
+### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
+
+Upstream builds two pieces of original firmware into the core: the High
+Score Cartridge ROM (`rtl/mem4.hex`/`.mif`, used in `cart.sv`) and the
+Starpath Supercharger BIOS (`rtl/ar.hex`/`.mif`, used in `banks2600.sv`). No
+license is given for either, so this copy leaves both files out.
+
+With `EXTERNAL_FIRMWARE` defined, those two ROMs are built empty and gain a
+write port (`fw_*` ports through `top.sv` -> `cart.sv`, and `top.sv` ->
+`cart2600.sv` -> `mapper_AR` in `banks2600.sv`). The Pocket wrapper fills
+them from the user's `highscor.rom` / `hsc.a78` and `supercharger.bin` data slots while
+the core is held in reset, and keeps the HSC disabled until a full 4 KiB
+image has arrived. `sim/extra_tests.sh` loads both through the slots and
+checks the ROM contents byte for byte.
 
 Note that 0dc8ad2 also moved PAL timing into the PLL (MiSTer retunes it to
 14.1876 MHz). The Pocket keeps the NTSC clock, so PAL games run about 0.9%
@@ -73,8 +91,10 @@ fast.
 
 ## Updating
 
-Copy a newer upstream `rtl/` over this one, re-apply the two `ifdef` blocks
-in `top.sv` and the holey DMA fix in `Maria/DMA.sv` (unless upstream has
-fixed it; check with `sim/extra_tests.sh`), update `UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.
+Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in
+`top.sv`, `cart.sv`, `cart2600.sv` and `banks2600.sv`, and the holey DMA fix
+in `Maria/DMA.sv` (unless upstream has fixed it; check with
+`sim/extra_tests.sh`). Delete `rtl/mem4.*` and `rtl/ar.*` again, update
+`UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.
 New upstream source files need adding to `../core/core.qip` (and to
 `sim/run_sim.sh`).

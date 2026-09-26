@@ -8,6 +8,8 @@
 #                row for row, with nothing drawn above or below it.
 #   pokey450     POKEY at $450 (A78 type 0x0040): audio stats + WAV
 #   pokey4000    POKEY at $4000 (type 0x0001, the retail location): same
+#   savekey      SaveKey on port 2 and its save slot
+#   firmware     HSC firmware / Supercharger BIOS data slots
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$HERE/work}"
@@ -93,4 +95,23 @@ echo "  Auto, header declares none (expect fail tone ~490 Hz):"
 "$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=31 +sk_auto | grep TONE
 echo "  32 KiB save round trip, APF read protocol (expect exactly the 8 bytes the cart wrote to differ):"
 "$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=7 +sk_on +sksave=random.bin | grep -E "SAVEKEY"
+cd - >/dev/null
+
+echo "-- Firmware slots: HSC firmware and Supercharger BIOS (not in this repository;"
+echo "   MiSTer's copies are fetched at test time, as a user would supply them)"
+mkdir -p "$X/fw"; ln -sfn "$WORK/rtl" "$X/fw/rtl"
+UP="https://raw.githubusercontent.com/MiSTer-unstable-nightlies/Atari7800_MiSTer/$(cat "$HERE/../src/fpga/mister/UPSTREAM_COMMIT")/rtl"
+[ -s "$X/fw/highscor.rom" ] || curl -fsSL "$UP/mem4.hex" | python3 "$HERE/../tools/hex2bin.py" > "$X/fw/highscor.rom"
+[ -s "$X/fw/supercharger.bin" ] || curl -fsSL "$UP/ar.hex" | python3 "$HERE/../tools/hex2bin.py" > "$X/fw/supercharger.bin"
+python3 "$HERE/make_a78.py" 7 > "$X/fw/tone.a78"
+python3 "$HERE/make_a78.py" --bin "$X/fw/highscor.rom" > "$X/fw/hsc.a78"   # the same firmware as an A78
+python3 -c "import os; open('$X/fw/random.sav','wb').write(os.urandom(2048))"
+cd "$X/fw"
+echo "  No firmware file, HSC On (expect HSC_EN 0):"
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on | grep -E "HSC_EN|TONE"
+echo "  Both files loaded (expect 0 bytes differ, HSC_EN 1, save intact):"
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=highscor.rom +arfw=supercharger.bin +save=random.sav \
+	| grep -E "FIRMWARE|HSC_EN|TONE|SAVE after"
+echo "  HSC firmware as hsc.a78 (expect its header skipped: 0 bytes differ from the payload, HSC_EN 1):"
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=hsc.a78 | grep -E "FIRMWARE|HSC_EN"
 cd - >/dev/null

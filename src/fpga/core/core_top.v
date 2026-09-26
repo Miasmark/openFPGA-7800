@@ -338,12 +338,18 @@ synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
 // Bridge address map
 //   0x00000000  cartridge image (data slot 0)       -> SDRAM via the loader
 //   0x02000000  7800 BIOS       (data slot 1)       -> BIOS block RAM
+//   0x04000000  HSC firmware    (data slot 4)       -> HSC ROM block RAM
+//   0x06000000  Supercharger BIOS (data slot 5)     -> AR ROM block RAM
+//   0x08000000  HSC firmware as hsc.a78 (data slot 6) -> HSC ROM block RAM
 //   0x10000000  settings (interact.json)
 //   0x20000000  high score cartridge RAM (save slot 2, 2 KiB)
 //   0xF8000000  APF command interface
 
 localparam [15:0] SLOT_CART = 16'h0100;
 localparam [15:0] SLOT_BIOS = 16'h0103;
+localparam [15:0] SLOT_HSCFW = 16'h0106;
+localparam [15:0] SLOT_ARFW = 16'h0107;
+localparam [15:0] SLOT_HSCA78 = 16'h0108;
 
 // Settings. Written by the host from interact.json, clk_74a.
     reg             set_swap      = 1'b0;
@@ -654,20 +660,26 @@ data_loader #(
 );
 
 // Into clk_sys
-    reg     [2:0]   dl_s, cart_s, bios_s, rst_s, mrst_s;
+    reg     [2:0]   dl_s, cart_s, bios_s, hscfw_s, arfw_s, rst_s, mrst_s;
     reg             cart_download = 1'b0;
     reg             bios_download = 1'b0;
+    reg             hscfw_download = 1'b0;
+    reg             arfw_download = 1'b0;
     reg             core_reset = 1'b1;
 
 always @(posedge clk_sys) begin
     dl_s   <= {dl_s[1:0],   is_downloading};
     cart_s <= {cart_s[1:0], download_slot == SLOT_CART};
     bios_s <= {bios_s[1:0], download_slot == SLOT_BIOS};
+    hscfw_s <= {hscfw_s[1:0], download_slot == SLOT_HSCFW || download_slot == SLOT_HSCA78};
+    arfw_s <= {arfw_s[1:0], download_slot == SLOT_ARFW};
     rst_s  <= {rst_s[1:0],  reset_n};
     mrst_s <= {mrst_s[1:0], menu_reset_cnt != 0};
 
     cart_download <= dl_s[2] & cart_s[2];
     bios_download <= dl_s[2] & bios_s[2];
+    hscfw_download <= dl_s[2] & hscfw_s[2];
+    arfw_download <= dl_s[2] & arfw_s[2];
     core_reset    <= ~rst_s[2] | mrst_s[2];
 end
 
@@ -732,7 +744,9 @@ atari7800_pocket atari (
 
     .cart_download  ( cart_download ),
     .bios_download  ( bios_download ),
-    .ioctl_wr       ( ioctl_wr & (cart_download | bios_download) ),
+    .hscfw_download ( hscfw_download ),
+    .arfw_download  ( arfw_download ),
+    .ioctl_wr       ( ioctl_wr & (cart_download | bios_download | hscfw_download | arfw_download) ),
     .ioctl_addr     ( ioctl_addr[24:0] ),
     .ioctl_dout     ( ioctl_dout ),
 

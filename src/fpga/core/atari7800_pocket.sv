@@ -27,6 +27,8 @@ module atari7800_pocket
 	// Download stream (clk_sys, one clk_sys cycle per byte)
 	input  wire        cart_download,
 	input  wire        bios_download,
+	input  wire        hscfw_download,  // high score cart firmware (4 KiB, optional A78 header)
+	input  wire        arfw_download,   // Supercharger BIOS (2 KiB)
 	input  wire        ioctl_wr,
 	input  wire [24:0] ioctl_addr,
 	input  wire  [7:0] ioctl_dout,
@@ -105,8 +107,8 @@ reg reset;
 
 always @(posedge clk_sys) begin
 	old_cart_download <= cart_download;
-	reset <= reset_in | cart_download | bios_download | old_cart_download |
-		mapper_init_busy | ~pll_locked;
+	reset <= reset_in | cart_download | bios_download | hscfw_download |
+		arfw_download | old_cart_download | mapper_init_busy | ~pll_locked;
 end
 
 ////////////////////////////  CART HEADER  ////////////////////////////////
@@ -120,6 +122,13 @@ reg         tia_mode;
 reg         cart_loaded;
 reg  [14:0] bios_mask;
 reg         bios_loaded;
+reg         hscfw_loaded;
+reg         hscfw_hdr;
+// Offset into the HSC firmware payload. The ROM takes it modulo 4 KiB, so a
+// longer file leaves its last 4 KiB in the ROM. Header bytes land in the
+// ROM first and are overwritten by the payload.
+wire        hscfw_payload = ~hscfw_hdr | (ioctl_addr >= 25'd128);
+wire [24:0] hscfw_off = (hscfw_hdr && ioctl_addr >= 25'd128) ? ioctl_addr - 25'd128 : ioctl_addr;
 wire [31:0] cart_size;
 
 initial begin
@@ -136,6 +145,8 @@ initial begin
 	cart_loaded = 0;
 	bios_mask = 0;
 	bios_loaded = 0;
+	hscfw_loaded = 0;
+	hscfw_hdr = 0;
 end
 
 // MiSTer picks 7800 vs 2600 from the file extension. The Pocket does not
@@ -149,6 +160,22 @@ always @(posedge clk_sys) begin
 		bios_mask <= ioctl_addr[14:0];
 		bios_loaded <= 1'b1;
 	end
+
+	// An hsc.a78 carries a 128 byte A78 header ("ATARI" at bytes 1-5).
+	if (hscfw_download && ioctl_wr)
+		case (ioctl_addr)
+			25'd0: hscfw_hdr <= 1'b0;
+			25'd1: hscfw_hdr <= ioctl_dout == "A";
+			25'd2: hscfw_hdr <= hscfw_hdr & (ioctl_dout == "T");
+			25'd3: hscfw_hdr <= hscfw_hdr & (ioctl_dout == "A");
+			25'd4: hscfw_hdr <= hscfw_hdr & (ioctl_dout == "R");
+			25'd5: hscfw_hdr <= hscfw_hdr & (ioctl_dout == "I");
+			default: ;
+		endcase
+
+	// The whole 4 KiB image has to arrive before the HSC can be offered.
+	if (hscfw_download && ioctl_wr && hscfw_off[11:0] == 12'hFFF && hscfw_payload)
+		hscfw_loaded <= 1'b1;
 
 	if (cart_download) begin
 		tia_mode <= 1'b0;
@@ -331,7 +358,10 @@ save_ram_dp #(.WORD_ADDR_BITS(9)) hsc_ram
 wire use_sk = (savekey_setting == 2'd1) ||
 	(savekey_setting == 2'd0 && cart_is_7800 && (cart_save[1] || joy1_type == 8'd10));
 
-wire hsc_en = (hsc_setting == 2'd0) ? (cart_save[0] || cart_xm[0]) : (hsc_setting == 2'd1);
+// The HSC firmware is not built in (it is Atari's code); it comes from the
+// user's highscor.rom. Without it there is no HSC, whatever the setting.
+wire hsc_en = hscfw_loaded &
+	((hsc_setting == 2'd0) ? (cart_save[0] || cart_xm[0]) : (hsc_setting == 2'd1));
 // The high score cart save is one shared file (hsc.sav) for every cart, like
 // the real HSC's single RAM. Its size in the data slot table is what the
 // Pocket reads to decide whether to write the file back, so it must be
@@ -471,6 +501,14 @@ wire use_bios = bios_loaded & ~skip_bios;
 
 Atari7800 main
 (
+	// HSC firmware and Supercharger BIOS: built without them
+	// (EXTERNAL_FIRMWARE), loaded from the user's files instead. The HSC
+	// keeps the last 4 KiB of its payload; the Supercharger the first 2 KiB.
+	.fw_hsc_load  (hscfw_download),
+	.fw_ar_load   (arfw_download),
+	.fw_wr        (ioctl_wr & (hscfw_download ? 1'b1 : ioctl_addr[24:11] == 0)),
+	.fw_addr      (hscfw_download ? hscfw_off[11:0] : ioctl_addr[11:0]),
+	.fw_data      (ioctl_dout),
 	.clk_sys      (clk_sys),
 	.reset        (reset),
 	.loading      (cart_download || bios_download || mapper_init_busy),

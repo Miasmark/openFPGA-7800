@@ -33,7 +33,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   high score cartridge.
 - 2600 cartridges (`.a26`, `.bin`), with MiSTer's bankswitch auto-detection.
   The ARM-based schemes (DPC+, CDF/CDFJ) are not included; see below.
-- High score cartridge saves, in **one shared file for all games**, like the
+- The high score cartridge, which needs its firmware as a file (see
+  *Firmware files* below). Its saves go in **one shared file for all games**, like the
   real HSC's single RAM: `hsc.sav` (the Pocket keeps it under
   `/Saves/7800/`). Versions 2.0.2 and 2.0.3 used a file per game, and those
   files are rotated by four bytes; `tools/fix_hsc_save.py` repairs one, which
@@ -46,6 +47,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   cart whose header asks for both (such as Triple Punch) gets both.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
+- 2600 Starpath Supercharger games, given the Supercharger BIOS as a file.
+  Untested on hardware.
 - Settings: difficulty switches, controller swap, region, palette
   (warm/cool/hot), high score cart, overscan, border, stereo TIA, 2600
   flicker blend, SaveKey, and POKEY IRQ (off by default, as on MiSTer; some
@@ -70,7 +73,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,539 / 18,480 (62%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
+| This port (ARM and BupChip left out) | **11,619 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -103,6 +106,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
+| Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
@@ -121,7 +125,8 @@ crystal, 0.015% fast, which is not audible.
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
 | SaveKey | New in 2.0.5; not yet tested on hardware. 2.0.6: HSC and SaveKey together when the header asks for both (Triple Punch) |
-| High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`) |
+| High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
+| Supercharger BIOS file | New in 2.0.7; not tested on hardware |
 
 ### Changes to the MiSTer sources
 
@@ -171,8 +176,27 @@ POKEY as the Pocket build.
 ## Installing
 
 Copy the contents of a release zip to the root of the SD card. Carts go
-anywhere under `/Assets/7800/`, and the optional BIOS goes in
-`/Assets/7800/common/7800bios.bin`.
+anywhere under `/Assets/7800/`.
+
+### Firmware files
+
+The core does not include any console or peripheral firmware. These optional
+files go in `/Assets/7800/common/`:
+
+| File | What it is | Size | Without it |
+|---|---|---|---|
+| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default |
+| `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
+| `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games do not load |
+
+Either HSC file works; use one. `highscor.rom` is the name the A7800 emulator
+uses. In `hsc.a78` the header is detected and skipped. If a file holds more
+than 4 KiB, the core keeps its last 4 KiB. A MiSTer-style `.hex` image (one byte per line) converts with
+`python3 tools/hex2bin.py file.hex > highscor.rom`.
+
+Up to 2.0.6 the high score cart and Supercharger firmware were built into the
+core, as they are on MiSTer. From 2.0.7 they are loaded from these files, so
+this repository and its releases carry no firmware whose license is unclear.
 
 ## Building
 
@@ -255,17 +279,8 @@ bitstream.
   non-commercial use; commercial use needs his permission.
 - `src/fpga/apf/`, `core_top.v` and `core_bridge_cmd.v` are Analogue's
   framework and template, under Analogue's terms.
-- The bitstream embeds the High Score Cartridge firmware and the Supercharger
-  BIOS, carried over from the MiSTer core. No license is given for either.
+- No console or peripheral firmware is included: the 7800 BIOS, the high
+  score cart firmware and the Supercharger BIOS are all user-supplied.
 
-**Known conflict.** GPL-3.0 does not allow extra restrictions on a combined
-work, and Watson's non-commercial condition is one. So, strictly, the
-bitstream can't be distributed under both licenses at once. The MiSTer core
-shipped the same combination for years. Until it is resolved, treat this core
-as non-commercial only. It can be resolved by any one of:
-
-1. getting Mark Watson's permission to distribute his POKEY under GPL-3.0;
-2. replacing the three GPL-3.0 parts with permissively licensed ones: a new
-   SDRAM controller, a new 24LC256 model, and building without the YM2151
-   (only a few XM homebrews use it);
-3. going back to upstream's MIT POKEY, which breaks Ballblazer on the Pocket.
+The POKEY portion keeps its own license, Mark Watson's terms above: the core
+may not be used or sold commercially without his permission.

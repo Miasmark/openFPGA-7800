@@ -5,6 +5,13 @@
 // Covers the bank switching, ram, and audio hardware from carts
 module cart
 (
+`ifdef EXTERNAL_FIRMWARE
+	// Pocket: HSC firmware written at load time (see POCKET_CHANGES.md)
+	input  logic        fw_load,
+	input  logic        fw_wr,
+	input  logic [11:0] fw_addr,
+	input  logic  [7:0] fw_data,
+`endif
 	input  logic        clk_sys,
 	input  logic        pclk0,
 	input  logic        pclk1,
@@ -790,6 +797,20 @@ end
 assign hsc_ram_cs = address_in[15:11] == 5'd2 && hsc_en;
 wire hsc_rom_cs = address_in[15:12] == 4'd3 && hsc_en;
 
+`ifdef EXTERNAL_FIRMWARE
+spram #(
+	.addr_width(12),
+	.mem_name("HSC")
+) hsc_rom
+(
+	.address (fw_load ? fw_addr : address_in[11:0]),
+	.clock   (clk_sys),
+	.data    (fw_data),
+	.wren    (fw_load & fw_wr),
+	.cs      (1'b1),
+	.q       (hsc_rom_dout)
+);
+`else
 spram #(
 	.addr_width(12),
 	.mem_name("HSC"),
@@ -804,6 +825,7 @@ spram #(
 	.cs      (1'b1),
 	.q       (hsc_rom_dout)
 );
+`endif
 
 assign hsc_ram_dout = hsc_ram_din;
 

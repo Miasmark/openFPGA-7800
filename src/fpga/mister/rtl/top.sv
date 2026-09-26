@@ -20,6 +20,15 @@ module Atari7800 #(
 	input  logic        bupchip_force_valid,
 	input  logic  [7:0] bupchip_force_data,
 `endif
+`ifdef EXTERNAL_FIRMWARE
+	// Pocket: the HSC and Supercharger firmware are loaded at run time from
+	// user-supplied files instead of being built in (see POCKET_CHANGES.md).
+	input  logic        fw_hsc_load,
+	input  logic        fw_ar_load,
+	input  logic        fw_wr,
+	input  logic [11:0] fw_addr,
+	input  logic  [7:0] fw_data,
+`endif
 	input  logic        clk_sys,
 	input  logic        reset,
 	input  logic        pause,
@@ -1026,6 +1035,12 @@ module Atari7800 #(
 		.cartram_wrdata (cartram_wrdata78),
 		.cartram_data   (cartram_data_bram),
 		.hsc_en         (hsc_en),
+`ifdef EXTERNAL_FIRMWARE
+		.fw_load        (fw_hsc_load),
+		.fw_wr          (fw_wr),
+		.fw_addr        (fw_addr),
+		.fw_data        (fw_data),
+`endif
 		.hsc_ram_cs     (hsc_ram_cs),
 		.hsc_ram_din    (hsc_ram_dout),
 		.rw             (RW),
@@ -1055,6 +1070,12 @@ module Atari7800 #(
 
 	cart2600 cart2600
 	(
+`ifdef EXTERNAL_FIRMWARE
+		.fw_load        (fw_ar_load),
+		.fw_wr          (fw_wr),
+		.fw_addr        (fw_addr[10:0]),
+		.fw_data        (fw_data),
+`endif
 		.pal            (PAL),
 		.ddr_timeout    (arm_ddr_timeout),
 		.d_out          (cart_2600_DB_out),

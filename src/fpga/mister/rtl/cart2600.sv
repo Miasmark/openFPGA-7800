@@ -3,6 +3,13 @@
 
 module cart2600
 (
+`ifdef EXTERNAL_FIRMWARE
+	// Pocket: Supercharger BIOS written at load time (see POCKET_CHANGES.md)
+	input           fw_load,
+	input           fw_wr,
+	input   [10:0]  fw_addr,
+	input   [7:0]   fw_data,
+`endif
 	// Physical Pins
 	output logic [7:0]  d_out, // Data bus
 	input    [7:0]  d_in,  // Data bus
@@ -1187,6 +1194,12 @@ module cart2600
 
 	mapper_AR mapper_AR
 	(
+`ifdef EXTERNAL_FIRMWARE
+		.fw_load    (fw_load),
+		.fw_wr      (fw_wr),
+		.fw_addr    (fw_addr),
+		.fw_data    (fw_data),
+`endif
 		.clk        (clk),
 		.reset      (reset || mapper != BANKAR),
 		.a_change   (address_change),

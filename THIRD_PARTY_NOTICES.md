@@ -36,19 +36,20 @@ CC0.
 
 ## Embedded ROM images
 
-The bitstream contains these ROM images, as the MiSTer core does:
+The bitstream contains these images from the MiSTer core (MIT):
 
 | Image | Path | What it is |
 |---|---|---|
-| `mem4.mif` | `src/fpga/mister/rtl/` | Atari 7800 High Score Cartridge firmware |
-| `ar.mif` | `src/fpga/mister/rtl/` | Starpath Supercharger BIOS |
 | `mem0.mif` | `src/fpga/mister/rtl/` | The MiSTer core's "no cartridge" screen |
 | `ooo.mif` | `src/fpga/mister/rtl/` | The MiSTer core's "unsupported cartridge" screen |
 | palettes | `src/fpga/mister/rtl/palettes/` | 7800 colour palettes |
 
-The High Score Cartridge and Supercharger images are firmware from the
-original hardware makers, carried over unchanged from upstream. No license
-for them is given there or here.
+No console or peripheral firmware is included. The MiSTer core builds in the
+High Score Cartridge firmware (`mem4`) and the Starpath Supercharger BIOS
+(`ar`), which are the original makers' code with no license given. This port
+removes both from the repository and builds with `EXTERNAL_FIRMWARE`, which
+loads them at run time from the user's own `highscor.rom` (or `hsc.a78`)
+and `supercharger.bin`, as it already did for the 7800 BIOS.
 
 ## Platform files
 
@@ -57,11 +58,9 @@ Spiritualized's 2022 Pocket 7800 core, which this core replaces.
 `dist/Cores/Miasmark.7800/icon.bin` is the placeholder from Analogue's core
 template.
 
-## How the licenses combine
+## POKEY
 
-The GPL-3.0 parts (SDRAM controller, JT51, EEPROM) and Mark Watson's POKEY
-are built into the same bitstream. GPL-3.0 section 10 does not allow extra
-restrictions on a combined work, while Watson's terms forbid commercial use
-without his permission. The MiSTer core shipped the same combination until
-2026-08-25. Until one side changes, treat the bitstream as non-commercial
-only, and see the README for the options to resolve it.
+Mark Watson's POKEY keeps its own license: free for non-commercial use, and
+commercial use or sale, in source or binary form, needs his permission
+(scrameta at gmail). That applies to any bitstream built from this
+repository.

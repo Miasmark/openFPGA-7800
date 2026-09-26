@@ -19,6 +19,7 @@ module tb_load;
 	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
+	logic hscfw_download = 1'b0, arfw_download = 1'b0;
 	logic [15:0] joy0 = 16'd0;
 	logic [1:0] hsc_setting = 2'd0;
 
@@ -47,7 +48,8 @@ module tb_load;
 	atari7800_pocket dut (
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
-		.ioctl_wr(ioctl_wr & cart_download), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
+		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
+		.ioctl_wr(ioctl_wr & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(1'b0),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
@@ -156,7 +158,19 @@ module tb_load;
 	logic [7:0] image [$];
 	int fd, c, audf, mismatches;
 	real measured, ideal;
-	string path, save_path, sk_path;
+	string path, save_path, sk_path, fw_path;
+	logic [7:0] fw_img [$];
+	// What a firmware ROM should hold: the HSC keeps the last 4 KiB of its
+	// payload (after an A78 header, if any), the Supercharger the first 2 KiB.
+	function automatic logic [7:0] fw_expect(int slot, int i);
+		int start, len;
+		start = (fw_img.size() > 5 && fw_img[1] == "A" && fw_img[2] == "T" && fw_img[3] == "A"
+			&& fw_img[4] == "R" && fw_img[5] == "I") ? 128 : 0;
+		len = fw_img.size() - start;
+		if (slot == 1) return i < fw_img.size() ? fw_img[i] : 8'h00;
+		if (len >= 4096) return fw_img[start + len - 4096 + i];
+		return i < len ? fw_img[start + i] : 8'h00;
+	endfunction
 	logic [7:0] sk_img [0:32767];
 	bit have_sk = 0;
 	int sk_diffs;
@@ -209,6 +223,38 @@ module tb_load;
 			end
 			have_save = 1;
 		end
+		// +hscfw=FILE / +arfw=FILE: load the HSC firmware / Supercharger BIOS
+		// through their data slots first, as the Pocket does at core start.
+		for (int slot = 0; slot < 2; slot++)
+			if ($value$plusargs(slot == 0 ? "hscfw=%s" : "arfw=%s", fw_path)) begin
+				fw_img.delete();
+				fd = $fopen(fw_path, "rb");
+				c = $fgetc(fd);
+				while (c != -1) begin fw_img.push_back(c[7:0]); c = $fgetc(fd); end
+				$fclose(fd);
+				while (fw_img.size() % 4) fw_img.push_back(8'h00);
+				if (slot == 0) hscfw_download = 1'b1; else arfw_download = 1'b1;
+				repeat (100) @(posedge clk_74a);
+				for (int i = 0; i < fw_img.size(); i += 4) begin
+					@(posedge clk_74a);
+					bridge_addr = i;
+					bridge_wr_data = {fw_img[i], fw_img[i+1], fw_img[i+2], fw_img[i+3]};
+					bridge_wr = 1'b1;
+					@(posedge clk_74a);
+					bridge_wr = 1'b0;
+					repeat (78) @(posedge clk_74a);
+				end
+				repeat (2000) @(posedge clk_74a);
+				hscfw_download = 1'b0; arfw_download = 1'b0;
+				repeat (100) @(posedge clk_sys);
+				mismatches = 0;
+				for (int i = 0; i < (slot == 0 ? 4096 : 2048); i++)
+					if ((slot == 0 ? dut.main.cart.hsc_rom.u_ram.mem_q[i]
+					               : dut.main.cart2600.mapper_AR.ar_rom.u_ram.mem_q[i[10:0]])
+					    !== fw_expect(slot, i)) mismatches++;
+				$display("FIRMWARE %0s: %0d byte file, %0d ROM bytes differ from it, hscfw_loaded=%0d",
+					slot == 0 ? "HSC" : "Supercharger", fw_img.size(), mismatches, dut.hscfw_loaded);
+			end
 		repeat (100) @(posedge clk_74a);
 		cart_download = 1'b1;
 		repeat (100) @(posedge clk_74a);
@@ -226,6 +272,7 @@ module tb_load;
 		cart_download = 1'b0;
 		repeat (100) @(posedge clk_sys);
 
+		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
 		// The payload (image minus its 128 byte header) must sit at SDRAM 0.
 		mismatches = 0;
 		if (dut.cart_is_7800) begin

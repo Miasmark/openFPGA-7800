@@ -901,6 +901,12 @@ endmodule
 
 module mapper_AR
 (
+`ifdef EXTERNAL_FIRMWARE
+	input           fw_load,
+	input           fw_wr,
+	input   [10:0]  fw_addr,
+	input   [7:0]   fw_data,
+`endif
 	input           clk,
 	input           reset,
 	input           a_change,
@@ -1008,6 +1014,19 @@ module mapper_AR
 	assign d_out = ~ram_rw ? we_byte : (adata_select ? {7'd0, audio_data} : bios_data);
 
 	// Supercharger
+`ifdef EXTERNAL_FIRMWARE
+	spram #(
+		.addr_width(11)
+	) ar_rom
+	(
+		.clock      (clk),
+		.address    (fw_load ? fw_addr : a_in[10:0]),
+		.data       (fw_data),
+		.wren       (fw_load & fw_wr),
+		.cs         (1'b1),
+		.q          (bios_data)
+	);
+`else
 	spram #(
 		.addr_width(11),
 		.mem_init_file("ar.mif"),
@@ -1021,6 +1040,7 @@ module mapper_AR
 		.cs         (1'b1),
 		.q          (bios_data)
 	);
+`endif
 	
 	always_comb begin
 		case (state_next)
