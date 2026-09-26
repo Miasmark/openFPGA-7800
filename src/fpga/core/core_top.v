@@ -357,6 +357,7 @@ localparam [15:0] SLOT_BIOS = 16'h0103;
     reg             set_stereo    = 1'b0;
     reg             set_skip_bios = 1'b1;
     reg             set_blend     = 1'b0;
+    reg             set_pokey_irq = 1'b0;
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -377,6 +378,7 @@ always @(posedge clk_74a) begin
             12'h280: set_stereo    <= bridge_wr_data[0];
             12'h284: set_skip_bios <= bridge_wr_data[0];
             12'h288: set_blend     <= bridge_wr_data[0];
+            12'h28C: set_pokey_irq <= bridge_wr_data[0];
             default: ;
         endcase
     end
@@ -647,7 +649,7 @@ end
 always @(posedge clk_sys) begin
     set_s1 <= {set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
-               set_blend, 4'b0000};
+               set_blend, set_pokey_irq, 3'b000};
     set_s2 <= set_s1;
 end
 
@@ -717,6 +719,7 @@ atari7800_pocket atari (
     .stereo_tia     ( set_s2[6] ),
     .skip_bios      ( set_s2[5] ),
     .flicker_blend  ( set_s2[4] ),
+    .pokey_irq      ( set_s2[3] ),
     .pause_core     ( 1'b0 ),
 
     .joy0           ( joy0_s2 ),

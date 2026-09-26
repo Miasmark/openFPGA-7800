@@ -1,0 +1,78 @@
+#!/bin/bash
+# Game-style tests built from 7800basic samples (GPL tools, built locally; no
+# ROMs are stored in this repository). Needs git, a C compiler, libpng-dev,
+# flex, python3 with Pillow, and the Verilator build that run_sim.sh makes.
+#
+#   multisprite  24 holey-DMA sprites crossing zones: frames in work/extra/
+#                multisprite_*.png. Every sprite must match gfx/herodown1.png
+#                row for row, with nothing drawn above or below it.
+#   pokey450     POKEY at $450 (A78 type 0x0040): audio stats + WAV
+#   pokey4000    POKEY at $4000 (type 0x0001, the retail location): same
+set -e
+HERE="$(cd "$(dirname "$0")" && pwd)"
+WORK="${WORK:-$HERE/work}"
+X="$WORK/extra"
+mkdir -p "$X"
+[ -x "$WORK/obj_load/vtb" ] || { echo "run ./run_sim.sh first"; exit 1; }
+
+if [ ! -x "$X/dasm/bin/dasm" ]; then
+	git clone -q --depth 1 https://github.com/dasm-assembler/dasm "$X/dasm"
+	make -C "$X/dasm" -j4 >/dev/null
+fi
+if [ ! -x "$X/7800basic/7800basic" ]; then
+	git clone -q --depth 1 https://github.com/7800-devtools/7800basic "$X/7800basic"
+	make -C "$X/7800basic" -j4 all >/dev/null 2>&1
+fi
+export PATH="$X/dasm/bin:$X/7800basic:$PATH" bas7800dir="$X/7800basic"
+
+build() {   # build <name> <sample> <sed expression or "">
+	rm -rf "$X/$1"; cp -r "$X/7800basic/samples/$2" "$X/$1"
+	[ -n "$3" ] && sed -i "$3" "$X/$1/$2.bas"
+	(cd "$X/$1" && sh "$X/7800basic/7800basic.native.sh" "$2.bas" >/dev/null 2>&1)
+	ln -sfn "$WORK/rtl" "$X/$1/rtl"
+}
+
+audio_stats() {
+	python3 - "$1" <<'PY'
+import struct, sys, wave
+d = open(sys.argv[1] + "/audio_raw.pcm", "rb").read()
+v = struct.unpack(f"<{len(d)//2}H", d)
+step = 12013
+for i in range(0, len(v), step):
+    seg = v[i:i+step]
+    print(f"  t={i/48052:.2f}s min={min(seg)} max={max(seg)} levels={len(set(seg))}")
+w = wave.open(sys.argv[1] + "/audio.wav", "wb")
+w.setnchannels(1); w.setsampwidth(2); w.setframerate(48052)
+w.writeframes(struct.pack(f"<{len(v)}h", *[x - 32768 for x in v])); w.close()
+PY
+}
+
+echo "-- multisprite (holey DMA)"
+ms="$X/multisprite"; build multisprite multisprite ""
+(cd "$ms" && "$WORK/obj_load/vtb" +image=multisprite.bas.a78 +audf=0 +dump=3 | grep LOAD)
+python3 - "$ms" <<'PY'
+import sys
+from PIL import Image
+for i in range(1, 3):
+    im = Image.open(f"{sys.argv[1]}/frame_{i:03d}.ppm")
+    im.resize((im.size[0] * 2, im.size[1] * 2), Image.NEAREST).save(f"{sys.argv[1]}/multisprite_{i}.png")
+    print(f"  wrote {sys.argv[1]}/multisprite_{i}.png")
+PY
+
+echo "-- POKEY at \$450"
+build pokey450 pokey 's/ set pokeysupport on/ set pokeysupport $450/'
+(cd "$X/pokey450" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 | grep -E "LOAD")
+audio_stats "$X/pokey450"
+
+echo "-- POKEY at \$4000"
+build pokey4000 pokey 's/ set pokeysupport on/ set pokeysupport $4000/'
+(cd "$X/pokey4000" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 | grep -E "LOAD")
+audio_stats "$X/pokey4000"
+
+echo "-- DLI + WSYNC + POKEY sweep at \$4000 (Ballblazer's siren pattern)"
+mkdir -p "$X/dli"; ln -sfn "$WORK/rtl" "$X/dli/rtl"
+dasm "$HERE/dli_pokey_test.asm" -f3 -o"$X/dli/dli.bin" >/dev/null
+python3 "$HERE/make_a78.py" --bin "$X/dli/dli.bin" --type 0x0001 > "$X/dli/dli.a78"
+(cd "$X/dli" && "$WORK/obj_load/vtb" +image=dli.a78 +wav=1000 | grep -E "LOAD|PROBE")
+echo "  expect: 60 NMIs, main loop writes in the hundreds of thousands, 61 AUDF1 writes"
+audio_stats "$X/dli"

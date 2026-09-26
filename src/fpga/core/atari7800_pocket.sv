@@ -43,6 +43,7 @@ module atari7800_pocket
 	input  wire        diff_right_b,
 	input  wire        skip_bios,
 	input  wire        flicker_blend,   // 2600 only
+	input  wire        pokey_irq,       // let POKEY timer IRQs reach the CPU (MiSTer "Pokey IRQ Enabled")
 	input  wire        pause_core,      // Pocket menu open
 
 	// Controllers, MiSTer joystick bit layout:
@@ -419,7 +420,7 @@ Atari7800 main
 	.tia_mode     (tia_mode && ~use_bios),
 	.bypass_bios  (~use_bios),
 	.cart_present (~(use_bios & ~cart_loaded)), // empty slot only when booting the BIOS alone
-	.pokey_irq    (1'b0),
+	.pokey_irq    (pokey_irq),
 	.minnie_en    (1'b1),
 	.minnie_alt   (1'b0),
 	.hsc_en       (hsc_en),

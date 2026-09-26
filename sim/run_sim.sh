@@ -45,6 +45,7 @@ SRCS=(
 	"$RTL/top.sv"
 	"$FPGA/core/atari7800_pocket.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
+	"$FPGA/core/audio_filter.sv"
 )
 
 build() {   # build <top> <objdir>

@@ -227,7 +227,7 @@ logic old_halt;
 // here.
 logic [9:0] cond2_hi;
 logic [1:0] cond2_lo;
-wire [13:0] cond2 = {cond2_hi, ~|OFFSET, (~|WIDTH || holey), cond2_lo}; // OFF0 and W0 are live
+wire [13:0] cond2 = {cond2_hi, ~|OFFSET, ~|WIDTH, cond2_lo}; // OFF0 and W0 are live
 // Input gated by phi2
 assign dmas[47] = cond2 ==? 14'b10010x10xxxx00;
 assign dmas[46] = cond2 ==? 14'b10010x10xxxx11;
@@ -325,9 +325,8 @@ always_ff @(posedge clk_sys) begin
 		XEN <= {XEN2, XEN1, XEN0}; // Gated by phi2, then phi1
 		addr_latch <= ALATCON; // gated by phi2, then phi1
 		add_sel <= ASEL; // Gated by phi2, then phi1
-		latch_byte <= ELRWA; // gated by phi2, then phi1
+		latch_byte <= ELRWA && ~holey; // gated by phi2, then phi1
 		halt_en <= vbe_halt || hbs_halt;
-		holey <= add_sel && ((holey8 || holey16) && incremented_address[15]);
 
 		// Gated by phi2, then phi1
 		TLD     <= rldcmp ==? 4'b0010;
@@ -368,6 +367,16 @@ always_ff @(posedge clk_sys) begin
 
 		if (addr_latch)
 			AB <= incremented_address;
+
+		// Pocket port: upstream 0dc8ad2 replaced this sticky hole flag with a
+		// per-cycle one fed into the DMA PLA, and graphics inside holes began
+		// to be drawn (sprites crossing zones show stray rows). This is the
+		// 8c96e1f behaviour: a hole ends the object and suppresses its bytes
+		// until the next display list entry.
+		if (add_sel && (holey8 || holey16) && incremented_address[15]) begin
+			holey <= 1;
+			WIDTH <= 0;
+		end
 
 		RSS0 <= (hbs_halt && sel_5); // gated by phi1
 		RSS1 <= (vbe_halt && sel_5);
@@ -446,6 +455,7 @@ always_ff @(posedge clk_sys) begin
 		end
 
 		if (DPLLD) begin
+			holey <= 0;
 			DL_PTR <= DL_PTR + 1'd1;
 		end
 

@@ -37,8 +37,9 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - Settings: difficulty switches, controller swap, region, palette
-  (warm/cool/hot), high score cart, overscan, border, stereo TIA, and 2600
-  flicker blend.
+  (warm/cool/hot), high score cart, overscan, border, stereo TIA, 2600
+  flicker blend, and POKEY IRQ (off by default, as on MiSTer; some games drive
+  their music from POKEY timer interrupts).
 
 ### Not included
 
@@ -59,7 +60,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,726 / 18,480 (63%)**, fitted | 2.05 / 3.15 Mbit (65%) |
+| This port (ARM and BupChip left out) | **11,652 / 18,480 (63%)**, fitted | 2.05 / 3.15 Mbit (65%) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -94,10 +95,33 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build meets timing on all four corners (worst setup slack
-+1.81 ns, hold +0.076 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
++2.08 ns, hold +0.117 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
-Not yet tested on a real Pocket. Hardware testing is the next step.
+### Changes to the MiSTer sources
+
+- **Holey DMA (sprite corruption).** Upstream's 2026-09-11 commit changed
+  how MARIA handles holey DMA, and sprites crossing zone boundaries began
+  showing stray rows (reported on hardware in Midnight Mutants, Commando and
+  Dig Dug). This port restores the previous upstream behaviour. The failure
+  and the fix both reproduce in simulation with 7800basic's multisprite
+  sample. After the fix every sprite matches its source graphic row for row.
+  This bug is in the MiSTer nightly too, not only here. See
+  [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
+
+### Open issues from hardware testing
+
+- **Commando: no POKEY music** (sound effects play). Try turning on
+  *POKEY IRQ* in the core settings.
+- **Ballblazer: the goal siren almost cuts out the sound.** The siren is
+  driven from a display list interrupt that waits on WSYNC and sweeps
+  AUDF1-4. A test cart built on that pattern (`sim/dli_pokey_test.asm`, POKEY
+  at $4000) works in simulation: the DLI fires once per frame, the main loop
+  keeps running, and every AUDF write lands. So the cause is still unknown.
+
+`sim/extra_tests.sh` builds 7800basic's sprite and POKEY samples and the DLI
+test cart locally (no ROMs are stored in this repository) and runs them
+through the core.
 
 ## Controls
 

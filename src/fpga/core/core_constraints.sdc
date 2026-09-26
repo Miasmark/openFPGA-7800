@@ -22,3 +22,12 @@ set_clock_groups -asynchronous \
 # clk_sdram periods after it is captured, never on the next clk_sys edge.
 set_multicycle_path -setup 2 -from [get_registers {*|sdram:sdram|*}] -to [get_clocks $clk_sys]
 set_multicycle_path -hold  1 -from [get_registers {*|sdram:sdram|*}] -to [get_clocks $clk_sys]
+
+# The APF data loader (clk_sdram) changes write_addr / write_data on the same
+# edge its write strobe rises, then holds them for at least ten clk_sdram
+# cycles. Every clk_sys consumer uses them one to four clk_sdram cycles later,
+# never on the coincident edge, so the default same-edge hold check does not
+# apply to them. The strobe (write_en) keeps its full check.
+set_multicycle_path -hold 1 \
+ -from [get_registers {ic|loader|write_addr[*] ic|loader|write_data[*]}] \
+ -to [get_clocks $clk_sys]
