@@ -13,6 +13,12 @@ python3 "$ROOT/tools/reverse_bits.py" "$RBF" "$CORE/atari7800.rbf_r"
 mkdir -p "$ROOT/release"
 OUT="$ROOT/release/Atari7800_Pocket_${VERSION}.zip"
 rm -f "$OUT"
+# License texts and notices travel with the bitstream.
+LIC="$CORE/licenses"
+mkdir -p "$LIC"
+cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/LICENSES/GPL-3.0.txt" "$LIC/"
+cp "$ROOT/src/fpga/mister/LICENSE" "$LIC/MiSTer-Atari7800-LICENSE.txt"
+cp "$ROOT/src/fpga/pocket_utils/LICENSE" "$LIC/analogue-pocket-utils-LICENSE.txt"
 if command -v zip >/dev/null; then
 	(cd "$ROOT/dist" && zip -r "$OUT" Cores Platforms Assets -x '*.keep')
 else

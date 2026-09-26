@@ -6,7 +6,12 @@
 - Commit: see `UPSTREAM_COMMIT`
 - License: `LICENSE` (MIT, Jamie Blanks). Third-party files keep their own
   notices: `sdram.sv` (GPL-3.0, Sorgelig), `jt51/` (GPL-3.0, Jose Tejada
-  "Jotego"), `souper.v` (zlib-style, Osman Celimli), `t65/` (BSD-style).
+  "Jotego"), `EEPROM_24LC256.sv` (GreyRogue, from NES_MiSTer, GPL-3.0; the
+  file itself has no license line), `video_mixer_plus.sv` (GPL, Alexey
+  Melnikov), `arm7tdmi/arm7tdmi_core.sv` (GPL-2.0-only), `souper.v`
+  (zlib-style, Osman Celimli), `t65/` (BSD-style). The Pocket build leaves
+  out `video_mixer_plus.sv`, `arm7tdmi_core.sv`, `t65/` and `Pokey/`. See
+  `../../../THIRD_PARTY_NOTICES.md`.
 
 The upstream wrapper (`Atari7800.sv`, `sys/`) is MiSTer-specific and is not
 used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.

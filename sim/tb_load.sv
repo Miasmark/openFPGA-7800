@@ -124,6 +124,26 @@ module tb_load;
 		if (!old_wr4k && !dut.RW && dut.bios_addr == 16'h4000) audf_writes <= audf_writes + 1;
 	end
 
+	// ---------------- save device probe ----------------
+	// Which save devices a cart actually talks to: CPU accesses to the HSC
+	// RAM ($1000-$17FF) and ROM ($3000-$3FFF) while the HSC is enabled, SCL
+	// edges on port 2 and bytes the SaveKey EEPROM writes.
+	longint hsc_ram_wr = 0, hsc_ram_rd = 0, hsc_rom_rd = 0, scl_edges = 0, sk_bytes = 0;
+	logic [15:0] old_a = 0; logic old_scl = 1'b1, old_skwr = 1'b0;
+	always @(posedge clk_sys) begin
+		old_a <= dut.bios_addr;
+		if (dut.hsc_en && dut.bios_addr != old_a) begin
+			if (dut.bios_addr[15:11] == 5'd2) begin
+				if (!dut.RW) hsc_ram_wr <= hsc_ram_wr + 1; else hsc_ram_rd <= hsc_ram_rd + 1;
+			end
+			if (dut.bios_addr[15:12] == 4'd3) hsc_rom_rd <= hsc_rom_rd + 1;
+		end
+		old_scl <= dut.PAout[3];
+		if (dut.use_sk && old_scl != dut.PAout[3]) scl_edges <= scl_edges + 1;
+		old_skwr <= dut.sk_ram_wr;
+		if (dut.sk_ram_wr && !old_skwr) sk_bytes <= sk_bytes + 1;
+	end
+
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
@@ -154,6 +174,7 @@ module tb_load;
 		while (image.size() % 4) image.push_back(8'hFF);
 
 		if ($test$plusargs("hsc_on")) hsc_setting = 2'd1;
+		if ($test$plusargs("hsc_off")) hsc_setting = 2'd2;
 		if ($test$plusargs("sk_on")) sk_setting = 2'd1;
 		if ($test$plusargs("sk_auto")) sk_setting = 2'd0;
 		// +sksave=FILE: write a 32 KiB SaveKey image through its save slot port.
@@ -252,6 +273,8 @@ module tb_load;
 			$display("WAV recorded %0d ms", wav_ms);
 			$display("PROBE NMIs %0d, main-loop writes to $41 %0d, POKEY AUDF1 writes %0d",
 				nmis, main_writes, audf_writes);
+			$display("DEVICES hsc_en %0d use_sk %0d; HSC RAM writes %0d reads %0d, HSC ROM reads %0d; SaveKey SCL edges %0d, EEPROM bytes written %0d",
+				dut.hsc_en, dut.use_sk, hsc_ram_wr, hsc_ram_rd, hsc_rom_rd, scl_edges, sk_bytes);
 			$finish;
 		end
 		repeat (14318181 / 10) @(posedge clk_sys);

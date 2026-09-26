@@ -64,7 +64,6 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/cart2600.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/banks2600.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/video_mux.sv]
-set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/video_mixer_plus.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/lightgun.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/paddles.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/mouse_st.sv]

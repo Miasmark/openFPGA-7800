@@ -12,7 +12,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("audf", nargs="?", default="7")
 ap.add_argument("--bin")
 ap.add_argument("--type", default="0")
-ap.add_argument("--save", default="0", help="header byte 58: 1 = HSC, 2 = SaveKey")
+ap.add_argument("--save", default="0", help="header byte 58, a bitfield: 1 = HSC, 2 = SaveKey, 3 = both")
 a = ap.parse_args()
 here = __file__.rsplit("/", 1)[0] or "."
 if a.bin:

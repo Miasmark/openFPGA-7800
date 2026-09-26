@@ -165,7 +165,7 @@ always @(posedge clk_sys) begin
 			'd55: joy0_type <= ioctl_dout;   // 0=none, 1=joystick, 2=lightgun
 			'd56: joy1_type <= ioctl_dout;
 			'd57: cart_region <= ioctl_dout; // 0=ntsc, 1=pal
-			'd58: cart_save <= ioctl_dout;   // 0=none, 1=high score cart, 2=savekey
+			'd58: cart_save <= ioctl_dout;   // bit 0 = high score cart, bit 1 = savekey
 			'd63: cart_xm <= ioctl_dout;     // 1 = Has XM
 			'd64: header_mapper <= ioctl_dout;
 			default: ;
@@ -320,12 +320,18 @@ save_ram_dp #(.WORD_ADDR_BITS(9)) hsc_ram
 	.dout_b (hsc_bridge_dout)
 );
 
-// SaveKey on controller port 2 (see below). Auto follows the A78 header.
+// Auto follows the A78 header. Its save byte is a bitfield (bit 0 HSC,
+// bit 1 SaveKey/AtariVox), so a cart can ask for both: Triple Punch's is 3.
+// A port 2 controller type of 10 (AtariVox/SaveKey) also asks for a SaveKey.
+//
+// MiSTer turns the HSC off while a SaveKey is in use, because both share its
+// one save file. Here each has its own file, and on real hardware they are
+// independent (the HSC sits on the cart bus, the SaveKey on port 2), so both
+// can be on at once.
 wire use_sk = (savekey_setting == 2'd1) ||
-	(savekey_setting == 2'd0 && cart_is_7800 && cart_save == 8'd2);
+	(savekey_setting == 2'd0 && cart_is_7800 && (cart_save[1] || joy1_type == 8'd10));
 
-// As on MiSTer, the HSC is off while a SaveKey is in use.
-wire hsc_en = ~use_sk & ((hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting == 2'd1));
+wire hsc_en = (hsc_setting == 2'd0) ? (cart_save[0] || cart_xm[0]) : (hsc_setting == 2'd1);
 // The high score cart save is one shared file (hsc.sav) for every cart, like
 // the real HSC's single RAM. Its size in the data slot table is what the
 // Pocket reads to decide whether to write the file back, so it must be
@@ -340,7 +346,7 @@ assign hsc_active = 1'b1;
 // block RAM whose other port is the shared savekey.sav slot, through the same
 // save_ram_dp as the HSC, so it has the same APF read latch.
 //
-// Auto turns it on when an A78 header asks for one (byte 58 = 2). A 2600
+// Auto turns it on when an A78 header asks for one (see use_sk). A 2600
 // image has no header, so 2600 SaveKey games need the setting On.
 
 

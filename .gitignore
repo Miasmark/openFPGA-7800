@@ -8,3 +8,4 @@ src/fpga/*.qws
 release/
 dist/Cores/Miasmark.7800/*.rbf_r
 sim/work/
+dist/Cores/Miasmark.7800/licenses/

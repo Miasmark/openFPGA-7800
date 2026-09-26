@@ -40,8 +40,10 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   can then be renamed `hsc.sav` to keep its scores.
 - **SaveKey** (24LC256 EEPROM on controller port 2), in one shared
   `savekey.sav`, like the real device. *SaveKey (port 2)* = Auto turns it on
-  when the A78 header asks for one; 2600 SaveKey games need it set to On. As on
-  MiSTer, the high score cart is off while a SaveKey is in use.
+  when the A78 header asks for one (save byte bit 1, or an AtariVox/SaveKey
+  on port 2); 2600 SaveKey games need it set to On. Unlike MiSTer, the high
+  score cart stays available alongside it, since each has its own file: a
+  cart whose header asks for both (such as Triple Punch) gets both.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - Settings: difficulty switches, controller swap, region, palette
@@ -68,7 +70,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,588 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
+| This port (ARM and BupChip left out) | **11,539 / 18,480 (62%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -118,7 +120,7 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
-| SaveKey | New in 2.0.5; not yet tested on hardware |
+| SaveKey | New in 2.0.5; not yet tested on hardware. 2.0.6: HSC and SaveKey together when the header asks for both (Triple Punch) |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`) |
 
 ### Changes to the MiSTer sources
@@ -224,6 +226,8 @@ tools/                 Packaging
 - **POKEY** by **Mark Watson**, the VHDL POKEY the MiSTer 7800 core used
   until 2026-08-25. This port still uses it; see POCKET_CHANGES.md.
 - **Souper** mapper logic by **Osman Celimli**.
+- **24LC0x EEPROM** (the SaveKey) by **GreyRogue**, from NES_MiSTer,
+  GPL-3.0.
 
 **Pocket side**
 
@@ -236,13 +240,32 @@ tools/                 Packaging
 
 ## License
 
-- The Pocket glue in `src/fpga/core/` is MIT.
-- The MiSTer core in `src/fpga/mister/` is MIT (© Jamie Blanks). Its
-  third-party files keep their own licenses, listed in
-  [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
-- The JT51 and SDRAM controller files are GPL-3.0. The complete source is in
-  this repository.
+Each part keeps its own license. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+lists every component, its license, and whether it is built into the
+bitstream.
+
+- This project's own code (`src/fpga/core/` apart from the two template
+  files, `sim/`, `tools/`) is MIT: see [LICENSE](LICENSE).
+- The MiSTer core in `src/fpga/mister/` is MIT (© Jamie Blanks), apart from
+  the third-party files below.
+- The SDRAM controller, JT51 and the SaveKey EEPROM are GPL-3.0. The full
+  text is in [LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt), and the complete
+  source for the bitstream is in this repository.
 - Mark Watson's POKEY (`src/fpga/mister/rtl/PokeyWatson/`) is free for
-  non-commercial use; commercial use needs his permission. So this core, like
-  the MiSTer core it comes from, is for non-commercial use.
-- `src/fpga/apf/` is Analogue's framework, under Analogue's terms.
+  non-commercial use; commercial use needs his permission.
+- `src/fpga/apf/`, `core_top.v` and `core_bridge_cmd.v` are Analogue's
+  framework and template, under Analogue's terms.
+- The bitstream embeds the High Score Cartridge firmware and the Supercharger
+  BIOS, carried over from the MiSTer core. No license is given for either.
+
+**Known conflict.** GPL-3.0 does not allow extra restrictions on a combined
+work, and Watson's non-commercial condition is one. So, strictly, the
+bitstream can't be distributed under both licenses at once. The MiSTer core
+shipped the same combination for years. Until it is resolved, treat this core
+as non-commercial only. It can be resolved by any one of:
+
+1. getting Mark Watson's permission to distribute his POKEY under GPL-3.0;
+2. replacing the three GPL-3.0 parts with permissively licensed ones: a new
+   SDRAM controller, a new 24LC256 model, and building without the YM2151
+   (only a few XM homebrews use it);
+3. going back to upstream's MIT POKEY, which breaks Ballblazer on the Pocket.
