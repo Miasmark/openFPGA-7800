@@ -60,7 +60,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,652 / 18,480 (63%)**, fitted | 2.05 / 3.15 Mbit (65%) |
+| This port (ARM and BupChip left out) | **11,410 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -95,7 +95,7 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build meets timing on all four corners (worst setup slack
-+2.08 ns, hold +0.117 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
++2.60 ns, hold +0.114 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
 ### Changes to the MiSTer sources
@@ -109,19 +109,28 @@ crystal, 0.015% fast, which is not audible.
   This bug is in the MiSTer nightly too, not only here. See
   [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
 
-### Open issues from hardware testing
+- **POKEY.** Upstream replaced Mark Watson's long-standing VHDL POKEY with
+  a new one on 2026-08-25. On Pocket hardware, Ballblazer's music turned into
+  near-silent taps and pops with the new one, and it plays correctly on the
+  2022 Pocket core, which used Watson's. This port uses Watson's POKEY again
+  (see POCKET_CHANGES.md). What exactly the new POKEY gets wrong is not
+  identified yet.
 
-- **Commando: no POKEY music** (sound effects play). Try turning on
-  *POKEY IRQ* in the core settings.
-- **Ballblazer: the goal siren almost cuts out the sound.** The siren is
-  driven from a display list interrupt that waits on WSYNC and sweeps
-  AUDF1-4. A test cart built on that pattern (`sim/dli_pokey_test.asm`, POKEY
-  at $4000) works in simulation: the DLI fires once per frame, the main loop
-  keeps running, and every AUDF write lands. So the cause is still unknown.
+### Known issues
+
+- **Commando: no POKEY music.** This also happens on the 2022 Spiritualized
+  core, so it isn't caused by this port. The usual cause is an A78 header
+  that doesn't flag the POKEY: check that the dump's header sets the POKEY
+  bit (cart type bit 0, POKEY at $4000). Turning on *POKEY IRQ* made no
+  difference.
 
 `sim/extra_tests.sh` builds 7800basic's sprite and POKEY samples and the DLI
 test cart locally (no ROMs are stored in this repository) and runs them
-through the core.
+through the core. `sim/tb_pokey.sv` sweeps a POKEY channel through all 256
+frequencies in any AUDC/AUDCTL mode, for comparison against `pokey_model.py`
+(the documented divider and polynomial behaviour) with `pokey_compare.py`.
+The simulation converts Watson's VHDL POKEY with GHDL, so it runs the same
+POKEY as the Pocket build.
 
 ## Controls
 
@@ -189,6 +198,8 @@ tools/                 Packaging
 
 - **JT51** (YM2151) by **Jose Tejada Gomez (Jotego)**, GPL-3.0.
 - **SDRAM controller** by **Sorgelig**, GPL-3.0.
+- **POKEY** by **Mark Watson**, the VHDL POKEY the MiSTer 7800 core used
+  until 2026-08-25. This port still uses it; see POCKET_CHANGES.md.
 - **Souper** mapper logic by **Osman Celimli**.
 
 **Pocket side**
@@ -206,6 +217,9 @@ tools/                 Packaging
 - The MiSTer core in `src/fpga/mister/` is MIT (© Jamie Blanks). Its
   third-party files keep their own licenses, listed in
   [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
-- The JT51 and SDRAM controller files are GPL-3.0, so a distributed bitstream
-  is covered by GPL-3.0 as a whole. The complete source is in this repository.
+- The JT51 and SDRAM controller files are GPL-3.0. The complete source is in
+  this repository.
+- Mark Watson's POKEY (`src/fpga/mister/rtl/PokeyWatson/`) is free for
+  non-commercial use; commercial use needs his permission. So this core, like
+  the MiSTer core it comes from, is for non-commercial use.
 - `src/fpga/apf/` is Analogue's framework, under Analogue's terms.

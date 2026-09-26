@@ -25,13 +25,24 @@ for f in Maria/control.sv banks2600.sv video_mux.sv RIOT/M6532.sv; do
 	sed -E 's/^(\s*)wire(\s+\[[^]]+\]\s+\w+\s*\[[0-9]+\]\s*=)/\1logic\2/' "$RTL/$f" > "$PATCHED/$f"
 done
 
+# The Pocket build uses Mark Watson's VHDL POKEY (rtl/PokeyWatson) behind
+# core/pokey_adapter_watson.sv. Verilator reads no VHDL, so GHDL (4.x)
+# converts it to Verilog first.
+if [ ! -f "$WORK/pokey_watson.v" ] || [ -n "$(find "$RTL/PokeyWatson" -newer "$WORK/pokey_watson.v")" ]; then
+	command -v ghdl >/dev/null || { echo "needs ghdl (apt install ghdl)"; exit 1; }
+	mkdir -p "$WORK/ghdl"
+	(cd "$WORK/ghdl" && rm -f ./*.cf && ghdl -a --std=08 -fsynopsys "$RTL"/PokeyWatson/*.vhd* 2>/dev/null \
+		&& ghdl --synth --std=08 -fsynopsys --out=verilog pokey_watson > "$WORK/pokey_watson.v" 2>/dev/null) \
+		|| { echo "ghdl conversion of PokeyWatson failed"; exit 1; }
+fi
+
 SRCS=(
 	"$HERE/sim_stubs.sv"
 	"$RTL/arm7tdmi/arm7tdmi_pkg.sv"
 	"$RTL/6502/mos6502_pkg.sv"
 	$(ls "$RTL"/6502/*.sv | grep -v pkg)
 	$(ls "$RTL"/Maria/*.sv | grep -v control.sv) "$PATCHED/Maria/control.sv"
-	$(sed -n 's/.*qip_path) \(.*\.sv\) *\].*/\1/p' "$RTL/Pokey/Pokey.qip" | sed "s#^#$RTL/Pokey/#")
+	"$WORK/pokey_watson.v" "$FPGA/core/pokey_adapter_watson.sv"
 	$(sed -n 's/.*qip_path) \(.*\.sv\) *\].*/\1/p' "$RTL/Minnie/Minnie.qip" | sed "s#^#$RTL/Minnie/#")
 	"$RTL/SN76489/sn76489.sv"
 	"$RTL"/jt51/*.v

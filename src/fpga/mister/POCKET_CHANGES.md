@@ -13,7 +13,29 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Two files are modified.
+Two upstream files are modified, and the POKEY is swapped for an older one.
+
+### POKEY: Mark Watson's VHDL instead of upstream's rtl/Pokey
+
+Upstream commit a36d55b (2026-08-25) replaced Mark Watson's VHDL POKEY with a
+new schematic-level one (`rtl/Pokey/`). On Pocket hardware, Ballblazer's
+procedurally generated music turns into near-silent taps and pops with the new
+POKEY, and its goal siren goes silent. The 2022 Pocket core, which used
+Watson's POKEY, plays it correctly on the same hardware.
+
+The Pocket build therefore uses Watson's POKEY: `rtl/PokeyWatson/`, from
+upstream b48eac0 (the last commit with it), with its top entity renamed
+`pokey` -> `pokey_watson` so it cannot collide with the new POKEY's module
+name. `../core/pokey_adapter_watson.sv` provides the `pokey_adapter` module
+that `cart.sv` instantiates, wired the way b48eac0 wired Watson's POKEY.
+`cart.sv` itself is unchanged, and `rtl/Pokey/` stays in the tree unbuilt.
+
+The exact fault in the new POKEY is not identified yet. Its pure tones match
+the documented behaviour at all 256 frequencies, and rewriting its registers
+every frame does not disturb them (`sim/tb_pokey.sv`).
+
+Watson's files carry his own terms: free for non-commercial use, commercial
+use needs his permission.
 
 ### `rtl/Maria/DMA.sv`: holey DMA restored
 

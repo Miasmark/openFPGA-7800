@@ -18,7 +18,21 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 # MiSTer Atari7800 core
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/sdram.sv]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/6502/mos6502.qip]
-set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/Pokey/Pokey.qip]
+# POKEY: Mark Watson's VHDL (upstream b48eac0) behind a pokey_adapter
+# wrapper, in place of upstream's newer rtl/Pokey. See pokey_adapter_watson.sv.
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) pokey_adapter_watson.sv]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/complete_address_decoder.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/delay_line.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/latch_delay_line.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_countdown_timer.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_keyboard_scanner.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_noise_filter.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_poly_17_9.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_poly_4.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/pokey_poly_5.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/synchronizer.vhdl]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) ../mister/rtl/PokeyWatson/syncreset_enable_divider.vhd]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/Minnie/Minnie.qip]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/SN76489/SN76489.qip]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/Maria/maria.qip]
