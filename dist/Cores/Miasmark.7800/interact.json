@@ -1,0 +1,205 @@
+{
+  "interact": {
+    "magic": "APF_VER_1",
+    "variables": [
+      {
+        "name": "Reset",
+        "id": 1,
+        "type": "action",
+        "enabled": true,
+        "address": "0x10000200",
+        "value": 1
+      },
+      {
+        "name": "Left Difficulty",
+        "id": 4,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000264",
+        "defaultval": 1,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "A (Pro)"
+          },
+          {
+            "value": 1,
+            "name": "B (Novice)"
+          }
+        ]
+      },
+      {
+        "name": "Right Difficulty",
+        "id": 5,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000268",
+        "defaultval": 1,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "A (Pro)"
+          },
+          {
+            "value": 1,
+            "name": "B (Novice)"
+          }
+        ]
+      },
+      {
+        "name": "Swap Controllers",
+        "id": 3,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000260",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "Region",
+        "id": 6,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x1000026C",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "NTSC"
+          },
+          {
+            "value": 2,
+            "name": "PAL"
+          }
+        ]
+      },
+      {
+        "name": "Palette",
+        "id": 7,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000270",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Warm"
+          },
+          {
+            "value": 1,
+            "name": "Cool"
+          },
+          {
+            "value": 2,
+            "name": "Hot"
+          }
+        ]
+      },
+      {
+        "name": "High Score Cart",
+        "id": 8,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000274",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "On"
+          },
+          {
+            "value": 2,
+            "name": "Off"
+          }
+        ]
+      },
+      {
+        "name": "Skip BIOS",
+        "id": 12,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000284",
+        "defaultval": 1,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "Show Overscan",
+        "id": 9,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000278",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "Hide Border",
+        "id": 10,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x1000027C",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "Stereo TIA",
+        "id": 11,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000280",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "2600 Flicker Blend",
+        "id": 13,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000288",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      }
+    ],
+    "messages": []
+  }
+}

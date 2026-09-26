@@ -1,0 +1,34 @@
+name: Build Pocket core
+
+on:
+  push:
+    branches: [ main, Mister-Pocket-Port ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: raetro/quartus:21.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Quartus compile
+        working-directory: src/fpga
+        run: quartus_sh --flow compile ap_core
+
+      - name: Check timing
+        working-directory: src/fpga
+        run: |
+          if grep -q "Timing requirements not met" output_files/ap_core.sta.rpt; then
+            grep -A20 "Unconstrained\|Slow 1100mV 85C Model Setup Summary" output_files/ap_core.sta.rpt || true
+            echo "::warning::Timing requirements not met"
+          fi
+
+      - name: Package
+        run: tools/package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Atari7800_Pocket
+          path: release/*.zip

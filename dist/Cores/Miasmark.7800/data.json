@@ -1,0 +1,36 @@
+{
+  "data": {
+    "magic": "APF_VER_1",
+    "data_slots": [
+      {
+        "name": "Cartridge",
+        "id": "0x100",
+        "required": true,
+        "parameters": "0x109",
+        "extensions": ["a78", "a26", "bin"],
+        "size_maximum": "0x400000",
+        "address": "0x00000000"
+      },
+      {
+        "name": "Atari 7800 BIOS",
+        "id": "0x103",
+        "required": false,
+        "filename": "7800bios.bin",
+        "parameters": "0x89",
+        "extensions": ["bin", "rom"],
+        "size_maximum": "0x4000",
+        "address": "0x02000000"
+      },
+      {
+        "name": "High Score Cart",
+        "id": "0x104",
+        "required": false,
+        "parameters": "0x84",
+        "nonvolatile": true,
+        "extensions": ["sav"],
+        "size_maximum": "0x800",
+        "address": "0x20000000"
+      }
+    ]
+  }
+}

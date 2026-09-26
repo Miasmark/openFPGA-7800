@@ -1,0 +1,10 @@
+Atari 7800 ProSystem for Analogue Pocket
+Ported from the MiSTer Atari7800 core by Jamie Blanks (Kitrinx),
+with thanks to its contributors. See the project README for full credits.
+
+Cartridges: .a78 (with header), .a26 / .bin (2600).
+BIOS (optional): put 7800bios.bin in /Assets/7800/common/ and turn
+off "Skip BIOS" to boot through it.
+
+Controls: A/Y left button, B/X right button, L pause (2600: colour/B&W),
+Select, Start = Reset.

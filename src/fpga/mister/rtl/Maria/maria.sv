@@ -1,0 +1,341 @@
+// k7800 (c) by Jamie Blanks
+//
+// Copyright (c) 2021-2026 Jamie Blanks
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+
+module maria(
+	// Busses
+	input  logic [15:0] AB_in,
+	output logic [15:0] AB_out,
+	input  logic  [7:0] d_in,
+	output logic  [7:0] DB_out,
+	output logic  [7:0] DB_out_oe,
+
+	// Clocking
+	input logic         reset,
+	input logic         clk_sys,
+	input logic         ce,
+	output logic        mclk0,     // This serves as tia_clk
+	output logic        mclk1,
+	output logic        tia_clk_x2,
+	output logic        pclk0,
+	output logic        pclk1,
+	input logic         pclk2,
+
+	// Chip Select lines
+	output logic        cs_ram0,
+	output logic        cs_ram1,
+	output logic        cs_riot,
+	output logic        cs_tia,
+	output logic        cs_maria,
+
+	// Maria configuration
+	input logic         RW,
+	input logic         maria_en,
+
+	// Video
+	output logic [7:0]  YC,
+	output logic        hsync,
+	output logic        vsync,
+	output logic        hblank,
+	output logic        vblank,
+	output logic        vblank_ex,
+
+	// CPU
+	output logic        NMI_n,
+	output logic        halt_n,
+	output logic        ready,
+
+	// Abstract Pins
+	output logic        drive_AB,    // Used to overcome the lack of a bidirectional bus
+	input  logic        hide_border, // Option to hide the boarder
+	input  logic        bypass_bios, // Flag to tell maria to initialize to a post-bios state
+	input  logic        PAL          // Indicates the system is in either NTSC or PAL
+
+);
+
+	/* Original Pins:
+		A0-A15        memory address bus
+		D0-D7         memory data bus
+		Vss           ground
+		Vdd           power
+		/NMI          output to cpu
+		XTAL1         14 MHz input
+		XTAL2         main clock output
+		MEN           Maria enable input. When lo, video is off and memory map is 2600
+		Ø2            phase 2 clock input
+		TCLK          TIA main/4 clock
+		Ø0            phase 0 clock output. 1.79M or 1.19M
+		DEL           delay line control voltage input
+		/SRAM0-1      RAM chipselects
+		/SEL32        RIOT chipselect
+		/TIASEL       TIA chipselect
+		R/W           Read/write input
+		/HALT         cpu halt output
+		READY         cpu ready output
+		LUM0-3        luminance output
+		COLOR         color output
+		BLANK         blank output
+		SYNC          video sync output
+	*/
+
+	logic [7:0]       ctrl;
+	logic [24:0][7:0] color_map;
+	logic [7:0]       char_base;
+	logic [15:0]      ZP;
+	logic [2:0]       palette;
+	logic [1:0]       zp_written;
+	logic [7:0]       UV_out;
+	logic [2:0]       clock_div = 3'd2;
+	logic [1:0]       edge_counter;
+	logic             wsync;
+	logic             border;
+	logic             prst;
+	logic             vbe;
+	logic             hbs;
+	logic             lrc;
+	logic             wm;
+	logic             latch_hpos;
+	logic             halt_en;
+	logic             DLI_en;
+	logic             dli_latch;
+	logic             clk_toggle = 1'b0;
+	logic             old_dli;
+	logic             latch_byte;
+	logic             pclk_toggle = 1'b0;
+	logic             sel_slow_clock;
+	logic             NMI_ung_n;
+	logic             slow_clk_latch = 1'b0;
+	logic             ready_int;
+	logic             cram_sel;
+	logic             ABEN;
+	logic             old_men = 1'b0;
+	logic [3:0]       men_count = 4'd0;
+	logic             pclk = 1'b0;
+	logic             tia_clk_en;
+	logic [3:0]       tia_enable_count = 4'd2;
+
+	// Apply color kill if needed
+	assign YC = UV_out & (ctrl[7] ? 8'h0F : 8'hFF);
+	assign drive_AB = ABEN && maria_en;
+
+	// Maria being enabled is a condition for NMI
+	assign NMI_n = NMI_ung_n || ~maria_en;
+	assign halt_n = ~halt_en;
+	// WSYNC on the die is an asynchronous cross-coupled NOR latch - page 18,
+	// MARIA_CONTROL, x 7300-7840 - and its output reaches the WAIT pad through
+	// a NOR and two inverters with nothing clocked in between. So READY is the
+	// latch straight out. The phase 2 hold this replaces made SALLY read a
+	// value one phase old, which cost an extra CPU cycle whenever the
+	// processor clock was stretched; the separate `lrc` term was redundant,
+	// since `lrc` sets `ready_int` on the same tick, and glitched the pin for
+	// one clk_sys where phase 2 began before that value was consumed.
+	assign ready = ready_int;
+
+	assign tia_clk_en = ~|tia_enable_count;
+	assign tia_clk_x2 = tia_clk_en && mclk0;
+
+	always @(posedge clk_sys) begin
+		mclk1 <= 1'b0;
+		mclk0 <= 1'b0;
+		pclk0 <= 1'b0;
+		pclk1 <= 1'b0;
+
+		if (reset) begin
+			ready_int <= 1'b1;
+		end
+
+		if (ce) begin
+			old_men <= maria_en;
+
+			// If maria enabled rises, the CPU clock is held in a state
+			// of reset for 5 master oscillator cycles.
+			if (~old_men && maria_en)
+				men_count <= 4'd5;
+
+			if (mclk1 && |tia_enable_count)
+				tia_enable_count <= tia_enable_count - 1'd1;
+
+			if (|men_count)
+				men_count <= men_count - 1'd1;
+
+			// Follow the phase pulse itself, not the mclk0 that normally
+			// carries it. This is decision 0076, from when PAL was slowed by
+			// dropping one master clock in 110 and a dropped cycle could steal
+			// the toggle. PAL now has its own clock out of the PLL (decision
+			// 0088) and there is no bubble, so a phase pulse always lands on an
+			// mclk0 cycle and this is the same cycle either way. Kept because
+			// following the pulse states the intent more directly.
+			if (pclk1)
+				pclk <= 0;
+			else if (pclk0)
+				pclk <= 1;
+
+			if (pclk0)
+				slow_clk_latch <= sel_slow_clock;
+
+			// Uniform in both regions: PAL's master clock is simply slower,
+			// out of the PLL (decision 0088). MARIA halves clk_sys either way.
+			mclk0 <= clk_toggle;
+			mclk1 <= ~clk_toggle;
+			clk_toggle <= ~clk_toggle;
+
+			if (!reset) begin
+				if (wsync)
+					ready_int <= 1'b0;
+				else
+					if (lrc)
+						ready_int <= 1'b1;
+
+			end
+
+			// The timing schematic has no reset input to the processor-clock
+			// generator. Keep PCLK0 running while the model reset clears
+			// functional state so SALLY can recognize reset.
+			if (mclk1) begin
+				if (clock_div != 3'd0)
+					clock_div <= clock_div - 1'd1;
+				else begin
+					pclk_toggle <= ~pclk_toggle;
+					pclk1 <= pclk_toggle;
+					pclk0 <= ~pclk_toggle;
+					clock_div <= (~pclk_toggle ? sel_slow_clock : slow_clk_latch) ? 3'd2 : 3'd1;
+				end
+			end
+
+			if (|men_count) begin
+				pclk_toggle <= 1'b0;
+				clock_div <= sel_slow_clock ? 3'd2 : 3'd1;
+			end
+		end
+	end
+
+	line_ram line_ram_inst (
+		.mclk0           (mclk0),
+		.mclk1           (mclk1),
+		.border          (border),
+		.clk_sys         (clk_sys),
+		.latch_byte      (latch_byte),
+		.latch_hpos      (latch_hpos),
+		.RESET           (reset || ~maria_en),
+		.PLAYBACK        (UV_out),
+		.PALETTE         (palette),
+		.d_in            (d_in),
+		.WM              (wm),
+		.COLOR_MAP       (color_map),
+		.RM              (ctrl[1:0]),
+		.KANGAROO_MODE   (ctrl[2]),
+		.BORDER_CONTROL  (ctrl[3]),
+		.COLOR_KILL      (ctrl[7]),
+		.lrc             (lrc),
+		.cram_write      (cram_sel)
+	);
+
+	control control_inst (
+		.mclk0           (mclk0),
+		.mclk1           (mclk1),
+		.pclkp           (pclk),
+		.maria_en        (maria_en),
+		.AB              (AB_in),
+		.ABEN            (drive_AB),
+		.DB_in           (d_in),
+		.DB_out          (DB_out),
+		.DB_out_oe       (DB_out_oe),
+		.RW              (RW),
+		.drive_AB        (drive_AB),
+		.ctrl            (ctrl),
+		.color_map       (color_map),
+		.status_read     ({vblank, 7'b0}),
+		.char_base       (char_base),
+		.ZP              (ZP),
+		.pal             (PAL),
+		.sel_slow_clock  (sel_slow_clock),
+		.wsync           (wsync),
+		.clk_sys         (clk_sys),
+		.reset           (reset),
+		.pclk0           (pclk2),
+		.bypass_bios     (bypass_bios),
+		.cs_ram0         (cs_ram0),
+		.cs_ram1         (cs_ram1),
+		.cs_riot         (cs_riot),
+		.cs_tia          (cs_tia),
+		.cs_maria        (cs_maria),
+		.cram_select     (cram_sel)
+	);
+
+	dma dma_inst (
+		.clk_sys         (clk_sys),
+		// Not `|| ~maria_en`. The BIOS clears the register block with
+		// STA $01,X, which turns MEN off and on again mid-frame. Restarting
+		// the engine from its zero state there drops ABENF at a raster
+		// position it never sequenced up to, so it takes the address bus
+		// with the CPU still running - the CPU then fetched from $0000 and
+		// the BIOS bailed to its 2600 fallback. Let it keep running instead;
+		// `drive_AB` is already gated by MEN.
+		.reset           (reset),
+		.mclk0           (mclk0),
+		.mclk1           (mclk1),
+		.vblank          (vblank),
+		.vbe             (vbe),
+		.hbs             (hbs),
+		.lrc             (lrc),
+		.pclk1           (pclk1),
+		.pclk0           (pclk0),
+		.DM              (ctrl[6:5]),
+		.AB              (AB_out),
+		.ABEN            (ABEN),
+		.PCLKEDGE        (~pclk_toggle),
+		.pclk            (pclk),
+		.latch_byte      (latch_byte),
+		.d_in            (d_in),
+		.latch_hpos      (latch_hpos),
+		.HALT            (halt_en),
+		.DLI             (DLI_en),
+		.WM              (wm),
+		.PAL             (palette),
+		.ZP              (ZP),
+		.char_width      (ctrl[4]),
+		.char_base       (char_base),
+		.bypass_bios     (bypass_bios),
+		.nmi_n           (NMI_ung_n)
+		);
+
+	video_sync sync_inst (
+		.mclk0           (mclk0),
+		.mclk1           (mclk1),
+		.clk             (clk_sys),
+		.reset           (reset || ~maria_en),
+		.bypass_bios     (bypass_bios),
+		.PAL             (PAL),
+		.HSync           (hsync),
+		.VSync           (vsync),
+		.hblank          (hblank),
+		.vblank          (vblank),
+		.vblank_ex       (vblank_ex),
+		.border          (border),
+		.hide_border     (hide_border),
+		.lrc             (lrc),
+		.prst            (prst),
+		.vbe             (vbe),
+		.hbs             (hbs)
+	);
+
+endmodule
