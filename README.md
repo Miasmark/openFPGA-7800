@@ -98,6 +98,16 @@ The Quartus build meets timing on all four corners (worst setup slack
 +2.60 ns, hold +0.114 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
+### Hardware testing (2.0.2, Analogue Pocket)
+
+| Test | Result |
+|---|---|
+| TIA sound pitch | Correct (the old core's octave-low bug is gone) |
+| Midnight Mutants, Commando, Dig Dug sprites | No corruption (holey DMA fix) |
+| Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
+| 2600: Solaris, Adventure | Nothing significantly wrong seen |
+| Commando POKEY music | Missing, as on the 2022 core; see Known issues |
+
 ### Changes to the MiSTer sources
 
 - **Holey DMA (sprite corruption).** Upstream's 2026-09-11 commit changed
