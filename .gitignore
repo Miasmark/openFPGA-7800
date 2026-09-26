@@ -7,5 +7,5 @@ src/fpga/*.qws
 # Packaging / simulation
 release/
 dist/Cores/Miasmark.7800/*.rbf_r
-sim/work/
+sim/work*/
 dist/Cores/Miasmark.7800/licenses/
