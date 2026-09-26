@@ -358,6 +358,7 @@ localparam [15:0] SLOT_BIOS = 16'h0103;
     reg             set_skip_bios = 1'b1;
     reg             set_blend     = 1'b0;
     reg             set_pokey_irq = 1'b0;
+    reg     [1:0]   set_savekey   = 2'd0;
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -379,6 +380,7 @@ always @(posedge clk_74a) begin
             12'h284: set_skip_bios <= bridge_wr_data[0];
             12'h288: set_blend     <= bridge_wr_data[0];
             12'h28C: set_pokey_irq <= bridge_wr_data[0];
+            12'h290: set_savekey   <= bridge_wr_data[1:0];
             default: ;
         endcase
     end
@@ -401,6 +403,11 @@ end
 wire hsc_sel = bridge_addr[31:24] == 8'h20;
 wire hsc_wr  = bridge_wr && hsc_sel;
 
+// SaveKey EEPROM RAM: 8192 words of 32 bits at 0x30000000, same scheme.
+    wire    [31:0]  sk_rd_latched;
+wire sk_sel = bridge_addr[31:24] == 8'h30;
+wire sk_wr  = bridge_wr && sk_sel;
+
 // for bridge write data, we just broadcast it to all bus devices
 // for bridge read data, we have to mux it
 always @(*) begin
@@ -410,6 +417,9 @@ always @(*) begin
     end
     32'h20xxxxxx: begin
         bridge_rd_data <= hsc_rd_latched;
+    end
+    32'h30xxxxxx: begin
+        bridge_rd_data <= sk_rd_latched;
     end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
@@ -603,11 +613,18 @@ end
 // hsc_active in atari7800_pocket.sv).
     wire            hsc_active;
     reg             hsc_active_74a;
+    reg             dt_toggle = 1'b0;
 always @(posedge clk_74a) begin
     hsc_active_74a <= hsc_active;
     datatable_wren <= 1'b1;
-    datatable_addr <= 10'd2 * 2 + 1;   // data slot index 2, size field
-    datatable_data <= hsc_active_74a ? 32'd2048 : 32'd0;
+    dt_toggle      <= ~dt_toggle;
+    if (dt_toggle) begin
+        datatable_addr <= 10'd2 * 2 + 1;   // data slot index 2 (HSC), size field
+        datatable_data <= hsc_active_74a ? 32'd2048 : 32'd0;
+    end else begin
+        datatable_addr <= 10'd3 * 2 + 1;   // data slot index 3 (SaveKey), size field
+        datatable_data <= 32'd32768;       // always, like the HSC: one shared file
+    end
 end
 
 // The loader runs on clk_sdram and holds each byte's write strobe for four
@@ -660,7 +677,7 @@ end
 always @(posedge clk_sys) begin
     set_s1 <= {set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
-               set_blend, set_pokey_irq, 3'b000};
+               set_blend, set_pokey_irq, set_savekey, 1'b0};
     set_s2 <= set_s1;
 end
 
@@ -731,6 +748,7 @@ atari7800_pocket atari (
     .skip_bios      ( set_s2[5] ),
     .flicker_blend  ( set_s2[4] ),
     .pokey_irq      ( set_s2[3] ),
+    .savekey_setting( set_s2[2:1] ),
     .pause_core     ( 1'b0 ),
 
     .joy0           ( joy0_s2 ),
@@ -757,6 +775,11 @@ atari7800_pocket atari (
     .hsc_bridge_din ( bridge_wr_data ),
     .hsc_bridge_dout( hsc_rd_latched ),
     .hsc_active     ( hsc_active ),
+    .sk_bridge_addr ( bridge_addr[14:2] ),
+    .sk_bridge_wr   ( sk_wr ),
+    .sk_bridge_rd   ( bridge_rd && sk_sel ),
+    .sk_bridge_din  ( bridge_wr_data ),
+    .sk_bridge_dout ( sk_rd_latched ),
 
     .SDRAM_A        ( dram_a ),
     .SDRAM_BA       ( dram_ba ),

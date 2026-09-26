@@ -73,8 +73,16 @@ module atari7800_pocket
 	input  wire        hsc_bridge_wr,
 	input  wire        hsc_bridge_rd,   // APF read strobe for this region
 	input  wire [31:0] hsc_bridge_din,  // big endian: [31:24] is the lowest byte
-	output reg  [31:0] hsc_bridge_dout = 32'd0, // word latched at the last read strobe
+	output wire [31:0] hsc_bridge_dout, // word latched at the last read strobe
 	output wire        hsc_active,      // keep the shared HSC save (always)
+
+	// SaveKey EEPROM (24LC256) RAM, second port for its save slot (clk_74a)
+	input  wire  [1:0] savekey_setting, // 0 auto (A78 header), 1 on, 2 off
+	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
+	input  wire        sk_bridge_wr,
+	input  wire        sk_bridge_rd,    // APF read strobe for this region
+	input  wire [31:0] sk_bridge_din,   // big endian: [31:24] is the lowest byte
+	output wire [31:0] sk_bridge_dout,  // word latched at the last read strobe
 
 	// SDRAM
 	output wire [12:0] SDRAM_A,
@@ -295,9 +303,8 @@ sdram sdram
 // save slot, so the scores survive power-off.
 wire       hsc_ram_cs;
 wire [7:0] hsc_ram_dout;
-wire [31:0] hsc_word_q;
 
-hsc_ram_dp hsc_ram
+save_ram_dp #(.WORD_ADDR_BITS(9)) hsc_ram
 (
 	.clk_a  (clk_sys),
 	.addr_a (bios_addr[10:0]),
@@ -309,19 +316,16 @@ hsc_ram_dp hsc_ram
 	.addr_b (hsc_bridge_addr),
 	.din_b  (hsc_bridge_din),
 	.we_b   (hsc_bridge_wr),
-	.dout_b (hsc_word_q)
+	.rd_b   (hsc_bridge_rd),
+	.dout_b (hsc_bridge_dout)
 );
 
-// The APF bridge reads with a one-transaction lag: the host samples the data
-// a few cycles into a read, then pulses the strobe, and expects to have
-// sampled the word latched at the previous strobe. Answering with the current
-// address shifted every saved word by one (the .sav came out rotated by four
-// bytes and the HSC signature at $1002 was lost on the next load).
-always @(posedge clk_74a)
-	if (hsc_bridge_rd)
-		hsc_bridge_dout <= hsc_word_q;
+// SaveKey on controller port 2 (see below). Auto follows the A78 header.
+wire use_sk = (savekey_setting == 2'd1) ||
+	(savekey_setting == 2'd0 && cart_is_7800 && cart_save == 8'd2);
 
-wire hsc_en = (hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting == 2'd1);
+// As on MiSTer, the HSC is off while a SaveKey is in use.
+wire hsc_en = ~use_sk & ((hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting == 2'd1));
 // The high score cart save is one shared file (hsc.sav) for every cart, like
 // the real HSC's single RAM. Its size in the data slot table is what the
 // Pocket reads to decide whether to write the file back, so it must be
@@ -331,12 +335,63 @@ wire hsc_en = (hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting 
 // after the Pocket has read the table.
 assign hsc_active = 1'b1;
 
+// SaveKey: a 24LC256 I2C EEPROM on controller port 2, SDA on PA2 and SCL on
+// PA3, as on MiSTer (EEPROM_24LC0X from the MiSTer core). Its 32 KiB live in
+// block RAM whose other port is the shared savekey.sav slot, through the same
+// save_ram_dp as the HSC, so it has the same APF read latch.
+//
+// Auto turns it on when an A78 header asks for one (byte 58 = 2). A 2600
+// image has no header, so 2600 SaveKey games need the setting On.
+
+
+wire  [7:0] PAout;
+wire        sk_sda;
+wire  [7:0] sk_ram_q, sk_ram_d;
+wire [14:0] sk_ram_addr;
+wire        sk_ram_wr;
+
+EEPROM_24LC0X #(
+	.ADDR_WIDTH (15),
+	.PAGE_WIDTH (6)
+) savekey (
+	.clk            (clk_sys),
+	.ce             (1'b1),
+	.reset          (reset | ~use_sk),
+	.SCL            (PAout[3]),
+	.SDA_in         (PAout[2]),
+	.SDA_out        (sk_sda),
+	.E_id           (3'd0),
+	.WC_n           (1'b0),
+	.data_from_ram  (sk_ram_q),
+	.data_to_ram    (sk_ram_d),
+	.ram_addr       (sk_ram_addr),
+	.ram_read       (),
+	.ram_write      (sk_ram_wr),
+	.ram_done       (1'b1)
+);
+
+save_ram_dp #(.WORD_ADDR_BITS(13)) sk_ram
+(
+	.clk_a  (clk_sys),
+	.addr_a (sk_ram_addr),
+	.din_a  (sk_ram_d),
+	.we_a   (sk_ram_wr),
+	.dout_a (sk_ram_q),
+
+	.clk_b  (clk_74a),
+	.addr_b (sk_bridge_addr),
+	.din_b  (sk_bridge_din),
+	.we_b   (sk_bridge_wr),
+	.rd_b   (sk_bridge_rd),
+	.dout_b (sk_bridge_dout)
+);
+
 //////////////////////////////  INPUT  ////////////////////////////////////
 
 wire [15:0] joya = swap_joysticks ? joy1 : joy0;
 wire [15:0] joyb = swap_joysticks ? joy0 : joy1;
 
-wire  [7:0] PAin, PBin, PAout, PBout;
+wire  [7:0] PAin, PBin, PBout;
 wire        PAread;
 wire  [3:0] iout;
 wire  [3:0] i_read;
@@ -380,7 +435,9 @@ always @(*) begin
 	if (joyb_b2) ilatch[1] = 1'b1;
 end
 
-assign PAin = pa_in_r;
+// With the SaveKey on, PA2 reads the EEPROM's SDA (the RIOT ANDs it with its
+// own output, so a released pin reads the EEPROM).
+assign PAin = use_sk ? {pa_in_r[7:3], sk_sda, pa_in_r[1:0]} : pa_in_r;
 
 assign PBin[7] = ~diff_right_b;           // Right difficulty: 1 = A
 assign PBin[6] = ~diff_left_b;            // Left difficulty
@@ -555,29 +612,46 @@ assign is_pal_o = region_select;
 endmodule
 
 
-// 2 KiB high score cartridge RAM: bytes for the console, 32 bit words for
-// the APF bridge. Four 512 byte lanes, one per byte of a word, each a true
-// dual port, dual clock RAM, so the bridge reads or writes a whole word in
-// one cycle (its reads sample the data a few cycles after the address).
-module hsc_ram_dp
-(
-	input  wire        clk_a,
-	input  wire [10:0] addr_a,
-	input  wire  [7:0] din_a,
-	input  wire        we_a,
-	output wire  [7:0] dout_a,
+// Save RAM for a Pocket save slot: bytes for the console, 32 bit words for
+// the APF bridge. Four byte lanes of 2^WORD_ADDR_BITS bytes each, one per
+// byte of a word, each a true dual port, dual clock RAM, so the bridge reads
+// or writes a whole word in one cycle. Used for the HSC (2 KiB) and the
+// SaveKey (32 KiB).
+//
+// Bridge reads have a one-transaction lag: the host samples dout_b a few
+// cycles into a read, then pulses rd_b, and expects to have sampled the word
+// latched at the previous strobe (core_bridge_cmd and agg23's data_unloader
+// behave the same way). Answering with the current address instead shifted
+// every saved word by one: HSC saves from 2.0.2/2.0.3 came out rotated by four
+// bytes. The latch lives here so every save slot gets it.
+module save_ram_dp #(
+	parameter WORD_ADDR_BITS = 9
+) (
+	input  wire                        clk_a,
+	input  wire [WORD_ADDR_BITS+1:0]   addr_a,
+	input  wire  [7:0]                 din_a,
+	input  wire                        we_a,
+	output wire  [7:0]                 dout_a,
 
-	input  wire        clk_b,
-	input  wire  [8:0] addr_b,
-	input  wire [31:0] din_b,
-	input  wire        we_b,
-	output wire [31:0] dout_b
+	input  wire                        clk_b,
+	input  wire [WORD_ADDR_BITS-1:0]   addr_b,
+	input  wire [31:0]                 din_b,
+	input  wire                        we_b,
+	input  wire                        rd_b,
+	output reg  [31:0]                 dout_b = 32'd0
 );
-	wire [7:0] lane_q [4];
-	reg  [1:0] lane_a;
+	localparam WORDS = 1 << WORD_ADDR_BITS;
+
+	wire [7:0]  lane_q [4];
+	wire [31:0] word_q;
+	reg  [1:0]  lane_a;
 
 	always @(posedge clk_a) lane_a <= addr_a[1:0];
 	assign dout_a = lane_q[lane_a];
+
+	always @(posedge clk_b)
+		if (rd_b)
+			dout_b <= word_q;
 
 	genvar i;
 	generate
@@ -585,11 +659,11 @@ module hsc_ram_dp
 			altsyncram #(
 				.operation_mode                 ("BIDIR_DUAL_PORT"),
 				.width_a                        (8),
-				.widthad_a                      (9),
-				.numwords_a                     (512),
+				.widthad_a                      (WORD_ADDR_BITS),
+				.numwords_a                     (WORDS),
 				.width_b                        (8),
-				.widthad_b                      (9),
-				.numwords_b                     (512),
+				.widthad_b                      (WORD_ADDR_BITS),
+				.numwords_b                     (WORDS),
 				.outdata_reg_a                  ("UNREGISTERED"),
 				.outdata_reg_b                  ("UNREGISTERED"),
 				.address_reg_b                  ("CLOCK1"),
@@ -606,7 +680,7 @@ module hsc_ram_dp
 				.lpm_type                       ("altsyncram")
 			) ram (
 				.clock0    (clk_a),
-				.address_a (addr_a[10:2]),
+				.address_a (addr_a[WORD_ADDR_BITS+1:2]),
 				.data_a    (din_a),
 				.wren_a    (we_a && addr_a[1:0] == i),
 				.q_a       (lane_q[i]),
@@ -615,7 +689,7 @@ module hsc_ram_dp
 				.address_b (addr_b),
 				.data_b    (din_b[31 - 8*i -: 8]),
 				.wren_b    (we_b),
-				.q_b       (dout_b[31 - 8*i -: 8]),
+				.q_b       (word_q[31 - 8*i -: 8]),
 
 				.aclr0 (1'b0), .aclr1 (1'b0),
 				.addressstall_a (1'b0), .addressstall_b (1'b0),

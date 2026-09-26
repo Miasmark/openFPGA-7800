@@ -76,3 +76,18 @@ python3 "$HERE/make_a78.py" --bin "$X/dli/dli.bin" --type 0x0001 > "$X/dli/dli.a
 (cd "$X/dli" && "$WORK/obj_load/vtb" +image=dli.a78 +wav=1000 | grep -E "LOAD|PROBE")
 echo "  expect: 60 NMIs, main loop writes in the hundreds of thousands, 61 AUDF1 writes"
 audio_stats "$X/dli"
+
+echo "-- SaveKey (24LC256 on port 2) and its save slot"
+mkdir -p "$X/savekey"; ln -sfn "$WORK/rtl" "$X/savekey/rtl"
+dasm "$HERE/savekey_test.asm" -f3 -I"$X/7800basic/includes" -o"$X/savekey/sk.bin" >/dev/null
+python3 "$HERE/make_a78.py" --bin "$X/savekey/sk.bin" --save 2 > "$X/savekey/sk_auto.a78"
+python3 "$HERE/make_a78.py" --bin "$X/savekey/sk.bin" > "$X/savekey/sk_plain.a78"
+python3 -c "import os; open('$X/savekey/random.bin','wb').write(os.urandom(32768))"
+cd "$X/savekey"
+echo "  Auto, header declares a SaveKey (expect pass tone ~1962 Hz, bytes match):"
+"$WORK/obj_load/vtb" +image=sk_auto.a78 +audf=7 +sk_auto +skcheck | grep -E "TONE|SAVEKEY"
+echo "  Auto, header declares none (expect fail tone ~490 Hz):"
+"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=31 +sk_auto | grep TONE
+echo "  32 KiB save round trip, APF read protocol (expect exactly the 8 bytes the cart wrote to differ):"
+"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=7 +sk_on +sksave=random.bin | grep -E "SAVEKEY"
+cd - >/dev/null

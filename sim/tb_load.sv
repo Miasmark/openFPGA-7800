@@ -15,7 +15,9 @@ module tb_load;
 	always #6.734 clk_74a = ~clk_74a;
 
 	logic reset_in = 1'b1;
-	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
+	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
+	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
+	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic [15:0] joy0 = 16'd0;
 	logic [1:0] hsc_setting = 2'd0;
@@ -55,6 +57,8 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
+		.savekey_setting(sk_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
+		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE()
 	);
@@ -132,7 +136,10 @@ module tb_load;
 	logic [7:0] image [$];
 	int fd, c, audf, mismatches;
 	real measured, ideal;
-	string path, save_path;
+	string path, save_path, sk_path;
+	logic [7:0] sk_img [0:32767];
+	bit have_sk = 0;
+	int sk_diffs;
 	logic [7:0] save_img [0:2047];
 	bit have_save = 0;
 	int save_diffs;
@@ -147,6 +154,23 @@ module tb_load;
 		while (image.size() % 4) image.push_back(8'hFF);
 
 		if ($test$plusargs("hsc_on")) hsc_setting = 2'd1;
+		if ($test$plusargs("sk_on")) sk_setting = 2'd1;
+		if ($test$plusargs("sk_auto")) sk_setting = 2'd0;
+		// +sksave=FILE: write a 32 KiB SaveKey image through its save slot port.
+		if ($value$plusargs("sksave=%s", sk_path)) begin
+			fd = $fopen(sk_path, "rb");
+			for (int i = 0; i < 32768; i++) begin c = $fgetc(fd); sk_img[i] = c[7:0]; end
+			$fclose(fd);
+			for (int i = 0; i < 8192; i++) begin
+				@(posedge clk_74a);
+				sk_addr = i[12:0];
+				sk_din = {sk_img[4*i], sk_img[4*i+1], sk_img[4*i+2], sk_img[4*i+3]};
+				sk_wr = 1'b1;
+				@(posedge clk_74a);
+				sk_wr = 1'b0;
+			end
+			have_sk = 1;
+		end
 		// +save=FILE: write a 2 KiB save through the save slot's bridge port
 		// while the core is held in reset, as the Pocket does on a load.
 		if ($value$plusargs("save=%s", save_path)) begin
@@ -263,6 +287,45 @@ module tb_load;
 						end
 			end
 			$display("SAVE after load, reset and 300 ms of running: %0d of 2048 bytes differ from the save file", save_diffs);
+		end
+		if (have_sk) begin
+			// Same APF read protocol as the HSC: 8193 transactions for 8192 words.
+			sk_diffs = 0;
+			for (int t = 0; t <= 8192; t++) begin
+				logic [31:0] got;
+				@(posedge clk_74a); sk_addr = t[12:0];
+				repeat (4) @(posedge clk_74a);
+				got = sk_dout;
+				sk_rd = 1'b1; @(posedge clk_74a); sk_rd = 1'b0;
+				if (t > 0)
+					for (int k = 0; k < 4; k++)
+						if (got[31 - 8*k -: 8] !== sk_img[4*(t-1) + k]) begin
+							if (sk_diffs < 8)
+								$display("  SaveKey byte %04x: saved %02x, read back %02x", 4*(t-1) + k,
+									sk_img[4*(t-1) + k], got[31 - 8*k -: 8]);
+							sk_diffs++;
+						end
+			end
+			$display("SAVEKEY save after load, reset and running: %0d of 32768 bytes differ from the save file", sk_diffs);
+		end
+		if ($test$plusargs("skcheck")) begin
+			// What the test cart wrote over I2C must be in the RAM that gets
+			// saved: EEPROM $1234..$123B, read through the save slot port.
+			logic [7:0] exp [8] = '{8'hA5, 8'h5A, 8'h01, 8'h02, 8'h80, 8'h7F, 8'hFF, 8'h00};
+			logic [7:0] got8 [8];
+			for (int t = 0; t < 3; t++) begin      // words $48D, $48E, then collect
+				logic [31:0] got;
+				@(posedge clk_74a); sk_addr = 13'h48D + t;
+				repeat (4) @(posedge clk_74a);
+				got = sk_dout;
+				sk_rd = 1'b1; @(posedge clk_74a); sk_rd = 1'b0;
+				if (t > 0) for (int k = 0; k < 4; k++) got8[4*(t-1) + k] = got[31 - 8*k -: 8];
+			end
+			sk_diffs = 0;
+			for (int k = 0; k < 8; k++) if (got8[k] !== exp[k]) sk_diffs++;
+			$display("SAVEKEY EEPROM $1234..$123B in the save RAM: %02x %02x %02x %02x %02x %02x %02x %02x (%0s)",
+				got8[0], got8[1], got8[2], got8[3], got8[4], got8[5], got8[6], got8[7],
+				sk_diffs == 0 ? "matches what the cart wrote" : "MISMATCH");
 		end
 		$finish;
 	end

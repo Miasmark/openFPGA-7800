@@ -38,12 +38,16 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   `/Saves/7800/`). Versions 2.0.2 and 2.0.3 used a file per game, and those
   files are rotated by four bytes; `tools/fix_hsc_save.py` repairs one, which
   can then be renamed `hsc.sav` to keep its scores.
+- **SaveKey** (24LC256 EEPROM on controller port 2), in one shared
+  `savekey.sav`, like the real device. *SaveKey (port 2)* = Auto turns it on
+  when the A78 header asks for one; 2600 SaveKey games need it set to On. As on
+  MiSTer, the high score cart is off while a SaveKey is in use.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - Settings: difficulty switches, controller swap, region, palette
   (warm/cool/hot), high score cart, overscan, border, stereo TIA, 2600
-  flicker blend, and POKEY IRQ (off by default, as on MiSTer; some games drive
-  their music from POKEY timer interrupts).
+  flicker blend, SaveKey, and POKEY IRQ (off by default, as on MiSTer; some
+  games drive their music from POKEY timer interrupts).
 
 ### Not included
 
@@ -64,7 +68,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,479 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
+| This port (ARM and BupChip left out) | **11,588 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -94,12 +98,15 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | 7800 video | 59.96 Hz, 320x224 (372x224 with the border) |
 | 2600 video | 59.92 Hz, 160x240 (MiSTer's "smart" stabiliser window) |
 | Audio filter | centred on zero, settles to 0 in silence |
+| SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
+| SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
+| HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build meets timing on all four corners (worst setup slack
-+1.72 ns, hold +0.120 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
++2.29 ns, hold +0.070 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
 ### Hardware testing (2.0.2, Analogue Pocket)
@@ -111,7 +118,8 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
-| High score cart (Dig Dug, Food Fight) | Worked in play. 2.0.2 kept no save file; 2.0.3 kept one, but it came out rotated by four bytes (see Features), so the HSC asked to be personalised again. Fixed in 2.0.4, which also moves to one shared `hsc.sav`; not yet retested |
+| SaveKey | New in 2.0.5; not yet tested on hardware |
+| High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`) |
 
 ### Changes to the MiSTer sources
 

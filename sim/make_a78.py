@@ -12,6 +12,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("audf", nargs="?", default="7")
 ap.add_argument("--bin")
 ap.add_argument("--type", default="0")
+ap.add_argument("--save", default="0", help="header byte 58: 1 = HSC, 2 = SaveKey")
 a = ap.parse_args()
 here = __file__.rsplit("/", 1)[0] or "."
 if a.bin:
@@ -27,6 +28,6 @@ hdr[49:53] = len(rom).to_bytes(4, "big")     # ROM size
 hdr[53:55] = int(a.type, 0).to_bytes(2, "big")
 hdr[55] = 1; hdr[56] = 1                     # joysticks
 hdr[57] = 0                                  # NTSC
-hdr[58] = 0                                  # no save device
+hdr[58] = int(a.save, 0)                     # save device
 hdr[100:128] = b"ACTUAL CART DATA STARTS HERE"
 sys.stdout.buffer.write(bytes(hdr) + rom)

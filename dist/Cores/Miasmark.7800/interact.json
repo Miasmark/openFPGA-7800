@@ -140,6 +140,31 @@
         ]
       },
       {
+        "name": "SaveKey (port 2)",
+        "id": 15,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000290",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "On"
+          },
+          {
+            "value": 2,
+            "name": "Off"
+          }
+        ]
+      },
+      {
         "name": "Skip BIOS",
         "id": 12,
         "type": "check",
