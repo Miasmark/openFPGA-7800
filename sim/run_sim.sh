@@ -61,7 +61,7 @@ SRCS=(
 
 build() {   # build <top> <objdir>
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
-		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE \
+		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
 		--top-module "$1" -Mdir "$WORK/$2" -o vtb "${SRCS[@]}" "$HERE/$1.sv" > "$WORK/$2.log" 2>&1 \
 		|| { grep -m20 "%Error" "$WORK/$2.log"; exit 1; }
 }

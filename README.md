@@ -40,7 +40,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   files are rotated by four bytes; `tools/fix_hsc_save.py` repairs one, which
   can then be renamed `hsc.sav` to keep its scores.
 - **SaveKey** (24LC256 EEPROM on controller port 2), in one shared
-  `savekey.sav`, like the real device. *SaveKey (port 2)* = Auto turns it on
+  `savekey.sav`, like the real device. A new file starts blank ($FF), as a
+  real SaveKey does. *SaveKey (port 2)* = Auto turns it on
   when the A78 header asks for one (save byte bit 1, or an AtariVox/SaveKey
   on port 2); 2600 SaveKey games need it set to On. Unlike MiSTer, the high
   score cart stays available alongside it, since each has its own file: a
@@ -73,7 +74,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,619 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
+| This port (ARM and BupChip left out) | **11,637 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -104,6 +105,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | 2600 video | 59.92 Hz, 160x240 (MiSTer's "smart" stabiliser window) |
 | Audio filter | centred on zero, settles to 0 in silence |
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
+| SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
@@ -124,7 +126,7 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
-| SaveKey | New in 2.0.5; not yet tested on hardware. 2.0.6: HSC and SaveKey together when the header asks for both (Triple Punch) |
+| SaveKey | 2.0.7 on Triple Punch: "Save ER" (EEPROM model bug on reads, and a zero-filled file). Fixed in 2.0.8; delete the old all-zero `savekey.sav` |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
 

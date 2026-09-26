@@ -737,6 +737,7 @@ set_global_assignment -name VERILOG_MACRO "NO_ARM_MAPPER=1"
 set_global_assignment -name VERILOG_MACRO "NO_BUPCHIP=1"
 set_global_assignment -name VERILOG_MACRO "NO_DDRAM=1"
 set_global_assignment -name VERILOG_MACRO "EXTERNAL_FIRMWARE=1"
+set_global_assignment -name VERILOG_MACRO "EEPROM_NACK_ENDS_READ=1"
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister

@@ -406,7 +406,7 @@ EEPROM_24LC0X #(
 	.ram_done       (1'b1)
 );
 
-save_ram_dp #(.WORD_ADDR_BITS(13)) sk_ram
+save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 (
 	.clk_a  (clk_sys),
 	.addr_a (sk_ram_addr),
@@ -669,7 +669,10 @@ endmodule
 // every saved word by one: HSC saves from 2.0.2/2.0.3 came out rotated by four
 // bytes. The latch lives here so every save slot gets it.
 module save_ram_dp #(
-	parameter WORD_ADDR_BITS = 9
+	parameter WORD_ADDR_BITS = 9,
+	// 8'hFF: store bytes inverted, so the RAM's power-up zeros read as $FF.
+	// A new SaveKey file then starts blank the way a real EEPROM does.
+	parameter [7:0] BLANK = 8'h00
 ) (
 	input  wire                        clk_a,
 	input  wire [WORD_ADDR_BITS+1:0]   addr_a,
@@ -691,11 +694,11 @@ module save_ram_dp #(
 	reg  [1:0]  lane_a;
 
 	always @(posedge clk_a) lane_a <= addr_a[1:0];
-	assign dout_a = lane_q[lane_a];
+	assign dout_a = lane_q[lane_a] ^ BLANK;
 
 	always @(posedge clk_b)
 		if (rd_b)
-			dout_b <= word_q;
+			dout_b <= word_q ^ {4{BLANK}};
 
 	genvar i;
 	generate
@@ -725,13 +728,13 @@ module save_ram_dp #(
 			) ram (
 				.clock0    (clk_a),
 				.address_a (addr_a[WORD_ADDR_BITS+1:2]),
-				.data_a    (din_a),
+				.data_a    (din_a ^ BLANK),
 				.wren_a    (we_a && addr_a[1:0] == i),
 				.q_a       (lane_q[i]),
 
 				.clock1    (clk_b),
 				.address_b (addr_b),
-				.data_b    (din_b[31 - 8*i -: 8]),
+				.data_b    (din_b[31 - 8*i -: 8] ^ BLANK),
 				.wren_b    (we_b),
 				.q_b       (word_q[31 - 8*i -: 8]),
 

@@ -18,9 +18,10 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Six upstream files are modified (`top.sv`, `Maria/DMA.sv`, and for the
-firmware switch `cart.sv`, `cart2600.sv`, `banks2600.sv`), two firmware images
-are removed, and the POKEY is swapped for an older one.
+Seven upstream files are modified (`top.sv`, `Maria/DMA.sv`,
+`EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
+`banks2600.sv`), two firmware images are removed, and the POKEY is swapped
+for an older one.
 
 ### POKEY: Mark Watson's VHDL instead of upstream's rtl/Pokey
 
@@ -55,6 +56,17 @@ multisprite sample). The Pocket copy restores the previous behaviour (upstream
 display list entry. `sim/extra_tests.sh` renders the multisprite sample, and
 each sprite then matches its source graphic row for row. The rest of that
 commit is kept.
+
+### `rtl/EEPROM_24LC256.sv`: a NACK ends a read (`EEPROM_NACK_ENDS_READ`)
+
+In a sequential read the model fetches the next byte whatever the master
+answers, and drives its first bit on the next SCL fall. A real 24LC256 goes
+idle on a NACK. When that stray bit is 0, the model holds SDA low, so the
+master's STOP and the next START are lost and every later transfer is
+misread. Triple Punch reads 3 bytes and NACKs; with a SaveKey file of zeros
+this broke every read after the first, and the game showed "Save ER". The
+fix is behind `EEPROM_NACK_ENDS_READ`: after a NACK the model releases SDA
+and waits for STOP or START. `sim/tb_load.sv +i2ctrace` decodes the bus.
 
 ### `rtl/top.sv`: build switches
 
@@ -92,7 +104,7 @@ fast.
 ## Updating
 
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in
-`top.sv`, `cart.sv`, `cart2600.sv` and `banks2600.sv`, and the holey DMA fix
+`top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv` and `EEPROM_24LC256.sv`, and the holey DMA fix
 in `Maria/DMA.sv` (unless upstream has fixed it; check with
 `sim/extra_tests.sh`). Delete `rtl/mem4.*` and `rtl/ar.*` again, update
 `UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.

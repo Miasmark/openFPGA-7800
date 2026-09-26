@@ -66,7 +66,7 @@ module tb_load;
 	);
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
-	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0;
+	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0;
 	logic capture = 0, old_vs2 = 0, old_hb2 = 1;
 	logic [23:0] fb [0:299][0:399];
 	always @(posedge clk_sys) begin
@@ -144,6 +144,41 @@ module tb_load;
 		if (dut.use_sk && old_scl != dut.PAout[3]) scl_edges <= scl_edges + 1;
 		old_skwr <= dut.sk_ram_wr;
 		if (dut.sk_ram_wr && !old_skwr) sk_bytes <= sk_bytes + 1;
+	end
+
+	// ---------------- I2C trace (+i2ctrace) ----------------
+	// Decodes port 2's SaveKey bus as the lines really are: open drain, so
+	// SDA is low when either the console or the EEPROM pulls it low.
+	logic i2c_on = 0, i2c_scl_d = 1, i2c_sda_d = 1, i2c_in = 0;
+	int   i2c_bits = 0, i2c_lines = 0; logic [8:0] i2c_sh = 0; string i2c_txt = "";
+	wire  i2c_scl = dut.PAout[3];
+	wire  i2c_sda = dut.PAout[2] & dut.sk_sda;
+	longint i2c_raw_from = 0, i2c_raw_to = 0;
+	initial begin
+		void'($value$plusargs("i2craw_from=%d", i2c_raw_from));
+		void'($value$plusargs("i2craw_to=%d", i2c_raw_to));
+	end
+	always @(posedge clk_sys) if (i2c_on && dut.use_sk && $time/1000000 >= i2c_raw_from && $time/1000000 < i2c_raw_to
+		&& (i2c_scl != i2c_scl_d || i2c_sda != i2c_sda_d || dut.PAout[2] != old_pa2 || dut.sk_sda != old_sksda))
+		$display("RAW %0d us: SCL %b SDA line %b (console %b, eeprom %b)", $time/1000000, i2c_scl, i2c_sda, dut.PAout[2], dut.sk_sda);
+	logic old_pa2 = 1, old_sksda = 1;
+	always @(posedge clk_sys) begin old_pa2 <= dut.PAout[2]; old_sksda <= dut.sk_sda; end
+	always @(posedge clk_sys) if (i2c_on && dut.use_sk) begin
+		i2c_scl_d <= i2c_scl; i2c_sda_d <= i2c_sda;
+		if (i2c_scl && i2c_scl_d && i2c_sda_d && !i2c_sda) begin          // START
+			if (i2c_txt != "" && i2c_lines < 400) begin $display("I2C %0s", i2c_txt); i2c_lines++; end
+			i2c_txt = $sformatf("[%0d us] S", $time / 1000000); i2c_bits = 0; i2c_in = 1;
+		end else if (i2c_scl && i2c_scl_d && !i2c_sda_d && i2c_sda) begin // STOP
+			i2c_txt = {i2c_txt, " P"};
+			if (i2c_lines < 400) begin $display("I2C %0s", i2c_txt); i2c_lines++; end
+			i2c_txt = ""; i2c_in = 0;
+		end else if (i2c_in && i2c_scl && !i2c_scl_d) begin               // bit
+			i2c_sh = {i2c_sh[7:0], i2c_sda}; i2c_bits++;
+			if (i2c_bits == 9) begin
+				i2c_txt = {i2c_txt, $sformatf(" %02x%0s", i2c_sh[8:1], i2c_sh[0] ? "n" : "a")};
+				i2c_bits = 0;
+			end
+		end
 	end
 
 	longint rises = 0;
@@ -314,6 +349,15 @@ module tb_load;
 				end
 			join_none
 			recording = 1;
+			i2c_on = $test$plusargs("i2ctrace");
+			// +dumpat=MS +dump=N: capture N frames starting MS into the recording
+			if ($value$plusargs("dumpat=%d", dump_at)) fork
+				begin
+					repeat (longint'(14318) * dump_at) @(posedge clk_sys);
+					void'($value$plusargs("dump=%d", dump_frames));
+					capture = 1;
+				end
+			join_none
 			repeat (longint'(14318) * wav_ms) @(posedge clk_sys);
 			recording = 0;
 			$fclose(wav_raw); $fclose(wav_filt);

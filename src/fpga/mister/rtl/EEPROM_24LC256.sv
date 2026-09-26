@@ -38,6 +38,14 @@ module EEPROM_24LC0X
 	reg last_SCL;
 	reg last_SDA;
 	reg [7:0] a_bytes_left;
+`ifdef EEPROM_NACK_ENDS_READ
+	// Pocket fix (POCKET_CHANGES.md). In a read, the byte-done event below
+	// comes after the 8th data bit; the master's ACK/NACK is clocked in one
+	// bit later. A NACK must end the read, as on a real 24LC256. Without this
+	// the next byte's first bit is driven on the next SCL fall, and a 0 there
+	// holds SDA low and swallows the master's STOP and the following START.
+	reg read_ack_phase;
+`endif
 	
 	integer byte_w = (ADDR_WIDTH >> 2'd3) + (|ADDR_WIDTH[2:0] ? 1'd1 : 1'd0);
 	wire [7:0] address_bytes = byte_w[7:0];
@@ -51,6 +59,9 @@ module EEPROM_24LC0X
 		ram_read <= 0;
 		address <= '0;
 		ram_write <= 0;
+`ifdef EEPROM_NACK_ENDS_READ
+		read_ack_phase <= 0;
+`endif
 	end else if (ce) begin
 		last_SCL <= SCL;
 		last_SDA <= SDA_in;
@@ -66,15 +77,27 @@ module EEPROM_24LC0X
 		if (SCL && last_SCL && !SDA_in && last_SDA) begin
 			state <= STATE_TEST;
 			command <= 10'd2;
+`ifdef EEPROM_NACK_ENDS_READ
+			read_ack_phase <= 0;
+`endif
 		end else if (SCL && last_SCL && SDA_in && !last_SDA) begin
 			state <= STATE_STANDBY;
 			command <= 10'd0;
+`ifdef EEPROM_NACK_ENDS_READ
+			read_ack_phase <= 0;
+`endif
 		end else if (state == STATE_STANDBY) begin
 			// Do nothing
 		end else if (SCL && !last_SCL) begin
 			command <= {command[8:0], SDA_in };
 		end else if (!SCL && last_SCL) begin
 			SDA_out <= 1;  //NoAck
+`ifdef EEPROM_NACK_ENDS_READ
+			read_ack_phase <= 0;
+			if (state == STATE_READ && read_ack_phase && command[0]) begin
+				state <= STATE_STANDBY;     // NACK: release SDA, wait for STOP/START
+			end else
+`endif
 			if (state == STATE_READ) begin
 				SDA_out <= data[8];
 				if (!ram_read) begin
@@ -112,6 +135,9 @@ module EEPROM_24LC0X
 					end
 					command <= 10'd1;
 				end else if (state == STATE_READ) begin
+`ifdef EEPROM_NACK_ENDS_READ
+					read_ack_phase <= 1;
+`endif
 					ram_read <= 1;
 					 SDA_out <= 1; //NoAck
 					command <= 10'd1;
