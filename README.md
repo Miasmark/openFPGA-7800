@@ -200,6 +200,17 @@ Up to 2.0.6 the high score cart and Supercharger firmware were built into the
 core, as they are on MiSTer. From 2.0.7 they are loaded from these files, so
 this repository and its releases carry no firmware whose license is unclear.
 
+**History rewrite (2026-09-26).** The first port commit vendored MiSTer's
+`rtl/mem4.hex`/`.mif` (High Score Cartridge firmware) and `rtl/ar.hex`/`.mif`
+(Starpath Supercharger BIOS). Both are the original makers' code with no
+license given, so they were removed from the whole history of the
+`Mister-Pocket-Port` branch, not just from its latest commit. Nothing else
+changed: every commit keeps its content and message, but has a new hash. A
+clone made before that date should be re-cloned, or reset with
+`git fetch && git reset --hard origin/Mister-Pocket-Port`. Pocket builds
+2.0.0 to 2.0.6 contain both images in their bitstream; please use 2.0.7 or
+later.
+
 ## Building
 
 The FPGA project is `src/fpga/ap_core.qpf`, for Quartus Prime Lite (built

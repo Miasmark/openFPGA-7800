@@ -87,7 +87,9 @@ the changed files are identical to upstream in behaviour.
 Upstream builds two pieces of original firmware into the core: the High
 Score Cartridge ROM (`rtl/mem4.hex`/`.mif`, used in `cart.sv`) and the
 Starpath Supercharger BIOS (`rtl/ar.hex`/`.mif`, used in `banks2600.sv`). No
-license is given for either, so this copy leaves both files out.
+license is given for either, so this copy leaves both files out. They were
+also removed from this branch's git history (see the README, "History
+rewrite").
 
 With `EXTERNAL_FIRMWARE` defined, those two ROMs are built empty and gain a
 write port (`fw_*` ports through `top.sv` -> `cart.sv`, and `top.sv` ->
