@@ -18,6 +18,7 @@ module tb_load;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic [15:0] joy0 = 16'd0;
+	logic [1:0] hsc_setting = 2'd0;
 
 	// ---------------- APF bridge + loader ----------------
 	logic        bridge_wr = 1'b0;
@@ -45,7 +46,7 @@ module tb_load;
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
 		.ioctl_wr(ioctl_wr & cart_download), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
-		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(2'd0), .show_overscan(1'b0),
+		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(1'b0),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
 		.joy0(joy0), .joy1(16'd0),
@@ -131,7 +132,10 @@ module tb_load;
 	logic [7:0] image [$];
 	int fd, c, audf, mismatches;
 	real measured, ideal;
-	string path;
+	string path, save_path;
+	logic [7:0] save_img [0:2047];
+	bit have_save = 0;
+	int save_diffs;
 
 	initial begin
 		if (!$value$plusargs("image=%s", path)) path = "load_test.a78";
@@ -142,6 +146,24 @@ module tb_load;
 		$fclose(fd);
 		while (image.size() % 4) image.push_back(8'hFF);
 
+		if ($test$plusargs("hsc_on")) hsc_setting = 2'd1;
+		// +save=FILE: write a 2 KiB save through the save slot's bridge port
+		// while the core is held in reset, as the Pocket does on a load.
+		if ($value$plusargs("save=%s", save_path)) begin
+			fd = $fopen(save_path, "rb");
+			for (int i = 0; i < 2048; i++) begin c = $fgetc(fd); save_img[i] = c[7:0]; end
+			$fclose(fd);
+			for (int i = 0; i < 512; i++) begin
+				@(posedge clk_74a);
+				hsc_addr = i[8:0];
+				hsc_din = {save_img[4*i], save_img[4*i+1], save_img[4*i+2], save_img[4*i+3]};
+				hsc_wr = 1'b1;
+				@(posedge clk_74a);
+				hsc_wr = 1'b0;
+				repeat (20) @(posedge clk_74a);
+			end
+			have_save = 1;
+		end
 		repeat (100) @(posedge clk_74a);
 		cart_download = 1'b1;
 		repeat (100) @(posedge clk_74a);
@@ -171,6 +193,7 @@ module tb_load;
 		$display("LOAD %0d bytes, header %s, cart_is_7800=%0d, cart_size=%0d, tia_mode=%0d, payload mismatches=%0d",
 			image.size(), dut.cart_header, dut.cart_is_7800, dut.cart_size, dut.tia_mode, mismatches);
 
+		if (!have_save) begin
 		// High score save, bridge side: a word written through the 32 bit port
 		// must land as four bytes in address order and read back whole.
 		@(posedge clk_74a); hsc_addr = 9'd5; hsc_din = 32'h11223344; hsc_wr = 1'b1;
@@ -180,6 +203,7 @@ module tb_load;
 			hsc_dout, dut.hsc_ram.lane[0].ram.mem[5], dut.hsc_ram.lane[1].ram.mem[5],
 			dut.hsc_ram.lane[2].ram.mem[5], dut.hsc_ram.lane[3].ram.mem[5]);
 
+		end
 		reset_in = 1'b0;
 		if ($value$plusargs("wav=%d", wav_ms)) begin
 			// Raw 16 bit little endian mono, 48052 Hz; wrapped as WAV afterwards.
@@ -212,6 +236,22 @@ module tb_load;
 		ideal = 3579545.0 / 114.0 / (audf + 1) / 2.0;
 		$display("TONE from loaded cart AUDF0=%0d: measured %.1f Hz, TIA reference %.1f Hz, ratio %.3f",
 			audf, measured, ideal, measured / ideal);
+		if (have_save) begin
+			// Read it back the way the Pocket saves it: through the bridge port.
+			save_diffs = 0;
+			for (int w = 0; w < 512; w++) begin
+				@(posedge clk_74a); hsc_addr = w[8:0];
+				repeat (3) @(posedge clk_74a);
+				for (int k = 0; k < 4; k++)
+					if (hsc_dout[31 - 8*k -: 8] !== save_img[4*w + k]) begin
+						if (save_diffs < 8)
+							$display("  HSC byte %03x ($%04x): saved %02x, now %02x", 4*w + k,
+								16'h1000 + 4*w + k, save_img[4*w + k], hsc_dout[31 - 8*k -: 8]);
+						save_diffs++;
+					end
+			end
+			$display("SAVE after load, reset and 300 ms of running: %0d of 2048 bytes differ from the save file", save_diffs);
+		end
 		$finish;
 	end
 endmodule
