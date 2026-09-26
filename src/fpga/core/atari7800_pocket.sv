@@ -71,9 +71,10 @@ module atari7800_pocket
 	input  wire        clk_74a,
 	input  wire  [8:0] hsc_bridge_addr, // 32 bit word address
 	input  wire        hsc_bridge_wr,
+	input  wire        hsc_bridge_rd,   // APF read strobe for this region
 	input  wire [31:0] hsc_bridge_din,  // big endian: [31:24] is the lowest byte
-	output wire [31:0] hsc_bridge_dout,
-	output wire        hsc_active,      // a 7800 cart is loaded: keep a save for the HSC RAM
+	output reg  [31:0] hsc_bridge_dout = 32'd0, // word latched at the last read strobe
+	output wire        hsc_active,      // keep the shared HSC save (always)
 
 	// SDRAM
 	output wire [12:0] SDRAM_A,
@@ -294,6 +295,7 @@ sdram sdram
 // save slot, so the scores survive power-off.
 wire       hsc_ram_cs;
 wire [7:0] hsc_ram_dout;
+wire [31:0] hsc_word_q;
 
 hsc_ram_dp hsc_ram
 (
@@ -307,17 +309,27 @@ hsc_ram_dp hsc_ram
 	.addr_b (hsc_bridge_addr),
 	.din_b  (hsc_bridge_din),
 	.we_b   (hsc_bridge_wr),
-	.dout_b (hsc_bridge_dout)
+	.dout_b (hsc_word_q)
 );
 
+// The APF bridge reads with a one-transaction lag: the host samples the data
+// a few cycles into a read, then pulses the strobe, and expects to have
+// sampled the word latched at the previous strobe. Answering with the current
+// address shifted every saved word by one (the .sav came out rotated by four
+// bytes and the HSC signature at $1002 was lost on the next load).
+always @(posedge clk_74a)
+	if (hsc_bridge_rd)
+		hsc_bridge_dout <= hsc_word_q;
+
 wire hsc_en = (hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting == 2'd1);
-// The save slot's size is what the Pocket reads to decide whether to keep a
-// save file at all, and it can read it before the menu settings reach the
-// core. So it must not depend on the High Score Cart setting: every 7800
-// cart gets the 2 KiB save, and it simply holds zeros for carts that never
-// enable the HSC. (With it tied to the setting, "On" arrived too late and
-// the scores were never written back.)
-assign hsc_active = cart_is_7800;
+// The high score cart save is one shared file (hsc.sav) for every cart, like
+// the real HSC's single RAM. Its size in the data slot table is what the
+// Pocket reads to decide whether to write the file back, so it must be
+// 2 KiB for every cart, 2600 images included: a size of 0 could leave the
+// shared file overwritten or dropped after playing a game without the HSC.
+// It also cannot follow the High Score Cart setting, which reaches the core
+// after the Pocket has read the table.
+assign hsc_active = 1'b1;
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 

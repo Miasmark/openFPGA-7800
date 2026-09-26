@@ -15,7 +15,7 @@ module tb_load;
 	always #6.734 clk_74a = ~clk_74a;
 
 	logic reset_in = 1'b1;
-	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
+	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic [15:0] joy0 = 16'd0;
 	logic [1:0] hsc_setting = 2'd0;
@@ -53,7 +53,7 @@ module tb_load;
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
-		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_din(hsc_din),
+		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE()
@@ -198,7 +198,10 @@ module tb_load;
 		// must land as four bytes in address order and read back whole.
 		@(posedge clk_74a); hsc_addr = 9'd5; hsc_din = 32'h11223344; hsc_wr = 1'b1;
 		@(posedge clk_74a); hsc_wr = 1'b0;
-		repeat (2) @(posedge clk_74a);
+		// APF read of word 5, then one more transaction to collect it
+		repeat (4) @(posedge clk_74a); hsc_rd = 1'b1; @(posedge clk_74a); hsc_rd = 1'b0;
+		@(posedge clk_74a); hsc_addr = 9'd6;
+		repeat (4) @(posedge clk_74a);
 		$display("HSC word 5 = %08x, bytes 20..23 = %02x %02x %02x %02x (expect 11223344 / 11 22 33 44)",
 			hsc_dout, dut.hsc_ram.lane[0].ram.mem[5], dut.hsc_ram.lane[1].ram.mem[5],
 			dut.hsc_ram.lane[2].ram.mem[5], dut.hsc_ram.lane[3].ram.mem[5]);
@@ -237,18 +240,27 @@ module tb_load;
 		$display("TONE from loaded cart AUDF0=%0d: measured %.1f Hz, TIA reference %.1f Hz, ratio %.3f",
 			audf, measured, ideal, measured / ideal);
 		if (have_save) begin
-			// Read it back the way the Pocket saves it: through the bridge port.
+			// Read it back the way the Pocket saves it. APF read transaction:
+			// the address is set, the data is sampled four clk_74a later, then
+			// bridge_rd pulses. The word sampled in transaction k belongs to
+			// the address of transaction k-1, so saving 512 words takes 513
+			// transactions (the last address wraps to word 0).
 			save_diffs = 0;
-			for (int w = 0; w < 512; w++) begin
-				@(posedge clk_74a); hsc_addr = w[8:0];
-				repeat (3) @(posedge clk_74a);
-				for (int k = 0; k < 4; k++)
-					if (hsc_dout[31 - 8*k -: 8] !== save_img[4*w + k]) begin
-						if (save_diffs < 8)
-							$display("  HSC byte %03x ($%04x): saved %02x, now %02x", 4*w + k,
-								16'h1000 + 4*w + k, save_img[4*w + k], hsc_dout[31 - 8*k -: 8]);
-						save_diffs++;
-					end
+			for (int t = 0; t <= 512; t++) begin
+				logic [31:0] got;
+				@(posedge clk_74a); hsc_addr = t[8:0];
+				repeat (4) @(posedge clk_74a);
+				got = hsc_dout;
+				hsc_rd = 1'b1; @(posedge clk_74a); hsc_rd = 1'b0;
+				repeat (2) @(posedge clk_74a);
+				if (t > 0)
+					for (int k = 0; k < 4; k++)
+						if (got[31 - 8*k -: 8] !== save_img[4*(t-1) + k]) begin
+							if (save_diffs < 8)
+								$display("  HSC byte %03x ($%04x): saved %02x, read back %02x", 4*(t-1) + k,
+									16'h1000 + 4*(t-1) + k, save_img[4*(t-1) + k], got[31 - 8*k -: 8]);
+							save_diffs++;
+						end
 			end
 			$display("SAVE after load, reset and 300 ms of running: %0d of 2048 bytes differ from the save file", save_diffs);
 		end

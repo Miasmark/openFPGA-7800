@@ -7,7 +7,11 @@
         "id": "0x100",
         "required": true,
         "parameters": "0x109",
-        "extensions": ["a78", "a26", "bin"],
+        "extensions": [
+          "a78",
+          "a26",
+          "bin"
+        ],
         "size_maximum": "0x400000",
         "address": "0x00000000"
       },
@@ -17,7 +21,10 @@
         "required": false,
         "filename": "7800bios.bin",
         "parameters": "0x89",
-        "extensions": ["bin", "rom"],
+        "extensions": [
+          "bin",
+          "rom"
+        ],
         "size_maximum": "0x4000",
         "address": "0x02000000"
       },
@@ -25,9 +32,12 @@
         "name": "High Score Cart",
         "id": "0x104",
         "required": false,
-        "parameters": "0x84",
+        "filename": "hsc.sav",
+        "parameters": "0x80",
         "nonvolatile": true,
-        "extensions": ["sav"],
+        "extensions": [
+          "sav"
+        ],
         "size_maximum": "0x800",
         "address": "0x20000000"
       }

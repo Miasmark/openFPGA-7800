@@ -33,10 +33,11 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   high score cartridge.
 - 2600 cartridges (`.a26`, `.bin`), with MiSTer's bankswitch auto-detection.
   The ARM-based schemes (DPC+, CDF/CDFJ) are not included; see below.
-- High score cartridge saves. Every 7800 game gets a 2 KB save file for the
-  HSC's RAM (in the Pocket's `/Saves/7800/`), whether or not it uses the HSC:
-  the Pocket decides whether to keep a save before the core's settings
-  arrive, so the file can't depend on the *High Score Cart* setting.
+- High score cartridge saves, in **one shared file for all games**, like the
+  real HSC's single RAM: `hsc.sav` (the Pocket keeps it under
+  `/Saves/7800/`). Versions 2.0.2 and 2.0.3 used a file per game, and those
+  files are rotated by four bytes; `tools/fix_hsc_save.py` repairs one, which
+  can then be renamed `hsc.sav` to keep its scores.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - Settings: difficulty switches, controller swap, region, palette
@@ -63,7 +64,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,453 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
+| This port (ARM and BupChip left out) | **11,479 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -98,7 +99,7 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build meets timing on all four corners (worst setup slack
-+2.57 ns, hold +0.120 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
++1.72 ns, hold +0.120 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
 ### Hardware testing (2.0.2, Analogue Pocket)
@@ -110,7 +111,7 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
-| High score cart (Dig Dug, Food Fight) | Worked in play, but scores were lost on reload in 2.0.2 (no save file kept). Fixed in 2.0.3; not yet retested |
+| High score cart (Dig Dug, Food Fight) | Worked in play. 2.0.2 kept no save file; 2.0.3 kept one, but it came out rotated by four bytes (see Features), so the HSC asked to be personalised again. Fixed in 2.0.4, which also moves to one shared `hsc.sav`; not yet retested |
 
 ### Changes to the MiSTer sources
 

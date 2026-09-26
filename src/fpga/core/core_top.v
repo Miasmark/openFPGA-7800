@@ -385,10 +385,21 @@ always @(posedge clk_74a) begin
 end
 
 // High score cartridge RAM, bridge side: 512 words of 32 bits at
-// 0x20000000. Writes go straight in; reads come from the RAM's word port,
-// one clk_74a after the address, well inside the bridge's read delay.
-    wire    [31:0]  hsc_rd_word;
-wire hsc_wr = bridge_wr && bridge_addr[31:24] == 8'h20;
+// 0x20000000. Writes go straight in.
+//
+// Reads follow the APF bridge's one-transaction lag: the host samples
+// bridge_rd_data a few cycles into a read and pulses bridge_rd afterwards,
+// and what it expects to sample is the word latched at the previous
+// bridge_rd, for the previous address (core_bridge_cmd and agg23's
+// data_unloader work the same way). Answering with the current address
+// instead shifted every saved word by one: the .sav files came out rotated
+// by four bytes, the HSC signature at $1002 moved, and the HSC firmware
+// asked to be personalised again after every load.
+// The latch lives in atari7800_pocket.sv (hsc_bridge_rd), where the
+// simulation exercises it.
+    wire    [31:0]  hsc_rd_latched;
+wire hsc_sel = bridge_addr[31:24] == 8'h20;
+wire hsc_wr  = bridge_wr && hsc_sel;
 
 // for bridge write data, we just broadcast it to all bus devices
 // for bridge read data, we have to mux it
@@ -398,7 +409,7 @@ always @(*) begin
         bridge_rd_data <= 0;
     end
     32'h20xxxxxx: begin
-        bridge_rd_data <= hsc_rd_word;
+        bridge_rd_data <= hsc_rd_latched;
     end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
@@ -588,8 +599,8 @@ always @(posedge clk_74a) begin
     end
 end
 
-// Save slot size: 2 KiB for every 7800 cart (see hsc_active in
-// atari7800_pocket.sv for why it does not follow the HSC setting).
+// Save slot size: 2 KiB, always - one shared hsc.sav for every cart (see
+// hsc_active in atari7800_pocket.sv).
     wire            hsc_active;
     reg             hsc_active_74a;
 always @(posedge clk_74a) begin
@@ -742,8 +753,9 @@ atari7800_pocket atari (
     .clk_74a        ( clk_74a ),
     .hsc_bridge_addr( bridge_addr[10:2] ),
     .hsc_bridge_wr  ( hsc_wr ),
+    .hsc_bridge_rd  ( bridge_rd && hsc_sel ),
     .hsc_bridge_din ( bridge_wr_data ),
-    .hsc_bridge_dout( hsc_rd_word ),
+    .hsc_bridge_dout( hsc_rd_latched ),
     .hsc_active     ( hsc_active ),
 
     .SDRAM_A        ( dram_a ),
