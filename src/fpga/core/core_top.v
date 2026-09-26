@@ -588,8 +588,8 @@ always @(posedge clk_74a) begin
     end
 end
 
-// The save slot only exists for carts that use the high score cartridge,
-// so other games do not get an empty save file each.
+// Save slot size: 2 KiB for every 7800 cart (see hsc_active in
+// atari7800_pocket.sv for why it does not follow the HSC setting).
     wire            hsc_active;
     reg             hsc_active_74a;
 always @(posedge clk_74a) begin

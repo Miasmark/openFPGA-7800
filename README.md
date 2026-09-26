@@ -33,7 +33,10 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   high score cartridge.
 - 2600 cartridges (`.a26`, `.bin`), with MiSTer's bankswitch auto-detection.
   The ARM-based schemes (DPC+, CDF/CDFJ) are not included; see below.
-- High score cartridge saves, kept in a Pocket save file.
+- High score cartridge saves. Every 7800 game gets a 2 KB save file for the
+  HSC's RAM (in the Pocket's `/Saves/7800/`), whether or not it uses the HSC:
+  the Pocket decides whether to keep a save before the core's settings
+  arrive, so the file can't depend on the *High Score Cart* setting.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - Settings: difficulty switches, controller swap, region, palette
@@ -60,7 +63,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,410 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
+| This port (ARM and BupChip left out) | **11,453 / 18,480 (62%)**, fitted | 2.05 / 3.15 Mbit (65%) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -95,7 +98,7 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build meets timing on all four corners (worst setup slack
-+2.60 ns, hold +0.114 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
++2.57 ns, hold +0.120 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
 crystal, 0.015% fast, which is not audible.
 
 ### Hardware testing (2.0.2, Analogue Pocket)
@@ -107,6 +110,7 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Missing, as on the 2022 core; see Known issues |
+| High score cart (Dig Dug, Food Fight) | Worked in play, but scores were lost on reload in 2.0.2 (no save file kept). Fixed in 2.0.3; not yet retested |
 
 ### Changes to the MiSTer sources
 

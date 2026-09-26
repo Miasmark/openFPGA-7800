@@ -73,7 +73,7 @@ module atari7800_pocket
 	input  wire        hsc_bridge_wr,
 	input  wire [31:0] hsc_bridge_din,  // big endian: [31:24] is the lowest byte
 	output wire [31:0] hsc_bridge_dout,
-	output wire        hsc_active,      // this cart uses the HSC
+	output wire        hsc_active,      // a 7800 cart is loaded: keep a save for the HSC RAM
 
 	// SDRAM
 	output wire [12:0] SDRAM_A,
@@ -311,7 +311,13 @@ hsc_ram_dp hsc_ram
 );
 
 wire hsc_en = (hsc_setting == 2'd0) ? (|cart_save || cart_xm[0]) : (hsc_setting == 2'd1);
-assign hsc_active = hsc_en & cart_is_7800 & cart_loaded;
+// The save slot's size is what the Pocket reads to decide whether to keep a
+// save file at all, and it can read it before the menu settings reach the
+// core. So it must not depend on the High Score Cart setting: every 7800
+// cart gets the 2 KiB save, and it simply holds zeros for carts that never
+// enable the HSC. (With it tied to the setting, "On" arrived too late and
+// the scores were never written back.)
+assign hsc_active = cart_is_7800;
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
