@@ -86,7 +86,7 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 
 | Build | Logic (ALMs) | Block RAM |
 |---|---|---|
-| This port (ARM and BupChip left out) | **11,637 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
+| This port (ARM and BupChip left out) | **11,668 / 18,480 (63%)**, fitted | 2.31 / 3.15 Mbit (73%, including the SaveKey's 32 KiB) |
 | With the ARM CPU and BupChip | **~25,000 / 18,480 (~135%)**, synthesis estimate | 2.44 Mbit |
 
 - The ARM CPU on its own is about 16,200 LUTs, roughly as much as the rest of
@@ -126,11 +126,11 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build meets timing on all four corners (worst setup slack
-+2.29 ns, hold +0.070 ns). The PLL produces 14.3204 MHz for the 14.3182 MHz
-crystal, 0.015% fast, which is not audible.
+The Quartus build (2.0.11) meets timing on all four corners (worst slack
++0.097 ns, a hold path). The PLL produces the NTSC and PAL master clocks
+exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.0.11, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -139,11 +139,12 @@ crystal, 0.015% fast, which is not audible.
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Works: typing intro, title theme and attract music. Needs a dump whose header flags the POKEY (see below) |
-| SaveKey | 2.0.7 on Triple Punch: "Save ER" (EEPROM model bug on reads, and a zero-filled file). Fixed in 2.0.8; delete the old all-zero `savekey.sav` |
-| High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
+| SaveKey (Triple Punch) | Works from 2.0.8: shows "Save SK", saves, and the high score is back after reloading. 2.0.7 showed "Save ER" (EEPROM model bug on reads, and a zero-filled file); delete an all-zero `savekey.sav` left by older versions |
+| Triple Punch, HSC and SaveKey together | Header asks for both (2.0.6): uses the HSC when present, the SaveKey with the HSC off |
+| High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). From 2.0.7 the firmware comes from the user's file; works with `hsc.a78` |
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
 | PAL games (Choplifter, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). 2.0.10: whole screen shown; colours match comparison screenshots |
-| Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. 2.0.10: fixed for NTSC (242-line modes); PAL with it on was still cut off, because a 9th and 10th display mode are more than the Pocket accepts. 2.0.11: PAL ignores the setting (274 lines already show everything) |
+| Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. 2.0.10: fixed for NTSC (242-line modes); Triple Punch's bonus timer shows in full. PAL with it on was still cut off, because a 9th and 10th display mode are more than the Pocket accepts. 2.0.11: PAL ignores the setting (274 lines already show everything); confirmed on hardware |
 
 ### Changes to the MiSTer sources
 
