@@ -1,5 +1,8 @@
 # Atari 7800 for Analogue Pocket
 
+To be clear and upfront, this port was assisted by Claude. I wanted it to exist and tested
+functionality as best I could.
+
 An Atari 7800 ProSystem core for the Analogue Pocket (openFPGA), ported from
 the current [MiSTer Atari7800 core](https://github.com/MiSTer-unstable-nightlies/Atari7800_MiSTer)
 by **Jamie Blanks (Kitrinx)** and its contributors.
@@ -313,6 +316,6 @@ bitstream.
   framework and template, under Analogue's terms.
 - No console or peripheral firmware is included: the 7800 BIOS, the high
   score cart firmware and the Supercharger BIOS are all user-supplied.
-
+- Any remainder should be considered MIT licensed.
 The POKEY portion keeps its own license, Mark Watson's terms above: the core
 may not be used or sold commercially without his permission.
