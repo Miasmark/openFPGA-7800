@@ -125,7 +125,7 @@ crystal, 0.015% fast, which is not audible.
 | Midnight Mutants, Commando, Dig Dug sprites | No corruption (holey DMA fix) |
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
-| Commando POKEY music | Missing, as on the 2022 core; see Known issues |
+| Commando POKEY music | Works: typing intro, title theme and attract music. Needs a dump whose header flags the POKEY (see below) |
 | SaveKey | 2.0.7 on Triple Punch: "Save ER" (EEPROM model bug on reads, and a zero-filled file). Fixed in 2.0.8; delete the old all-zero `savekey.sav` |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
@@ -148,13 +148,13 @@ crystal, 0.015% fast, which is not audible.
   (see POCKET_CHANGES.md). What exactly the new POKEY gets wrong is not
   identified yet.
 
-### Known issues
+### POKEY music missing? Check the ROM's header
 
-- **Commando: no POKEY music.** This also happens on the 2022 Spiritualized
-  core, so it isn't caused by this port. The usual cause is an A78 header
-  that doesn't flag the POKEY: check that the dump's header sets the POKEY
-  bit (cart type bit 0, POKEY at $4000). Turning on *POKEY IRQ* made no
-  difference.
+The core maps a POKEY in only where the A78 header says there is one, as
+MiSTer does. A dump whose header leaves the POKEY out plays its TIA sound
+effects but no POKEY music. Commando did exactly this on hardware until the
+dump was replaced with one whose header sets cart type bit 0 (POKEY at
+$4000); with that, the music played at once.
 
 `sim/extra_tests.sh` builds 7800basic's sprite and POKEY samples and the DLI
 test cart locally (no ROMs are stored in this repository) and runs them
