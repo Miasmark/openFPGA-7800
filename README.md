@@ -141,7 +141,7 @@ crystal, 0.015% fast, which is not audible.
 | SaveKey | 2.0.7 on Triple Punch: "Save ER" (EEPROM model bug on reads, and a zero-filled file). Fixed in 2.0.8; delete the old all-zero `savekey.sav` |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
-| PAL games (Joust, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). Fixed in 2.0.10 with PAL display modes |
+| PAL games (Choplifter, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). Fixed in 2.0.10 with PAL display modes |
 | Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. Fixed: 242-line (PAL 292) display modes |
 
 ### Changes to the MiSTer sources
