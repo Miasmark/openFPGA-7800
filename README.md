@@ -5,9 +5,8 @@ the current [MiSTer Atari7800 core](https://github.com/MiSTer-unstable-nightlies
 by **Jamie Blanks (Kitrinx)** and its contributors.
 
 This replaces the original 2022 Pocket core (Spiritualized, 1.0.2), whose
-source was never published. The old release files are kept in this
-repository for reference under `Cores/`, `Platforms/` and the `*.zip` /
-`*.tar.gz` archives at the root.
+source was never published. Its release files were in this repository until
+2.0.11 and remain in the git history (before the port's first commit).
 
 ## Why a new port
 
