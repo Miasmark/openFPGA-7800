@@ -272,7 +272,12 @@ and cuts the rest, which is how PAL games and *Show Overscan* first looked.
 | 3 / 4 | 372×274 / 320×274 | PAL 7800 |
 | 5 | 160×288 | PAL 2600 |
 | 6 / 7 | 372×242 / 320×242 | NTSC 7800, Show Overscan |
-| 8 / 9 | 372×292 / 320×292 | PAL 7800, Show Overscan |
+
+All eight slots are in use, and 8 appears to be the Pocket's limit. A
+9th and 10th mode (372×292 and 320×292 for PAL with overscan) were ignored
+on hardware, so PAL games were cut off again, although the simulation
+showed the right number of lines. That's why PAL now ignores *Show
+Overscan*. To add a mode, first free a slot.
 
 MARIA's windows come from `Maria/video_sync.sv` (`vblank_ex` normally,
 `vblank` with overscan). The 2600's come from the TIA stabiliser in `TIA.sv`

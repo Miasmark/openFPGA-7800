@@ -65,22 +65,6 @@
         "aspect_h": 64,
         "rotation": 0,
         "mirror": 0
-      },
-      {
-        "width": 372,
-        "height": 292,
-        "aspect_w": 75,
-        "aspect_h": 52,
-        "rotation": 0,
-        "mirror": 0
-      },
-      {
-        "width": 320,
-        "height": 292,
-        "aspect_w": 67,
-        "aspect_h": 54,
-        "rotation": 0,
-        "mirror": 0
       }
     ]
   }

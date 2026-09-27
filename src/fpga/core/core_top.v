@@ -844,14 +844,17 @@ wire core_de = ~(core_hb | core_vb);
 //   NTSC      0 372x224  1 320x224  2 160x240
 //   PAL       3 372x274  4 320x274  5 160x288
 // Show Overscan (MARIA's full blanking window instead of vblank_ex; the
-// TIA's window is unchanged):
+// TIA's window is unchanged), NTSC only:
 //   NTSC      6 372x242  7 320x242
-//   PAL       8 372x292  9 320x292
+// The APF takes at most 8 scaler modes, so there is no PAL overscan mode;
+// atari7800_pocket.sv ignores Show Overscan in PAL instead (274 lines already
+// show the whole PAL picture). Slots 8 and above make the Pocket fall back to
+// the wrong height, which is what a 292 line PAL mode did on hardware.
 wire       hide_border = set_s2[7];
-wire       overscan    = set_s2[8];
-wire [3:0] video_slot  = core_tia_mode ? (core_video_pal ? 4'd5 : 4'd2) :
-                         overscan      ? (core_video_pal ? 4'd8 : 4'd6) + {3'd0, hide_border} :
-                                         (core_video_pal ? 4'd3 : 4'd0) + {3'd0, hide_border};
+wire       overscan    = set_s2[8] & ~core_video_pal;
+wire [2:0] video_slot  = core_tia_mode ? (core_video_pal ? 3'd5 : 3'd2) :
+                         overscan      ? 3'd6 + {2'd0, hide_border} :
+                                         (core_video_pal ? 3'd3 : 3'd0) + {2'd0, hide_border};
 
 always @(posedge clk_sys) begin
     vid_de   <= 1'b0;
@@ -864,7 +867,7 @@ always @(posedge clk_sys) begin
         vid_skip <= ~core_ce;
         vid_rgb  <= {core_r, core_g, core_b};
     end else if (de_prev) begin
-        vid_rgb  <= {7'd0, video_slot, 13'd0};
+        vid_rgb  <= {8'd0, video_slot, 13'd0};
     end
 
     // HSync rising edge, delayed so it never lands on the VSync cycle.

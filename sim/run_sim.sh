@@ -85,7 +85,7 @@ for audf in 0 14; do
 	echo "$out" | grep TONE; echo "$out" | grep FRAME | tail -1
 done
 
-echo "-- PAL and overscan geometry (expect 274 / 242 / 292 lines, video PAL flag set for PAL):"
+echo "-- PAL and overscan geometry (expect 274 / 242 / 274 lines: PAL ignores overscan; video PAL flag set for PAL):"
 rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 7 > rtl/mem0.hex
 for opt in "+pal" "+overscan" "+overscan +pal"; do
 	echo "  $opt: $(./obj/vtb +audf=7 $opt | grep FRAME | tail -1 | sed 's/^FRAME [0-9]*: //')"

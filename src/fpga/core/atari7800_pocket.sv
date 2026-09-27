@@ -549,7 +549,10 @@ Atari7800 main
 	.comp_burst_start(),
 	.comp_burst_len  (),
 	.show_border  (~hide_border),
-	.show_overscan(show_overscan),
+	// PAL ignores Show Overscan: its 274 line window already holds the whole
+	// picture, and the Pocket has no scaler slot left for 292 lines (the APF
+	// allows 8 modes; see core_top.v).
+	.show_overscan(show_overscan & ~region_select),
 	.PAL          (region_select),
 	.pal_temp     (palette_temp),
 	.tia_mode     (tia_mode && ~use_bios),
