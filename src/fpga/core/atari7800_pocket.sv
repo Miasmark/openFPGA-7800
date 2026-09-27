@@ -65,6 +65,7 @@ module atari7800_pocket
 	output wire        ce_pix,
 	output wire        tia_mode_o,      // 2600 image loaded (160 wide)
 	output wire        is_pal_o,
+	output wire        video_pal_o,     // this frame's geometry is PAL (picks the scaler slot)
 
 	// Audio (clk_sys), unsigned around a midpoint, as MiSTer
 	output wire [15:0] AUDIO_L,
@@ -667,6 +668,10 @@ Atari7800 main
 
 assign tia_mode_o = tia_en;
 assign is_pal_o = region_select;
+// MARIA's frame follows region_select (274 visible lines for PAL, 224 NTSC).
+// A 2600 image's window follows the TIA's own region measurement (288 / 240),
+// which is what the stabiliser uses, whatever the Region setting says.
+assign video_pal_o = tia_mode ? tia_pal : region_select;
 
 endmodule
 

@@ -739,6 +739,7 @@ end
     wire            core_hs, core_vs, core_hb, core_vb, core_ce;
     wire            core_tia_mode;
     wire            core_is_pal;
+    wire            core_video_pal;
     wire    [15:0]  audio_l, audio_r;
     wire            dram_dqml, dram_dqmh;
 
@@ -785,6 +786,7 @@ atari7800_pocket atari (
     .ce_pix         ( core_ce ),
     .tia_mode_o     ( core_tia_mode ),
     .is_pal_o       ( core_is_pal ),
+    .video_pal_o    ( core_video_pal ),
 
     .AUDIO_L        ( audio_l ),
     .AUDIO_R        ( audio_r ),
@@ -836,9 +838,20 @@ assign dram_dqm = {dram_dqmh, dram_dqml};
 
 wire core_de = ~(core_hb | core_vb);
 
-// Scaler slots (video.json): 0 = 7800 with border (372x224),
-// 1 = 7800 without border (320x224), 2 = 2600 (160x240).
-wire [1:0] video_slot = core_tia_mode ? 2'd2 : (set_s2[7] ? 2'd1 : 2'd0);
+// Scaler slots (video.json). The height must match what MARIA or the TIA
+// actually sends, or the Pocket shows the top of the frame and cuts the rest.
+//        with border  no border  2600
+//   NTSC      0 372x224  1 320x224  2 160x240
+//   PAL       3 372x274  4 320x274  5 160x288
+// Show Overscan (MARIA's full blanking window instead of vblank_ex; the
+// TIA's window is unchanged):
+//   NTSC      6 372x242  7 320x242
+//   PAL       8 372x292  9 320x292
+wire       hide_border = set_s2[7];
+wire       overscan    = set_s2[8];
+wire [3:0] video_slot  = core_tia_mode ? (core_video_pal ? 4'd5 : 4'd2) :
+                         overscan      ? (core_video_pal ? 4'd8 : 4'd6) + {3'd0, hide_border} :
+                                         (core_video_pal ? 4'd3 : 4'd0) + {3'd0, hide_border};
 
 always @(posedge clk_sys) begin
     vid_de   <= 1'b0;
@@ -851,7 +864,7 @@ always @(posedge clk_sys) begin
         vid_skip <= ~core_ce;
         vid_rgb  <= {core_r, core_g, core_b};
     end else if (de_prev) begin
-        vid_rgb  <= {9'd0, video_slot, 13'd0};
+        vid_rgb  <= {7'd0, video_slot, 13'd0};
     end
 
     // HSync rising edge, delayed so it never lands on the VSync cycle.

@@ -21,6 +21,8 @@ module tb_load;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0;
 	logic pokey_irq_on = 1'b0;
+	logic overscan_on = 1'b0;
+	initial overscan_on = $test$plusargs("overscan");
 	initial pokey_irq_on = $test$plusargs("pokeyirq");
 	logic [15:0] joy0 = 16'd0;
 	logic [1:0] hsc_setting = 2'd0;
@@ -52,12 +54,12 @@ module tb_load;
 		.cart_download(cart_download), .bios_download(1'b0),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
 		.ioctl_wr(ioctl_wr & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
-		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(1'b0),
+		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.joy0(joy0), .joy1(16'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
-		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal),
+		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
@@ -68,7 +70,7 @@ module tb_load;
 	);
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
-	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0;
+	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0, fire_at = 0, fire_at2 = 0;
 	logic capture = 0, old_vs2 = 0, old_hb2 = 1;
 	logic [23:0] fb [0:299][0:399];
 	always @(posedge clk_sys) begin
@@ -378,6 +380,24 @@ module tb_load;
 			wav_raw = $fopen("audio_raw.pcm", "wb");
 			wav_filt = $fopen("audio_filt.pcm", "wb");
 			// +fire: press fire 1 at 300 ms for 100 ms (menus that wait for it)
+			// +fireat=MS / +fireat2=MS: press fire at MS for 150 ms (with wav);
+			// two presses for games with a title screen and then a menu.
+			if ($value$plusargs("fireat2=%d", fire_at2)) fork
+				begin
+					repeat (longint'(14318) * fire_at2) @(posedge clk_sys);
+					joy0[4] = 1'b1;
+					repeat (longint'(14318) * 150) @(posedge clk_sys);
+					joy0[4] = 1'b0;
+				end
+			join_none
+			if ($value$plusargs("fireat=%d", fire_at)) fork
+				begin
+					repeat (longint'(14318) * fire_at) @(posedge clk_sys);
+					joy0[4] = 1'b1;
+					repeat (longint'(14318) * 150) @(posedge clk_sys);
+					joy0[4] = 1'b0;
+				end
+			join_none
 			if ($test$plusargs("fire")) fork
 				begin
 					repeat (longint'(14318) * 300) @(posedge clk_sys);

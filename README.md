@@ -59,7 +59,13 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   follows the A78 header (2600 games: their measured frame length) or the
   *Region* setting. As on MiSTer, the PLL is retuned when the region changes,
   which holds the core in reset for a moment; a PAL 2600 game restarts once
-  when it is recognised. New in 2.0.9 and not yet tested on hardware.
+  when it is recognised. PAL frames are taller than NTSC ones (274 visible
+  lines instead of 224; 288 instead of 240 for the 2600), and the Pocket's
+  display mode follows, so nothing is cut off. PAL games need no PAL BIOS
+  while *Skip BIOS* is on (the default).
+- *Show Overscan* shows MARIA's whole picture: 242 lines (292 in PAL)
+  instead of the 224 (274) most games stay inside. Games that draw into the
+  overscan, like Triple Punch's bonus timer at the bottom, need it.
 
 ### Not included
 
@@ -113,6 +119,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
+| Display geometry | Active lines per frame match the display mode: NTSC 224, overscan 242, PAL 274, PAL overscan 292, 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
@@ -134,6 +141,8 @@ crystal, 0.015% fast, which is not audible.
 | SaveKey | 2.0.7 on Triple Punch: "Save ER" (EEPROM model bug on reads, and a zero-filled file). Fixed in 2.0.8; delete the old all-zero `savekey.sav` |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). Needs `highscor.rom` from 2.0.7 |
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
+| PAL games (Joust, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). Fixed in 2.0.10 with PAL display modes |
+| Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. Fixed: 242-line (PAL 292) display modes |
 
 ### Changes to the MiSTer sources
 
@@ -192,7 +201,7 @@ files go in `/Assets/7800/common/`:
 
 | File | What it is | Size | Without it |
 |---|---|---|---|
-| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default |
+| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. Only one can be installed: to boot PAL carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
 | `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games do not load |
 

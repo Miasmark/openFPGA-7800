@@ -70,6 +70,7 @@ build tb_load obj_load
 
 cd "$WORK"
 for audf in ${@:-0 7 14 31}; do
+	rm -f rtl/mem0.hex   # may be a link to the upstream file: never write through it
 	python3 "$HERE/tone_test.py" "$audf" > rtl/mem0.hex
 	out=$(./obj/vtb +audf="$audf")
 	echo "$out" | grep TONE; echo "$out" | grep FRAME | tail -1
@@ -78,10 +79,21 @@ echo "-- border hidden:"
 ./obj/vtb +audf=0 +hide_border | grep FRAME | tail -1
 echo "-- 2600 mode (TIA video, stabilised):"
 for audf in 0 14; do
+	rm -f rtl/mem0.hex
 	python3 "$HERE/tone_test.py" "$audf" 2600 > rtl/mem0.hex
 	out=$(./obj/vtb +audf="$audf" +mode2600)
 	echo "$out" | grep TONE; echo "$out" | grep FRAME | tail -1
 done
+
+echo "-- PAL and overscan geometry (expect 274 / 242 / 292 lines, video PAL flag set for PAL):"
+rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 7 > rtl/mem0.hex
+for opt in "+pal" "+overscan" "+overscan +pal"; do
+	echo "  $opt: $(./obj/vtb +audf=7 $opt | grep FRAME | tail -1 | sed 's/^FRAME [0-9]*: //')"
+done
+echo "-- PAL 2600 frame, after region detection (expect 285 lines, video PAL 1):"
+rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 14 2600 pal > rtl/mem0.hex
+./obj/vtb +audf=14 +mode2600 +long | grep FRAME | tail -1
+rm -f rtl/mem0.hex
 
 echo "-- load an A78 through the APF data loader:"
 ln -sfn "$RTL/mem0.hex" rtl/mem0.hex     # upstream's built-in image: no tone

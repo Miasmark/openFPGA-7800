@@ -12,6 +12,10 @@ import sys
 
 audf = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 mode2600 = len(sys.argv) > 2 and sys.argv[2] == "2600"
+# tone_test.py <audf> 2600 pal: a PAL frame instead (3 VSYNC, 45 VBLANK,
+# 228 visible, 36 overscan = 312 lines)
+pal = len(sys.argv) > 3 and sys.argv[3] == "pal"
+vb_lines, vis_lines, os_lines = (45, 228, 36) if pal else (37, 192, 30)
 
 
 def assemble(org, items):
@@ -63,11 +67,11 @@ else:
         0xA9, 0x02, 0x85, 0x01, 0x85, 0x00,        # VBLANK on, VSYNC on
         *WSYNC, *WSYNC, *WSYNC,
         0xA9, 0x00, 0x85, 0x00,                    # VSYNC off
-        0xA2, 37, ("label", "vb"), *WSYNC, 0xCA, 0xD0, ("rel", "vb"),
+        0xA2, vb_lines, ("label", "vb"), *WSYNC, 0xCA, 0xD0, ("rel", "vb"),
         0xA9, 0x00, 0x85, 0x01,                    # VBLANK off
-        0xA2, 192, ("label", "vis"), 0x86, 0x09, *WSYNC, 0xCA, 0xD0, ("rel", "vis"),
+        0xA2, vis_lines, ("label", "vis"), 0x86, 0x09, *WSYNC, 0xCA, 0xD0, ("rel", "vis"),
         0xA9, 0x02, 0x85, 0x01,                    # VBLANK on
-        0xA2, 30, ("label", "os"), *WSYNC, 0xCA, 0xD0, ("rel", "os"),
+        0xA2, os_lines, ("label", "os"), *WSYNC, 0xCA, 0xD0, ("rel", "os"),
         0x4C, ("abs", "frame"),
     ])
     bank = bytearray([0xFF] * 0x1000)

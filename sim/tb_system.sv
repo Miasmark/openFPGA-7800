@@ -24,23 +24,25 @@ module tb_system;
 	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic hide_border = 1'b0;
+	logic [1:0] region = 2'd1;   // NTSC; +pal for PAL
+	logic overscan = 1'b0;       // +overscan
 	logic clk_74a = 1'b0;
 	always #6.734 clk_74a = ~clk_74a;
 
 	wire [7:0] R, G, B;
-	wire HSync, VSync, HBlank, VBlank, ce_pix, tia_mode, is_pal;
+	wire HSync, VSync, HBlank, VBlank, ce_pix, tia_mode, is_pal, video_pal;
 	wire [15:0] AUDIO_L, AUDIO_R;
 	wire [15:0] SDRAM_DQ;
 
 	atari7800_pocket dut (
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(1'b0), .bios_download(1'b0), .hscfw_download(1'b0), .arfw_download(1'b0), .ioctl_wr(1'b0), .ioctl_addr(25'd0), .ioctl_dout(8'd0),
-		.region_setting(2'd1), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(1'b0),
+		.region_setting(region), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(overscan),
 		.hide_border(hide_border), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
 		.joy0(16'd0), .joy1(16'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
-		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal),
+		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(video_pal),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
@@ -99,12 +101,16 @@ module tb_system;
 	initial begin
 		if (!$value$plusargs("audf=%d", audf)) audf = 0;
 		if ($test$plusargs("hide_border")) hide_border = 1'b1;
+		if ($test$plusargs("pal")) region = 2'd2;
+		if ($test$plusargs("overscan")) overscan = 1'b1;
 		// 2600 mode: what the wrapper latches after loading a headerless image.
 		if ($test$plusargs("mode2600")) force dut.tia_mode = 1'b1;
 		repeat (200) @(posedge clk_sys);
 		reset_in = 1'b0;
 		// Let the program run and a few frames go by.
 		repeat (14318181 / 10) @(posedge clk_sys);    // 100 ms
+		// +long: 1.2 s more, past the TIA's 2600 region detection (48 frames)
+		if ($test$plusargs("long")) repeat (14318181 / 10 * 12) @(posedge clk_sys);
 		counting = 1;
 		repeat (14318181 / 5) @(posedge clk_sys);     // 200 ms window
 		counting = 0;
@@ -114,8 +120,8 @@ module tb_system;
 			audf, measured, ideal, measured / ideal);
 		for (int i = 1; i < frame_len.size(); i++)
 			if (i >= frame_len.size() - 3)
-				$display("FRAME %0d: %0d clk_sys (%.3f Hz), active lines %0d, active pixels/line %0d",
-					i, frame_len[i], 14318181.0 / frame_len[i], frame_lines_active[i], frame_px[i]);
+				$display("FRAME %0d: %0d clk_sys (%.3f Hz), active lines %0d, active pixels/line %0d, video PAL %0d",
+					i, frame_len[i], 14318181.0 / frame_len[i], frame_lines_active[i], frame_px[i], video_pal);
 		$finish;
 	end
 endmodule

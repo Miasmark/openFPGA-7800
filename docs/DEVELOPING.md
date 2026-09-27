@@ -257,6 +257,33 @@ from a retune clears that measurement, so `atari7800_pocket.sv` latches it
 (`tia_pal_seen`) until the next cart load. Without the latch a PAL 2600 game
 would flip back to NTSC and loop.
 
+## Video modes
+
+The Pocket scales each frame with a *scaler mode* from `video.json`, and the
+core picks one per frame by sending its index in `rgb[23:13]` after active
+video (`core_top.v`, `video_slot`). A mode's height must match the number of
+lines the core actually outputs. A shorter mode shows the top of the frame
+and cuts the rest, which is how PAL games and *Show Overscan* first looked.
+
+| Slot | Size | Used for |
+|---|---|---|
+| 0 / 1 | 372×224 / 320×224 | NTSC 7800, with / without border |
+| 2 | 160×240 | NTSC 2600 |
+| 3 / 4 | 372×274 / 320×274 | PAL 7800 |
+| 5 | 160×288 | PAL 2600 |
+| 6 / 7 | 372×242 / 320×242 | NTSC 7800, Show Overscan |
+| 8 / 9 | 372×292 / 320×292 | PAL 7800, Show Overscan |
+
+MARIA's windows come from `Maria/video_sync.sv` (`vblank_ex` normally,
+`vblank` with overscan). The 2600's come from the TIA stabiliser in `TIA.sv`
+and follow its own PAL detection, not the Region setting. Aspect ratios keep
+the NTSC modes' pixel shape (320×224 is 4:3) and scale it for PAL by the
+pixel clock ratio and by 242.5/287.5 visible TV lines.
+
+`sim/tb_system.sv` measures the active lines and pixels of each frame
+(`+pal`, `+overscan`, `+hide_border`, `+mode2600`, `+long`). Check it after
+any change to the video path.
+
 ## Timing constraints
 
 `src/fpga/core/core_constraints.sdc` refers to the PLL outputs by name. The
