@@ -1,0 +1,11 @@
+# Quartus build products
+src/fpga/db/
+src/fpga/incremental_db/
+src/fpga/output_files/
+src/fpga/*.log
+src/fpga/*.qws
+# Packaging / simulation
+release/
+dist/Cores/Miasmark.7800/*.rbf_r
+sim/work*/
+dist/Cores/Miasmark.7800/licenses/

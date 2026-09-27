@@ -1,0 +1,10 @@
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_core.v]
+set_instance_assignment -name PLL_COMPENSATION_MODE DIRECT -to "*pll_core*|altera_pll:altera_pll_i*|*"
+set_instance_assignment -name UNFORCE_MERGE_PLL_OUTPUT_COUNTER ON -to "*pll_core*|altera_pll:altera_pll_i*|*"
+set_instance_assignment -name PLL_CHANNEL_SPACING "0.0 KHz" -to "*pll_core*|altera_pll:altera_pll_i*|*"
+set_instance_assignment -name PLL_AUTO_RESET OFF -to "*pll_core*|altera_pll:altera_pll_i*|*"
+set_instance_assignment -name PLL_BANDWIDTH_PRESET AUTO -to "*pll_core*|altera_pll:altera_pll_i*|*"
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_cfg/pll_cfg.v]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_cfg/altera_pll_reconfig_top.v]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_cfg/altera_pll_reconfig_core.v]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_cfg/altera_std_synchronizer.v]
