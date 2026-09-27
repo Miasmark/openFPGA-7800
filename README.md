@@ -54,6 +54,12 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   (warm/cool/hot), high score cart, overscan, border, stereo TIA, 2600
   flicker blend, SaveKey, and POKEY IRQ (off by default, as on MiSTer; some
   games drive their music from POKEY timer interrupts).
+- PAL games at the real PAL master clock, 14.18758 MHz instead of NTSC's
+  14.31818 MHz, so they run at 50 Hz and play at the right pitch. The region
+  follows the A78 header (2600 games: their measured frame length) or the
+  *Region* setting. As on MiSTer, the PLL is retuned when the region changes,
+  which holds the core in reset for a moment; a PAL 2600 game restarts once
+  when it is recognised. New in 2.0.9 and not yet tested on hardware.
 
 ### Not included
 
@@ -61,7 +67,6 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 |---|---|
 | **BupChip** (Souper music co-processor) | **Doesn't fit on the Pocket.** See below. Souper games run, but without the extra music channel. |
 | 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on the same soft ARM CPU as the BupChip, so they don't fit either. |
-| Exact PAL clock | MiSTer reprograms its PLL for PAL (14.1876 MHz). This port keeps the NTSC clock, so PAL games run and sound about 0.9% fast. |
 | Light gun, paddles, trackball, keypad | These need input the Pocket doesn't have. Joysticks work. |
 | Composite video filter | Only the RGB output is used. |
 
@@ -212,6 +217,10 @@ clone made before that date should be re-cloned, or reset with
 later.
 
 ## Building
+
+Changing the core or updating its parts? Start with
+[docs/DEVELOPING.md](docs/DEVELOPING.md): layout, tools, recipes (settings,
+data and save slots, PLL, upstream updates) and known pitfalls.
 
 The FPGA project is `src/fpga/ap_core.qpf`, for Quartus Prime Lite (built
 with 21.1). The GitHub workflow builds it in the `raetro/quartus:21.1`

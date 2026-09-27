@@ -99,9 +99,14 @@ the core is held in reset, and keeps the HSC disabled until a full 4 KiB
 image has arrived. `sim/extra_tests.sh` loads both through the slots and
 checks the ROM contents byte for byte.
 
-Note that 0dc8ad2 also moved PAL timing into the PLL (MiSTer retunes it to
-14.1876 MHz). The Pocket keeps the NTSC clock, so PAL games run about 0.9%
-fast.
+Upstream 0dc8ad2 also moved PAL timing into the PLL (MiSTer retunes it to
+14.18758 MHz). The Pocket does the same with its own PLL
+(`../core/pll/pll_core.v`, `../core/pll_region.v`), from its 74.25 MHz
+reference. One difference: the TIA's 2600 region detection is cleared by
+the core reset that a retune causes, which as upstream's wrapper is written
+could send a PAL 2600 game back to NTSC and into another retune.
+`../core/atari7800_pocket.sv` latches the detected region until the next
+cart load instead.
 
 ## Updating
 

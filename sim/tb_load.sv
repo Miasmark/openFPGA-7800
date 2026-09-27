@@ -48,7 +48,7 @@ module tb_load;
 	wire [15:0] AUDIO_L, AUDIO_R, SDRAM_DQ;
 
 	atari7800_pocket dut (
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .reset_in(reset_in),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
 		.ioctl_wr(ioctl_wr & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),

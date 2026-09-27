@@ -23,6 +23,7 @@ https://github.com/Miasmark/openFPGA-7800
 | SN76489 | `src/fpga/mister/rtl/SN76489/` | Jamie Blanks | MIT | Built |
 | `data_loader`, `sound_i2s`, `sync_fifo` | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built |
 | APF framework | `src/fpga/apf/` | Analogue | Analogue's APF Software License Agreement (file headers); `mf_*.v` also carry the Intel Program License | Built |
+| PLL and PLL reconfiguration IP (generated) | `src/fpga/core/pll/` | Intel | Intel Program License (file headers): for use with Intel devices | Built |
 | Core template glue (`core_top.v`, `core_bridge_cmd.v`) | `src/fpga/core/` | Analogue, modified for this port | Analogue's APF terms | Built |
 | Pocket wrapper, audio filter, POKEY adapter, PLL setup, sim, tools | `src/fpga/core/`, `sim/`, `tools/` | this project | MIT (`LICENSE`) | Built (HDL) |
 | Video mixer | `src/fpga/mister/rtl/video_mixer_plus.sv` | Alexey Melnikov (Sorgelig) | GPL | Repo only |

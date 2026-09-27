@@ -92,6 +92,12 @@ echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
 ./obj_load/vtb +image=load_test.a26 +audf=14 | grep -E "LOAD|TONE"
 
+echo "-- PAL/NTSC PLL retune sequence:"
+"${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_pll_region \
+	-Mdir "$WORK/obj_pllr" -o vtb "$FPGA/core/pll_region.v" "$HERE/tb_pll_region.sv" > "$WORK/obj_pllr.log" 2>&1 \
+	|| { grep -m20 "%Error" "$WORK/obj_pllr.log"; exit 1; }
+./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
+
 echo "-- audio filter:"
 "${VERILATOR:-verilator}" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_audio_filter \
 	-Mdir "$WORK/obj_af" -o vtb "$FPGA/core/audio_filter.sv" "$HERE/tb_audio_filter.sv" > "$WORK/obj_af.log" 2>&1 \

@@ -22,6 +22,7 @@ module atari7800_pocket
 	input  wire        clk_sys,
 	input  wire        clk_sdram,
 	input  wire        pll_locked,
+	input  wire        pll_busy,        // clk_74a: PLL retune (PAL/NTSC) in progress
 	input  wire        reset_in,        // host reset / menu reset, clk_sys
 
 	// Download stream (clk_sys, one clk_sys cycle per byte)
@@ -104,11 +105,14 @@ module atari7800_pocket
 reg old_cart_download = 1'b0;
 wire mapper_init_busy;
 reg reset;
+reg [1:0] pll_busy_s = 2'b00;
 
 always @(posedge clk_sys) begin
 	old_cart_download <= cart_download;
+	pll_busy_s <= {pll_busy_s[0], pll_busy};
 	reset <= reset_in | cart_download | bios_download | hscfw_download |
-		arfw_download | old_cart_download | mapper_init_busy | ~pll_locked;
+		arfw_download | old_cart_download | mapper_init_busy | ~pll_locked |
+		pll_busy_s[1];
 end
 
 ////////////////////////////  CART HEADER  ////////////////////////////////
@@ -486,8 +490,19 @@ assign PBin[0] = ~joya[8] & ~joyb[8];     // Reset
 
 //////////////////////////////  SYSTEM  ///////////////////////////////////
 
+// A 2600 image's region is measured from its video (the TIA's auto_pal). That
+// measurement restarts with the core's reset, and switching the master clock
+// to PAL resets the core, so the result is latched here until the next cart
+// load; otherwise a PAL 2600 game would flip back to NTSC and retune forever.
+reg tia_pal_seen = 1'b0;
+always @(posedge clk_sys)
+	if (cart_download)
+		tia_pal_seen <= 1'b0;
+	else if (tia_pal)
+		tia_pal_seen <= 1'b1;
+
 wire region_select = (region_setting == 2'd0) ?
-	(tia_en ? tia_pal : cart_region[0]) : (region_setting == 2'd2);
+	(tia_en ? (tia_pal | tia_pal_seen) : cart_region[0]) : (region_setting == 2'd2);
 
 reg [15:0] rnd = 16'h5A5A;
 always @(posedge clk_sys) rnd <= {rnd[14:0], rnd[15] ^ rnd[13] ^ rnd[12] ^ rnd[10]};

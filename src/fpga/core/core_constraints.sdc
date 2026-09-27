@@ -2,14 +2,16 @@
 # Atari 7800 core constraints (loaded by apf/apf_constraints.sdc)
 #
 # One core PLL (ic|pll) makes:
-#   general[0]  clk_sys     14.318 MHz
-#   general[1]  clk_sdram   57.273 MHz  (exactly 4 x clk_sys, same VCO)
-#   general[2]  clk_sys_90  clk_sys at 90 degrees, video sample clock
+#   counter[0]  clk_sys     14.318 MHz (14.188 MHz for PAL, see pll_region.v)
+#   counter[1]  clk_sdram   4 x clk_sys (same VCO)
+#   counter[2]  clk_sys_90  clk_sys at 90 degrees, video sample clock
+# The PLL is reconfigurable, which names its outputs by counter. Timing is
+# checked at the NTSC (faster) setting; PAL only slows every clock by 0.9%.
 # All three share edges, so they are one synchronous group and every crossing
 # between them is timed. Everything else is asynchronous to them.
 
-set core_clks {ic|pll|altera_pll_i|general[*].gpll~PLL_OUTPUT_COUNTER|divclk}
-set clk_sys  {ic|pll|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
+set core_clks {ic|pll|altera_pll_i|cyclonev_pll|counter[*].output_counter|divclk}
+set clk_sys  {ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk}
 
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \

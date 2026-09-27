@@ -33,7 +33,7 @@ module tb_system;
 	wire [15:0] SDRAM_DQ;
 
 	atari7800_pocket dut (
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .reset_in(reset_in),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(1'b0), .bios_download(1'b0), .hscfw_download(1'b0), .arfw_download(1'b0), .ioctl_wr(1'b0), .ioctl_addr(25'd0), .ioctl_dout(8'd0),
 		.region_setting(2'd1), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(1'b0),
 		.hide_border(hide_border), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),

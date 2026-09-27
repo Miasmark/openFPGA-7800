@@ -319,13 +319,18 @@ assign vpll_feed = 1'bZ;
     wire    pll_core_locked;
     wire    pll_core_locked_s;
 
+    wire    [63:0]  reconfig_to_pll, reconfig_from_pll;
+    reg             pll_busy;               // core held in reset across a retune
+
 pll_core pll (
     .refclk     ( clk_74a ),
     .rst        ( 1'b0 ),
     .outclk_0   ( clk_sys ),
     .outclk_1   ( clk_sdram ),
     .outclk_2   ( clk_sys_90 ),
-    .locked     ( pll_core_locked )
+    .locked     ( pll_core_locked ),
+    .reconfig_to_pll   ( reconfig_to_pll ),
+    .reconfig_from_pll ( reconfig_from_pll )
 );
 
 synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
@@ -343,6 +348,7 @@ synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
 //   0x08000000  HSC firmware as hsc.a78 (data slot 6) -> HSC ROM block RAM
 //   0x10000000  settings (interact.json)
 //   0x20000000  high score cartridge RAM (save slot 2, 2 KiB)
+//   0x30000000  SaveKey EEPROM RAM (save slot 3, 32 KiB)
 //   0xF8000000  APF command interface
 
 localparam [15:0] SLOT_CART = 16'h0100;
@@ -740,6 +746,7 @@ atari7800_pocket atari (
     .clk_sys        ( clk_sys ),
     .clk_sdram      ( clk_sdram ),
     .pll_locked     ( pll_core_locked ),
+    .pll_busy       ( pll_busy ),
     .reset_in       ( core_reset ),
 
     .cart_download  ( cart_download ),
@@ -899,6 +906,50 @@ sound_i2s #(
     .audio_mclk ( audio_mclk ),
     .audio_lrck ( audio_lrck ),
     .audio_dac  ( audio_dac )
+);
+
+
+////////////////////////////////////////////////////////////////////////////////
+// PAL / NTSC master clock
+////////////////////////////////////////////////////////////////////////////////
+
+// A PAL 7800 runs from 14.18758 MHz (MARIA = 2/5 of 4 x 4.43361875 MHz), an
+// NTSC one from 14.3181818 MHz. As on MiSTer, the PLL's fractional multiplier
+// is the only value that changes (pll_core.v), so clk_sdram stays exactly
+// 4 x clk_sys and the 90 degree clock keeps its phase.
+//
+// The sequence is in pll_region.v; it runs on clk_74a, which the PLL does
+// not generate.
+    wire            cfg_waitrequest;
+    wire            cfg_write;
+    wire    [5:0]   cfg_address;
+    wire    [31:0]  cfg_writedata;
+    wire            pll_busy_w;
+
+pll_region pll_region (
+    .clk             ( clk_74a ),
+    .is_pal          ( core_is_pal ),
+    .loading         ( is_downloading ),
+    .pll_locked      ( pll_core_locked_s ),
+    .busy            ( pll_busy_w ),
+    .cfg_waitrequest ( cfg_waitrequest ),
+    .cfg_write       ( cfg_write ),
+    .cfg_address     ( cfg_address ),
+    .cfg_writedata   ( cfg_writedata )
+);
+always @(*) pll_busy = pll_busy_w;
+
+pll_cfg pll_cfg (
+    .mgmt_clk          ( clk_74a ),
+    .mgmt_reset        ( 1'b0 ),
+    .mgmt_waitrequest  ( cfg_waitrequest ),
+    .mgmt_read         ( 1'b0 ),
+    .mgmt_readdata     ( ),
+    .mgmt_write        ( cfg_write ),
+    .mgmt_address      ( cfg_address ),
+    .mgmt_writedata    ( cfg_writedata ),
+    .reconfig_to_pll   ( reconfig_to_pll ),
+    .reconfig_from_pll ( reconfig_from_pll )
 );
 
 endmodule
