@@ -60,6 +60,23 @@ Spiritualized's 2022 Pocket 7800 core, which this core replaces.
 `dist/Cores/Miasmark.7800/icon.bin` is the placeholder from Analogue's core
 template.
 
+## Notices shipped with releases
+
+`tools/package.sh` puts these in `Cores/Miasmark.7800/licenses/` in every
+release zip: this project's `LICENSE`, this file, `GPL-3.0.txt`, the MiSTer
+core's `LICENSE`, analogue-pocket-utils' `LICENSE`, and, copied word for
+word from their source headers, Mark Watson's POKEY notice
+(`PokeyWatson-NOTICE.txt`) and Analogue's APF Software License Agreement
+(`Analogue-APF-Software-License.txt`).
+
+## References
+
+No code from these is included, but the port's behaviour follows them:
+Stella (2600 driving controller gray code, paddle swapping), Analogue's
+openFPGA documentation, and agg23's openFPGA cores (the `video.json`
+display-mode list). The simulation's test carts use 7800basic's includes
+(CC0), fetched at test time.
+
 ## POKEY
 
 Mark Watson's POKEY keeps its own license: free for non-commercial use, and

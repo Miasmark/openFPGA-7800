@@ -368,6 +368,8 @@ tools/                 Packaging
 - **Souper** mapper logic by **Osman Celimli**.
 - **24LC0x EEPROM** (the SaveKey) by **GreyRogue**, from NES_MiSTer,
   GPL-3.0.
+- **Light gun** module (`lightgun.sv`), the one **Sorgelig**'s MiSTer cores
+  share; this port drives it from the D-pad.
 
 **Pocket side**
 
@@ -377,6 +379,19 @@ tools/                 Packaging
   (MIT).
 - **Spiritualized**: the original 2022 Pocket 7800 core, and the platform
   image and slot layout this port stays compatible with.
+
+**References and tools**
+
+- **Stella**, the 2600 emulator: the driving controller's gray code, the
+  per-game "swap paddles" practice, and much of the 2600 behaviour the
+  MiSTer core follows.
+- **Analogue's openFPGA developer docs**, and **agg23's openFPGA cores**
+  (the SNES core's display-mode list was the model for ours).
+- **7800basic** by **Mike Saarna (RevEng)** and contributors: the SaveKey
+  driver and samples the simulation test carts are built from (CC0).
+- **A7800**, whose `highscor.rom` file name this core accepts.
+- **Verilator**, **GHDL** and **Intel Quartus Prime Lite**, for simulation
+  and builds.
 
 ## License
 
