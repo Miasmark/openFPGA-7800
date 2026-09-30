@@ -439,7 +439,7 @@ module tb_load;
 		reset_in = 1'b0;
 		if ($test$plusargs("inputtest")) begin
 			// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X (slow), 12 Y (fast)
-			$display("INPUT port types: A %0d, B %0d", dut.porta_type, dut.portb_type);
+			$display("INPUT port types: A %0d, B %0d, gun on port %0d", dut.porta_type, dut.portb_type, dut.gun_port + 1);
 			run_ms(300);                          show("at rest");
 			joy0[0] = 1; run_ms(150); joy0[0] = 0; run_ms(60); show("P1 right 150 ms");
 			joy0[0] = 1; run_ms(1000); joy0[0] = 0; run_ms(60); show("P1 right 1 s (end stop)");

@@ -626,7 +626,10 @@ wire [3:0] dual_move = last_wins(dual_move_raw, move_last);
 wire [3:0] dual_fire = last_wins(dual_fire_raw, fire_last);
 
 // Light-gun crosshair Y, on whichever port has the gun.
-wire       gun_port = (portb_type == 8'd2);             // 0: port 1, 1: port 2
+// One gun. It goes on port 1 when port 1 is a light gun, whatever port 2
+// is: Sentinel's header asks for a gun on both ports, and MiSTer's choice of
+// port 2 then left the gun on controller 2 and port 1 a joystick.
+wire       gun_port = (portb_type == 8'd2) && (porta_type != 8'd2);  // 0: port 1, 1: port 2
 wire       gun_en   = (porta_type == 8'd2) || gun_port;
 wire [15:0] gun_joy = gun_port ? joyb : joya;
 wire  [7:0] gun_y;
