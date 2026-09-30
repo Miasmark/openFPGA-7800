@@ -19,6 +19,7 @@ https://github.com/Miasmark/openFPGA-7800
 | JT51 (YM2151) | `src/fpga/mister/rtl/jt51/` | Jose Tejada (Jotego) | GPL-3.0-or-later (`LICENSES/GPL-3.0.txt`) | Built |
 | 24LC0x EEPROM (SaveKey) | `src/fpga/mister/rtl/EEPROM_24LC256.sv` | GreyRogue, from NES_MiSTer; adapted upstream | GPL-3.0 (NES_MiSTer's license, `LICENSES/GPL-3.0.txt`) | Built |
 | POKEY | `src/fpga/mister/rtl/PokeyWatson/` | Mark Watson | Own terms: free for non-commercial use; commercial use needs his permission. See the file headers | Built |
+| Paddle timing, light gun | `src/fpga/mister/rtl/paddles.sv`, `lightgun.sv` | Jamie Blanks (`paddles.sv`); `lightgun.sv` has no header and matches the light-gun module in Sorgelig's MiSTer cores | MIT with the rest of the MiSTer 7800 repository; `lightgun.sv` may also be under those cores' GPL (`LICENSES/GPL-3.0.txt`) | Built (from 2.0.13) |
 | Souper mapper | `src/fpga/mister/rtl/souper.v` | Osman Celimli | zlib-style (file header) | Built |
 | SN76489 | `src/fpga/mister/rtl/SN76489/` | Jamie Blanks | MIT | Built |
 | `data_loader`, `sound_i2s`, `sync_fifo` | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built |

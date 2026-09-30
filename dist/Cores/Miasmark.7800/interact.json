@@ -65,6 +65,72 @@
         "mask": "0xFFFFFFFE"
       },
       {
+        "name": "Port 1 Input",
+        "id": 20,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x100002A4",
+        "defaultval": 0,
+        "mask": "0xFFFFFFF8",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "Joystick"
+          },
+          {
+            "value": 2,
+            "name": "Paddles"
+          },
+          {
+            "value": 3,
+            "name": "Driving"
+          },
+          {
+            "value": 4,
+            "name": "Light Gun"
+          }
+        ]
+      },
+      {
+        "name": "Port 2 Input",
+        "id": 21,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x100002A8",
+        "defaultval": 0,
+        "mask": "0xFFFFFFF8",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "Joystick"
+          },
+          {
+            "value": 2,
+            "name": "Paddles"
+          },
+          {
+            "value": 3,
+            "name": "Driving"
+          },
+          {
+            "value": 4,
+            "name": "Light Gun"
+          }
+        ]
+      },
+      {
         "name": "Region",
         "id": 6,
         "type": "list",

@@ -375,6 +375,8 @@ localparam [15:0] SLOT_HSCA78 = 16'h0108;
     reg             set_clear_rnd = 1'b0;   // clear RAM to random values
     reg             set_decomb    = 1'b0;   // 2600 de-comb
     reg     [4:0]   set_bs        = 5'd0;   // 2600 bankswitching: 0 auto, else forced
+    reg     [2:0]   set_port1     = 3'd0;   // 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun
+    reg     [2:0]   set_port2     = 3'd0;
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -401,6 +403,8 @@ always @(posedge clk_74a) begin
             12'h298: set_clear_rnd <= bridge_wr_data[0];
             12'h29C: set_decomb    <= bridge_wr_data[0];
             12'h2A0: set_bs        <= bridge_wr_data[4:0];
+            12'h2A4: set_port1     <= bridge_wr_data[2:0];
+            12'h2A8: set_port2     <= bridge_wr_data[2:0];
             default: ;
         endcase
     end
@@ -699,9 +703,9 @@ end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
 // a two stage synchroniser per bit is enough.
-    reg     [26:0]  set_s1, set_s2;
+    reg     [32:0]  set_s1, set_s2;
 always @(posedge clk_sys) begin
-    set_s1 <= {set_bs, set_decomb, set_clear_rnd, set_stmix,
+    set_s1 <= {set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
                set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
                set_blend, set_pokey_irq, set_savekey, 1'b0};
@@ -714,7 +718,8 @@ end
 ////////////////////////////////////////////////////////////////////////////////
 
 // Pocket key bitmap -> MiSTer joystick layout
-//   0 R, 1 L, 2 D, 3 U, 4 Fire1, 5 Fire2, 6 Pause/B&W, 7 Select, 8 Reset
+//   0 R, 1 L, 2 D, 3 U, 4 Fire1, 5 Fire2, 6 Pause/B&W, 7 Select, 8 Reset,
+//   9 A, 10 B, 11 X, 12 Y
 function [15:0] map_joy;
     input [31:0] k;
     begin
@@ -728,15 +733,42 @@ function [15:0] map_joy;
         map_joy[6] = k[8];              // L: pause (7800) / colour-B&W (2600)
         map_joy[7] = k[14];             // select
         map_joy[8] = k[15];             // start -> reset switch
+        // Raw face buttons, for the virtual paddles, driving controllers and
+        // light gun (atari7800_pocket.sv): A or B fire, X slow, Y fast.
+        map_joy[9]  = k[4];             // A
+        map_joy[10] = k[5];             // B
+        map_joy[11] = k[6];             // X
+        map_joy[12] = k[7];             // Y
     end
 endfunction
 
     reg     [15:0]  joy0_s1, joy0_s2, joy1_s1, joy1_s2;
+    reg     [15:0]  joy2_s1, joy2_s2, joy3_s1, joy3_s2;
 always @(posedge clk_sys) begin
     joy0_s1 <= map_joy(cont1_key);
     joy1_s1 <= map_joy(cont2_key);
+    joy2_s1 <= map_joy(cont3_key);
+    joy3_s1 <= map_joy(cont4_key);
     joy0_s2 <= joy0_s1;
     joy1_s2 <= joy1_s1;
+    joy2_s2 <= joy2_s1;
+    joy3_s2 <= joy3_s1;
+end
+
+// Left analog sticks, {y, x}, unsigned with 128 at rest. They are only
+// ever sampled at the 1 kHz virtual controller tick, so a torn value from
+// crossing clocks mid-change lasts one sample at most.
+    reg     [15:0]  ana0_s1, ana0_s2, ana1_s1, ana1_s2;
+    reg     [15:0]  ana2_s1, ana2_s2, ana3_s1, ana3_s2;
+always @(posedge clk_sys) begin
+    ana0_s1 <= cont1_joy[15:0];
+    ana1_s1 <= cont2_joy[15:0];
+    ana2_s1 <= cont3_joy[15:0];
+    ana3_s1 <= cont4_joy[15:0];
+    ana0_s2 <= ana0_s1;
+    ana1_s2 <= ana1_s1;
+    ana2_s2 <= ana2_s1;
+    ana3_s2 <= ana3_s1;
 end
 
 
@@ -783,10 +815,18 @@ atari7800_pocket atari (
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),
     .bs_override    ( set_s2[26:22] ),
+    .port1_input    ( set_s2[29:27] ),
+    .port2_input    ( set_s2[32:30] ),
     .pause_core     ( 1'b0 ),
 
     .joy0           ( joy0_s2 ),
     .joy1           ( joy1_s2 ),
+    .joy2           ( joy2_s2 ),
+    .joy3           ( joy3_s2 ),
+    .analog0        ( ana0_s2 ),
+    .analog1        ( ana1_s2 ),
+    .analog2        ( ana2_s2 ),
+    .analog3        ( ana3_s2 ),
 
     .R              ( core_r ),
     .G              ( core_g ),

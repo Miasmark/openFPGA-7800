@@ -74,6 +74,11 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   lines instead of 224; 288 instead of 240 for the 2600), and the Pocket's
   display mode follows, so nothing is cut off. PAL games need no PAL BIOS
   while *Skip BIOS* is on (the default).
+- **Paddles, driving controllers and the light gun**, played with the
+  D-pad (or, docked, a controller's left stick). See *Controls* below. The
+  A78 header picks them for 7800 games; 2600 games have no header, so set
+  *Port 1 Input* / *Port 2 Input* for them (Paddles for Breakout, Kaboom!,
+  Warlords; Driving for Indy 500).
 - *Show Overscan* shows MARIA's whole NTSC picture: 242 lines instead of
   the 224 most games stay inside. Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
@@ -85,7 +90,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 |---|---|
 | **BupChip** (Souper music co-processor) | **Doesn't fit on the Pocket.** See below. Souper games run, but without the extra music channel. |
 | 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on the same soft ARM CPU as the BupChip, so they don't fit either. |
-| Light gun, paddles, trackball, keypad | These need input the Pocket doesn't have. Joysticks work. |
+| Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
 #### Why the BupChip doesn't fit
@@ -201,6 +206,30 @@ POKEY as the Pocket build.
 | L | Pause (7800) / Colour-B&W (2600) |
 | Select | Select |
 | Start | Reset |
+
+Paddles, driving controllers and the light gun (the A78 header's choice, or
+*Port 1 Input* / *Port 2 Input*):
+
+| Pocket | Paddles | Driving controller | Light gun |
+|---|---|---|---|
+| D-pad left / right | Turn the knob | Turn the wheel | Move the crosshair |
+| D-pad up / down | | | Move the crosshair |
+| A or B | Paddle button | Fire | Trigger |
+| X (held) | Turn slowly, for fine aim | Turn slowly | Move slowly |
+| Y (held) | Turn fast | Turn fast | Move fast |
+
+Movement starts slowly and speeds up the longer the D-pad is held, so a tap
+moves a little and a hold crosses the whole range in about half a second
+(a quarter of a second with Y).
+Docked, a controller's left stick also works: a paddle or the crosshair
+follows the stick's position, and a driving controller turns at a speed set
+by how far the stick is pushed. The next D-pad press takes over again.
+
+Paddles come in pairs: the two paddles on port 1 are controllers 1 and 2,
+the two on port 2 are controllers 3 and 4 (docked). A driving controller
+or the light gun on port 1 is controller 1, on port 2 controller 2. The
+light gun draws a red crosshair; aim off the top or bottom of the picture
+to shoot off-screen (to reload in some games).
 
 ## Installing
 

@@ -29,7 +29,13 @@ module tb_load;
 	end
 	initial overscan_on = $test$plusargs("overscan");
 	initial pokey_irq_on = $test$plusargs("pokeyirq");
-	logic [15:0] joy0 = 16'd0;
+	logic [15:0] joy0 = 16'd0, joy1 = 16'd0, joy2 = 16'd0, joy3 = 16'd0;
+	logic [15:0] ana0 = 16'h8080;
+	logic [2:0] port1_in = 3'd0, port2_in = 3'd0;   // +port1=N, +port2=N
+	initial begin
+		void'($value$plusargs("port1=%d", port1_in));
+		void'($value$plusargs("port2=%d", port2_in));
+	end
 	logic [1:0] hsc_setting = 2'd0;
 
 	// ---------------- APF bridge + loader ----------------
@@ -63,7 +69,9 @@ module tb_load;
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
-		.joy0(joy0), .joy1(16'd0),
+		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
+		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
+		.port1_input(port1_in), .port2_input(port2_in),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
@@ -227,6 +235,33 @@ module tb_load;
 		end
 	end
 
+	// ---------------- controller test probe (+inputtest) ----------------
+	// input_test.py writes what it read to $90-$98 each frame, $98 last.
+	logic [7:0] inres [0:8];
+	logic [15:0] in_old_a = 0; logic in_old_w = 0;
+	int in_frames = 0;
+	always @(posedge clk_sys) begin
+		in_old_a <= dut.bios_addr; in_old_w <= !dut.RW;
+		if (!dut.RW && dut.bios_addr >= 16'h0090 && dut.bios_addr <= 16'h0098
+			&& (dut.bios_addr != in_old_a || !in_old_w)) begin
+			inres[dut.bios_addr - 16'h0090] <= dut.din;
+			if (dut.bios_addr == 16'h0098) in_frames <= in_frames + 1;
+		end
+	end
+	task automatic run_ms(int ms);
+		repeat (longint'(14318) * ms) @(posedge clk_sys);
+	endtask
+	task automatic show(string what);
+		$display("INPUT %-34s paddles %3d %3d %3d %3d  gun line %3d  SWCHA %08b  INPT4 %b INPT5 %b  (frame %0d)",
+			what, inres[0], inres[1], inres[2], inres[3], inres[4], inres[5], inres[6][7], inres[7][7], in_frames);
+	endtask
+	// Driving: log each change of port 1's gray code while turning.
+	logic [1:0] drv_last = 2'b11; string drv_seq = "";
+	always @(posedge clk_sys) if (in_frames > 0 && inres[5][5:4] != drv_last) begin
+		drv_last <= inres[5][5:4];
+		if (drv_seq.len() < 60) drv_seq = {drv_seq, $sformatf("%0d", inres[5][5:4])};
+	end
+
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
@@ -387,6 +422,33 @@ module tb_load;
 
 		end
 		reset_in = 1'b0;
+		if ($test$plusargs("inputtest")) begin
+			// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X (slow), 12 Y (fast)
+			$display("INPUT port types: A %0d, B %0d", dut.porta_type, dut.portb_type);
+			run_ms(300);                          show("at rest");
+			joy0[0] = 1; run_ms(150); joy0[0] = 0; run_ms(60); show("P1 right 150 ms");
+			joy0[0] = 1; run_ms(1000); joy0[0] = 0; run_ms(60); show("P1 right 1 s (end stop)");
+			joy0[1] = 1; run_ms(400); joy0[1] = 0; run_ms(60); show("P1 left 400 ms");
+			joy0[1] = 1; joy0[11] = 1; run_ms(400); joy0 = 0; run_ms(60); show("P1 left 400 ms slow (X)");
+			joy0[1] = 1; joy0[12] = 1; run_ms(400); joy0 = 0; run_ms(60); show("P1 left 400 ms fast (Y)");
+			joy1[1] = 1; run_ms(300); joy1 = 0; run_ms(60); show("P2 left 300 ms");
+			joy2[0] = 1; joy3[1] = 1; run_ms(300); joy2 = 0; joy3 = 0; run_ms(60); show("P3 right, P4 left 300 ms");
+			joy0[9] = 1; joy1[10] = 1; run_ms(60); show("P1 A, P2 B held");
+			joy0 = 0; joy1 = 0; run_ms(60); show("released");
+			// Analog stick on controller 1: push it right, then leave it.
+			ana0[7:0] = 8'd224; run_ms(200); show("P1 stick right (x=224)");
+			ana0[7:0] = 8'd128; run_ms(200); show("P1 stick centred");
+			$display("INPUT driving gray sequence so far: %0s", drv_seq);
+			drv_seq = "";
+			joy0[1] = 1; run_ms(300); joy0 = 0; run_ms(60);
+			$display("INPUT driving gray sequence turning left: %0s", drv_seq);
+			// Light gun: move the crosshair down, then fire.
+			joy0[2] = 1; run_ms(300); joy0 = 0; run_ms(60); show("gun down 300 ms");
+			joy0[3] = 1; run_ms(1500); joy0 = 0; run_ms(60); show("gun up 1.5 s (top: off screen)");
+			joy0[9] = 1; run_ms(60); show("trigger (A) held");
+			joy0 = 0; run_ms(60);
+			$finish;
+		end
 		if ($value$plusargs("wav=%d", wav_ms)) begin
 			// Raw 16 bit little endian mono, 48052 Hz; wrapped as WAV afterwards.
 			wav_raw = $fopen("audio_raw.pcm", "wb");

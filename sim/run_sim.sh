@@ -24,6 +24,9 @@ for f in Maria/control.sv banks2600.sv video_mux.sv RIOT/M6532.sv; do
 	mkdir -p "$PATCHED/$(dirname "$f")"
 	sed -E 's/^(\s*)wire(\s+\[[^]]+\]\s+\w+\s*\[[0-9]+\]\s*=)/\1logic\2/' "$RTL/$f" > "$PATCHED/$f"
 done
+# paddles.sv assigns its `output charged` (a wire) from an always block,
+# which Quartus allows and Verilator does not.
+sed -E 's/^(\s*)output(\s+)charged,/\1output logic\2charged,/' "$RTL/paddles.sv" > "$PATCHED/paddles.sv"
 
 # The Pocket build uses Mark Watson's VHDL POKEY (rtl/PokeyWatson) behind
 # core/pokey_adapter_watson.sv. Verilator reads no VHDL, so GHDL (4.x)
@@ -55,6 +58,7 @@ SRCS=(
 	"$RTL/detect2600.sv" "$RTL/a78_cart_extent.sv" "$PATCHED/RIOT/M6532.sv"
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
+	"$FPGA/core/virtual_axis.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 )
@@ -115,3 +119,9 @@ echo "-- audio filter:"
 	-Mdir "$WORK/obj_af" -o vtb "$FPGA/core/audio_filter.sv" "$HERE/tb_audio_filter.sv" > "$WORK/obj_af.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_af.log"; exit 1; }
 ./obj_af/vtb | grep AUDIO
+
+echo "-- virtual paddle / driving / light-gun axis:"
+"${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_virtual_axis \
+	-Mdir "$WORK/obj_va" -o vtb "$FPGA/core/virtual_axis.sv" "$HERE/tb_virtual_axis.sv" > "$WORK/obj_va.log" 2>&1 \
+	|| { grep -m20 "%Error" "$WORK/obj_va.log"; exit 1; }
+./obj_va/vtb | grep AXIS

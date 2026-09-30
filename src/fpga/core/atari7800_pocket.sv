@@ -56,6 +56,14 @@ module atari7800_pocket
 	//  0 R, 1 L, 2 D, 3 U, 4 Fire1, 5 Fire2, 6 Pause/B&W, 7 Select, 8 Reset
 	input  wire [15:0] joy0,
 	input  wire [15:0] joy1,
+	input  wire [15:0] joy2,             // docked controllers 3 and 4 (paddles 3, 4)
+	input  wire [15:0] joy3,
+	input  wire [15:0] analog0,          // left stick {y, x}, unsigned, 128 = centre
+	input  wire [15:0] analog1,
+	input  wire [15:0] analog2,
+	input  wire [15:0] analog3,
+	input  wire  [2:0] port1_input,      // 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun
+	input  wire  [2:0] port2_input,
 
 	// Video (clk_sys)
 	output wire  [7:0] R,
@@ -459,8 +467,176 @@ end
 wire joya_b2 = ~PBout[2] && ~tia_en;
 wire joyb_b2 = ~PBout[4] && ~tia_en;
 
-wire [7:0] porta_type = joy0_type == 8'd0 ? 8'd0 : 8'd1;
-wire [7:0] portb_type = joy1_type == 8'd0 ? 8'd0 : 8'd1;
+//////////////////////////  VIRTUAL CONTROLLERS  ///////////////////////////
+//
+// Port types use MiSTer's numbers: 0 none, 1 joystick, 2 light gun,
+// 3 paddles, 6 driving. Auto takes the A78 header's controller byte; a 2600
+// image has none, so its paddle and driving games need the Port Input menu.
+function [7:0] header_port_type(input [7:0] t);
+	case (t)
+		8'd0: header_port_type = 8'd0;
+		8'd2: header_port_type = 8'd2;   // light gun
+		8'd3: header_port_type = 8'd3;   // paddles
+		8'd6: header_port_type = 8'd6;   // 2600 driving controller
+		default: header_port_type = 8'd1; // joysticks; trakball, keypad, mice unsupported
+	endcase
+endfunction
+
+function [7:0] menu_port_type(input [2:0] m, input [7:0] auto_type);
+	case (m)
+		3'd1: menu_port_type = 8'd1;
+		3'd2: menu_port_type = 8'd3;
+		3'd3: menu_port_type = 8'd6;
+		3'd4: menu_port_type = 8'd2;
+		default: menu_port_type = auto_type;
+	endcase
+endfunction
+
+wire [7:0] porta_type = menu_port_type(port1_input, header_port_type(joy0_type));
+wire [7:0] portb_type = menu_port_type(port2_input, header_port_type(joy1_type));
+
+// The D-pad and docked analog sticks become positions (virtual_axis.sv).
+// A or B is the paddle button, fire or trigger; X held moves slowly and
+// finely, Y held moves fast. Controllers 1 and 2 are the two paddles on port
+// 1 (2600 paddles come in pairs), 3 and 4 the two on port 2.
+wire [15:0] ana_a = swap_joysticks ? analog1 : analog0;
+wire [15:0] ana_b = swap_joysticks ? analog0 : analog1;
+
+reg [13:0] ms_div = 14'd0;
+reg        ms_tick = 1'b0;
+always @(posedge clk_sys) begin
+	ms_tick <= 1'b0;
+	if (ms_div == 14'd14317) begin
+		ms_div  <= 14'd0;
+		ms_tick <= 1'b1;
+	end else
+		ms_div <= ms_div + 1'd1;
+end
+
+wire [15:0] vjoy [4];
+assign vjoy[0] = joya;
+assign vjoy[1] = joyb;
+assign vjoy[2] = joy2;
+assign vjoy[3] = joy3;
+wire [15:0] vana [4];
+assign vana[0] = ana_a;
+assign vana[1] = ana_b;
+assign vana[2] = analog2;
+assign vana[3] = analog3;
+
+wire  [7:0] vx_pos [4];
+wire [15:0] vx_phase [4];
+wire  [3:0] vbutton;
+genvar vi;
+generate
+	for (vi = 0; vi < 4; vi = vi + 1) begin : vaxis
+		// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X, 12 Y
+		assign vbutton[vi] = vjoy[vi][9] | vjoy[vi][10];
+		virtual_axis ax (
+			.clk      (clk_sys),
+			.reset    (cart_download),
+			.tick     (ms_tick),
+			.neg      (vjoy[vi][1]),
+			.pos      (vjoy[vi][0]),
+			.slow     (vjoy[vi][11]),
+			.fast     (vjoy[vi][12]),
+			.analog   (vana[vi][7:0]),
+			.position (vx_pos[vi]),
+			.phase    (vx_phase[vi])
+		);
+	end
+endgenerate
+
+// Light-gun crosshair Y, on whichever port has the gun.
+wire       gun_port = (portb_type == 8'd2);             // 0: port 1, 1: port 2
+wire       gun_en   = (porta_type == 8'd2) || gun_port;
+wire [15:0] gun_joy = gun_port ? joyb : joya;
+wire  [7:0] gun_y;
+virtual_axis gun_axis_y (
+	.clk      (clk_sys),
+	.reset    (cart_download),
+	.tick     (ms_tick),
+	.neg      (gun_joy[3]),
+	.pos      (gun_joy[2]),
+	.slow     (gun_joy[11]),
+	.fast     (gun_joy[12]),
+	.analog   (gun_port ? ana_b[15:8] : ana_a[15:8]),
+	.position (gun_y),
+	.phase    ()
+);
+wire [7:0] gun_ax = gun_port ? vx_pos[1] : vx_pos[0];
+
+// lightgun.sv's joystick mode (JOY_X/Y offset by 128) puts the crosshair
+// 1.5 x X pixels across and Y - 8 lines down, so scale the 0..255 axes to the
+// picture: 372, 320 or 160 pixels wide and 224 to 247 lines tall (a PAL
+// picture is taller, and its bottom lines are out of the gun's reach).
+wire [7:0] gun_kx = tia_en ? 8'd107 : hide_border ? 8'd213 : 8'd248;
+wire [7:0] gun_ky = video_pal_o ? 8'd248 : tia_en ? 8'd240 : (show_overscan ? 8'd242 : 8'd224);
+wire [15:0] gun_mx = gun_ax * gun_kx;
+wire [15:0] gun_my = gun_y * gun_ky;
+wire [7:0] gun_x  = gun_mx[15:8];
+wire [7:0] gun_yl = gun_my[15:8] + 8'd8;
+
+// Paddles: MiSTer's paddle_timer charges the pot line to the position, with
+// the same polarity as its analog path (right = lower resistance).
+wire [3:0] paddle_en = {(portb_type == 8'd3) ? 2'b11 : 2'b00, (porta_type == 8'd3) ? 2'b11 : 2'b00};
+wire [3:0] pad_wire;
+generate
+	for (vi = 0; vi < 4; vi = vi + 1) begin : paddle
+		paddle_timer pt (
+			.clk        (clk_sys),
+			.ce         (1'b1),
+			.reset      (reset || ~paddle_en[vi]),
+			.kohms      ({2'b00, ~vx_pos[vi]}),
+			.clear      (~iout[1]),
+			.read       (i_read[vi]),
+			.charged    (pad_wire[vi]),
+			.difference ()
+		);
+	end
+endgenerate
+
+// Driving controller: the gray code Stella uses (3, 1, 0, 2 turning right),
+// on the up (bit 0) and down (bit 1) lines.
+function [1:0] drive_gray(input [1:0] q);
+	case (q)
+		2'd0: drive_gray = 2'd3;
+		2'd1: drive_gray = 2'd1;
+		2'd2: drive_gray = 2'd0;
+		2'd3: drive_gray = 2'd2;
+	endcase
+endfunction
+wire [1:0] drive_a = drive_gray(vx_phase[0][15:14]);
+wire [1:0] drive_b = drive_gray(vx_phase[1][15:14]);
+
+// Light gun, MiSTer's lightgun.sv driven like its joystick mode.
+wire gun_target, gun_sensor, gun_trigger;
+lightgun lightgun (
+	.CLK          (clk_sys),
+	.RESET        (reset),
+	.MOUSE        (25'd0),
+	.MOUSE_XY     (1'b0),
+	.LIGHT        (|core_r[7:4] || |core_g[7:4] || |core_b[7:4]),
+	.H_WIDTH      (tia_en ? 10'd160 : (hide_border ? 10'd320 : 10'd372)),
+	.JOY_X        ({~gun_x[7], gun_x[6:0]}),
+	.JOY_Y        ({~gun_yl[7], gun_yl[6:0]}),
+	.JOY_TRIG     (gun_port ? vbutton[1] : vbutton[0]),
+	.HDE          (~HBlank),
+	.VDE          (~VBlank_orig),
+	.CE_PIX       (ce_pix),
+	.BTN_MODE     (1'b0),
+	.SIZE         (2'd1),
+	.SENSOR_DELAY (tia_en ? 8'd20 : 8'd48),
+	.LINE_DELAY   (tia_en ? 8'd1 : 8'd20),
+	.TARGET       (gun_target),
+	.SENSOR       (gun_sensor),
+	.TRIGGER      (gun_trigger)
+);
+
+// The crosshair, drawn over the picture in red, as on MiSTer.
+assign R = (gun_en & gun_target) ? 8'd255 : core_r;
+assign G = (gun_en & gun_target) ? 8'd0   : core_g;
+assign B = (gun_en & gun_target) ? 8'd0   : core_b;
 
 always @(*) begin
 	// P2 F1, P2 F2, P1 F1, P1 F2
@@ -471,8 +647,20 @@ always @(*) begin
 	ilatch[0] = tia_en ? ~joya[4] : ~(joya[4] || joya[5]);    // P1 Fire
 	ilatch[1] = tia_en ? ~joyb[4] : ~(joyb[4] || joyb[5]);    // P2 Fire
 
-	if (porta_type == 8'd0) begin pa_in_r[7:4] = 4'b1111; ilatch[0] = 1'b1; idump[1:0] = 2'b00; end
-	if (portb_type == 8'd0) begin pa_in_r[3:0] = 4'b1111; ilatch[1] = 1'b1; idump[3:2] = 2'b00; end
+	case (porta_type)
+		8'd0: begin pa_in_r[7:4] = 4'b1111; ilatch[0] = 1'b1; idump[1:0] = 2'b00; end
+		8'd2: if (~gun_port) begin pa_in_r[7:4] = {3'b111, gun_trigger}; ilatch[0] = ~gun_sensor; idump[1:0] = 2'b00; end
+		8'd3: begin pa_in_r[7:4] = {~vbutton[0], ~vbutton[1], 2'b11}; idump[1:0] = pad_wire[1:0]; ilatch[0] = 1'b1; end
+		8'd6: begin pa_in_r[7:4] = {2'b11, drive_a}; ilatch[0] = ~vbutton[0]; idump[1:0] = 2'b00; end
+		default: ;
+	endcase
+	case (portb_type)
+		8'd0: begin pa_in_r[3:0] = 4'b1111; ilatch[1] = 1'b1; idump[3:2] = 2'b00; end
+		8'd2: if (gun_port) begin pa_in_r[3:0] = {3'b111, gun_trigger}; ilatch[1] = ~gun_sensor; idump[3:2] = 2'b00; end
+		8'd3: begin pa_in_r[3:0] = {~vbutton[2], ~vbutton[3], 2'b11}; idump[3:2] = pad_wire[3:2]; ilatch[1] = 1'b1; end
+		8'd6: begin pa_in_r[3:0] = {2'b11, drive_b}; ilatch[1] = ~vbutton[1]; idump[3:2] = 2'b00; end
+		default: ;
+	endcase
 
 	// In two button mode pin 6 is pulled up strongly and will not lower.
 	if (joya_b2) ilatch[0] = 1'b1;
@@ -512,6 +700,7 @@ reg [15:0] rnd = 16'h5A5A;
 always @(posedge clk_sys) rnd <= {rnd[14:0], rnd[15] ^ rnd[13] ^ rnd[12] ^ rnd[10]};
 
 wire VBlank_orig;
+wire [7:0] core_r, core_g, core_b;
 
 // As on MiSTer, running the real BIOS and running a 2600 image natively are
 // the two sides of one switch: with the BIOS in charge it finds the 2600
@@ -534,9 +723,9 @@ Atari7800 main
 	.pause        (pause_core),
 
 	// Video
-	.RED          (R),
-	.GREEN        (G),
-	.BLUE         (B),
+	.RED          (core_r),
+	.GREEN        (core_g),
+	.BLUE         (core_b),
 	.HSync        (HSync),
 	.VSync        (VSync),
 	.HBlank       (HBlank),
