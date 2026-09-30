@@ -145,6 +145,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Display geometry | Active lines per frame match the display mode: NTSC 224, overscan 242, PAL 274 (overscan setting ignored), 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
 | Paddles (virtual) | A 2600 test program timing INPT0-3 after the pot dump: all four paddles respond, the D-pad reaches both ends (lines 1 and 191 of 192), X and Y change the speed, A/B press the buttons, and a stick moved on controller 1 takes over (Paddles on both ports) |
 | Driving controller (virtual) | SWCHA bits 5:4 step 3, 1, 0, 2 turning right and the reverse turning left; A reads on INPT4 |
+| Light gun, both ports (Sentinel) | Sentinel's header asks for a gun on both ports; the gun goes on port 1 (from 2.0.18; before, port 2, aimed from controller 2) |
 | Light gun (virtual) | The latched INPT4 goes low on the crosshair's line (104 of 192 centred); off the top of the picture gives no hit; the trigger reads on SWCHA bit 4, with MiSTer's polarity |
 | Virtual controller axis | a 16 ms tap moves 1 step of 256; holding crosses the range in 0.5 s (0.26 s with Y); the driving code steps at most every 25 ms (D-pad) or 32 ms (stick) |
 | Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
@@ -153,8 +154,8 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.15) meets timing on all four corners: worst setup
-slack +3.12 ns, worst hold slack +0.11 ns.
+The Quartus build (2.0.18) meets timing on all four corners: worst setup
+slack +3.17 ns, worst hold slack +0.03 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
 core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of the ALMs
