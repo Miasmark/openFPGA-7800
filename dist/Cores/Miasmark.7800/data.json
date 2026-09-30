@@ -20,7 +20,7 @@
         "id": "0x103",
         "required": false,
         "filename": "7800bios.bin",
-        "parameters": "0x89",
+        "parameters": "0x88",
         "extensions": [
           "bin",
           "rom"
@@ -59,7 +59,7 @@
         "id": "0x106",
         "required": false,
         "filename": "highscor.rom",
-        "parameters": "0x89",
+        "parameters": "0x88",
         "extensions": [
           "rom",
           "bin"
@@ -72,7 +72,7 @@
         "id": "0x107",
         "required": false,
         "filename": "supercharger.bin",
-        "parameters": "0x89",
+        "parameters": "0x88",
         "extensions": [
           "bin",
           "rom"
@@ -85,7 +85,7 @@
         "id": "0x108",
         "required": false,
         "filename": "hsc.a78",
-        "parameters": "0x89",
+        "parameters": "0x88",
         "extensions": [
           "a78"
         ],

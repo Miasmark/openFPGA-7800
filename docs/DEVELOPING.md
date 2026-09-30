@@ -160,13 +160,18 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 
 A setting passes through four places. Keep them in step:
 
-**Keep `interact.json` to at most 16 entries, and at most 16 options in a
-list.** What hardware showed: 2.0.12 (18 entries, one with 29 options) loaded,
-but the 29-option list (2600 Bankswitching) never appeared in the menu;
-2.0.14 (21 entries) refused to load ("Load error in 'interact'"). So a
-long list is dropped silently, and too many entries (somewhere between 19
-and 21) fail the whole core. Neither limit is documented anywhere this
-port could reach; 16 of each is what working cores stay within. The menu is at 16. A new setting has to share an entry: a
+**Menu limits (Analogue's interact.json docs):** at most 16 entries
+from `interact.json` are shown, and interact entries plus user-reloadable
+data slots (parameter bit 0 in `data.json`) may total at most 20; past
+that, entries are dropped silently from the end. A list may have 16
+options, and names at most 23 characters. Lists don't count against the
+entry limit per option, so prefer one list over several checkboxes.
+
+This bit the port twice: 2.0.12 (18 entries plus 5 reloadable slots)
+showed only the first 12 entries (to Stereo TIA), and 2.0.14 (21 entries)
+failed to load. From 2.0.16 only the cartridge slot is reloadable; the BIOS
+and firmware slots (fixed filenames, loaded at start) are 0x88, not 0x89.
+The menu is at 16 entries, 17 rows with the cartridge. A new setting has to share an entry: a
 list whose value sets several `set_*` registers at once (see the combined
 addresses `0x2B0`-`0x2C0` in `core_top.v`). Give a changed entry a new
 `id`, so a value the Pocket saved for the old one isn't applied to it.

@@ -281,6 +281,12 @@ files go in `/Assets/7800/common/`:
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
 | `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games do not load |
 
+The core loads these when it starts. From 2.0.16 they are no longer listed
+as "Load" items in the core settings menu: the Pocket shows at most 20
+menu rows for settings and reloadable files together, and the firmware
+rows were pushing settings off the end. To change one, replace the file
+and restart the core.
+
 Either HSC file works; use one. `highscor.rom` is the name the A7800 emulator
 uses. In `hsc.a78` the header is detected and skipped. If a file holds more
 than 4 KiB, the core keeps its last 4 KiB. A MiSTer-style `.hex` image (one byte per line) converts with
