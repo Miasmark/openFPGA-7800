@@ -679,6 +679,22 @@ data_loader #(
     .write_data             ( ioctl_dout )
 );
 
+// Register the loader's output on clk_sys before anything uses it. The
+// loader changes strobe, address and data together on clk_sdram, and the
+// strobe spans exactly one clk_sys edge, so this register sees each byte
+// once, a cycle later. Without it, everything the bytes feed (header
+// parser, 2600 mapper detection) had to settle within one clk_sdram period
+// (17.5 ns) instead of one clk_sys period (69.8 ns): those crossings were
+// all of the build's tightest setup paths.
+    reg             ioctl_wr_r = 1'b0;
+    reg     [24:0]  ioctl_addr_r = 25'd0;
+    reg     [7:0]   ioctl_dout_r = 8'd0;
+always @(posedge clk_sys) begin
+    ioctl_wr_r   <= ioctl_wr;
+    ioctl_addr_r <= ioctl_addr[24:0];
+    ioctl_dout_r <= ioctl_dout;
+end
+
 // Into clk_sys
     reg     [2:0]   dl_s, cart_s, bios_s, hscfw_s, arfw_s, rst_s, mrst_s;
     reg             cart_download = 1'b0;
@@ -804,9 +820,9 @@ atari7800_pocket atari (
     .bios_download  ( bios_download ),
     .hscfw_download ( hscfw_download ),
     .arfw_download  ( arfw_download ),
-    .ioctl_wr       ( ioctl_wr & (cart_download | bios_download | hscfw_download | arfw_download) ),
-    .ioctl_addr     ( ioctl_addr[24:0] ),
-    .ioctl_dout     ( ioctl_dout ),
+    .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download) ),
+    .ioctl_addr     ( ioctl_addr_r ),
+    .ioctl_dout     ( ioctl_dout_r ),
 
     .swap_joysticks ( set_s2[17] ),
     .diff_left_b    ( set_s2[16] ),

@@ -57,6 +57,12 @@ module tb_load;
 		.write_en(ioctl_wr), .write_addr(ioctl_addr), .write_data(ioctl_dout)
 	);
 
+	// core_top registers the loader's output on clk_sys
+	logic ioctl_wr_r = 0; logic [24:0] ioctl_addr_r = 0; logic [7:0] ioctl_dout_r = 0;
+	always @(posedge clk_sys) begin
+		ioctl_wr_r <= ioctl_wr; ioctl_addr_r <= ioctl_addr[24:0]; ioctl_dout_r <= ioctl_dout;
+	end
+
 	// ---------------- system ----------------
 	wire [7:0] R, G, B;
 	wire HSync, VSync, HBlank, VBlank, ce_pix, tia_mode, is_pal;
@@ -66,7 +72,7 @@ module tb_load;
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr[24:0]), .ioctl_dout(ioctl_dout),
+		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
