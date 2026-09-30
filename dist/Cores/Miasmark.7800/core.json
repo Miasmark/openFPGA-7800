@@ -7,8 +7,8 @@
       "description": "Atari 7800 ProSystem, ported from the MiSTer Atari7800 core by Jamie Blanks (Kitrinx).",
       "author": "Miasmark",
       "url": "https://github.com/Miasmark/openFPGA-7800",
-      "version": "2.0.11",
-      "date_release": "2026-09-27"
+      "version": "2.0.12",
+      "date_release": "2026-09-30"
     },
     "framework": {
       "target_product": "Analogue Pocket",

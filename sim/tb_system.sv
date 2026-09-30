@@ -40,6 +40,7 @@ module tb_system;
 		.region_setting(region), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(overscan),
 		.hide_border(hide_border), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
+		.clear_random(1'b0), .decomb(1'b0), .bs_override(5'd0),
 		.joy0(16'd0), .joy1(16'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(video_pal),

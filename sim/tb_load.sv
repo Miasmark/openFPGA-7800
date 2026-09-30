@@ -22,6 +22,11 @@ module tb_load;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0;
 	logic pokey_irq_on = 1'b0;
 	logic overscan_on = 1'b0;
+	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
+	initial begin
+		clear_rnd = $test$plusargs("clearrnd");
+		void'($value$plusargs("bs=%d", bs_ovr));
+	end
 	initial overscan_on = $test$plusargs("overscan");
 	initial pokey_irq_on = $test$plusargs("pokeyirq");
 	logic [15:0] joy0 = 16'd0;
@@ -57,6 +62,7 @@ module tb_load;
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
+		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(16'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(),
@@ -348,6 +354,12 @@ module tb_load;
 		repeat (100) @(posedge clk_sys);
 
 		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
+		begin
+			automatic int nz = 0;
+			for (int i = 0; i < 2048; i++) if (dut.main.ram0.u_ram.mem_q[i] != 8'h00) nz++;
+			$display("OPTIONS RAM0 bytes non-zero after load: %0d of 2048; 2600 mapper %0d (override %0d)",
+				nz, dut.main.cart2600.mapper, bs_ovr);
+		end
 		// The payload (image minus its 128 byte header) must sit at SDRAM 0.
 		mismatches = 0;
 		if (dut.cart_is_7800) begin

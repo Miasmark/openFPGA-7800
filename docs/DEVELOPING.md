@@ -149,7 +149,7 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 A setting passes through four places. Keep them in step:
 
 1. `dist/Cores/Miasmark.7800/interact.json`: a new `id`, and an `address` in
-   `0x10000200`–`0x100002FF` (the next free one is `0x10000294`).
+   `0x10000200`–`0x100002FF` (the next free one is `0x100002A4`).
 2. `core_top.v`: a `set_*` register with the same default as
    `interact.json`, and a `case` entry for the address.
 3. `core_top.v`: widen `set_s1`/`set_s2` (the clk_74a → clk_sys

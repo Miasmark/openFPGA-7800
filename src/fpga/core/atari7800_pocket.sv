@@ -46,7 +46,10 @@ module atari7800_pocket
 	input  wire        diff_right_b,
 	input  wire        skip_bios,
 	input  wire        flicker_blend,   // 2600 only
-	input  wire        pokey_irq,       // let POKEY timer IRQs reach the CPU (MiSTer "Pokey IRQ Enabled")
+	input  wire        pokey_irq,
+	input  wire        clear_random,    // fill RAM with random values at reset (MiSTer "Clear Memory")
+	input  wire        decomb,          // 2600 de-comb
+	input  wire  [4:0] bs_override,     // 2600 bankswitching: 0 auto, else MiSTer's mapper number       // let POKEY timer IRQs reach the CPU (MiSTer "Pokey IRQ Enabled")
 	input  wire        pause_core,      // Pocket menu open
 
 	// Controllers, MiSTer joystick bit layout:
@@ -643,7 +646,8 @@ Atari7800 main
 	.PAread       (PAread),
 
 	// 2600 cart flags from detect2600
-	.force_bs     (force_bs),
+	// MiSTer's Bankswitching menu: its index is the mapper number.
+	.force_bs     (|bs_override ? {1'b0, bs_override} : force_bs),
 	.mapper_revision,
 	.cdf_ldx,
 	.cdf_ldy,
@@ -653,9 +657,9 @@ Atari7800 main
 	.cdfj_stack,
 	.arm_audio_size_addr,
 	.sc           (sc),
-	.clearval     (8'h00),
+	.clearval     (clear_random ? rnd[7:0] : 8'h00),
 	.random       (rnd[7:0]),
-	.decomb       (1'b0),
+	.decomb       (decomb),
 	.mapper       (6'd0),
 	.tape_in      (2'b00),
 	.fix_sc_cs    (1'b0),

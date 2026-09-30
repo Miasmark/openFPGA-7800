@@ -371,6 +371,10 @@ localparam [15:0] SLOT_HSCA78 = 16'h0108;
     reg             set_blend     = 1'b0;
     reg             set_pokey_irq = 1'b0;
     reg     [1:0]   set_savekey   = 2'd0;
+    reg     [1:0]   set_stmix     = 2'd0;   // stereo mix: none, 25%, 50%, 100%
+    reg             set_clear_rnd = 1'b0;   // clear RAM to random values
+    reg             set_decomb    = 1'b0;   // 2600 de-comb
+    reg     [4:0]   set_bs        = 5'd0;   // 2600 bankswitching: 0 auto, else forced
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -393,6 +397,10 @@ always @(posedge clk_74a) begin
             12'h288: set_blend     <= bridge_wr_data[0];
             12'h28C: set_pokey_irq <= bridge_wr_data[0];
             12'h290: set_savekey   <= bridge_wr_data[1:0];
+            12'h294: set_stmix     <= bridge_wr_data[1:0];
+            12'h298: set_clear_rnd <= bridge_wr_data[0];
+            12'h29C: set_decomb    <= bridge_wr_data[0];
+            12'h2A0: set_bs        <= bridge_wr_data[4:0];
             default: ;
         endcase
     end
@@ -691,9 +699,10 @@ end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
 // a two stage synchroniser per bit is enough.
-    reg     [17:0]  set_s1, set_s2;
+    reg     [26:0]  set_s1, set_s2;
 always @(posedge clk_sys) begin
-    set_s1 <= {set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
+    set_s1 <= {set_bs, set_decomb, set_clear_rnd, set_stmix,
+               set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
                set_blend, set_pokey_irq, set_savekey, 1'b0};
     set_s2 <= set_s1;
@@ -771,6 +780,9 @@ atari7800_pocket atari (
     .flicker_blend  ( set_s2[4] ),
     .pokey_irq      ( set_s2[3] ),
     .savekey_setting( set_s2[2:1] ),
+    .clear_random   ( set_s2[20] ),
+    .decomb         ( set_s2[21] ),
+    .bs_override    ( set_s2[26:22] ),
     .pause_core     ( 1'b0 ),
 
     .joy0           ( joy0_s2 ),
@@ -903,10 +915,33 @@ assign video_hs   = vid_hs;
 
     wire    [15:0]  aud_l_f, aud_r_f;
 
+// Stereo Mix, as on MiSTer: 25% / 50% / 100% blends each side with 1/8,
+// 1/4 and 1/2 of the other (100% is mono). Only matters with Stereo TIA or
+// a stereo cart (two POKEYs, YM2151).
+    wire    [1:0]   stmix = set_s2[19:18];
+    reg     [15:0]  mix_l = 16'd0, mix_r = 16'd0;
+always @(posedge clk_sys) begin
+    case (stmix)
+    2'd0: begin mix_l <= audio_l; mix_r <= audio_r; end
+    2'd1: begin
+        mix_l <= audio_l - (audio_l >> 3) + (audio_r >> 3);
+        mix_r <= audio_r - (audio_r >> 3) + (audio_l >> 3);
+    end
+    2'd2: begin
+        mix_l <= audio_l - (audio_l >> 2) + (audio_r >> 2);
+        mix_r <= audio_r - (audio_r >> 2) + (audio_l >> 2);
+    end
+    default: begin
+        mix_l <= (audio_l >> 1) + (audio_r >> 1);
+        mix_r <= (audio_l >> 1) + (audio_r >> 1);
+    end
+    endcase
+end
+
 audio_filter afilt (
     .clk        ( clk_sys ),
-    .in_l       ( audio_l ),
-    .in_r       ( audio_r ),
+    .in_l       ( mix_l ),
+    .in_r       ( mix_r ),
     .out_l      ( aud_l_f ),
     .out_r      ( aud_r_f )
 );

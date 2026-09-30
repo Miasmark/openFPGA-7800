@@ -53,9 +53,18 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 - 2600 Starpath Supercharger games, given the Supercharger BIOS as a file.
   Untested on hardware.
 - Settings: difficulty switches, controller swap, region, palette
-  (warm/cool/hot), high score cart, overscan, border, stereo TIA, 2600
-  flicker blend, SaveKey, and POKEY IRQ (off by default, as on MiSTer; some
-  games drive their music from POKEY timer interrupts).
+  (warm/cool/hot), high score cart, overscan, border, stereo TIA, SaveKey,
+  and POKEY IRQ (off by default, as on MiSTer; some games drive their music
+  from POKEY timer interrupts). From 2.0.12, also these MiSTer options:
+  - *Stereo Mix* (None / 25% / 50% / 100%): blends the left and right
+    channels, for Stereo TIA and stereo carts on headphones.
+  - *Clear Memory* (Zero / Random): what RAM holds at power-on. Real
+    hardware starts random, and some homebrew seeds its randomness from it.
+  - *2600 De-comb*: smooths the comb pattern some 2600 games draw by
+    alternating lines between frames.
+  - *2600 Bankswitching*: forces a cartridge mapper when auto-detection
+    picks the wrong one. The ARM mappers (DPC+, CDF, BUS) aren't in this
+    build, so they aren't offered.
 - PAL games at the real PAL master clock, 14.18758 MHz instead of NTSC's
   14.31818 MHz, so they run at 50 Hz and play at the right pitch. The region
   follows the A78 header (2600 games: their measured frame length) or the

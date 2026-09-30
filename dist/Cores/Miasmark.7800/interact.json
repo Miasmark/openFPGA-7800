@@ -213,6 +213,35 @@
         "mask": "0xFFFFFFFE"
       },
       {
+        "name": "Stereo Mix",
+        "id": 16,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000294",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "None"
+          },
+          {
+            "value": 1,
+            "name": "25%"
+          },
+          {
+            "value": 2,
+            "name": "50%"
+          },
+          {
+            "value": 3,
+            "name": "100% (mono)"
+          }
+        ]
+      },
+      {
         "name": "2600 Flicker Blend",
         "id": 13,
         "type": "check",
@@ -225,6 +254,147 @@
         "mask": "0xFFFFFFFE"
       },
       {
+        "name": "2600 De-comb",
+        "id": 18,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x1000029C",
+        "defaultval": 0,
+        "value": 1,
+        "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "2600 Bankswitching",
+        "id": 19,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x100002A0",
+        "defaultval": 0,
+        "mask": "0xFFFFFFE0",
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "F8"
+          },
+          {
+            "value": 2,
+            "name": "F6"
+          },
+          {
+            "value": 3,
+            "name": "FE"
+          },
+          {
+            "value": 4,
+            "name": "E0"
+          },
+          {
+            "value": 5,
+            "name": "3F"
+          },
+          {
+            "value": 6,
+            "name": "F4"
+          },
+          {
+            "value": 7,
+            "name": "P2"
+          },
+          {
+            "value": 8,
+            "name": "FA"
+          },
+          {
+            "value": 9,
+            "name": "CV"
+          },
+          {
+            "value": 10,
+            "name": "2K"
+          },
+          {
+            "value": 11,
+            "name": "UA"
+          },
+          {
+            "value": 12,
+            "name": "E7"
+          },
+          {
+            "value": 13,
+            "name": "F0"
+          },
+          {
+            "value": 14,
+            "name": "32"
+          },
+          {
+            "value": 15,
+            "name": "AR"
+          },
+          {
+            "value": 16,
+            "name": "3E"
+          },
+          {
+            "value": 17,
+            "name": "SB"
+          },
+          {
+            "value": 18,
+            "name": "WD"
+          },
+          {
+            "value": 19,
+            "name": "EF"
+          },
+          {
+            "value": 20,
+            "name": "JANE"
+          },
+          {
+            "value": 22,
+            "name": "CTY"
+          },
+          {
+            "value": 25,
+            "name": "FA2"
+          },
+          {
+            "value": 26,
+            "name": "0840"
+          },
+          {
+            "value": 27,
+            "name": "FC"
+          },
+          {
+            "value": 28,
+            "name": "DF/BF"
+          },
+          {
+            "value": 29,
+            "name": "Multi 2K"
+          },
+          {
+            "value": 30,
+            "name": "Multi 4K"
+          },
+          {
+            "value": 31,
+            "name": "Multi 8K"
+          }
+        ]
+      },
+      {
         "name": "POKEY IRQ",
         "id": 14,
         "type": "check",
@@ -235,6 +405,27 @@
         "defaultval": 0,
         "value": 1,
         "mask": "0xFFFFFFFE"
+      },
+      {
+        "name": "Clear Memory",
+        "id": 17,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x10000298",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFE",
+        "options": [
+          {
+            "value": 0,
+            "name": "Zero"
+          },
+          {
+            "value": 1,
+            "name": "Random"
+          }
+        ]
       }
     ],
     "messages": []
