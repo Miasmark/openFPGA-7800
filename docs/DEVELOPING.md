@@ -161,10 +161,12 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 A setting passes through four places. Keep them in step:
 
 **Keep `interact.json` to at most 16 entries, and at most 16 options in a
-list.** 2.0.14 had 21 entries and a 29-option list, and the Pocket refused
-to load it ("Load error in 'interact'"); no working core we checked goes
-past either number. Which of the two limits the Pocket enforces isn't
-documented anywhere this port could reach. The menu is at 16. A new setting has to share an entry: a
+list.** What hardware showed: 2.0.12 (18 entries, one with 29 options) loaded,
+but the 29-option list (2600 Bankswitching) never appeared in the menu;
+2.0.14 (21 entries) refused to load ("Load error in 'interact'"). So a
+long list is dropped silently, and too many entries (somewhere between 19
+and 21) fail the whole core. Neither limit is documented anywhere this
+port could reach; 16 of each is what working cores stay within. The menu is at 16. A new setting has to share an entry: a
 list whose value sets several `set_*` registers at once (see the combined
 addresses `0x2B0`-`0x2C0` in `core_top.v`). Give a changed entry a new
 `id`, so a value the Pocket saved for the old one isn't applied to it.
