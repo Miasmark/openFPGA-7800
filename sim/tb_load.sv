@@ -289,7 +289,7 @@ module tb_load;
 	logic [7:0] image [$];
 	int fd, c, audf, mismatches;
 	real measured, ideal;
-	string path, save_path, sk_path, fw_path;
+	string path, save_path, sk_path, fw_path, image2_path;
 	logic [7:0] fw_img [$];
 	// What a firmware ROM should hold: the HSC keeps the last 4 KiB of its
 	// payload (after an A78 header, if any), the Supercharger the first 2 KiB.
@@ -505,6 +505,36 @@ module tb_load;
 					joy0[4] = 1'b1;
 					repeat (longint'(14318) * 100) @(posedge clk_sys);
 					joy0[4] = 1'b0;
+				end
+			join_none
+			// +image2=FILE +image2at=MS: load a second cart MS into the run,
+			// as picking another game on the Pocket does (no reset_in).
+			if ($value$plusargs("image2=%s", image2_path)) fork
+				begin
+					automatic logic [7:0] img2 [$];
+					automatic int f2, c2;
+					automatic int at = 0;
+					void'($value$plusargs("image2at=%d", at));
+					f2 = $fopen(image2_path, "rb");
+					while ((c2 = $fgetc(f2)) != -1) img2.push_back(c2[7:0]);
+					$fclose(f2);
+					while (img2.size() % 4) img2.push_back(8'hFF);
+					repeat (longint'(14318) * at) @(posedge clk_sys);
+					@(posedge clk_74a); cart_download = 1'b1;
+					repeat (100) @(posedge clk_74a);
+					for (int i = 0; i < img2.size(); i += 4) begin
+						@(posedge clk_74a);
+						bridge_addr = i;
+						bridge_wr_data = {img2[i], img2[i+1], img2[i+2], img2[i+3]};
+						bridge_wr = 1'b1;
+						@(posedge clk_74a);
+						bridge_wr = 1'b0;
+						repeat (78) @(posedge clk_74a);
+					end
+					repeat (2000) @(posedge clk_74a);
+					cart_download = 1'b0;
+					$display("IMAGE2 %s loaded at %0d ms: %0d bytes, tia_mode=%0d, mapper %0d",
+						image2_path, $time / 1000000, img2.size(), dut.tia_mode, dut.main.cart2600.mapper);
 				end
 			join_none
 			recording = 1;
