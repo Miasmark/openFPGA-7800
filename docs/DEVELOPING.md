@@ -322,11 +322,18 @@ Other constraints already in the file:
 
 ## Resource budget
 
+(Timing: read setup slack, not the smallest number in
+`ap_core.sta.summary`, which is usually a hold slack. Hold slack only has
+to stay positive, and the fitter keeps it so. Setup slack is the margin
+that shrinks as logic is added: +2.8 ns in 2.0.14, limited by the loader's
+FIFO on clk_74a. Anything the loader's bytes feed now starts from a clk_sys
+register in `core_top.v`; keep it that way.)
+
 The Cyclone V 5CEBA4 has 18,480 ALMs and **308 M10K blocks**. Block count,
 not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 *bits* because every memory rounds up to whole blocks.
 
-Current use (2.0.13) is 75% ALMs (63% in 2.0.9; the four paddle timers
+Current use (2.0.14) is 75% ALMs (63% in 2.0.9; the four paddle timers
 are most of the difference), 73% RAM bits, and all 308 M10K blocks. A 16 KiB diagnostic RAM did not fit, and neither did an 8 KiB one.
 Before adding memory, check the M10K count in `ap_core.fit.summary`.
 Upstream memories that the Pocket build instantiates but can't use (ARM

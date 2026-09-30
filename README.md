@@ -146,14 +146,19 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Driving controller (virtual) | SWCHA bits 5:4 step 3, 1, 0, 2 turning right and the reverse turning left; A reads on INPT4 |
 | Light gun (virtual) | The latched INPT4 goes low on the crosshair's line (104 of 192 centred); off the top of the picture gives no hit; the trigger reads on SWCHA bit 4, with MiSTer's polarity |
 | Virtual controller axis | a 16 ms tap moves 1 step of 256; holding crosses the range in 0.5 s (0.26 s with Y); the driving code steps at most every 25 ms (D-pad) or 32 ms (stick) |
+| Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.13) meets timing on all four corners (worst slack
-+0.087 ns). It uses 75% of the ALMs (64% before the virtual controllers,
-mostly the four paddle timers) and all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
+The Quartus build (2.0.14) meets timing on all four corners: worst setup
+slack +2.82 ns (inside the APF loader's FIFO), worst hold slack +0.09 ns.
+Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
+loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
+core clock, which gives those paths 10 ns or more. It uses 75% of the ALMs
+(64% before the virtual controllers, mostly the four paddle timers) and all
+308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
 ### Hardware testing (2.0.2 to 2.0.11, Analogue Pocket)
