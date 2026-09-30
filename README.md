@@ -158,11 +158,11 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.14) meets timing on all four corners: worst setup
-slack +2.82 ns (inside the APF loader's FIFO), worst hold slack +0.09 ns.
+The Quartus build (2.0.15) meets timing on all four corners: worst setup
+slack +3.12 ns, worst hold slack +0.11 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
-core clock, which gives those paths 10 ns or more. It uses 75% of the ALMs
+core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of the ALMs
 (64% before the virtual controllers, mostly the four paddle timers) and all
 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
