@@ -136,6 +136,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Headerless 2600 image through the loader | detected as 2600, stored with 0 mismatches, plays the right tone |
 | High score save word port | 32 bit word lands as 4 bytes in address order |
 | 7800 video | 59.96 Hz, 320x224 (372x224 with the border) |
+| 2600 frame fills the display mode | 240 active lines NTSC, 288 PAL, matching the scaler modes exactly (from 2.0.19; before, 239 / 285, and the Pocket kept an earlier game's last rows below) |
 | 2600 video | 59.92 Hz, 160x240 (MiSTer's "smart" stabiliser window) |
 | Audio filter | centred on zero, settles to 0 in silence |
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
@@ -154,8 +155,8 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.18) meets timing on all four corners: worst setup
-slack +3.17 ns, worst hold slack +0.03 ns.
+The Quartus build (2.0.19) meets timing on all four corners: worst setup
+slack +3.49 ns, worst hold slack +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
 core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of the ALMs
