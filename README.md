@@ -147,7 +147,7 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build (2.0.13) meets timing on all four corners (worst slack
-+0.090 ns). It uses 75% of the ALMs (64% before the virtual controllers,
++0.087 ns). It uses 75% of the ALMs (64% before the virtual controllers,
 mostly the four paddle timers) and all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
