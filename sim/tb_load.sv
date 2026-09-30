@@ -277,6 +277,27 @@ module tb_load;
 		fire_last <= inres[6][7]; fire_changes <= fire_changes + 1;
 	end
 
+	// ---------------- paddle trace (+padtrace, with wav) ----------------
+	// Every 100 ms: paddle 0's timer calibration, the virtual knob, and the
+	// last value the cart stored at +padvar=ADDR (Demons to Diamonds: $CD).
+	int pad_var = 0; logic [7:0] pad_val = 0; int pad_reads = 0; logic old_pr = 0;
+	initial void'($value$plusargs("padvar=%h", pad_var));
+	always @(posedge clk_sys) begin
+		if (!dut.RW && dut.bios_addr == pad_var[15:0] && pad_var != 0) pad_val <= dut.din;
+		old_pr <= dut.i_read[0];
+		if (dut.i_read[0] && !old_pr) pad_reads <= pad_reads + 1;
+	end
+	initial if ($test$plusargs("padtrace")) begin
+		wait (recording);
+		forever begin
+			repeat (longint'(14318) * 100) @(posedge clk_sys);
+			$display("PAD %5d ms: knob %3d  lowest %0d highest %0d difference %0d read_count %0d charged %b  reads/100ms %0d  cart var %0d",
+				$time / 1000000, dut.vx_pos[0], dut.paddle[0].pt.lowest, dut.paddle[0].pt.highest,
+				dut.paddle[0].pt.difference, dut.paddle[0].pt.read_count, dut.pad_wire[0], pad_reads, pad_val);
+			pad_reads = 0;
+		end
+	end
+
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
@@ -497,6 +518,17 @@ module tb_load;
 					joy0[4] = 1'b1;
 					repeat (longint'(14318) * 150) @(posedge clk_sys);
 					joy0[4] = 1'b0;
+				end
+			join_none
+			// +holdright=MS: hold the D-pad right for 1 s from MS, then left.
+			if ($value$plusargs("holdright=%d", fire_at)) fork
+				begin
+					repeat (longint'(14318) * fire_at) @(posedge clk_sys);
+					joy0[0] = 1'b1;
+					repeat (longint'(14318) * 1000) @(posedge clk_sys);
+					joy0[0] = 1'b0; joy0[1] = 1'b1;
+					repeat (longint'(14318) * 600) @(posedge clk_sys);
+					joy0[1] = 1'b0;
 				end
 			join_none
 			if ($test$plusargs("fire")) fork
