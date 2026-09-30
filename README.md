@@ -52,19 +52,25 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
 - 2600 Starpath Supercharger games, given the Supercharger BIOS as a file.
   Untested on hardware.
-- Settings: difficulty switches, controller swap, region, palette
-  (warm/cool/hot), high score cart, overscan, border, stereo TIA, SaveKey,
-  and POKEY IRQ (off by default, as on MiSTer; some games drive their music
-  from POKEY timer interrupts). From 2.0.12, also these MiSTer options:
-  - *Stereo Mix* (None / 25% / 50% / 100%): blends the left and right
-    channels, for Stereo TIA and stereo carts on headphones.
-  - *Clear Memory* (Zero / Random): what RAM holds at power-on. Real
-    hardware starts random, and some homebrew seeds its randomness from it.
-  - *2600 De-comb*: smooths the comb pattern some 2600 games draw by
-    alternating lines between frames.
+- Settings (the Pocket shows at most 16, so related ones share an entry):
+  - *Difficulty*: both difficulty switches.
+  - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
+  - *Region*, *Palette* (warm/cool/hot), *High Score Cart*, *SaveKey
+    (port 2)*, *Skip BIOS*.
+  - *Picture*: the border on or off, and *Overscan* (below).
+  - *Audio*: Stereo TIA, and a blend of the left and right channels (25%,
+    50%, or full mono) for Stereo TIA and stereo carts on headphones.
+  - *2600 Video*: Flicker Blend, and De-comb, which smooths the comb
+    pattern some 2600 games draw by alternating lines between frames.
   - *2600 Bankswitching*: forces a cartridge mapper when auto-detection
-    picks the wrong one. The ARM mappers (DPC+, CDF, BUS) aren't in this
-    build, so they aren't offered.
+    picks the wrong one. The 15 most common are offered (F8, F6, F4, FE,
+    E0, E7, 3F, 3E, FA, CV, UA, F0, EF, SB, P2); the rest are
+    auto-detected only. The ARM mappers (DPC+, CDF, BUS) aren't in this
+    build.
+  - *Compatibility*: POKEY IRQ (off by default, as on MiSTer; some games
+    drive their music from POKEY timer interrupts) and Random RAM (what
+    RAM holds at power-on: real hardware starts random, and some homebrew
+    seeds its randomness from it).
 - PAL games at the real PAL master clock, 14.18758 MHz instead of NTSC's
   14.31818 MHz, so they run at 50 Hz and play at the right pitch. The region
   follows the A78 header (2600 games: their measured frame length) or the
@@ -84,7 +90,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   **turbo fire** on X and Y. From 2.0.14.
 - The Pocket's **display modes** (CRT and LCD looks, under *Display
   Mode* in the Pocket's video settings). From 2.0.14.
-- *Show Overscan* shows MARIA's whole NTSC picture: 242 lines instead of
+- *Overscan* (in *Picture*) shows MARIA's whole NTSC picture: 242 lines instead of
   the 224 most games stay inside. Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.

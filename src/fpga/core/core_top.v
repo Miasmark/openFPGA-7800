@@ -407,6 +407,13 @@ always @(posedge clk_74a) begin
             12'h2A4: set_port1     <= bridge_wr_data[2:0];
             12'h2A8: set_port2     <= bridge_wr_data[2:0];
             12'h2AC: set_turbo     <= bridge_wr_data[1:0];
+            // Combined menu entries (the Pocket takes at most 16): each
+            // sets two of the settings above.
+            12'h2B0: {set_rdiff_b, set_ldiff_b}   <= bridge_wr_data[1:0];
+            12'h2B4: {set_overscan, set_border}   <= bridge_wr_data[1:0];
+            12'h2B8: {set_stereo, set_stmix}      <= bridge_wr_data[2:0];
+            12'h2BC: {set_decomb, set_blend}      <= bridge_wr_data[1:0];
+            12'h2C0: {set_clear_rnd, set_pokey_irq} <= bridge_wr_data[1:0];
             default: ;
         endcase
     end

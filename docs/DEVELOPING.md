@@ -160,8 +160,17 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 
 A setting passes through four places. Keep them in step:
 
+**Keep `interact.json` to at most 16 entries, and at most 16 options in a
+list.** 2.0.14 had 21 entries and a 29-option list, and the Pocket refused
+to load it ("Load error in 'interact'"); no working core we checked goes
+past either number. Which of the two limits the Pocket enforces isn't
+documented anywhere this port could reach. The menu is at 16. A new setting has to share an entry: a
+list whose value sets several `set_*` registers at once (see the combined
+addresses `0x2B0`-`0x2C0` in `core_top.v`). Give a changed entry a new
+`id`, so a value the Pocket saved for the old one isn't applied to it.
+
 1. `dist/Cores/Miasmark.7800/interact.json`: a new `id`, and an `address` in
-   `0x10000200`–`0x100002FF` (the next free one is `0x100002B0`).
+   `0x10000200`–`0x100002FF` (the next free one is `0x100002C4`).
 2. `core_top.v`: a `set_*` register with the same default as
    `interact.json`, and a `case` entry for the address.
 3. `core_top.v`: widen `set_s1`/`set_s2` (the clk_74a → clk_sys
