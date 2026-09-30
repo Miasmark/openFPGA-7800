@@ -18,7 +18,7 @@
         "persist": true,
         "writeonly": true,
         "address": "0x100002B0",
-        "defaultval": 3,
+        "defaultval": 0,
         "mask": "0xFFFFFFFC",
         "options": [
           {
