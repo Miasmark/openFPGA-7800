@@ -32,7 +32,9 @@ module tb_load;
 	logic [15:0] joy0 = 16'd0, joy1 = 16'd0, joy2 = 16'd0, joy3 = 16'd0;
 	logic [15:0] ana0 = 16'h8080;
 	logic [2:0] port1_in = 3'd0, port2_in = 3'd0;   // +port1=N, +port2=N
+	logic [1:0] turbo = 2'd0;                         // +turbo=N
 	initial begin
+		void'($value$plusargs("turbo=%d", turbo));
 		void'($value$plusargs("port1=%d", port1_in));
 		void'($value$plusargs("port2=%d", port2_in));
 	end
@@ -72,6 +74,7 @@ module tb_load;
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
 		.port1_input(port1_in), .port2_input(port2_in),
+		.analog0r(16'h8080), .analog1r(16'h8080), .turbo(turbo),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
@@ -262,6 +265,12 @@ module tb_load;
 		if (drv_seq.len() < 60) drv_seq = {drv_seq, $sformatf("%0d", inres[5][5:4])};
 	end
 
+	// Turbo: count INPT4 changes (read live once a frame) while counting is on.
+	logic fire_count_on = 0, fire_last = 1; int fire_changes = 0;
+	always @(posedge clk_sys) if (fire_count_on && inres[6][7] != fire_last) begin
+		fire_last <= inres[6][7]; fire_changes <= fire_changes + 1;
+	end
+
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
@@ -435,6 +444,11 @@ module tb_load;
 			joy2[0] = 1; joy3[1] = 1; run_ms(300); joy2 = 0; joy3 = 0; run_ms(60); show("P3 right, P4 left 300 ms");
 			joy0[9] = 1; joy1[10] = 1; run_ms(60); show("P1 A, P2 B held");
 			joy0 = 0; joy1 = 0; run_ms(60); show("released");
+			joy0[11] = 1; joy0[12] = 1; run_ms(60); show("P1 X, Y held");
+			fire_last = inres[6][7]; fire_changes = 0; fire_count_on = 1;
+			run_ms(500);
+			fire_count_on = 0; joy0 = 0; run_ms(60);
+			$display("INPUT Y held 500 ms (turbo %0d): fire 1 changed %0d times", turbo, fire_changes);
 			// Analog stick on controller 1: push it right, then leave it.
 			ana0[7:0] = 8'd224; run_ms(200); show("P1 stick right (x=224)");
 			ana0[7:0] = 8'd128; run_ms(200); show("P1 stick centred");

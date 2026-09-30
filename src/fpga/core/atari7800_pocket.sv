@@ -64,6 +64,9 @@ module atari7800_pocket
 	input  wire [15:0] analog3,
 	input  wire  [2:0] port1_input,      // 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun
 	input  wire  [2:0] port2_input,
+	input  wire [15:0] analog0r,         // right sticks {y, x}: dual-stick fire
+	input  wire [15:0] analog1r,
+	input  wire  [1:0] turbo,            // X / Y repeat fire: 0 off, 1 fast, 2 medium, 3 slow
 
 	// Video (clk_sys)
 	output wire  [7:0] R,
@@ -440,8 +443,38 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
-wire [15:0] joya = swap_joysticks ? joy1 : joy0;
-wire [15:0] joyb = swap_joysticks ? joy0 : joy1;
+// Turbo: Y repeats fire 1 and X fire 2 (A and B stay plain), switching
+// every 2, 3 or 4 frames: 15, 10 or 7.5 presses a second at 60 Hz. Counted
+// in frames so each press and release lasts whole frames, which games that
+// read the buttons once a frame need.
+reg  [1:0] turbo_cnt = 2'd0;
+reg        turbo_on = 1'b1;
+reg        turbo_vs = 1'b0;
+always @(posedge clk_sys) begin
+	turbo_vs <= VSync;
+	if (VSync && !turbo_vs) begin
+		if (turbo_cnt >= turbo) begin
+			turbo_cnt <= 2'd0;
+			turbo_on  <= ~turbo_on;
+		end else
+			turbo_cnt <= turbo_cnt + 1'd1;
+	end
+end
+wire turbo_gate = (turbo == 2'd0) | turbo_on;
+
+// joy bits: 4 fire 1 (A or Y), 5 fire 2 (B or X), 9 A, 10 B, 11 X, 12 Y
+function [15:0] with_turbo(input [15:0] j, input gate);
+	begin
+		with_turbo    = j;
+		with_turbo[4] = j[9]  | (j[12] & gate);
+		with_turbo[5] = j[10] | (j[11] & gate);
+	end
+endfunction
+
+wire [15:0] joy0t = with_turbo(joy0, turbo_gate);
+wire [15:0] joy1t = with_turbo(joy1, turbo_gate);
+wire [15:0] joya = swap_joysticks ? joy1t : joy0t;
+wire [15:0] joyb = swap_joysticks ? joy0t : joy1t;
 
 wire  [7:0] PAin, PBin, PBout;
 wire        PAread;
@@ -470,7 +503,7 @@ wire joyb_b2 = ~PBout[4] && ~tia_en;
 //////////////////////////  VIRTUAL CONTROLLERS  ///////////////////////////
 //
 // Port types use MiSTer's numbers: 0 none, 1 joystick, 2 light gun,
-// 3 paddles, 6 driving. Auto takes the A78 header's controller byte; a 2600
+// 3 paddles, 6 driving, 9 Booster Grip, 10 dual stick (MiSTer's Robotron). Auto takes the A78 header's controller byte; a 2600
 // image has none, so its paddle and driving games need the Port Input menu.
 function [7:0] header_port_type(input [7:0] t);
 	case (t)
@@ -488,6 +521,8 @@ function [7:0] menu_port_type(input [2:0] m, input [7:0] auto_type);
 		3'd2: menu_port_type = 8'd3;
 		3'd3: menu_port_type = 8'd6;
 		3'd4: menu_port_type = 8'd2;
+		3'd5: menu_port_type = 8'd10;
+		3'd6: menu_port_type = 8'd9;
 		default: menu_port_type = auto_type;
 	endcase
 endfunction
@@ -546,6 +581,18 @@ generate
 		);
 	end
 endgenerate
+
+// Dual stick (Robotron: 2084 and other twin-stick games), as MiSTer's
+// Robotron mode: one controller drives both ports. Port 1 moves, from the
+// D-pad or left stick; port 2 fires in a direction, from the face buttons in
+// their diamond (X up, B down, Y left, A right) or the right stick.
+wire [15:0] anr_a = swap_joysticks ? analog1r : analog0r;
+wire  [3:0] stick_l, stick_r;
+stick_dirs dual_left  (.clk(clk_sys), .reset(cart_download), .stick(ana_a), .dirs(stick_l));
+stick_dirs dual_right (.clk(clk_sys), .reset(cart_download), .stick(anr_a), .dirs(stick_r));
+wire       dual_stick = (porta_type == 8'd10) || (portb_type == 8'd10);
+wire [3:0] dual_move  = joya[3:0] | stick_l;                                   // U D L R = 3..0
+wire [3:0] dual_fire  = {joya[11], joya[10], joya[12], joya[9]} | stick_r;
 
 // Light-gun crosshair Y, on whichever port has the gun.
 wire       gun_port = (portb_type == 8'd2);             // 0: port 1, 1: port 2
@@ -652,6 +699,8 @@ always @(*) begin
 		8'd2: if (~gun_port) begin pa_in_r[7:4] = {3'b111, gun_trigger}; ilatch[0] = ~gun_sensor; idump[1:0] = 2'b00; end
 		8'd3: begin pa_in_r[7:4] = {~vbutton[0], ~vbutton[1], 2'b11}; idump[1:0] = pad_wire[1:0]; ilatch[0] = 1'b1; end
 		8'd6: begin pa_in_r[7:4] = {2'b11, drive_a}; ilatch[0] = ~vbutton[0]; idump[1:0] = 2'b00; end
+		// Booster Grip: its trigger (B) on INPT1 and booster (X) on INPT0
+		8'd9: idump[1:0] = {joya[10], joya[11]};
 		default: ;
 	endcase
 	case (portb_type)
@@ -659,8 +708,16 @@ always @(*) begin
 		8'd2: if (gun_port) begin pa_in_r[3:0] = {3'b111, gun_trigger}; ilatch[1] = ~gun_sensor; idump[3:2] = 2'b00; end
 		8'd3: begin pa_in_r[3:0] = {~vbutton[2], ~vbutton[3], 2'b11}; idump[3:2] = pad_wire[3:2]; ilatch[1] = 1'b1; end
 		8'd6: begin pa_in_r[3:0] = {2'b11, drive_b}; ilatch[1] = ~vbutton[1]; idump[3:2] = 2'b00; end
+		8'd9: idump[3:2] = {joyb[10], joyb[11]};
 		default: ;
 	endcase
+
+	if (dual_stick) begin
+		pa_in_r = ~{dual_move[0], dual_move[1], dual_move[2], dual_move[3],
+		            dual_fire[0], dual_fire[1], dual_fire[2], dual_fire[3]};
+		ilatch  = 2'b11;
+		idump   = 4'b0000;
+	end
 
 	// In two button mode pin 6 is pulled up strongly and will not lower.
 	if (joya_b2) ilatch[0] = 1'b1;

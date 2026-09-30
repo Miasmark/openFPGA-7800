@@ -125,7 +125,8 @@ Something that fails only on hardware is most likely in one of those.
 | `pokeylog` | Every POKEY write to `pokey_writes.txt` |
 | `i2ctrace`, `i2craw_from/_to=MS` | Decode the SaveKey I2C bus; dump raw lines |
 | `refreshstat` | SDRAM refresh coverage per 64 ms |
-| `port1=N`, `port2=N` | Port Input setting: 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun |
+| `port1=N`, `port2=N` | Port Input setting: 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun, 5 dual stick, 6 Booster Grip |
+| `turbo=N` | Turbo (X/Y): 0 off, 1 fast, 2 medium, 3 slow |
 | `inputtest` | Scripted controller test for `input_test.py`'s image (below) |
 
 `input_test.py` builds a 2600 image that reads the ports every frame the
@@ -160,7 +161,7 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 A setting passes through four places. Keep them in step:
 
 1. `dist/Cores/Miasmark.7800/interact.json`: a new `id`, and an `address` in
-   `0x10000200`–`0x100002FF` (the next free one is `0x100002AC`).
+   `0x10000200`–`0x100002FF` (the next free one is `0x100002B0`).
 2. `core_top.v`: a `set_*` register with the same default as
    `interact.json`, and a `case` entry for the address.
 3. `core_top.v`: widen `set_s1`/`set_s2` (the clk_74a → clk_sys

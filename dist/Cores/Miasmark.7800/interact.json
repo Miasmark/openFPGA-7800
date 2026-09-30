@@ -94,6 +94,14 @@
           {
             "value": 4,
             "name": "Light Gun"
+          },
+          {
+            "value": 5,
+            "name": "Dual Stick"
+          },
+          {
+            "value": 6,
+            "name": "Booster Grip"
           }
         ]
       },
@@ -127,6 +135,43 @@
           {
             "value": 4,
             "name": "Light Gun"
+          },
+          {
+            "value": 5,
+            "name": "Dual Stick"
+          },
+          {
+            "value": 6,
+            "name": "Booster Grip"
+          }
+        ]
+      },
+      {
+        "name": "Turbo (X/Y)",
+        "id": 22,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x100002AC",
+        "defaultval": 0,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Off"
+          },
+          {
+            "value": 1,
+            "name": "Fast"
+          },
+          {
+            "value": 2,
+            "name": "Medium"
+          },
+          {
+            "value": 3,
+            "name": "Slow"
           }
         ]
       },

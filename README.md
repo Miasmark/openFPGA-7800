@@ -79,6 +79,11 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   A78 header picks them for 7800 games; 2600 games have no header, so set
   *Port 1 Input* / *Port 2 Input* for them (Paddles for Breakout, Kaboom!,
   Warlords; Driving for Indy 500).
+- **Dual stick** for Robotron: 2084 and other twin-stick games (MiSTer's
+  Robotron mode), the **2600 Booster Grip** (Omega Race, Thrust+), and
+  **turbo fire** on X and Y. From 2.0.14.
+- The Pocket's **display modes** (CRT and LCD looks, under *Display
+  Mode* in the Pocket's video settings). From 2.0.14.
 - *Show Overscan* shows MARIA's whole NTSC picture: 242 lines instead of
   the 224 most games stay inside. Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
@@ -206,8 +211,8 @@ POKEY as the Pocket build.
 | Pocket | Atari |
 |---|---|
 | D-pad | Joystick |
-| A / Y | Left button (fire 1) |
-| B / X | Right button (fire 2) |
+| A / Y | Left button (fire 1); Y repeats with *Turbo (X/Y)* on |
+| B / X | Right button (fire 2); X repeats with *Turbo (X/Y)* on |
 | L | Pause (7800) / Colour-B&W (2600) |
 | Select | Select |
 | Start | Reset |
@@ -229,6 +234,19 @@ moves a little and a hold crosses the whole range in about half a second
 Docked, a controller's left stick also works: a paddle or the crosshair
 follows the stick's position, and a driving controller turns at a speed set
 by how far the stick is pushed. The next D-pad press takes over again.
+
+*Port 1 Input* (or *Port 2 Input*) also offers:
+
+- **Dual Stick**, for Robotron: 2084: controller 1 drives both joystick
+  ports. The D-pad (or left stick) moves; the face buttons fire in their
+  direction on the diamond (X up, B down, Y left, A right), or, docked, the
+  right stick.
+- **Booster Grip** (2600): A fires, B is the grip's trigger and X its
+  booster button.
+
+*Turbo (X/Y)* makes Y repeat fire 1 and X repeat fire 2 while held, at
+15, 10 or 7.5 presses a second (Fast / Medium / Slow; 12.5, 8.3 and 6.25
+in PAL games). A and B stay single presses.
 
 Paddles come in pairs: the two paddles on port 1 are controllers 1 and 2,
 the two on port 2 are controllers 3 and 4 (docked). A driving controller

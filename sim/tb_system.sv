@@ -44,6 +44,7 @@ module tb_system;
 		.joy0(16'd0), .joy1(16'd0), .joy2(16'd0), .joy3(16'd0),
 		.analog0(16'h8080), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
 		.port1_input(3'd0), .port2_input(3'd0),
+		.analog0r(16'h8080), .analog1r(16'h8080), .turbo(2'd0),
 		.R(R), .G(G), .B(B), .HSync(HSync), .VSync(VSync), .HBlank(HBlank), .VBlank(VBlank),
 		.ce_pix(ce_pix), .tia_mode_o(tia_mode), .is_pal_o(is_pal), .video_pal_o(video_pal),
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),

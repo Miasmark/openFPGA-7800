@@ -377,6 +377,7 @@ localparam [15:0] SLOT_HSCA78 = 16'h0108;
     reg     [4:0]   set_bs        = 5'd0;   // 2600 bankswitching: 0 auto, else forced
     reg     [2:0]   set_port1     = 3'd0;   // 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun
     reg     [2:0]   set_port2     = 3'd0;
+    reg     [1:0]   set_turbo     = 2'd0;   // X / Y turbo: off, fast, medium, slow
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -405,6 +406,7 @@ always @(posedge clk_74a) begin
             12'h2A0: set_bs        <= bridge_wr_data[4:0];
             12'h2A4: set_port1     <= bridge_wr_data[2:0];
             12'h2A8: set_port2     <= bridge_wr_data[2:0];
+            12'h2AC: set_turbo     <= bridge_wr_data[1:0];
             default: ;
         endcase
     end
@@ -703,9 +705,9 @@ end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
 // a two stage synchroniser per bit is enough.
-    reg     [32:0]  set_s1, set_s2;
+    reg     [34:0]  set_s1, set_s2;
 always @(posedge clk_sys) begin
-    set_s1 <= {set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
+    set_s1 <= {set_turbo, set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
                set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
                set_blend, set_pokey_irq, set_savekey, 1'b0};
@@ -755,12 +757,19 @@ always @(posedge clk_sys) begin
     joy3_s2 <= joy3_s1;
 end
 
-// Left analog sticks, {y, x}, unsigned with 128 at rest. They are only
-// ever sampled at the 1 kHz virtual controller tick, so a torn value from
-// crossing clocks mid-change lasts one sample at most.
+// Analog sticks, {y, x}, unsigned with 128 at rest: the left sticks of all
+// four controllers, and the right sticks of the first two (dual stick). A
+// value torn by crossing clocks mid-change lasts one clk_sys cycle, and
+// everything that reads them (a 1 kHz tick, direction thresholds a game
+// polls far more slowly) shrugs that off.
     reg     [15:0]  ana0_s1, ana0_s2, ana1_s1, ana1_s2;
     reg     [15:0]  ana2_s1, ana2_s2, ana3_s1, ana3_s2;
+    reg     [15:0]  anr0_s1, anr0_s2, anr1_s1, anr1_s2;
 always @(posedge clk_sys) begin
+    anr0_s1 <= cont1_joy[31:16];
+    anr1_s1 <= cont2_joy[31:16];
+    anr0_s2 <= anr0_s1;
+    anr1_s2 <= anr1_s1;
     ana0_s1 <= cont1_joy[15:0];
     ana1_s1 <= cont2_joy[15:0];
     ana2_s1 <= cont3_joy[15:0];
@@ -817,6 +826,7 @@ atari7800_pocket atari (
     .bs_override    ( set_s2[26:22] ),
     .port1_input    ( set_s2[29:27] ),
     .port2_input    ( set_s2[32:30] ),
+    .turbo          ( set_s2[34:33] ),
     .pause_core     ( 1'b0 ),
 
     .joy0           ( joy0_s2 ),
@@ -827,6 +837,8 @@ atari7800_pocket atari (
     .analog1        ( ana1_s2 ),
     .analog2        ( ana2_s2 ),
     .analog3        ( ana3_s2 ),
+    .analog0r       ( anr0_s2 ),
+    .analog1r       ( anr1_s2 ),
 
     .R              ( core_r ),
     .G              ( core_g ),

@@ -58,7 +58,7 @@ SRCS=(
 	"$RTL/detect2600.sv" "$RTL/a78_cart_extent.sv" "$PATCHED/RIOT/M6532.sv"
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
-	"$FPGA/core/virtual_axis.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
+	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 )
