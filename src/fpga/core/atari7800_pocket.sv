@@ -591,8 +591,39 @@ wire  [3:0] stick_l, stick_r;
 stick_dirs dual_left  (.clk(clk_sys), .reset(cart_download), .stick(ana_a), .dirs(stick_l));
 stick_dirs dual_right (.clk(clk_sys), .reset(cart_download), .stick(anr_a), .dirs(stick_r));
 wire       dual_stick = (porta_type == 8'd10) || (portb_type == 8'd10);
-wire [3:0] dual_move  = joya[3:0] | stick_l;                                   // U D L R = 3..0
-wire [3:0] dual_fire  = {joya[11], joya[10], joya[12], joya[9]} | stick_r;
+wire [3:0] dual_move_raw = joya[3:0] | stick_l;                                // U D L R = 3..0
+wire [3:0] dual_fire_raw = {joya[11], joya[10], joya[12], joya[9]} | stick_r;
+
+// A joystick can't push up and down (or left and right) at once, but four
+// face buttons can, and so can a stick plus the D-pad. Robotron doesn't
+// expect it: opposite directions together stopped its fire stick and
+// corrupted the screen. Of an opposite pair held together, the one pressed
+// last wins, as on arcade stick encoders.
+reg  [3:0] dual_move_d = 4'd0, dual_fire_d = 4'd0;
+reg  [1:0] move_last = 2'b00, fire_last = 2'b00;   // [0] R/L: 1 = R newer; [1] D/U: 1 = D newer
+always @(posedge clk_sys) begin
+	dual_move_d <= dual_move_raw;
+	dual_fire_d <= dual_fire_raw;
+	if (dual_move_raw[0] & ~dual_move_d[0]) move_last[0] <= 1'b1;
+	if (dual_move_raw[1] & ~dual_move_d[1]) move_last[0] <= 1'b0;
+	if (dual_move_raw[2] & ~dual_move_d[2]) move_last[1] <= 1'b1;
+	if (dual_move_raw[3] & ~dual_move_d[3]) move_last[1] <= 1'b0;
+	if (dual_fire_raw[0] & ~dual_fire_d[0]) fire_last[0] <= 1'b1;
+	if (dual_fire_raw[1] & ~dual_fire_d[1]) fire_last[0] <= 1'b0;
+	if (dual_fire_raw[2] & ~dual_fire_d[2]) fire_last[1] <= 1'b1;
+	if (dual_fire_raw[3] & ~dual_fire_d[3]) fire_last[1] <= 1'b0;
+end
+
+function [3:0] last_wins(input [3:0] d, input [1:0] last);
+	begin
+		last_wins = d;
+		if (d[0] & d[1]) begin last_wins[0] = last[0]; last_wins[1] = ~last[0]; end
+		if (d[2] & d[3]) begin last_wins[2] = last[1]; last_wins[3] = ~last[1]; end
+	end
+endfunction
+
+wire [3:0] dual_move = last_wins(dual_move_raw, move_last);
+wire [3:0] dual_fire = last_wins(dual_fire_raw, fire_last);
 
 // Light-gun crosshair Y, on whichever port has the gun.
 wire       gun_port = (portb_type == 8'd2);             // 0: port 1, 1: port 2

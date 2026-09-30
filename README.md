@@ -246,7 +246,9 @@ by how far the stick is pushed. The next D-pad press takes over again.
 - **Dual Stick**, for Robotron: 2084: controller 1 drives both joystick
   ports. The D-pad (or left stick) moves; the face buttons fire in their
   direction on the diamond (X up, B down, Y left, A right), or, docked, the
-  right stick.
+  right stick. Two diagonal buttons fire diagonally; of two opposite ones
+  (X and B, or Y and A) the one pressed last wins, since a real joystick
+  can't point both ways.
 - **Booster Grip** (2600): A fires, B is the grip's trigger and X its
   booster button.
 

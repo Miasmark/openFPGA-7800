@@ -451,6 +451,13 @@ module tb_load;
 			joy0[9] = 1; joy1[10] = 1; run_ms(60); show("P1 A, P2 B held");
 			joy0 = 0; joy1 = 0; run_ms(60); show("released");
 			joy0[11] = 1; joy0[12] = 1; run_ms(60); show("P1 X, Y held");
+			// Opposites: B (down) then X (up) on top, then all four, in the
+			// order A, Y, B, X: the newest of each pair should win.
+			joy0 = 0; joy0[10] = 1; run_ms(30); joy0[11] = 1; run_ms(60); show("P1 B then X held");
+			joy0 = 0; joy0[9] = 1; run_ms(20); joy0[12] = 1; run_ms(20); joy0[10] = 1; run_ms(20);
+			joy0[11] = 1; run_ms(60); show("P1 A, Y, B, X held (newest: Y, X)");
+			joy0[11] = 0; run_ms(60); show("  ...X released (B again)");
+			joy0 = 0; run_ms(30);
 			fire_last = inres[6][7]; fire_changes = 0; fire_count_on = 1;
 			run_ms(500);
 			fire_count_on = 0; joy0 = 0; run_ms(60);
