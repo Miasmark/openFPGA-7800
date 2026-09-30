@@ -94,7 +94,7 @@ rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 7 > rtl/mem0.hex
 for opt in "+pal" "+overscan" "+overscan +pal"; do
 	echo "  $opt: $(./obj/vtb +audf=7 $opt | grep FRAME | tail -1 | sed 's/^FRAME [0-9]*: //')"
 done
-echo "-- PAL 2600 frame, after region detection (expect 285 lines, video PAL 1):"
+echo "-- PAL 2600 frame, after region detection (expect 288 lines, video PAL 1):"
 rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 14 2600 pal > rtl/mem0.hex
 ./obj/vtb +audf=14 +mode2600 +long | grep FRAME | tail -1
 rm -f rtl/mem0.hex

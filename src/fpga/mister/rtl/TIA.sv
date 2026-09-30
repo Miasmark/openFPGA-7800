@@ -1630,7 +1630,11 @@ module video_stabilize
 			v_count <= v_count + 1'd1;
 			if (v_count == (auto_pal ? pal_vb_end : ntsc_vb_end))
 				vblank_en <= 0;
-			if (v_count == (auto_pal ? pal_vb_start : ntsc_vb_start) || v_count == ((vsync_override ? vsync_line : total_lines) - 4'd4))
+			// Pocket: end the window 1 line before the frame ends, not 4, so a
+			// standard frame (262 / 312 lines) fills the whole 240 / 288 line
+			// window. With 4 it gave 239 / 285: the Pocket's scaler then kept
+			// its last rows from an earlier game, a flickering line at the bottom.
+			if (v_count == (auto_pal ? pal_vb_start : ntsc_vb_start) || v_count == ((vsync_override ? vsync_line : total_lines) - 4'd1))
 				vblank_en <= 1;
 
 			if ((vsync_override && v_count == (vsync_line - 1'd1)) || vsync_set) begin

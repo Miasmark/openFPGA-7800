@@ -108,6 +108,14 @@ could send a PAL 2600 game back to NTSC and into another retune.
 `../core/atari7800_pocket.sv` latches the detected region until the next
 cart load instead.
 
+`TIA.sv`, `video_stabilize`: the stabilised 2600 window ends 1 line before
+the frame's end instead of 4. Upstream's 4 gives a standard 262-line frame
+239 visible lines (285 for a 312-line PAL frame), one (three) short of the
+window, and the Pocket's scaler kept whatever an earlier game left in the
+missing rows: a flickering line at the bottom of every 2600 game after one
+that did fill it (Kaboom!). The extra line is in the game's own vertical
+blank, so it is black.
+
 ## Updating
 
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in
