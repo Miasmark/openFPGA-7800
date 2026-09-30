@@ -257,6 +257,10 @@ by how far the stick is pushed. The next D-pad press takes over again.
 15, 10 or 7.5 presses a second (Fast / Medium / Slow; 12.5, 8.3 and 6.25
 in PAL games). A and B stay single presses.
 
+Some 2600 paddle games read the second paddle of the pair for player 1
+(Demons to Diamonds, for one; Stella keeps a "swap paddles" list for
+them). If a paddle game ignores the D-pad, turn on *Swap Controllers*.
+
 Paddles come in pairs: the two paddles on port 1 are controllers 1 and 2,
 the two on port 2 are controllers 3 and 4 (docked). A driving controller
 or the light gun on port 1 is controller 1, on port 2 controller 2. The
