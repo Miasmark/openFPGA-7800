@@ -62,11 +62,6 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
     50%, or full mono) for Stereo TIA and stereo carts on headphones.
   - *2600 Video*: Flicker Blend, and De-comb, which smooths the comb
     pattern some 2600 games draw by alternating lines between frames.
-  - *2600 Bankswitching*: forces a cartridge mapper when auto-detection
-    picks the wrong one. The 15 most common are offered (F8, F6, F4, FE,
-    E0, E7, 3F, 3E, FA, CV, UA, F0, EF, SB, P2); the rest are
-    auto-detected only. The ARM mappers (DPC+, CDF, BUS) aren't in this
-    build.
   - *Compatibility*: POKEY IRQ (off by default, as on MiSTer; some games
     drive their music from POKEY timer interrupts) and Random RAM (what
     RAM holds at power-on: real hardware starts random, and some homebrew
@@ -246,7 +241,7 @@ Docked, a controller's left stick also works: a paddle or the crosshair
 follows the stick's position, and a driving controller turns at a speed set
 by how far the stick is pushed. The next D-pad press takes over again.
 
-*Port 1 Input* (or *Port 2 Input*) also offers:
+*Port 1 Input* also offers:
 
 - **Dual Stick**, for Robotron: 2084: controller 1 drives both joystick
   ports. The D-pad (or left stick) moves; the face buttons fire in their

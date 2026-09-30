@@ -171,7 +171,14 @@ This bit the port twice: 2.0.12 (18 entries plus 5 reloadable slots)
 showed only the first 12 entries (to Stereo TIA), and 2.0.14 (21 entries)
 failed to load. From 2.0.16 only the cartridge slot is reloadable; the BIOS
 and firmware slots (fixed filenames, loaded at start) are 0x88, not 0x89.
-The menu is at 16 entries, 17 rows with the cartridge. A new setting has to share an entry: a
+
+One more limit, found on hardware and not in the docs: the **total number
+of list options** across the menu. 2.0.12's menu (51 options) loads;
+2.0.16's (16 entries, 69 options) failed with "Load error in 'interact'",
+although each half of it loaded on its own (28 and 41 options). 2.0.17 has
+15 entries and 49 options. Stay at or under 51 until a larger count is
+proven on hardware. The 2600 bankswitch override (address `0x2A0`, still
+decoded by the core) was dropped from the menu to fit. A new setting has to share an entry: a
 list whose value sets several `set_*` registers at once (see the combined
 addresses `0x2B0`-`0x2C0` in `core_top.v`). Give a changed entry a new
 `id`, so a value the Pocket saved for the old one isn't applied to it.

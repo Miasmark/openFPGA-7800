@@ -122,14 +122,6 @@
           {
             "value": 4,
             "name": "Light Gun"
-          },
-          {
-            "value": 5,
-            "name": "Dual Stick"
-          },
-          {
-            "value": 6,
-            "name": "Booster Grip"
           }
         ]
       },
@@ -331,14 +323,6 @@
             "name": "Stereo, 50% Blend"
           },
           {
-            "value": 1,
-            "name": "Mono TIA, 25% Blend"
-          },
-          {
-            "value": 2,
-            "name": "Mono TIA, 50% Blend"
-          },
-          {
             "value": 3,
             "name": "Full Mono"
           }
@@ -370,83 +354,6 @@
           {
             "value": 3,
             "name": "Blend + De-comb"
-          }
-        ]
-      },
-      {
-        "name": "2600 Bankswitching",
-        "id": 28,
-        "type": "list",
-        "enabled": true,
-        "persist": true,
-        "writeonly": true,
-        "address": "0x100002A0",
-        "defaultval": 0,
-        "mask": "0xFFFFFFE0",
-        "options": [
-          {
-            "value": 0,
-            "name": "Auto"
-          },
-          {
-            "value": 1,
-            "name": "F8"
-          },
-          {
-            "value": 2,
-            "name": "F6"
-          },
-          {
-            "value": 6,
-            "name": "F4"
-          },
-          {
-            "value": 3,
-            "name": "FE"
-          },
-          {
-            "value": 4,
-            "name": "E0"
-          },
-          {
-            "value": 12,
-            "name": "E7"
-          },
-          {
-            "value": 5,
-            "name": "3F"
-          },
-          {
-            "value": 16,
-            "name": "3E"
-          },
-          {
-            "value": 8,
-            "name": "FA"
-          },
-          {
-            "value": 9,
-            "name": "CV"
-          },
-          {
-            "value": 11,
-            "name": "UA"
-          },
-          {
-            "value": 13,
-            "name": "F0"
-          },
-          {
-            "value": 19,
-            "name": "EF"
-          },
-          {
-            "value": 17,
-            "name": "SB"
-          },
-          {
-            "value": 7,
-            "name": "P2"
           }
         ]
       },
