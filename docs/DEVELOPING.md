@@ -325,8 +325,8 @@ The Cyclone V 5CEBA4 has 18,480 ALMs and **308 M10K blocks**. Block count,
 not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 *bits* because every memory rounds up to whole blocks.
 
-Current use (2.0.9) is 63% ALMs, 73% RAM bits, and close to the M10K block
-limit. A 16 KiB diagnostic RAM did not fit, and neither did an 8 KiB one.
+Current use (2.0.13) is 75% ALMs (63% in 2.0.9; the four paddle timers
+are most of the difference), 73% RAM bits, and all 308 M10K blocks. A 16 KiB diagnostic RAM did not fit, and neither did an 8 KiB one.
 Before adding memory, check the M10K count in `ap_core.fit.summary`.
 Upstream memories that the Pocket build instantiates but can't use (ARM
 mapper tables, CDF jump table) are candidates to remove behind a macro if

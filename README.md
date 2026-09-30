@@ -137,13 +137,18 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
 | Display geometry | Active lines per frame match the display mode: NTSC 224, overscan 242, PAL 274 (overscan setting ignored), 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
+| Paddles (virtual) | A 2600 test program timing INPT0-3 after the pot dump: all four paddles respond, the D-pad reaches both ends (lines 1 and 191 of 192), X and Y change the speed, A/B press the buttons, and a stick moved on controller 1 takes over (Paddles on both ports) |
+| Driving controller (virtual) | SWCHA bits 5:4 step 3, 1, 0, 2 turning right and the reverse turning left; A reads on INPT4 |
+| Light gun (virtual) | The latched INPT4 goes low on the crosshair's line (104 of 192 centred); off the top of the picture gives no hit; the trigger reads on SWCHA bit 4, with MiSTer's polarity |
+| Virtual controller axis | a 16 ms tap moves 1 step of 256; holding crosses the range in 0.5 s (0.26 s with Y); the driving code steps at most every 25 ms (D-pad) or 32 ms (stick) |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.11) meets timing on all four corners (worst slack
-+0.097 ns, a hold path). The PLL produces the NTSC and PAL master clocks
+The Quartus build (2.0.13) meets timing on all four corners (worst slack
++0.090 ns). It uses 75% of the ALMs (64% before the virtual controllers,
+mostly the four paddle timers) and all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
 ### Hardware testing (2.0.2 to 2.0.11, Analogue Pocket)
