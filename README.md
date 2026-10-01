@@ -84,7 +84,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   Robotron mode), the **2600 Booster Grip** (Omega Race, Thrust+), and
   **turbo fire** on X and Y. From 2.0.14.
 - The Pocket's **display modes** (CRT and LCD looks, under *Display
-  Mode* in the Pocket's video settings). From 2.0.14.
+  Mode* in the Pocket's video settings). From 2.0.14. The grayscale LCD
+  look suits 2600 games played in B&W mode (L toggles it).
 - *Overscan* (in *Picture*) shows MARIA's whole NTSC picture: 242 lines instead of
   the 224 most games stay inside. Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
@@ -185,6 +186,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Light gun (Sentinel) | Works from 2.0.18. Its header asks for a gun on both ports, and before 2.0.18 the gun went to port 2 (controller 2), so the cursor never moved |
 | Dual Stick (Robotron: 2084) | Works from 2.0.18. In 2.0.17, three face buttons at once (an opposite pair) stopped the fire stick and corrupted the screen |
 | Booster Grip | Works (2.0.14+) |
+| Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 
 ### Changes to the MiSTer sources
