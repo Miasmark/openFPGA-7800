@@ -479,10 +479,12 @@ module tb_load;
 			joy0[11] = 1; run_ms(60); show("P1 A, Y, B, X held (newest: Y, X)");
 			joy0[11] = 0; run_ms(60); show("  ...X released (B again)");
 			joy0 = 0; run_ms(30);
+			// Turbo: X repeats fire 1 (A's) while held.
+			joy0[11] = 1;
 			fire_last = inres[6][7]; fire_changes = 0; fire_count_on = 1;
 			run_ms(500);
 			fire_count_on = 0; joy0 = 0; run_ms(60);
-			$display("INPUT Y held 500 ms (turbo %0d): fire 1 changed %0d times", turbo, fire_changes);
+			$display("INPUT X held 500 ms (turbo %0d): fire 1 changed %0d times", turbo, fire_changes);
 			// Analog stick on controller 1: push it right, then leave it.
 			ana0[7:0] = 8'd224; run_ms(200); show("P1 stick right (x=224)");
 			ana0[7:0] = 8'd128; run_ms(200); show("P1 stick centred");

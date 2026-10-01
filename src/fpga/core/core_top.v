@@ -753,8 +753,10 @@ function [15:0] map_joy;
         map_joy[1] = k[2];              // left
         map_joy[2] = k[1];              // down
         map_joy[3] = k[0];              // up
-        map_joy[4] = k[4] | k[7];       // A / Y: left button (fire 1)
-        map_joy[5] = k[5] | k[6];       // B / X: right button (fire 2)
+        // X and Y repeat their neighbours on the diamond: X (top) is a
+        // second A (right), Y (left) a second B (bottom).
+        map_joy[4] = k[4] | k[6];       // A / X: left button (fire 1)
+        map_joy[5] = k[5] | k[7];       // B / Y: right button (fire 2)
         map_joy[6] = k[8];              // L: pause (7800) / colour-B&W (2600)
         map_joy[7] = k[14];             // select
         map_joy[8] = k[15];             // start -> reset switch

@@ -443,7 +443,8 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
-// Turbo: Y repeats fire 1 and X fire 2 (A and B stay plain), switching
+// Turbo: X repeats fire 1 (as A does) and Y fire 2 (as B does), the
+// button next to each on the Pocket's diamond; A and B stay plain. Switching
 // every 2, 3 or 4 frames: 15, 10 or 7.5 presses a second at 60 Hz. Counted
 // in frames so each press and release lasts whole frames, which games that
 // read the buttons once a frame need.
@@ -462,12 +463,12 @@ always @(posedge clk_sys) begin
 end
 wire turbo_gate = (turbo == 2'd0) | turbo_on;
 
-// joy bits: 4 fire 1 (A or Y), 5 fire 2 (B or X), 9 A, 10 B, 11 X, 12 Y
+// joy bits: 4 fire 1 (A or X), 5 fire 2 (B or Y), 9 A, 10 B, 11 X, 12 Y
 function [15:0] with_turbo(input [15:0] j, input gate);
 	begin
 		with_turbo    = j;
-		with_turbo[4] = j[9]  | (j[12] & gate);
-		with_turbo[5] = j[10] | (j[11] & gate);
+		with_turbo[4] = j[9]  | (j[11] & gate);
+		with_turbo[5] = j[10] | (j[12] & gate);
 	end
 endfunction
 

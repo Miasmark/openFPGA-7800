@@ -226,8 +226,8 @@ POKEY as the Pocket build.
 | Pocket | Atari |
 |---|---|
 | D-pad | Joystick |
-| A / Y | Left button (fire 1); Y repeats with *Turbo (X/Y)* on |
-| B / X | Right button (fire 2); X repeats with *Turbo (X/Y)* on |
+| A / X | Left button (fire 1); X repeats with *Turbo (X/Y)* on |
+| B / Y | Right button (fire 2); Y repeats with *Turbo (X/Y)* on |
 | L | Pause (7800) / Colour-B&W (2600) |
 | Select | Select |
 | Start | Reset |
@@ -261,7 +261,8 @@ by how far the stick is pushed. The next D-pad press takes over again.
 - **Booster Grip** (2600): A fires, B is the grip's trigger and X its
   booster button.
 
-*Turbo (X/Y)* makes Y repeat fire 1 and X repeat fire 2 while held, at
+*Turbo (X/Y)* makes X repeat A's fire 1 and Y repeat B's fire 2 while held
+(each sits next to the button it copies on the diamond), at
 15, 10 or 7.5 presses a second (Fast / Medium / Slow; 12.5, 8.3 and 6.25
 in PAL games). A and B stay single presses.
 
