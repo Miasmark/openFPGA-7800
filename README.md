@@ -164,7 +164,7 @@ core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of 
 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.0.11, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.0.19, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -179,6 +179,13 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Supercharger BIOS file | New in 2.0.7; not tested on hardware |
 | PAL games (Choplifter, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). 2.0.10: whole screen shown; colours match comparison screenshots |
 | Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. 2.0.10: fixed for NTSC (242-line modes); Triple Punch's bonus timer shows in full. PAL with it on was still cut off, because a 9th and 10th display mode are more than the Pocket accepts. 2.0.11: PAL ignores the setting (274 lines already show everything); confirmed on hardware |
+| Settings menu | 2.0.12 showed only its first 12 entries; 2.0.14 to 2.0.16 refused to load ("Load error in 'interact'"). 2.0.17 loads, all 15 entries shown: 16 entries at most, and the whole menu kept to 49 list options (see docs/DEVELOPING.md) |
+| Paddles (Kaboom!, Demons to Diamonds) | Work (2.0.13+). Demons to Diamonds reads the second paddle for player 1: needs *Swap Controllers* |
+| Driving controller (Indy 500) | Works (2.0.13+) |
+| Light gun (Sentinel) | Works from 2.0.18. Its header asks for a gun on both ports, and before 2.0.18 the gun went to port 2 (controller 2), so the cursor never moved |
+| Dual Stick (Robotron: 2084) | Works from 2.0.18. In 2.0.17, three face buttons at once (an opposite pair) stopped the fire stick and corrupted the screen |
+| Booster Grip | Works (2.0.14+) |
+| 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 
 ### Changes to the MiSTer sources
 
