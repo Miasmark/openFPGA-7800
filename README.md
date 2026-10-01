@@ -156,8 +156,9 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.19) meets timing on all four corners: worst setup
-slack +3.49 ns, worst hold slack +0.06 ns.
+The Quartus build (2.0.20) meets timing on all four corners: worst setup
+slack +2.03 ns, worst hold slack +0.11 ns (setup slack moves by a
+nanosecond or so between builds with placement).
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
 core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of the ALMs
