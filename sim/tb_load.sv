@@ -139,6 +139,18 @@ module tb_load;
 		end
 	end
 
+`ifdef POKEY_SHADOW
+	// ---------------- POKEY shadow (run_pokey_shadow.sh) ----------------
+	// The AUD node of the Watson POKEY the core plays and of upstream's new
+	// POKEY shadowing it, sampled together at the WAV rate.
+	int pk_w = 0, pk_n = 0;
+	always @(posedge clk_sys) if (recording && rec_div == 0) begin
+		if (pk_w == 0) begin pk_w = $fopen("pokey_watson.pcm", "wb"); pk_n = $fopen("pokey_new.pcm", "wb"); end
+		$fwrite(pk_w, "%c%c", dut.main.cart.pokey_aud[7:0], dut.main.cart.pokey_aud[15:8]);
+		$fwrite(pk_n, "%c%c", dut.main.cart.shadow_aud[7:0], dut.main.cart.shadow_aud[15:8]);
+	end
+`endif
+
 	// ---------------- bus probe for dli_pokey_test ----------------
 	// NMI count (DLIs), and writes to $41 (the test cart's main loop counter)
 	// and $4000 (POKEY AUDF1, the siren sweep).
