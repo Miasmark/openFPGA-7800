@@ -49,8 +49,8 @@ PATCHED="$WORK/patched"
 [ -f "$WORK/pokey_watson.v" ] || { echo "run sim/run_sim.sh first"; exit 1; }
 eval "$(sed -n '/^SRCS=(/,/^)/p' "$HERE/run_sim.sh" | sed "s#\"\$RTL/cart.sv\"#\"$SH/cart.sv\"#")"
 SRCS+=("$SH/pokey_adapter_new.sv" $(ls "$RTL"/Pokey/*.sv | grep -v pokey_adapter.sv))
-"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
+"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 ${VTHREADS:+--threads $VTHREADS} -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
 	-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ -DPOKEY_SHADOW \
-	--top-module tb_load -Mdir "$WORK/obj_shadow" -o vtb "${SRCS[@]}" "$HERE/tb_load.sv" > "$WORK/obj_shadow.log" 2>&1 \
+	--top-module tb_load -Mdir "$WORK/obj_shadow${VTHREADS:+_mt}" -o vtb "${SRCS[@]}" "$HERE/tb_load.sv" > "$WORK/obj_shadow.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_shadow.log"; exit 1; }
 echo "built $WORK/obj_shadow/vtb"

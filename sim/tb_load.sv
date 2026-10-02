@@ -447,7 +447,10 @@ module tb_load;
 		mismatches = 0;
 		if (dut.cart_is_7800) begin
 			for (int i = 128; i < image.size(); i++)
-				if (dut.sdram.mem[i - 128] !== image[i]) mismatches++;
+				if (dut.sdram.mem[i - 128] !== image[i]) begin
+					if (mismatches < 4) $display("  payload byte %0d: SDRAM %02x, image %02x", i - 128, dut.sdram.mem[i - 128], image[i]);
+					mismatches++;
+				end
 		end else begin
 			for (int i = 0; i < image.size(); i++)
 				if (dut.sdram.mem[i] !== image[i]) mismatches++;
@@ -594,7 +597,7 @@ module tb_load;
 					capture = 1;
 				end
 			join_none
-			repeat (longint'(14318) * wav_ms) @(posedge clk_sys);
+			for (int ms_i = 0; ms_i < wav_ms; ms_i++) repeat (14318) @(posedge clk_sys);   // by ms: a long run's cycle count overflows repeat
 			recording = 0;
 			$fclose(wav_raw); $fclose(wav_filt);
 			$display("WAV recorded %0d ms", wav_ms);
