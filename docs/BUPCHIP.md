@@ -181,6 +181,47 @@ working; 960 distinct instruction addresses ran):
 For scale, MiSTer's ARM core alone is about 16,200 LUTs. The Pocket build has
 about 4,200 ALMs free.
 
+### Memory options
+
+The memories below are the ones `core_top.v` has ports for. Check the speed
+grades against Analogue's hardware documentation before designing to them.
+
+| Memory | Size and width | Behaviour | Use for the BupChip |
+|---|---|---|---|
+| FPGA block RAM | 308 × M10K | One clock, any width | Ideal, but full in this build |
+| SRAM (`sram_*`) | 256 KB, 16-bit, asynchronous | Same access time for any address; no refresh or row opening. Unused by this core. | **Firmware and working RAM** |
+| SDRAM (`dram_*`) | 64 MB, 16-bit | Fast bursts; each new row and each refresh costs several clocks. Holds the cartridge, read by the 7800 through Sorgelig's controller at `clk_sdram`. | Poor for fetches without a cache; possible for assets |
+| PSRAM (`cram0_*`, `cram1_*`) | 2 × 16 MB, 16-bit, address/data multiplexed (`cram*_a[21:16]` plus `dq`) | Slow random reads; burst mode suits sequential reads only. Unused by this core. | **Asset block** |
+
+- **The firmware and working RAM belong in the SRAM.** Fetches and stack
+  accesses are random. The SRAM's access time does not depend on the address,
+  and nothing else shares it.
+- **The SRAM is 16 bits wide, so a 32-bit word takes two reads.** At a 25–30
+  MHz CPU clock (33–40 ns), the SRAM side can run at twice the CPU clock and
+  deliver one 32-bit word per CPU clock. That is tight once the FPGA's pin
+  delays are counted, so confirm it in a timing build. An instruction cache
+  or prefetch buffer gives extra slack. 24 KB of the 256 KB is used.
+- **The asset block belongs in the PSRAM.** It is 212 KiB, written once while
+  the cartridge loads, and read through a small cache like
+  `bupchip_asset_ddr.sv`. The measurements above show asset latency barely
+  matters, and putting the block here keeps the BupChip off the SDRAM the
+  7800 reads its cartridge from.
+- **The SDRAM is the fallback.** The cartridge leaves most of its bandwidth
+  free, but fetches would compete with the 7800's reads and stall on every row
+  change. It is workable behind an instruction cache, but more work and more
+  risk.
+- **The PCM buffer** can be small, because nothing stalls for long on the
+  Pocket. A few hundred frames could go in the SRAM, or in a few block RAMs if
+  any are freed.
+
+Suggested layout:
+
+| Memory | Contents |
+|---|---|
+| SRAM | Firmware (7.8 KB), working RAM (16 KiB), optionally the PCM buffer |
+| PSRAM | ARSC asset block (212 KiB), behind a small cache |
+| SDRAM | The cartridge, unchanged |
+
 ## Reproducing
 
 ```sh
