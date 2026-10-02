@@ -93,9 +93,17 @@ module sdram (
 	end
 	reg old_rd = 0, old_wr = 0;
 	reg [2:0] cnt = 0;
+	// Requests are edges, remembered while busy exactly as the real
+	// controller (rtl/sdram.sv) does: old_* only follows a request once it
+	// is accepted, so a strobe that rises during a cycle and is still high
+	// when the cycle ends is taken then, not dropped.
 	always @(posedge clk) begin
-		old_rd <= ch0_rd;
-		old_wr <= ch0_wr;
+		old_rd <= old_rd & ch0_rd;
+		old_wr <= old_wr & ch0_wr;
+		if (cnt == 0 && ((~old_wr & ch0_wr) | (~old_rd & ch0_rd))) begin
+			old_rd <= ch0_rd;
+			old_wr <= ch0_wr;
+		end
 		if (cnt != 0) begin
 			cnt <= cnt - 1'b1;
 			if (cnt == 1) ch0_busy <= 1'b0;

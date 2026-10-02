@@ -10,8 +10,14 @@
 module tb_load;
 	localparam real T_SYS = 69.8413;
 	logic clk_sdram = 1'b1, clk_sys = 1'b1, clk_74a = 1'b0;
-	always #(T_SYS / 8.0) clk_sdram = ~clk_sdram;
-	always #(T_SYS / 2.0) clk_sys = ~clk_sys;
+	// Both clocks step from one rounded half period, so clk_sys is exactly
+	// 4 x clk_sdram as the PLL makes it. T_SYS / 8 and T_SYS / 2 round to
+	// different picoseconds (8.730 vs 34.921 ns); the clocks then drifted,
+	// and now and then the clk_sys register missed one of the loader's
+	// four-clk_sdram strobes and dropped a cartridge byte.
+	localparam real T_HALF_SDRAM = 8.730;
+	always #(T_HALF_SDRAM) clk_sdram = ~clk_sdram;
+	always #(4 * T_HALF_SDRAM) clk_sys = ~clk_sys;
 	always #6.734 clk_74a = ~clk_74a;
 
 	logic reset_in = 1'b1;
