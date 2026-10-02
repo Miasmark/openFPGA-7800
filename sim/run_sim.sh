@@ -58,14 +58,22 @@ SRCS=(
 	"$RTL/detect2600.sv" "$RTL/a78_cart_extent.sv" "$PATCHED/RIOT/M6532.sv"
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
-	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
+	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 )
 
+# SRAM=1 builds the POCKET_SRAM variant (cartridge RAM, Flicker Blend frame,
+# SaveKey and BIOS in the Pocket's SRAM; no memory editor), as the qsf does
+# when it defines the same macros.
+SRAM_DEFS=""
+# KEEP_NOCART_ROM keeps the built-in cartridge image tb_system runs from.
+[ "${SRAM:-0}" = 1 ] && SRAM_DEFS="-DPOCKET_SRAM -DEXTERNAL_CARTRAM -DNO_MEM_EDITOR -DKEEP_NOCART_ROM"
+
 build() {   # build <top> <objdir>
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
 		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
+		$SRAM_DEFS \
 		--top-module "$1" -Mdir "$WORK/$2" -o vtb "${SRCS[@]}" "$HERE/$1.sv" > "$WORK/$2.log" 2>&1 \
 		|| { grep -m20 "%Error" "$WORK/$2.log"; exit 1; }
 }

@@ -20,6 +20,19 @@ module Atari7800 #(
 	input  logic        bupchip_force_valid,
 	input  logic  [7:0] bupchip_force_data,
 `endif
+`ifdef POCKET_SRAM
+	// Pocket: the BIOS and the Flicker Blend frame live in the Pocket's SRAM
+	// (core/sram_ctrl.sv), as does the cartridge RAM (EXTERNAL_CARTRAM).
+	// mclk1 is the SRAM's slot reference; bios_sel says a cartridge-space
+	// read is the BIOS. See POCKET_CHANGES.md.
+	output logic        mclk1_out,
+	output logic        bios_sel_out,
+	output logic [15:0] fb_addr,
+	output logic        fb_we,
+	output logic  [7:0] fb_wdata,
+	output logic        fb_active,
+	input  logic  [7:0] fb_q,
+`endif
 `ifdef EXTERNAL_FIRMWARE
 	// Pocket: the HSC and Supercharger firmware are loaded at run time from
 	// user-supplied files instead of being built in (see POCKET_CHANGES.md).
@@ -330,6 +343,10 @@ module Atari7800 #(
 
 	wire cs_cart = ~|{cs_ram0, cs_ram1, cs_tia, cs_riot, cs_maria};
 	wire bios_sel = ~bios_en_b && AB[15];
+`ifdef POCKET_SRAM
+	assign bios_sel_out = bios_sel;
+	assign mclk1_out = mclk1;
+`endif
 
 	// A selected chip drives only the lines its own oe mask marks - the TIA has
 	// no drivers at all on D5:D0 - and the bus keeps its charge on the rest.
@@ -581,6 +598,13 @@ module Atari7800 #(
 		.green          (GREEN),
 		.blue           (BLUE),
 		.pix_ce         (ce_pix),
+`ifdef POCKET_SRAM
+		.fb_addr        (fb_addr),
+		.fb_we          (fb_we),
+		.fb_wdata       (fb_wdata),
+		.fb_active      (fb_active),
+		.fb_q           (fb_q),
+`endif
 		.blend          (blend)
 	);
 

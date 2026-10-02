@@ -117,7 +117,7 @@ output  wire            dram_cas_n,
 output  wire            dram_we_n,
 
 ///////////////////////////////////////////////////
-// sram, 1mbit 16bit
+// sram, AS6C2016-55: 2 Mbit as 128K x 16, 55 ns
 
 output  wire    [16:0]  sram_a,
 inout   wire    [15:0]  sram_dq,
@@ -289,12 +289,7 @@ assign cram1_ub_n = 1;
 assign cram1_lb_n = 1;
 
 
-assign sram_a = 'h0;
-assign sram_dq = {16{1'bZ}};
-assign sram_oe_n  = 1;
-assign sram_we_n  = 1;
-assign sram_ub_n  = 1;
-assign sram_lb_n  = 1;
+// The SRAM is driven by atari7800_pocket (sram_ctrl in POCKET_SRAM builds).
 
 assign dbg_tx = 1'bZ;
 assign user1 = 1'bZ;
@@ -902,7 +897,14 @@ atari7800_pocket atari (
     .SDRAM_nRAS     ( dram_ras_n ),
     .SDRAM_nCAS     ( dram_cas_n ),
     .SDRAM_CLK      ( dram_clk ),
-    .SDRAM_CKE      ( dram_cke )
+    .SDRAM_CKE      ( dram_cke ),
+
+    .SRAM_A         ( sram_a ),
+    .SRAM_DQ        ( sram_dq ),
+    .SRAM_OE_N      ( sram_oe_n ),
+    .SRAM_WE_N      ( sram_we_n ),
+    .SRAM_UB_N      ( sram_ub_n ),
+    .SRAM_LB_N      ( sram_lb_n )
 );
 
 // MiSTer's SDRAM module routes DQM through A12/A11; the Pocket has real pins.

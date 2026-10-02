@@ -145,3 +145,22 @@ module dcfifo #(
 	always @(posedge rdclk) if (rdreq && fifo.size() > 0) q <= fifo.pop_front();
 	assign rdempty = fifo.size() == 0;
 endmodule
+
+// The Pocket's AS6C2016-55 SRAM (128K x 16), as the controller sees it:
+// reads answer while OE is low and WE high, writes land as WE rises. Access
+// time is not modelled; sram_ctrl samples five clk_sdram (87 ns) after it
+// sets the address. Power-up contents are pseudo-random, as on hardware.
+module sram_model (
+	input  wire [16:0] a,
+	inout  wire [15:0] dq,
+	input  wire        oe_n, we_n, ub_n, lb_n
+);
+	reg [15:0] mem [0:131071];
+	integer seed = 7800;
+	initial for (int i = 0; i < 131072; i++) mem[i] = 16'($random(seed));
+	assign dq = (!oe_n && we_n) ? mem[a] : 16'hZZZZ;
+	always @(posedge we_n) begin
+		if (!lb_n) mem[a][7:0] <= dq[7:0];
+		if (!ub_n) mem[a][15:8] <= dq[15:8];
+	end
+endmodule

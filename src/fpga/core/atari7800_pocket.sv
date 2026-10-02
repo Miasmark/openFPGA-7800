@@ -112,7 +112,16 @@ module atari7800_pocket
 	output wire        SDRAM_nRAS,
 	output wire        SDRAM_nCAS,
 	output wire        SDRAM_CLK,
-	output wire        SDRAM_CKE
+	output wire        SDRAM_CKE,
+
+	// SRAM (AS6C2016-55, 128K x 16): cartridge RAM, Flicker Blend frame,
+	// SaveKey and BIOS in POCKET_SRAM builds, idle otherwise
+	output wire [16:0] SRAM_A,
+	inout  wire [15:0] SRAM_DQ,
+	output wire        SRAM_OE_N,
+	output wire        SRAM_WE_N,
+	output wire        SRAM_UB_N,
+	output wire        SRAM_LB_N
 );
 
 //////////////////////////////  RESET  ////////////////////////////////////
@@ -293,7 +302,19 @@ wire  [7:0] din;
 wire [24:0] cart_write_addr = (ioctl_addr >= 25'd128) && cart_is_7800 ?
 	(ioctl_addr - 25'd128) : ioctl_addr;
 
-// The "no cartridge" image MiSTer boots into when nothing is loaded.
+// The "no cartridge" image MiSTer boots into when nothing is loaded. The
+// Pocket's cartridge slot is required, so the core never runs without a
+// cartridge and the image is never seen: POCKET_SRAM builds leave it out
+// (16 block RAMs). sim/tb_system runs its test programs from this image, so
+// the simulation keeps it (KEEP_NOCART_ROM).
+`ifdef POCKET_SRAM
+`ifndef KEEP_NOCART_ROM
+`define NO_NOCART_ROM
+`endif
+`endif
+`ifdef NO_NOCART_ROM
+assign cart_data_rom = 8'hFF;
+`else
 spram #(
 	.addr_width(14),
 	.mem_name("Cart"),
@@ -308,8 +329,11 @@ spram #(
 	.cs      (1'b1),
 	.q       (cart_data_rom)
 );
+`endif
 
 // The 7800 BIOS is 4 KiB (NTSC) or 16 KiB (PAL); the mask mirrors it.
+// POCKET_SRAM builds keep it in the SRAM (sram_ctrl, below).
+`ifndef POCKET_SRAM
 spram #(.addr_width(14), .mem_name("BIOS")) bios
 (
 	.address (bios_download ? ioctl_addr[13:0] : (bios_addr[13:0] & bios_mask[13:0])),
@@ -319,6 +343,7 @@ spram #(.addr_width(14), .mem_name("BIOS")) bios
 	.cs      (1'b1),
 	.q       (bios_data)
 );
+`endif
 
 sdram sdram
 (
@@ -403,7 +428,7 @@ wire  [7:0] PAout;
 wire        sk_sda;
 wire  [7:0] sk_ram_q, sk_ram_d;
 wire [14:0] sk_ram_addr;
-wire        sk_ram_wr;
+wire        sk_ram_wr, sk_ram_rd, sk_ram_done;
 
 EEPROM_24LC0X #(
 	.ADDR_WIDTH (15),
@@ -420,11 +445,27 @@ EEPROM_24LC0X #(
 	.data_from_ram  (sk_ram_q),
 	.data_to_ram    (sk_ram_d),
 	.ram_addr       (sk_ram_addr),
-	.ram_read       (),
+	.ram_read       (sk_ram_rd),
 	.ram_write      (sk_ram_wr),
-	.ram_done       (1'b1)
+	.ram_done       (sk_ram_done)
 );
 
+`ifdef POCKET_SRAM
+// The SaveKey image lives in the SRAM. The EEPROM model holds ram_read or
+// ram_write until ram_done; one toggle asks sram_ctrl, its toggle answers.
+reg  sk_req = 1'b0, sk_pend = 1'b0;
+wire sk_ack;
+assign sk_ram_done = sk_pend && (sk_ack == sk_req);
+always @(posedge clk_sys) begin
+	if (sk_ram_done)
+		sk_pend <= 1'b0;
+	else if ((sk_ram_rd | sk_ram_wr) && !sk_pend) begin
+		sk_pend <= 1'b1;
+		sk_req <= ~sk_req;
+	end
+end
+`else
+assign sk_ram_done = 1'b1;
 save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 (
 	.clk_a  (clk_sys),
@@ -440,6 +481,7 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 	.rd_b   (sk_bridge_rd),
 	.dout_b (sk_bridge_dout)
 );
+`endif
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
@@ -799,6 +841,15 @@ wire [7:0] core_r, core_g, core_b;
 // cartridge itself, the way the console does.
 wire use_bios = bios_loaded & ~skip_bios;
 
+// SRAM side of the system module (POCKET_SRAM)
+wire [17:0] cartram_addr;
+wire        cartram_wr, cartram_rd;
+wire  [7:0] cartram_wrdata, sram_c_rdata;
+wire        mclk1, bios_sel;
+wire [15:0] fb_addr;
+wire        fb_we, fb_active;
+wire  [7:0] fb_wdata, fb_q;
+
 Atari7800 main
 (
 	// HSC firmware and Supercharger BIOS: built without them
@@ -866,12 +917,28 @@ Atari7800 main
 	.cart_xm      (cart_is_7800 ? cart_xm : 8'h0),
 	.ps2_key      (11'd0),
 
+`ifdef POCKET_SRAM
+	// Cartridge RAM lives in the SRAM (EXTERNAL_CARTRAM)
+	.cartram_addr   (cartram_addr),
+	.cartram_wr     (cartram_wr),
+	.cartram_rd     (cartram_rd),
+	.cartram_wrdata (cartram_wrdata),
+	.cartram_data   (sram_c_rdata),
+	.mclk1_out      (mclk1),
+	.bios_sel_out   (bios_sel),
+	.fb_addr        (fb_addr),
+	.fb_we          (fb_we),
+	.fb_wdata       (fb_wdata),
+	.fb_active      (fb_active),
+	.fb_q           (fb_q),
+`else
 	// Cartridge RAM lives inside top.sv (cart_ram_tdp)
 	.cartram_addr   (),
 	.cartram_wr     (),
 	.cartram_rd     (),
 	.cartram_wrdata (),
 	.cartram_data   (8'hFF),
+`endif
 
 	// ARM mapper / BupChip / DDR3 - compiled out for the Pocket
 	.clk_arm          (clk_sys),
@@ -953,6 +1020,68 @@ Atari7800 main
 	.blend        (flicker_blend),
 	.i_read       (i_read)
 );
+
+`ifdef POCKET_SRAM
+// The BIOS answers MARIA's bus strobe like the cartridge RAM does: the SRAM
+// serves it in the slot that starts there, and the bus takes the byte two
+// clk_sys later, as it does from SDRAM.
+wire bios_rd = mclk1 & bios_sel & RW;
+
+sram_ctrl sram
+(
+	.clk          (clk_sdram),
+	.sys_reset    (reset),
+	.game_running (~reset & cart_loaded),
+	.tia_mode     (tia_en),
+	.mclk1        (mclk1),
+
+	.c_rd         (cartram_rd | bios_rd),
+	.c_wr         (cartram_wr),
+	.c_bios       (bios_rd),
+	.c_addr       (bios_rd ? {3'd0, bios_addr[13:0] & bios_mask[13:0]} : cartram_addr[16:0]),
+	.c_wdata      (cartram_wrdata),
+	.c_rdata      (sram_c_rdata),
+
+	.fb_en        (fb_active),
+	.fb_addr      (fb_addr),
+	.fb_we        (fb_we),
+	.fb_wdata     (fb_wdata),
+	.fb_q         (fb_q),
+
+	.sk_req       (sk_req),
+	.sk_we        (sk_ram_wr),
+	.sk_addr      (sk_ram_addr),
+	.sk_wdata     (sk_ram_d),
+	.sk_ack       (sk_ack),
+	.sk_rdata     (sk_ram_q),
+
+	.dl_wr        (ioctl_wr & bios_download),
+	.dl_addr      (ioctl_addr[13:0]),
+	.dl_data      (ioctl_dout),
+
+	.clk_74a      (clk_74a),
+	.br_wr        (sk_bridge_wr),
+	.br_rd        (sk_bridge_rd),
+	.br_addr      (sk_bridge_addr),
+	.br_wdata     (sk_bridge_din),
+	.br_rdata     (sk_bridge_dout),
+
+	.sram_a       (SRAM_A),
+	.sram_dq      (SRAM_DQ),
+	.sram_oe_n    (SRAM_OE_N),
+	.sram_we_n    (SRAM_WE_N),
+	.sram_ub_n    (SRAM_UB_N),
+	.sram_lb_n    (SRAM_LB_N)
+);
+assign bios_data = sram_c_rdata;
+`else
+assign SRAM_A    = 17'd0;
+assign SRAM_DQ   = 16'hZZZZ;
+assign SRAM_OE_N = 1'b1;
+assign SRAM_WE_N = 1'b1;
+assign SRAM_UB_N = 1'b1;
+assign SRAM_LB_N = 1'b1;
+`endif
 
 assign tia_mode_o = tia_en;
 assign is_pal_o = region_select;

@@ -39,6 +39,9 @@ Related documents:
 | `NO_DDRAM` | Leaves out the DDR3 bridge. The Pocket has no DDR3. |
 | `EXTERNAL_FIRMWARE` | HSC firmware and Supercharger BIOS loaded from files, not built in. |
 | `EEPROM_NACK_ENDS_READ` | SaveKey EEPROM fix: a NACK ends a sequential read. |
+| `POCKET_SRAM` | Test variant, off: cartridge RAM, Flicker Blend frame, SaveKey and BIOS in the SRAM (`core/sram_ctrl.sv`), no "no cartridge" screen. Needs `EXTERNAL_CARTRAM`. |
+| `EXTERNAL_CARTRAM` | Upstream's: cartridge RAM from `top.sv`'s `cartram_*` ports. |
+| `NO_MEM_EDITOR` | Test variant, off: no In-System Memory Content Editor on `spram` memories. |
 
 Macros belong in the `.qsf`, never in a `.qip` (Quartus rejects them there).
 `sim/run_sim.sh` passes the same set with `-D`; keep the two lists in step.
@@ -87,6 +90,7 @@ the container's glibc is too old for the Node.js runtime that
 sim/run_sim.sh          # whole-core tests; a few minutes
 sim/extra_tests.sh      # game-style tests with 7800basic carts; needs run_sim.sh first
 sim/bupchip/run_bupchip.sh GAME.a78 SONG   # BupChip CPU load; see BUPCHIP.md
+SRAM=1 WORK=sim/work_sram sim/run_sim.sh   # the POCKET_SRAM variant
 ```
 
 `run_sim.sh` converts the POKEY with GHDL, copies the few upstream files

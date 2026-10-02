@@ -40,6 +40,12 @@ module tb_system;
 	wire [15:0] AUDIO_L, AUDIO_R;
 	wire [15:0] SDRAM_DQ;
 
+	// The Pocket's SRAM (POCKET_SRAM builds use it; otherwise it stays idle)
+	wire [16:0] SRAM_A; wire [15:0] SRAM_DQ;
+	wire SRAM_OE_N, SRAM_WE_N, SRAM_UB_N, SRAM_LB_N;
+	sram_model sram_chip (.a(SRAM_A), .dq(SRAM_DQ), .oe_n(SRAM_OE_N), .we_n(SRAM_WE_N),
+		.ub_n(SRAM_UB_N), .lb_n(SRAM_LB_N));
+
 	atari7800_pocket dut (
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(1'b0), .bios_download(1'b0), .hscfw_download(1'b0), .arfw_download(1'b0), .ioctl_wr(1'b0), .ioctl_addr(25'd0), .ioctl_dout(8'd0),
@@ -59,7 +65,9 @@ module tb_system;
 		.savekey_setting(sk_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
-		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE()
+		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
+		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),
+		.SRAM_UB_N(SRAM_UB_N), .SRAM_LB_N(SRAM_LB_N)
 	);
 
 	// ---------------- video geometry ----------------

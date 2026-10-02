@@ -34,6 +34,8 @@ module tb_load;
 		void'($value$plusargs("bs=%d", bs_ovr));
 	end
 	initial overscan_on = $test$plusargs("overscan");
+	logic blend_on = 1'b0;                                // +blend: 2600 Flicker Blend
+	initial blend_on = $test$plusargs("blend");
 	initial pokey_irq_on = $test$plusargs("pokeyirq");
 	logic [15:0] joy0 = 16'd0, joy1 = 16'd0, joy2 = 16'd0, joy3 = 16'd0;
 	logic [15:0] ana0 = 16'h8080;
@@ -74,6 +76,12 @@ module tb_load;
 	wire HSync, VSync, HBlank, VBlank, ce_pix, tia_mode, is_pal;
 	wire [15:0] AUDIO_L, AUDIO_R, SDRAM_DQ;
 
+	// The Pocket's SRAM (POCKET_SRAM builds use it; otherwise it stays idle)
+	wire [16:0] SRAM_A; wire [15:0] SRAM_DQ;
+	wire SRAM_OE_N, SRAM_WE_N, SRAM_UB_N, SRAM_LB_N;
+	sram_model sram_chip (.a(SRAM_A), .dq(SRAM_DQ), .oe_n(SRAM_OE_N), .we_n(SRAM_WE_N),
+		.ub_n(SRAM_UB_N), .lb_n(SRAM_LB_N));
+
 	atari7800_pocket dut (
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
@@ -81,7 +89,7 @@ module tb_load;
 		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
-		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
+		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
@@ -95,7 +103,9 @@ module tb_load;
 		.savekey_setting(sk_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
-		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE()
+		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
+		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),
+		.SRAM_UB_N(SRAM_UB_N), .SRAM_LB_N(SRAM_LB_N)
 	);
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
@@ -436,6 +446,9 @@ module tb_load;
 				sk_wr = 1'b1;
 				@(posedge clk_74a);
 				sk_wr = 1'b0;
+				// The APF sends a word about every 75 clk_74a (see data_loader.sv);
+				// the SRAM SaveKey (POCKET_SRAM) relies on that spacing.
+				repeat (73) @(posedge clk_74a);
 			end
 			have_sk = 1;
 		end
@@ -719,6 +732,7 @@ module tb_load;
 				repeat (4) @(posedge clk_74a);
 				got = sk_dout;
 				sk_rd = 1'b1; @(posedge clk_74a); sk_rd = 1'b0;
+				repeat (70) @(posedge clk_74a);    // APF pacing, as for writes
 				if (t > 0)
 					for (int k = 0; k < 4; k++)
 						if (got[31 - 8*k -: 8] !== sk_img[4*(t-1) + k]) begin
@@ -741,6 +755,7 @@ module tb_load;
 				repeat (4) @(posedge clk_74a);
 				got = sk_dout;
 				sk_rd = 1'b1; @(posedge clk_74a); sk_rd = 1'b0;
+				repeat (70) @(posedge clk_74a);
 				if (t > 0) for (int k = 0; k < 4; k++) got8[4*(t-1) + k] = got[31 - 8*k -: 8];
 			end
 			sk_diffs = 0;

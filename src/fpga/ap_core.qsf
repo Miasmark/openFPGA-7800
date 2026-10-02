@@ -738,6 +738,12 @@ set_global_assignment -name VERILOG_MACRO "NO_BUPCHIP=1"
 set_global_assignment -name VERILOG_MACRO "NO_DDRAM=1"
 set_global_assignment -name VERILOG_MACRO "EXTERNAL_FIRMWARE=1"
 set_global_assignment -name VERILOG_MACRO "EEPROM_NACK_ENDS_READ=1"
+# POCKET_SRAM test builds: cartridge RAM, Flicker Blend frame, SaveKey and
+# BIOS in the SRAM, and no In-System Memory Content Editor. Off until tested
+# on hardware; sim/run_sim.sh takes SRAM=1 for the same set.
+#set_global_assignment -name VERILOG_MACRO "POCKET_SRAM=1"
+#set_global_assignment -name VERILOG_MACRO "EXTERNAL_CARTRAM=1"
+#set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister
@@ -746,3 +752,14 @@ set_global_assignment -name SEARCH_PATH mister/rtl
 set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name QIP_FILE core/core.qip
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+
+# SRAM (sram_ctrl): every pin from or into an I/O register, so its timing is
+# fixed by the pad, not by placement.
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_oe_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_ub_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_lb_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_dq[*]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to sram_dq[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to sram_dq[*]

@@ -33,3 +33,10 @@ set_multicycle_path -hold  1 -from [get_registers {*|sdram:sdram|*}] -to [get_cl
 set_multicycle_path -hold 1 \
  -from [get_registers {ic|loader|write_addr[*] ic|loader|write_data[*]}] \
  -to [get_clocks $clk_sys]
+
+# POCKET_SRAM: the SRAM's cartridge / BIOS byte (sram|c_rdata) is captured
+# at least two clk_sdram before the bus samples it at the second clk_sys
+# edge after MARIA's strobe, like the SDRAM byte above. Its other outputs
+# (Flicker Blend, SaveKey) keep the default check.
+set_multicycle_path -setup 2 -from [get_registers -nowarn {*|sram_ctrl:sram|c_rdata[*]}] -to [get_clocks $clk_sys]
+set_multicycle_path -hold  1 -from [get_registers -nowarn {*|sram_ctrl:sram|c_rdata[*]}] -to [get_clocks $clk_sys]

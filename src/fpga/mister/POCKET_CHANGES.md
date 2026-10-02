@@ -132,6 +132,28 @@ wrong writes leave channels un-silenced or retuned, and over a match they
 add up to the near-silence heard on hardware. Not yet confirmed on Pocket
 hardware; worth reporting upstream either way.
 
+### Memories in the Pocket's SRAM (`POCKET_SRAM`, `EXTERNAL_CARTRAM`, `NO_MEM_EDITOR`)
+
+A test variant, off in `../ap_core.qsf` until it is confirmed on hardware.
+`../core/sram_ctrl.sv` puts four memories in the Pocket's SRAM (AS6C2016-55)
+instead of block RAM: the cartridge RAM (128 KiB), the 2600 Flicker Blend
+frame (64 KiB), the SaveKey image (32 KiB) and the BIOS (16 KiB). The
+"no cartridge" screen (16 KiB) is left out, since the Pocket's cartridge slot
+is required. That frees 256 M10K blocks.
+
+- `EXTERNAL_CARTRAM` is upstream's own switch: `top.sv` takes the cartridge
+  RAM from its `cartram_*` ports instead of `cart_ram_tdp`.
+- `rtl/top.sv` (`POCKET_SRAM`): new outputs `mclk1_out` (MARIA's 7.16 MHz
+  strobe, the SRAM's slot reference), `bios_sel_out` (a cartridge-space read
+  is the BIOS), and the Flicker Blend port, passed through from `video_mux`.
+- `rtl/video_mux.sv` (`POCKET_SRAM`): the frame's `spram` becomes the port
+  `fb_addr` / `fb_we` / `fb_wdata` / `fb_q`, plus `fb_active`. `sram_ctrl`
+  answers like the `spram` did, prefetching the next pixel.
+- `rtl/bram.v` (`NO_MEM_EDITOR`): `spram` stops asking for the In-System
+  Memory Content Editor (`ENABLE_RUNTIME_MOD`). Every editable memory cost a
+  JTAG port and the editor a hub: about 350 ALMs of hub, plus 40-60 ALMs per
+  memory.
+
 ## Updating
 
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in

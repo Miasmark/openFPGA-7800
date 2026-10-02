@@ -32,7 +32,13 @@ module spram
 		.DATA_WIDTH    (data_width),
 		.MEM_INIT_FILE (mem_init_file),
 		.SIM_INIT_FILE (sim_init_file),
+`ifdef NO_MEM_EDITOR
+		// Pocket: no In-System Memory Content Editor. Each editable memory
+		// costs a JTAG port and the editor a hub (about 1,000 ALMs in all).
+		.LPM_HINT      ("ENABLE_RUNTIME_MOD=NO")
+`else
 		.LPM_HINT      ({"ENABLE_RUNTIME_MOD=YES,INSTANCE_NAME=", mem_name})
+`endif
 	) u_ram (
 		.clk_i   (clock),
 		.addr_i  (address),

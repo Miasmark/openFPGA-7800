@@ -11,6 +11,7 @@ set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) core_br
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) pll_region.v]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) atari7800_pocket.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) virtual_axis.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) sram_ctrl.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) stick_dirs.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) audio_filter.sv]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) pll/pll_core.qip]

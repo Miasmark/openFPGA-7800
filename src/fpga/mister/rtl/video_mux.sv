@@ -40,6 +40,16 @@ module video_mux
 	output logic [7:0] green,
 	output logic [7:0] blue,
 	output logic       pix_ce
+`ifdef POCKET_SRAM
+	,
+	// Pocket: the frame lives in the Pocket's SRAM (core/sram_ctrl.sv), which
+	// answers like the spram it replaces: fb_q follows fb_addr.
+	output logic [15:0] fb_addr,
+	output logic        fb_we,
+	output logic  [7:0] fb_wdata,
+	output logic        fb_active,
+	input  logic  [7:0] fb_q
+`endif
 );
 
 logic [23:0] out_color, nwarm_color, ncool_color, nhot_color,
@@ -72,6 +82,13 @@ logic [3:0] tia_chroma_region;
 // show them solidly instead of flickering. Bit 7 carries that frame's vblank state so
 // frames of differing height still blend cleanly. Frozen while paused to keep the
 // stored frame intact for when the core resumes.
+`ifdef POCKET_SRAM
+assign fb_addr   = frame_ptr;
+assign fb_wdata  = {tia_vblank, yuv_index[7:1]};
+assign fb_we     = pix_ce_immediate && ~is_maria && ~pause;
+assign fb_active = blend && ~is_maria;
+assign frame_data = fb_q;
+`else
 spram #(.addr_width(16), .mem_name("FBLN")) ram0
 (
 	.clock          (clk_sys),
@@ -81,6 +98,7 @@ spram #(.addr_width(16), .mem_name("FBLN")) ram0
 	.cs             (1'b1),
 	.q              (frame_data)
 );
+`endif
 
 // PAL 2600 $0x = PAL 7800 $0x
 // PAL 2600 $1x = PAL 7800 $0x
