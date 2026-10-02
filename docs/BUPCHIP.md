@@ -220,21 +220,36 @@ The burst modes only help sequential reads, which is what a cache refill does.
 That is about 26 M10K blocks, or fewer with caches in front of external
 memory.
 
-**The block RAM can be freed.** Several of the 7800's own memories are read
-at bus speed (1.79 MHz CPU cycles, MARIA DMA at a few MHz), which 55 ns
-SRAM serves easily:
+**The block RAM can be freed.** The fitter report (2.0.21 test build) puts
+two thirds of the 308 blocks in five memories. An M10K holds 1 KB at byte
+width, so every KiB costs a block:
 
-| Memory (`atari7800_pocket.sv`) | Size | M10K blocks | Candidate home |
-|---|---|---|---|
-| SaveKey EEPROM image (`save_ram_dp`) | 32 KiB | 32 | SRAM |
-| BIOS (`bios`) | 16 KiB | 16 | SRAM or SDRAM |
-| "No cartridge" screen (`cart_rom`, `mem0.mif`) | 16 KiB | 16 | SRAM or SDRAM |
+| Memory | Size | M10K blocks | Read by | Candidate home |
+|---|---|---|---|---|
+| Cartridge RAM (`top.sv` `cart_ram_tdp`, 4 byte lanes) | 128 KiB | 128 | 6502 and MARIA DMA (SuperGame, Souper, XM RAM); upstream's 2600 ARM mappers on port B | SRAM, if MARIA's DMA reads can be met |
+| 2600 Flicker Blend frame (`video_mux.sv` `ram0`) | 64 KiB | 64 | Video, one byte per pixel | SDRAM or PSRAM, or a smaller frame (see below) |
+| SaveKey EEPROM image (`save_ram_dp sk_ram`) | 32 KiB | 32 | I2C, a few kHz | SRAM, easily |
+| BIOS (`bios`) | 16 KiB | 16 | 6502 and MARIA | SRAM or SDRAM |
+| "No cartridge" screen (`cart_rom`, `mem0.mif`) | 16 KiB | 16 | 6502 and MARIA | SRAM or SDRAM |
 
-Moving even the SaveKey frees more blocks than the BupChip needs. The
-SaveKey still needs its bridge save and load path, so it is a change to plan
-carefully, and it should be hardware-tested on its own before any BupChip
-work. Upstream memories the Pocket can't use (ARM mapper tables, CDF jump
-table) are further candidates; see DEVELOPING.md, "Resource budget".
+Notes on each:
+
+- **SaveKey.** A real 24LC256 holds 32 KiB, and the save file is the whole
+  chip, so the image can't shrink. It is the easiest to move: the I2C bus runs
+  at a few kHz. The bridge save and load path has to follow it.
+- **Cartridge RAM.** It is sized for the largest cartridges, and the 2600 ARM
+  mappers the Pocket build leaves out also use it. 128 KiB fits in the 256 KB
+  SRAM, but MARIA can DMA from cartridge RAM. 55 ns plus pin delays is close
+  to one 69.8 ns `clk_sys` period, so check the read timing first.
+- **Flicker Blend.** It only serves the 2600 Flicker Blend option. It stores
+  one byte per TIA pixel: 160 × 312 lines (PAL) is 49,920 bytes, rounded up to
+  a 64 KiB address space. Sizing it to the visible 240 or 288 lines (38–46
+  blocks) frees 18–26 blocks; moving it to SDRAM or PSRAM frees all 64.
+
+Moving the SaveKey alone (32 blocks) already covers the BupChip's 26. Each of
+these moves needs its own hardware test before any BupChip work. Upstream
+memories the Pocket can't use (ARM mapper tables, CDF jump table) are smaller
+candidates; see DEVELOPING.md, "Resource budget".
 
 **The asset block goes in the PSRAM.** It is 212 KiB, written once while the
 cartridge loads, and read through a small cache like
@@ -247,7 +262,7 @@ Suggested layout:
 | Memory | Contents |
 |---|---|
 | Block RAM, freed as above | Firmware ROM (8 KB, or a 4 KB instruction cache), working RAM (16 KiB), PCM buffer |
-| SRAM | SaveKey image, BIOS, "no cartridge" screen, moved out of block RAM |
+| SRAM | SaveKey image first; BIOS, "no cartridge" screen or cartridge RAM if more room is needed |
 | PSRAM | ARSC asset block, behind a small cache |
 | SDRAM | The cartridge, unchanged |
 
