@@ -184,6 +184,24 @@ module tb_load;
 	end
 	final $display("SHADOW writes: %0d arrived, %0d arrived wrong, %0d lost, %0d unasked", sh_ok, sh_bad, sh_lost, sh_extra);
 
+	// The bus over the last 64 clk, dumped at the first two wrong arrivals.
+	typedef struct packed { logic p1, p0, rw, cs, halt_n; logic [15:0] a; logic [7:0] d; logic [15:0] awr; } bus_t;
+	bus_t sh_ring [64]; int sh_ri = 0, sh_dumps = 0; longint sh_bad_d = 0;
+	always @(posedge clk_sys) begin
+		sh_ring[sh_ri] <= '{dut.main.cart.pclk1, dut.main.cart.pclk0, dut.main.cart.rw, dut.main.cart.pokey_cs,
+			dut.main.cart.halt_n, dut.main.cart.address_in, dut.main.cart.din, `SHP.addr_wr};
+		sh_ri <= (sh_ri + 1) % 64;
+		sh_bad_d <= sh_bad;
+		if (sh_bad != sh_bad_d && sh_dumps < 2) begin
+			sh_dumps++;
+			$display("BUS dump, oldest first: clk p1 p0 rw cs halt_n addr  data  shadow_strobes");
+			for (int k = 0; k < 64; k++) begin
+				automatic bus_t e = sh_ring[(sh_ri + k) % 64];
+				$display("BUS %3d  %b  %b  %b  %b  %b    %04x  %02x    %04x", k - 63, e.p1, e.p0, e.rw, e.cs, e.halt_n, e.a, e.d, e.awr);
+			end
+		end
+	end
+
 	// ---------------- POKEY shadow (run_pokey_shadow.sh) ----------------
 	// The AUD node of the Watson POKEY the core plays and of upstream's new
 	// POKEY shadowing it, sampled together at the WAV rate.
