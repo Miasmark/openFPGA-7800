@@ -140,6 +140,24 @@ module tb_load;
 	end
 
 `ifdef POKEY_SHADOW
+	// The bus over the last 64 clk, dumped at the first two wrong arrivals.
+	typedef struct packed { logic p1, p0, rw, cs, halt_n; logic [15:0] a; logic [7:0] d; logic [15:0] awr; } bus_t;
+	bus_t sh_ring [64]; int sh_ri = 0, sh_dumps = 0;
+	always @(posedge clk_sys) begin
+		sh_ring[sh_ri] <= '{dut.main.cart.pclk1, dut.main.cart.pclk0, dut.main.cart.rw, dut.main.cart.pokey_cs,
+			dut.main.cart.halt_n, dut.main.cart.address_in, dut.main.cart.din, dut.main.cart.shadow_pokey.u_pokey.addr_wr};
+		sh_ri <= (sh_ri + 1) % 64;
+	end
+	task automatic dump_ring();
+		if (sh_dumps >= 2) return;
+		sh_dumps++;
+		$display("BUS dump, oldest first: clk p1 p0 rw cs halt_n addr  data  shadow_strobes");
+		for (int k = 0; k < 64; k++) begin
+			automatic bus_t e = sh_ring[(sh_ri + k) % 64];
+			$display("BUS %3d  %b  %b  %b  %b  %b    %04x  %02x    %04x", k - 63, e.p1, e.p0, e.rw, e.cs, e.halt_n, e.a, e.d, e.awr);
+		end
+	endtask
+
 	// ---------------- shadow POKEY write check ----------------
 	// Every CPU write to the POKEY (pokey_cs and a write at phase 2) must
 	// show up inside the shadow as that register's write strobe, carrying the
@@ -159,7 +177,7 @@ module tb_load;
 		for (int i = 0; i < 16; i++) if (`SHP.addr_wr[i] && !sh_wr_d[i] && !dut.main.cart.shadow_pokey.boot_wr) begin
 			if (sh_pend && i == sh_reg && `SHP.write_data == sh_val) begin sh_ok++; sh_pend = 0; end
 			else begin
-				if (sh_pend) begin sh_bad++; if (sh_shown < 30) begin sh_shown++;
+				if (sh_pend) begin sh_bad++; dump_ring(); if (sh_shown < 30) begin sh_shown++;
 					$display("SHADOW %0d ms: CPU wrote %x <- %02x (p1->p2 %0d clk), shadow strobed %x <- %02x",
 						$time / 1000000, sh_reg, sh_val, sh_sp, i, `SHP.write_data); end
 					sh_pend = 0; end
@@ -184,23 +202,6 @@ module tb_load;
 	end
 	final $display("SHADOW writes: %0d arrived, %0d arrived wrong, %0d lost, %0d unasked", sh_ok, sh_bad, sh_lost, sh_extra);
 
-	// The bus over the last 64 clk, dumped at the first two wrong arrivals.
-	typedef struct packed { logic p1, p0, rw, cs, halt_n; logic [15:0] a; logic [7:0] d; logic [15:0] awr; } bus_t;
-	bus_t sh_ring [64]; int sh_ri = 0, sh_dumps = 0; longint sh_bad_d = 0;
-	always @(posedge clk_sys) begin
-		sh_ring[sh_ri] <= '{dut.main.cart.pclk1, dut.main.cart.pclk0, dut.main.cart.rw, dut.main.cart.pokey_cs,
-			dut.main.cart.halt_n, dut.main.cart.address_in, dut.main.cart.din, `SHP.addr_wr};
-		sh_ri <= (sh_ri + 1) % 64;
-		sh_bad_d <= sh_bad;
-		if (sh_bad != sh_bad_d && sh_dumps < 2) begin
-			sh_dumps++;
-			$display("BUS dump, oldest first: clk p1 p0 rw cs halt_n addr  data  shadow_strobes");
-			for (int k = 0; k < 64; k++) begin
-				automatic bus_t e = sh_ring[(sh_ri + k) % 64];
-				$display("BUS %3d  %b  %b  %b  %b  %b    %04x  %02x    %04x", k - 63, e.p1, e.p0, e.rw, e.cs, e.halt_n, e.a, e.d, e.awr);
-			end
-		end
-	end
 
 	// ---------------- POKEY shadow (run_pokey_shadow.sh) ----------------
 	// The AUD node of the Watson POKEY the core plays and of upstream's new
