@@ -116,6 +116,22 @@ missing rows: a flickering line at the bottom of every 2600 game after one
 that did fill it (Kaboom!). The extra line is in the game's own vertical
 blank, so it is black.
 
+`Pokey/pokey_adapter.sv` (upstream's new POKEY, not built by default; see
+above): the adapter now captures the CPU's write - address, data and write
+enable - at the phase 2 strobe and holds it for the rest of phase 2.
+`pokey_bus.sv` samples the write row across the whole o2 half and keeps the
+last value, so it needs the address held until the next phase 1, as the
+real bus holds it. In this core MARIA's DMA address can be on the bus in the
+very clk that ends a write's o2 half, when DMA starts right after the write,
+and the write then lands on the register MARIA's address names. Found with
+`sim/run_pokey_shadow.sh` (upstream's POKEY run as a shadow of Watson's in
+the whole core) on Ballblazer: its `$BBA8 STA $4007`, followed by DMA
+reading `$2772`, arrived as a write to register 2. 7 of the 2,404 writes in
+its first 10 s went to a wrong register (always 2), none after the fix. The
+wrong writes leave channels un-silenced or retuned, and over a match they
+add up to the near-silence heard on hardware. Not yet confirmed on Pocket
+hardware; worth reporting upstream either way.
+
 ## Updating
 
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in

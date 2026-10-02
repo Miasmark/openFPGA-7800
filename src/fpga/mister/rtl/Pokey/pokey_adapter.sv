@@ -132,9 +132,39 @@ module pokey_adapter (
 
 	wire        boot_wr = in_reset | (leaving != 2'd0);
 
-	wire  [3:0] a_i    = boot_wr ? 4'hF : ADDR;
-	wire  [7:0] d_in_i = boot_wr ? (in_reset ? 8'h00 : 8'h03) : DATA_IN;
-	wire        rw_i   = boot_wr ? 1'b0 : ~WR_EN;
+	// Pocket port: hold the CPU's write through phase 2. `pokey_bus.sv`
+	// samples the write row across the whole o2 half and keeps the last
+	// value, so the address must stay valid until the next phase 1. On the
+	// real bus it does (address hold after phi2). In this core it does not
+	// when MARIA starts DMA right after the write: MARIA's address is on the
+	// bus in the clk that ends o2, so the write lands on whatever register its
+	// low nibble names. Ballblazer's `STA $4007` before a JSR arrived as a
+	// write to register 2 (MARIA reading $2772): 7 of 2,404 writes in its
+	// first 10 s, enough to leave channels in states the music driver never
+	// corrects. Address, data and write-enable are therefore captured at the
+	// phase 2 strobe, as Watson's POKEY sampled them, and held for the rest of
+	// phase 2. See ../../POCKET_CHANGES.md.
+	logic       in_o2 = 1'b0;
+	logic [3:0] addr_h;
+	logic [7:0] data_h;
+	logic       wr_h;
+	always_ff @(posedge CLK) begin
+		if (PHI2_EN) begin
+			in_o2  <= 1'b1;
+			addr_h <= ADDR;
+			data_h <= DATA_IN;
+			wr_h   <= WR_EN;
+		end else if (PHI1_EN)
+			in_o2  <= 1'b0;
+	end
+	wire        held   = in_o2 & ~PHI2_EN;
+	wire  [3:0] addr_e = held ? addr_h : ADDR;
+	wire  [7:0] data_e = held ? data_h : DATA_IN;
+	wire        wr_e   = held ? wr_h   : WR_EN;
+
+	wire  [3:0] a_i    = boot_wr ? 4'hF : addr_e;
+	wire  [7:0] d_in_i = boot_wr ? (in_reset ? 8'h00 : 8'h03) : data_e;
+	wire        rw_i   = boot_wr ? 1'b0 : ~wr_e;
 
 	wire  [7:0] d_out_i;
 	wire        d_oe_i;
@@ -194,7 +224,7 @@ module pokey_adapter (
 	// d_oe, and a bus nobody drives reads high the way the 7800's does. Without
 	// this, a read taken while the adapter is holding SKCTL down for RESET_N
 	// would show whatever the internal bus happened to carry.
-	wire   read_sel = ~boot_wr & ~WR_EN;
+	wire   read_sel = ~boot_wr & ~wr_e;
 
 	assign DATA_OUT = read_sel ? d_out_i : 8'hFF;
 
