@@ -155,7 +155,8 @@ module tb_load;
 		if (dut.main.cart.pclk1) sh_last_p1 <= sh_clk;
 		sh_wr_d <= `SHP.addr_wr;
 		// a strobe rising in the shadow
-		for (int i = 0; i < 16; i++) if (`SHP.addr_wr[i] && !sh_wr_d[i]) begin
+		// (the adapter's own SKCTL writes around reset are expected)
+		for (int i = 0; i < 16; i++) if (`SHP.addr_wr[i] && !sh_wr_d[i] && !dut.main.cart.shadow_pokey.boot_wr) begin
 			if (sh_pend && i == sh_reg && `SHP.write_data == sh_val) begin sh_ok++; sh_pend = 0; end
 			else begin
 				if (sh_pend) begin sh_bad++; if (sh_shown < 30) begin sh_shown++;
