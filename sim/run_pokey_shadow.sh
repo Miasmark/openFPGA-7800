@@ -17,6 +17,35 @@ mkdir -p "$SH"
 
 # The new POKEY's adapter, renamed so it can sit beside Watson's.
 sed 's/^module pokey_adapter (/module pokey_adapter_new (/' "$RTL/Pokey/pokey_adapter.sv" > "$SH/pokey_adapter_new.sv"
+# FIXPOKEY=1: the candidate fix - the adapter captures the CPU's write at
+# the phase 2 strobe and holds it for the rest of phase 2, so a bus that
+# moves on early cannot change which register the write lands on.
+if [ -n "$FIXPOKEY" ]; then
+	python3 - "$SH/pokey_adapter_new.sv" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = """	wire  [3:0] a_i    = boot_wr ? 4'hF : ADDR;
+	wire  [7:0] d_in_i = boot_wr ? (in_reset ? 8'h00 : 8'h03) : DATA_IN;
+	wire        rw_i   = boot_wr ? 1'b0 : ~WR_EN;"""
+new = """	// Hold the CPU's write through phase 2 (FIXPOKEY).
+	logic       in_o2 = 1'b0;
+	logic [3:0] addr_h; logic [7:0] data_h; logic wr_h;
+	always_ff @(posedge CLK) begin
+		if (PHI2_EN) begin in_o2 <= 1'b1; addr_h <= ADDR; data_h <= DATA_IN; wr_h <= WR_EN; end
+		else if (PHI1_EN) in_o2 <= 1'b0;
+	end
+	wire        held   = in_o2 & ~PHI2_EN;
+	wire  [3:0] addr_e = held ? addr_h : ADDR;
+	wire  [7:0] data_e = held ? data_h : DATA_IN;
+	wire        wr_e   = held ? wr_h   : WR_EN;
+	wire  [3:0] a_i    = boot_wr ? 4'hF : addr_e;
+	wire  [7:0] d_in_i = boot_wr ? (in_reset ? 8'h00 : 8'h03) : data_e;
+	wire        rw_i   = boot_wr ? 1'b0 : ~wr_e;"""
+assert old in s, "adapter text changed"
+s = s.replace(old, new, 1).replace("wire   read_sel = ~boot_wr & ~WR_EN;", "wire   read_sel = ~boot_wr & ~wr_e;")
+open(p, "w").write(s)
+PY
+fi
 
 # cart.sv with the shadow wired in parallel to the 4000 POKEY (the_penguin).
 python3 - "$RTL/cart.sv" "$SH/cart.sv" <<'PY'
