@@ -35,7 +35,7 @@ Related documents:
 | Macro | Effect |
 |---|---|
 | `NO_ARM_MAPPER` | Upstream's: leaves out the ARM7TDMI (2600 DPC+/CDF). Doesn't fit. |
-| `NO_BUPCHIP` | Leaves out the BupChip player. Doesn't fit. |
+| `NO_BUPCHIP` | Leaves out the BupChip player. Doesn't fit; see [BUPCHIP.md](BUPCHIP.md). |
 | `NO_DDRAM` | Leaves out the DDR3 bridge. The Pocket has no DDR3. |
 | `EXTERNAL_FIRMWARE` | HSC firmware and Supercharger BIOS loaded from files, not built in. |
 | `EEPROM_NACK_ENDS_READ` | SaveKey EEPROM fix: a NACK ends a sequential read. |
@@ -86,6 +86,7 @@ the container's glibc is too old for the Node.js runtime that
 ```sh
 sim/run_sim.sh          # whole-core tests; a few minutes
 sim/extra_tests.sh      # game-style tests with 7800basic carts; needs run_sim.sh first
+sim/bupchip/run_bupchip.sh GAME.a78 SONG   # BupChip CPU load; see BUPCHIP.md
 ```
 
 `run_sim.sh` converts the POKEY with GHDL, copies the few upstream files

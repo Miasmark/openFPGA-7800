@@ -124,6 +124,18 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
 Running the BupChip on the Pocket would need a much smaller ARM
 implementation. That would be a project of its own.
 
+[docs/BUPCHIP.md](docs/BUPCHIP.md) has the details such a project would start
+from:
+- the firmware's memory map, registers and commands, and the ARSC resource format;
+- which ARM features the firmware uses: ARM state only, no Thumb, interrupts,
+  SWP or coprocessor, but multiply, yes;
+- the CPU load, measured in simulation with Rikki & Vikki's music:
+  - up to 89% of MiSTer's 71.6 MHz ARM, about 16 million instructions a second;
+  - an average of 4 clocks per instruction, most of it spent waiting on memory.
+
+`sim/bupchip/` holds the tools that build the resource block from a game
+install and measure any song.
+
 ## Verification
 
 `sim/run_sim.sh` runs the complete core (this Pocket wrapper plus the MiSTer
