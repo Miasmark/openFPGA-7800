@@ -140,6 +140,49 @@ module tb_load;
 	end
 
 `ifdef POKEY_SHADOW
+	// ---------------- shadow POKEY write check ----------------
+	// Every CPU write to the POKEY (pokey_cs and a write at phase 2) must
+	// show up inside the shadow as that register's write strobe, carrying the
+	// written byte. Reports writes that never arrive, arrive wrong, or arrive
+	// unasked, with the phase 1 -> phase 2 spacing of the CPU cycle.
+	`define SHP dut.main.cart.shadow_pokey.u_pokey
+	longint sh_clk = 0, sh_last_p1 = 0, sh_ok = 0, sh_bad = 0, sh_lost = 0, sh_extra = 0;
+	logic [15:0] sh_wr_d = 0;
+	logic        sh_pend = 0; logic [3:0] sh_reg; logic [7:0] sh_val; longint sh_at = 0, sh_sp = 0;
+	int sh_shown = 0;
+	always @(posedge clk_sys) begin
+		sh_clk <= sh_clk + 1;
+		if (dut.main.cart.pclk1) sh_last_p1 <= sh_clk;
+		sh_wr_d <= `SHP.addr_wr;
+		// a strobe rising in the shadow
+		for (int i = 0; i < 16; i++) if (`SHP.addr_wr[i] && !sh_wr_d[i]) begin
+			if (sh_pend && i == sh_reg && `SHP.write_data == sh_val) begin sh_ok++; sh_pend = 0; end
+			else begin
+				if (sh_pend) begin sh_bad++; if (sh_shown < 30) begin sh_shown++;
+					$display("SHADOW %0d ms: CPU wrote %x <- %02x (p1->p2 %0d clk), shadow strobed %x <- %02x",
+						$time / 1000000, sh_reg, sh_val, sh_sp, i, `SHP.write_data); end
+					sh_pend = 0; end
+				else begin sh_extra++; if (sh_shown < 30) begin sh_shown++;
+					$display("SHADOW %0d ms: unasked strobe %x <- %02x", $time / 1000000, i, `SHP.write_data); end end
+			end
+		end
+		// a CPU write cycle to the POKEY, at its phase 2
+		if (dut.main.cart.pclk0 && dut.main.cart.pokey_cs && !dut.main.cart.rw) begin
+			if (sh_pend) begin sh_lost++; if (sh_shown < 30) begin sh_shown++;
+				$display("SHADOW %0d ms: write %x <- %02x never reached the shadow (p1->p2 %0d clk)",
+					$time / 1000000, sh_reg, sh_val, sh_sp); end end
+			sh_pend = 1; sh_reg = dut.main.cart.address_in[3:0]; sh_val = dut.main.cart.din;
+			sh_at = sh_clk; sh_sp = sh_clk - sh_last_p1;
+		end
+		if (sh_pend && sh_clk - sh_at > 48) begin
+			sh_lost++; if (sh_shown < 30) begin sh_shown++;
+			$display("SHADOW %0d ms: write %x <- %02x never reached the shadow (p1->p2 %0d clk)",
+				$time / 1000000, sh_reg, sh_val, sh_sp); end
+			sh_pend = 0;
+		end
+	end
+	final $display("SHADOW writes: %0d arrived, %0d arrived wrong, %0d lost, %0d unasked", sh_ok, sh_bad, sh_lost, sh_extra);
+
 	// ---------------- POKEY shadow (run_pokey_shadow.sh) ----------------
 	// The AUD node of the Watson POKEY the core plays and of upstream's new
 	// POKEY shadowing it, sampled together at the WAV rate.
