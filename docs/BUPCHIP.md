@@ -174,8 +174,8 @@ working; 960 distinct instruction addresses ran):
 | Instruction set | ARMv4 ARM state only, conditional execution, the barrel shifter, halfword and signed loads, LDM/STM. |
 | Can drop | Thumb, IRQ/FIQ/abort/SWI entry, SPSRs and banked registers (one mode), SWP, coprocessor. |
 | Multiply | MUL/MLA at about 1.3 million a second (8% of instructions), so several clocks each is fine. UMULL is very rare and can be slow. |
-| ROM and RAM | 7.8 KB of code and 16 KiB of RAM, fetched in one clock for the throughput above. The FPGA's block RAM is full in this build. The Pocket's SRAM (128K × 16, unused) is 16 bits wide, so it needs two reads per 32-bit word; a small instruction cache in front of it would help. |
-| Assets | 212 KiB for Rikki & Vikki. Latency barely matters, so SDRAM or SRAM is fine. |
+| ROM and RAM | 7.8 KB of code and 16 KiB of RAM, answering in one clock for the throughput above, so block RAM or caches. Block RAM is full in this build; see *Memory options* for how to free it. |
+| Assets | 212 KiB for Rikki & Vikki. Latency barely matters, so PSRAM, SDRAM or SRAM all work. |
 | Output | 48 kHz stereo 16-bit. The FIFO can be much smaller than MiSTer's 85 ms. |
 
 For scale, MiSTer's ARM core alone is about 16,200 LUTs. The Pocket build has
@@ -183,43 +183,72 @@ about 4,200 ALMs free.
 
 ### Memory options
 
-The memories below are the ones `core_top.v` has ports for. Check the speed
-grades against Analogue's hardware documentation before designing to them.
+The Pocket's memories, with the parts Analogue fitted. The speed figures are
+the parts' asynchronous access times; check the datasheets before designing
+to them.
 
-| Memory | Size and width | Behaviour | Use for the BupChip |
+| Memory | Part | Size and width | Speed | Used by this core |
+|---|---|---|---|---|
+| FPGA block RAM | Cyclone V M10K | 308 blocks, 1 KB each at ×8/×16/×32 | 1 clock | All 308 |
+| SRAM (`sram_*`) | AS6C2016-55 | 256 KB (128K × 16) | 55 ns asynchronous | No |
+| PSRAM (`cram0_*`, `cram1_*`) | AS1C8M16PL-70 | 16 MB (8M × 16) each, address/data multiplexed on the Pocket (`cram*_a[21:16]` plus `dq`) | 70 ns asynchronous; page and synchronous burst modes | No |
+| SDRAM (`dram_*`) | — | 64 MB, 16-bit | Fast bursts; each row change and refresh costs several clocks | The cartridge |
+
+**No external memory can feed the CPU directly.** A 25–30 MHz CPU wants a
+32-bit word every 33–40 ns:
+
+| Memory | Time per 32-bit word | Equivalent rate |
+|---|---|---|
+| SRAM | about 110 ns (two 16-bit reads) | about 9 MHz |
+| PSRAM, random access | about 140 ns | about 7 MHz |
+| PSRAM and SDRAM, bursts | Fast once streaming | — |
+
+The burst modes only help sequential reads, which is what a cache refill does.
+
+**So the firmware and working RAM need block RAM or caches.**
+
+- **Firmware ROM:** 7.8 KB, 8 M10K blocks. The code it executes is smaller
+  still: Misery_F ran 960 distinct instruction addresses (3.8 KB), so even a
+  4 KB instruction cache would almost never miss.
+- **Working RAM:** 16 KiB as MiSTer sizes it, 16 blocks. The static data ends
+  at 8.1 KiB, and the stack top is not yet measured. About 40% of the
+  executed instructions are loads and stores (6.2 million data accesses a
+  second on Misery_F), far too many for 55 ns SRAM without a data cache.
+- **PCM buffer:** a few hundred frames, 1–2 blocks. Nothing on the Pocket
+  stalls the way MiSTer's DDR3 does.
+
+That is about 26 M10K blocks, or fewer with caches in front of external
+memory.
+
+**The block RAM can be freed.** Several of the 7800's own memories are read
+at bus speed (1.79 MHz CPU cycles, MARIA DMA at a few MHz), which 55 ns
+SRAM serves easily:
+
+| Memory (`atari7800_pocket.sv`) | Size | M10K blocks | Candidate home |
 |---|---|---|---|
-| FPGA block RAM | 308 × M10K | One clock, any width | Ideal, but full in this build |
-| SRAM (`sram_*`) | 256 KB, 16-bit, asynchronous | Same access time for any address; no refresh or row opening. Unused by this core. | **Firmware and working RAM** |
-| SDRAM (`dram_*`) | 64 MB, 16-bit | Fast bursts; each new row and each refresh costs several clocks. Holds the cartridge, read by the 7800 through Sorgelig's controller at `clk_sdram`. | Poor for fetches without a cache; possible for assets |
-| PSRAM (`cram0_*`, `cram1_*`) | 2 × 16 MB, 16-bit, address/data multiplexed (`cram*_a[21:16]` plus `dq`) | Slow random reads; burst mode suits sequential reads only. Unused by this core. | **Asset block** |
+| SaveKey EEPROM image (`save_ram_dp`) | 32 KiB | 32 | SRAM |
+| BIOS (`bios`) | 16 KiB | 16 | SRAM or SDRAM |
+| "No cartridge" screen (`cart_rom`, `mem0.mif`) | 16 KiB | 16 | SRAM or SDRAM |
 
-- **The firmware and working RAM belong in the SRAM.** Fetches and stack
-  accesses are random. The SRAM's access time does not depend on the address,
-  and nothing else shares it.
-- **The SRAM is 16 bits wide, so a 32-bit word takes two reads.** At a 25–30
-  MHz CPU clock (33–40 ns), the SRAM side can run at twice the CPU clock and
-  deliver one 32-bit word per CPU clock. That is tight once the FPGA's pin
-  delays are counted, so confirm it in a timing build. An instruction cache
-  or prefetch buffer gives extra slack. 24 KB of the 256 KB is used.
-- **The asset block belongs in the PSRAM.** It is 212 KiB, written once while
-  the cartridge loads, and read through a small cache like
-  `bupchip_asset_ddr.sv`. The measurements above show asset latency barely
-  matters, and putting the block here keeps the BupChip off the SDRAM the
-  7800 reads its cartridge from.
-- **The SDRAM is the fallback.** The cartridge leaves most of its bandwidth
-  free, but fetches would compete with the 7800's reads and stall on every row
-  change. It is workable behind an instruction cache, but more work and more
-  risk.
-- **The PCM buffer** can be small, because nothing stalls for long on the
-  Pocket. A few hundred frames could go in the SRAM, or in a few block RAMs if
-  any are freed.
+Moving even the SaveKey frees more blocks than the BupChip needs. The
+SaveKey still needs its bridge save and load path, so it is a change to plan
+carefully, and it should be hardware-tested on its own before any BupChip
+work. Upstream memories the Pocket can't use (ARM mapper tables, CDF jump
+table) are further candidates; see DEVELOPING.md, "Resource budget".
+
+**The asset block goes in the PSRAM.** It is 212 KiB, written once while the
+cartridge loads, and read through a small cache like
+`bupchip_asset_ddr.sv`. Asset latency barely matters (Title ran the same
+with 5× faster asset memory), and nothing else uses the chip. The SDRAM would
+also work, but its reads would compete with the cartridge.
 
 Suggested layout:
 
 | Memory | Contents |
 |---|---|
-| SRAM | Firmware (7.8 KB), working RAM (16 KiB), optionally the PCM buffer |
-| PSRAM | ARSC asset block (212 KiB), behind a small cache |
+| Block RAM, freed as above | Firmware ROM (8 KB, or a 4 KB instruction cache), working RAM (16 KiB), PCM buffer |
+| SRAM | SaveKey image, BIOS, "no cartridge" screen, moved out of block RAM |
+| PSRAM | ARSC asset block, behind a small cache |
 | SDRAM | The cartridge, unchanged |
 
 ## Reproducing
