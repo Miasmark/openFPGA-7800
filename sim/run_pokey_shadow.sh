@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build tb_load with upstream's new POKEY (rtl/Pokey) running as a shadow of
-# the Watson POKEY the Pocket uses: same clock, phases, bus and writes, cycle
+# Mark Watson's POKEY (the Pocket's until 2.0.20): same clock, phases, bus and writes, cycle
 # for cycle, its output recorded but never heard or read by the CPU. Any
 # difference between the two recordings is the new POKEY's own doing.
 #   sim/run_pokey_shadow.sh            build into $WORK/obj_shadow
@@ -48,7 +48,8 @@ PY
 # copies and the converted Watson POKEY this needs), with cart.sv swapped.
 FPGA="$HERE/../src/fpga"
 PATCHED="$WORK/patched"
-[ -f "$WORK/pokey_watson.v" ] || { echo "run sim/run_sim.sh first"; exit 1; }
+[ -f "$WORK/pokey_watson.v" ] || { echo "run POKEY=watson sim/run_sim.sh first"; exit 1; }
+POKEY_SRCS=("$WORK/pokey_watson.v" "$FPGA/core/pokey_adapter_watson.sv")
 eval "$(sed -n '/^SRCS=(/,/^)/p' "$HERE/run_sim.sh" | sed "s#\"\$RTL/cart.sv\"#\"$SH/cart.sv\"#")"
 SRCS+=("$SH/pokey_adapter_new.sv" $(ls "$RTL"/Pokey/*.sv | grep -v pokey_adapter.sv))
 "${VERILATOR:-verilator}" --binary --timing -j 4 -O2 ${VTHREADS:+--threads $VTHREADS} -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \

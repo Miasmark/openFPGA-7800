@@ -180,6 +180,13 @@ module pokey_adapter (
 	wire        sid_i  = 1'b1;    // idle high, so no start bit is ever seen
 	wire        bclk_i = 1'b0;
 
+	// Pocket: half level. The mixer's curve rises at 2.17x full scale per unit
+	// of linear sum, so the same music came out about twice as loud as the
+	// linear sum of Watson's POKEY, the level this core's mix (and its
+	// players) had until 2.0.20. Halving restores that level; the curve's
+	// compression of loud passages is kept.
+	wire [15:0] aud_i;
+
 	pokey u_pokey (
 		.clk    (CLK),
 		.ph1_en (PHI1_EN),
@@ -215,7 +222,9 @@ module pokey_adapter (
 		.dac2   (CHANNEL_1_OUT),
 		.dac3   (CHANNEL_2_OUT),
 		.dac4   (CHANNEL_3_OUT),
-		.aud    (AUD));
+		.aud    (aud_i));
+
+	assign AUD = {1'b0, aud_i[15:1]};
 
 	// This interface has no read phase: DATA_OUT is expected to hold the
 	// addressed register for the whole cycle, while the real pads drive only

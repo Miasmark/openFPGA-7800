@@ -18,7 +18,7 @@ https://github.com/Miasmark/openFPGA-7800
 | SDRAM controller | `src/fpga/mister/rtl/sdram.sv` | Sorgelig | GPL-3.0-or-later (`LICENSES/GPL-3.0.txt`) | Built |
 | JT51 (YM2151) | `src/fpga/mister/rtl/jt51/` | Jose Tejada (Jotego) | GPL-3.0-or-later (`LICENSES/GPL-3.0.txt`) | Built |
 | 24LC0x EEPROM (SaveKey) | `src/fpga/mister/rtl/EEPROM_24LC256.sv` | GreyRogue, from NES_MiSTer; adapted upstream | GPL-3.0 (NES_MiSTer's license, `LICENSES/GPL-3.0.txt`) | Built |
-| POKEY | `src/fpga/mister/rtl/PokeyWatson/` | Mark Watson | Own terms: free for non-commercial use; commercial use needs his permission. See the file headers | Built |
+| POKEY (schematic-level, `k7800`) | `src/fpga/mister/rtl/Pokey/` | Jamie Blanks | MIT | Built (from 2.0.21) |
 | Paddle timing, light gun | `src/fpga/mister/rtl/paddles.sv`, `lightgun.sv` | Jamie Blanks (`paddles.sv`); `lightgun.sv` has no header and matches the light-gun module in Sorgelig's MiSTer cores | MIT with the rest of the MiSTer 7800 repository; `lightgun.sv` may also be under those cores' GPL (`LICENSES/GPL-3.0.txt`) | Built (from 2.0.13) |
 | Souper mapper | `src/fpga/mister/rtl/souper.v` | Osman Celimli | zlib-style (file header) | Built |
 | SN76489 | `src/fpga/mister/rtl/SN76489/` | Jamie Blanks | MIT | Built |
@@ -30,7 +30,7 @@ https://github.com/Miasmark/openFPGA-7800
 | Video mixer | `src/fpga/mister/rtl/video_mixer_plus.sv` | Alexey Melnikov (Sorgelig) | GPL | Repo only |
 | ARM7TDMI core | `src/fpga/mister/rtl/arm7tdmi/arm7tdmi_core.sv` | Robert Peip / Jamie Blanks | GPL-2.0-only | Repo only |
 | T65 | `src/fpga/mister/rtl/t65/` | Daniel Wallner, Mike Johnson, Wolfgang Scherr, Morten Leikvoll | BSD-style (file headers) | Repo only |
-| Schematic POKEY | `src/fpga/mister/rtl/Pokey/` | Jamie Blanks | MIT | Repo only |
+| Watson POKEY | `src/fpga/mister/rtl/PokeyWatson/` | Mark Watson | Own terms: free for non-commercial use; commercial use needs his permission. See the file headers | Repo only (built up to 2.0.20; simulation) |
 
 The 6502 assembler test programs in `sim/` pull in 7800basic's
 `i2c7800.inc` at build time. It is not stored here; 7800basic's includes are
@@ -64,10 +64,10 @@ template.
 
 `tools/package.sh` puts these in `Cores/Miasmark.7800/licenses/` in every
 release zip: this project's `LICENSE`, this file, `GPL-3.0.txt`, the MiSTer
-core's `LICENSE`, analogue-pocket-utils' `LICENSE`, and, copied word for
-word from their source headers, Mark Watson's POKEY notice
-(`PokeyWatson-NOTICE.txt`) and Analogue's APF Software License Agreement
-(`Analogue-APF-Software-License.txt`).
+core's `LICENSE`, analogue-pocket-utils' `LICENSE`, and Analogue's APF
+Software License Agreement (`Analogue-APF-Software-License.txt`), copied
+word for word from its source header. Releases up to 2.0.20, which built
+Mark Watson's POKEY, also carried his notice (`PokeyWatson-NOTICE.txt`).
 
 ## References
 
@@ -79,7 +79,9 @@ display-mode list). The simulation's test carts use 7800basic's includes
 
 ## POKEY
 
-Mark Watson's POKEY keeps its own license: free for non-commercial use, and
-commercial use or sale, in source or binary form, needs his permission
-(scrameta at gmail). That applies to any bitstream built from this
-repository.
+Since 2.0.21 the bitstream builds upstream's MIT POKEY (`rtl/Pokey`).
+Mark Watson's POKEY, still in `rtl/PokeyWatson` for simulation and built
+into releases up to 2.0.20, keeps its own license: free for non-commercial
+use, and commercial use or sale, in source or binary form, needs his
+permission (scrameta at gmail). That applies to those releases and to any
+bitstream built with it.

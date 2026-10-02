@@ -23,7 +23,16 @@ Seven upstream files are modified (`top.sv`, `Maria/DMA.sv`,
 `banks2600.sv`), two firmware images are removed, and the POKEY is swapped
 for an older one.
 
-### POKEY: Mark Watson's VHDL instead of upstream's rtl/Pokey
+### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
+
+Since 2.0.21 the Pocket build uses upstream's `rtl/Pokey/` again, with two
+changes in `Pokey/pokey_adapter.sv`: the write hold described below (the
+cause of the Ballblazer fault), and half the output level. The new mixer's
+curve gives about twice the level of Watson's linear sum for the same music,
+and the core's mix was set for Watson's; the curve's compression of loud
+passages is kept. Confirmed on hardware: Ballblazer plays a full match.
+
+What follows is the history up to 2.0.20.
 
 Upstream commit a36d55b (2026-08-25) replaced Mark Watson's VHDL POKEY with a
 new schematic-level one (`rtl/Pokey/`). On Pocket hardware, Ballblazer's
@@ -31,14 +40,14 @@ procedurally generated music turns into near-silent taps and pops with the new
 POKEY, and its goal siren goes silent. The 2022 Pocket core, which used
 Watson's POKEY, plays it correctly on the same hardware.
 
-The Pocket build therefore uses Watson's POKEY: `rtl/PokeyWatson/`, from
+Releases up to 2.0.20 therefore used Watson's POKEY: `rtl/PokeyWatson/`, from
 upstream b48eac0 (the last commit with it), with its top entity renamed
 `pokey` -> `pokey_watson` so it cannot collide with the new POKEY's module
 name. `../core/pokey_adapter_watson.sv` provides the `pokey_adapter` module
 that `cart.sv` instantiates, wired the way b48eac0 wired Watson's POKEY.
-`cart.sv` itself is unchanged, and `rtl/Pokey/` stays in the tree unbuilt.
+`cart.sv` itself is unchanged. (2.0.21 and later build `rtl/Pokey/` instead.)
 
-The exact fault in the new POKEY is not identified yet. Its pure tones match
+At the time the exact fault in the new POKEY was not identified (it is below). Its pure tones match
 the documented behaviour at all 256 frequencies, and rewriting its registers
 every frame does not disturb them (`sim/tb_pokey.sv`).
 
@@ -129,12 +138,12 @@ the whole core) on Ballblazer: its `$BBA8 STA $4007`, followed by DMA
 reading `$2772`, arrived as a write to register 2. 7 of the 2,404 writes in
 its first 10 s went to a wrong register (always 2), none after the fix. The
 wrong writes leave channels un-silenced or retuned, and over a match they
-add up to the near-silence heard on hardware. Not yet confirmed on Pocket
-hardware; worth reporting upstream either way.
+add up to the near-silence heard on hardware. Confirmed on Pocket hardware (a
+full Ballblazer match); worth reporting upstream.
 
 ### Memories in the Pocket's SRAM (`POCKET_SRAM`, `EXTERNAL_CARTRAM`, `NO_MEM_EDITOR`)
 
-A test variant, off in `../ap_core.qsf` until it is confirmed on hardware.
+On since 2.0.21 (confirmed on hardware with a test build).
 `../core/sram_ctrl.sv` puts four memories in the Pocket's SRAM (AS6C2016-55)
 instead of block RAM: the cartridge RAM (128 KiB), the 2600 Flicker Blend
 frame (64 KiB), the SaveKey image (32 KiB) and the BIOS (16 KiB). The

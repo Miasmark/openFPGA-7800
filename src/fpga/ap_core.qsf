@@ -738,12 +738,12 @@ set_global_assignment -name VERILOG_MACRO "NO_BUPCHIP=1"
 set_global_assignment -name VERILOG_MACRO "NO_DDRAM=1"
 set_global_assignment -name VERILOG_MACRO "EXTERNAL_FIRMWARE=1"
 set_global_assignment -name VERILOG_MACRO "EEPROM_NACK_ENDS_READ=1"
-# POCKET_SRAM test builds: cartridge RAM, Flicker Blend frame, SaveKey and
-# BIOS in the SRAM, and no In-System Memory Content Editor. Off until tested
-# on hardware; sim/run_sim.sh takes SRAM=1 for the same set.
-#set_global_assignment -name VERILOG_MACRO "POCKET_SRAM=1"
-#set_global_assignment -name VERILOG_MACRO "EXTERNAL_CARTRAM=1"
-#set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
+# Cartridge RAM, Flicker Blend frame, SaveKey and BIOS in the SRAM, and no
+# In-System Memory Content Editor (since 2.0.21). sim/run_sim.sh builds the
+# same set; SRAM=0 there builds the block RAM version.
+set_global_assignment -name VERILOG_MACRO "POCKET_SRAM=1"
+set_global_assignment -name VERILOG_MACRO "EXTERNAL_CARTRAM=1"
+set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister

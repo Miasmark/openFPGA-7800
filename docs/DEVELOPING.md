@@ -22,7 +22,7 @@ Related documents:
 | `src/fpga/core/atari7800_pocket.sv` | Pocket counterpart of MiSTer's `Atari7800.sv`: header parsing, reset, SDRAM, BIOS/save RAMs, SaveKey, firmware loading | This project |
 | `src/fpga/core/pll/` | Generated PLL and PLL-reconfiguration IP | Quartus `ip-generate` (see below) |
 | `src/fpga/core/pll_region.v` | PAL/NTSC PLL retune sequence | This project |
-| `src/fpga/core/audio_filter.sv`, `pokey_adapter_watson.sv` | Audio conditioning; Watson POKEY wrapper | This project |
+| `src/fpga/core/audio_filter.sv`, `pokey_adapter_watson.sv` | Audio conditioning; Watson POKEY wrapper (simulation only since 2.0.21) | This project |
 | `src/fpga/mister/rtl/` | The MiSTer Atari7800 core, vendored | Upstream; change only as POCKET_CHANGES.md records |
 | `src/fpga/pocket_utils/` | agg23's data loader, I2S, FIFO | agg23 (MIT) |
 | `dist/` | SD card layout: `Cores/Miasmark.7800/*.json`, platform files | This project |
@@ -39,9 +39,9 @@ Related documents:
 | `NO_DDRAM` | Leaves out the DDR3 bridge. The Pocket has no DDR3. |
 | `EXTERNAL_FIRMWARE` | HSC firmware and Supercharger BIOS loaded from files, not built in. |
 | `EEPROM_NACK_ENDS_READ` | SaveKey EEPROM fix: a NACK ends a sequential read. |
-| `POCKET_SRAM` | Test variant, off: cartridge RAM, Flicker Blend frame, SaveKey and BIOS in the SRAM (`core/sram_ctrl.sv`), no "no cartridge" screen. Needs `EXTERNAL_CARTRAM`. |
+| `POCKET_SRAM` | Cartridge RAM, Flicker Blend frame, SaveKey and BIOS in the SRAM (`core/sram_ctrl.sv`), no "no cartridge" screen. Needs `EXTERNAL_CARTRAM`. On since 2.0.21. |
 | `EXTERNAL_CARTRAM` | Upstream's: cartridge RAM from `top.sv`'s `cartram_*` ports. |
-| `NO_MEM_EDITOR` | Test variant, off: no In-System Memory Content Editor on `spram` memories. |
+| `NO_MEM_EDITOR` | No In-System Memory Content Editor on `spram` memories. On since 2.0.21. |
 
 Macros belong in the `.qsf`, never in a `.qip` (Quartus rejects them there).
 `sim/run_sim.sh` passes the same set with `-D`; keep the two lists in step.
@@ -52,7 +52,7 @@ Macros belong in the `.qsf`, never in a `.qip` (Quartus rejects them there).
 |---|---|---|
 | Quartus Prime Lite | 21.1 | Docker image `raetro/quartus:21.1`; CI uses it. |
 | Verilator | 5.040 | 5.020 is too old for the upstream sources. |
-| GHDL | 4.x | Converts Watson's VHDL POKEY to Verilog for simulation. |
+| GHDL | 4.x | Converts Watson's VHDL POKEY to Verilog, for `POKEY=watson` and the shadow comparison. |
 | Python 3 | any recent | Packaging and sim helpers; numpy/Pillow for some sim scripts. |
 | dasm, 7800basic | built by `sim/extra_tests.sh` | Test carts. |
 
@@ -90,7 +90,8 @@ the container's glibc is too old for the Node.js runtime that
 sim/run_sim.sh          # whole-core tests; a few minutes
 sim/extra_tests.sh      # game-style tests with 7800basic carts; needs run_sim.sh first
 sim/bupchip/run_bupchip.sh GAME.a78 SONG   # BupChip CPU load; see BUPCHIP.md
-SRAM=1 WORK=sim/work_sram sim/run_sim.sh   # the POCKET_SRAM variant
+SRAM=0 WORK=sim/work_bram sim/run_sim.sh   # the block RAM build, as up to 2.0.20
+POKEY=watson sim/run_sim.sh               # Watson's POKEY instead of upstream's
 ```
 
 `run_sim.sh` converts the POKEY with GHDL, copies the few upstream files
@@ -157,8 +158,9 @@ Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`. Then:
 2. Run `sim/run_sim.sh` and `sim/extra_tests.sh`. `extra_tests.sh` catches
    the holey DMA regression.
 3. Build, and check timing and resource use (see "Resource budget").
-4. Check whether upstream's POKEY now plays Ballblazer correctly. If it
-   does, the Watson POKEY swap can go.
+4. Check `rtl/Pokey/pokey_adapter.sv` still holds the CPU's write through
+   phase 2 and halves the level (POCKET_CHANGES.md): an upstream update to
+   that file would drop both.
 5. Check any new file's license header and update THIRD_PARTY_NOTICES.md.
 
 ### Add a menu setting

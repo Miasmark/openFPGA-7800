@@ -28,10 +28,16 @@ done
 # which Quartus allows and Verilator does not.
 sed -E 's/^(\s*)output(\s+)charged,/\1output logic\2charged,/' "$RTL/paddles.sv" > "$PATCHED/paddles.sv"
 
-# The Pocket build uses Mark Watson's VHDL POKEY (rtl/PokeyWatson) behind
-# core/pokey_adapter_watson.sv. Verilator reads no VHDL, so GHDL (4.x)
-# converts it to Verilog first.
-if [ ! -f "$WORK/pokey_watson.v" ] || [ -n "$(find "$RTL/PokeyWatson" -newer "$WORK/pokey_watson.v")" ]; then
+# The Pocket build uses upstream's POKEY (rtl/Pokey). POKEY=watson builds
+# Mark Watson's VHDL one (rtl/PokeyWatson, behind core/pokey_adapter_watson.sv)
+# instead, as releases up to 2.0.20 did. Verilator reads no VHDL, so GHDL
+# (4.x) converts it to Verilog first. run_pokey_shadow.sh needs that file.
+if [ "${POKEY:-new}" = watson ]; then
+	POKEY_SRCS=("$WORK/pokey_watson.v" "$FPGA/core/pokey_adapter_watson.sv")
+else
+	POKEY_SRCS=($(ls "$RTL"/Pokey/*.sv))
+fi
+if [ "${POKEY:-new}" = watson ] && { [ ! -f "$WORK/pokey_watson.v" ] || [ -n "$(find "$RTL/PokeyWatson" -newer "$WORK/pokey_watson.v")" ]; }; then
 	command -v ghdl >/dev/null || { echo "needs ghdl (apt install ghdl)"; exit 1; }
 	mkdir -p "$WORK/ghdl"
 	(cd "$WORK/ghdl" && rm -f ./*.cf && ghdl -a --std=08 -fsynopsys "$RTL"/PokeyWatson/*.vhd* 2>/dev/null \
@@ -45,7 +51,7 @@ SRCS=(
 	"$RTL/6502/mos6502_pkg.sv"
 	$(ls "$RTL"/6502/*.sv | grep -v pkg)
 	$(ls "$RTL"/Maria/*.sv | grep -v control.sv) "$PATCHED/Maria/control.sv"
-	"$WORK/pokey_watson.v" "$FPGA/core/pokey_adapter_watson.sv"
+	"${POKEY_SRCS[@]}"
 	$(sed -n 's/.*qip_path) \(.*\.sv\) *\].*/\1/p' "$RTL/Minnie/Minnie.qip" | sed "s#^#$RTL/Minnie/#")
 	"$RTL/SN76489/sn76489.sv"
 	"$RTL"/jt51/*.v
@@ -63,12 +69,12 @@ SRCS=(
 	"$FPGA/core/audio_filter.sv"
 )
 
-# SRAM=1 builds the POCKET_SRAM variant (cartridge RAM, Flicker Blend frame,
-# SaveKey and BIOS in the Pocket's SRAM; no memory editor), as the qsf does
-# when it defines the same macros.
+# The POCKET_SRAM build (cartridge RAM, Flicker Blend frame, SaveKey and BIOS
+# in the Pocket's SRAM; no memory editor), as the qsf defines it. SRAM=0
+# builds the block RAM version instead.
 SRAM_DEFS=""
 # KEEP_NOCART_ROM keeps the built-in cartridge image tb_system runs from.
-[ "${SRAM:-0}" = 1 ] && SRAM_DEFS="-DPOCKET_SRAM -DEXTERNAL_CARTRAM -DNO_MEM_EDITOR -DKEEP_NOCART_ROM"
+[ "${SRAM:-1}" = 1 ] && SRAM_DEFS="-DPOCKET_SRAM -DEXTERNAL_CARTRAM -DNO_MEM_EDITOR -DKEEP_NOCART_ROM"
 
 build() {   # build <top> <objdir>
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \

@@ -178,13 +178,13 @@ core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of 
 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.0.19, Analogue Pocket)
+### Hardware testing (2.0.2 to the 2.0.21 test builds, Analogue Pocket)
 
 | Test | Result |
 |---|---|
 | TIA sound pitch | Correct (the old core's octave-low bug is gone) |
 | Midnight Mutants, Commando, Dig Dug sprites | No corruption (holey DMA fix) |
-| Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct |
+| Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct. Also a full match with upstream's POKEY and the adapter fix (2.0.21-test); before the fix the music fell to near silence |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
 | Commando POKEY music | Works: typing intro, title theme and attract music. Needs a dump whose header flags the POKEY (see below) |
 | SaveKey (Triple Punch) | Works from 2.0.8: shows "Save SK", saves, and the high score is back after reloading. 2.0.7 showed "Save ER" (EEPROM model bug on reads, and a zero-filled file); delete an all-zero `savekey.sav` left by older versions |
@@ -199,6 +199,10 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Light gun (Sentinel) | Works from 2.0.18. Its header asks for a gun on both ports, and before 2.0.18 the gun went to port 2 (controller 2), so the cursor never moved |
 | Dual Stick (Robotron: 2084) | Works from 2.0.18. In 2.0.17, three face buttons at once (an opposite pair) stopped the fire stick and corrupted the screen |
 | Booster Grip | Works (2.0.14+) |
+| Rikki & Vikki (Souper) | Runs, without the BupChip music (2.0.21-test). Needs an A78 header: Jamie Blanks's patch for the Steam ROM |
+| Summer Games, Winter Games | Work (2.0.21-test), with a correctly headered dump |
+| Crystal Castles (2600) | Works (2.0.21-test) |
+| SRAM memories (2.0.21-test) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 
@@ -215,10 +219,12 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
 - **POKEY.** Upstream replaced Mark Watson's long-standing VHDL POKEY with
   a new one on 2026-08-25. On Pocket hardware, Ballblazer's music turned into
-  near-silent taps and pops with the new one, and it plays correctly on the
-  2022 Pocket core, which used Watson's. This port uses Watson's POKEY again
-  (see POCKET_CHANGES.md). What exactly the new POKEY gets wrong is not
-  identified yet.
+  near-silent taps and pops with it, so releases up to 2.0.20 kept Watson's.
+  The cause, found in simulation: when MARIA's DMA starts right after a
+  POKEY write, MARIA's address reaches the new POKEY before it has finished
+  sampling the write, and the byte lands in the wrong register. The adapter
+  now holds the write (see POCKET_CHANGES.md), and since 2.0.21 the core
+  uses the new POKEY, at Watson's output level.
 
 ### POKEY music missing? Check the ROM's header
 
@@ -233,8 +239,9 @@ test cart locally (no ROMs are stored in this repository) and runs them
 through the core. `sim/tb_pokey.sv` sweeps a POKEY channel through all 256
 frequencies in any AUDC/AUDCTL mode, for comparison against `pokey_model.py`
 (the documented divider and polynomial behaviour) with `pokey_compare.py`.
-The simulation converts Watson's VHDL POKEY with GHDL, so it runs the same
-POKEY as the Pocket build.
+The simulation runs the same POKEY as the Pocket build. `POKEY=watson
+sim/run_sim.sh` converts Watson's VHDL POKEY with GHDL and uses it instead,
+and `sim/run_pokey_shadow.sh` runs the two side by side.
 
 ## Controls
 
@@ -386,8 +393,9 @@ tools/                 Packaging
 
 - **JT51** (YM2151) by **Jose Tejada Gomez (Jotego)**, GPL-3.0.
 - **SDRAM controller** by **Sorgelig**, GPL-3.0.
-- **POKEY** by **Mark Watson**, the VHDL POKEY the MiSTer 7800 core used
-  until 2026-08-25. This port still uses it; see POCKET_CHANGES.md.
+- **POKEY**: the schematic-level POKEY by **Jamie Blanks** (MIT), since
+  2.0.21. Releases up to 2.0.20 used **Mark Watson**'s VHDL POKEY, which the
+  MiSTer 7800 core used until 2026-08-25; see POCKET_CHANGES.md.
 - **Souper** mapper logic by **Osman Celimli**.
 - **24LC0x EEPROM** (the SaveKey) by **GreyRogue**, from NES_MiSTer,
   GPL-3.0.
@@ -429,12 +437,13 @@ bitstream.
 - The SDRAM controller, JT51 and the SaveKey EEPROM are GPL-3.0. The full
   text is in [LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt), and the complete
   source for the bitstream is in this repository.
-- Mark Watson's POKEY (`src/fpga/mister/rtl/PokeyWatson/`) is free for
-  non-commercial use; commercial use needs his permission.
+- Mark Watson's POKEY (`src/fpga/mister/rtl/PokeyWatson/`), built into
+  releases up to 2.0.20, is free for non-commercial use; commercial use needs
+  his permission. Releases from 2.0.21 use the MIT POKEY instead.
 - `src/fpga/apf/`, `core_top.v` and `core_bridge_cmd.v` are Analogue's
   framework and template, under Analogue's terms.
 - No console or peripheral firmware is included: the 7800 BIOS, the high
   score cart firmware and the Supercharger BIOS are all user-supplied.
 - Any remainder should be considered MIT licensed.
-The POKEY portion keeps its own license, Mark Watson's terms above: the core
-may not be used or sold commercially without his permission.
+Releases up to 2.0.20 contain Mark Watson's POKEY, under his terms above:
+those may not be used or sold commercially without his permission.

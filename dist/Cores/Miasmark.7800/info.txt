@@ -15,6 +15,7 @@ Select, Start = Reset.
 Saves: the High Score Cart and the SaveKey (port 2) each keep one shared
 file for all games, hsc.sav and savekey.sav.
 
-Licenses: see the licenses/ folder. MIT and GPL-3.0; the POKEY has Mark
-Watson's own terms (non-commercial use only without his permission). Source:
+Licenses: see the licenses/ folder. MIT and GPL-3.0. From 2.0.21 the POKEY
+is the MIT one; 2.0.20 and earlier use Mark Watson's POKEY, under his own
+terms (non-commercial use only without his permission). Source:
 https://github.com/Miasmark/openFPGA-7800
