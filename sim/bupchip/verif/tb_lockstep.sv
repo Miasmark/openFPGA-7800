@@ -71,10 +71,19 @@ module tb_lockstep;
 		.pr_valid, .pr_addr, .pr_wait, .pr_avail, .pr_data,
 		.halted, .halt_pc);
 
+	// The DUT's tag for its bus events: instructions retired before this clock.
+`ifdef DUT_BUP
+	`define DUT_N dret
+`else
+	`define DUT_N dut.nret
+`endif
+
 	// ---- scoreboard -----------------------------------------------------------
 	typedef struct { logic [31:0] pc, insn; logic [31:0] r [15]; logic [3:0] f; } rec_t;
-	typedef struct { logic [31:0] a, d; logic [3:0] s; } st_t;
-	typedef struct { logic [7:0] a; logic [31:0] d; } io_t;
+	// Each access carries n, the number of instructions its side had retired
+	// when it happened.
+	typedef struct { logic [31:0] a, d; logic [3:0] s; longint n; } st_t;
+	typedef struct { logic [7:0] a; logic [31:0] d; longint n; } io_t;
 
 	rec_t   refq [$], dutq [$];
 	st_t    rstq [$], dstq [$];
@@ -87,6 +96,16 @@ module tb_lockstep;
 	logic   abort_ok = 0;
 	longint inject_mmio = -1;
 	int     maxfail = 5;
+	// Per stream (RAM stores, peripheral writes, peripheral reads): the lowest
+	// and highest n(DUT) - n(reference) over the matched pairs.
+	longint tlo [3] = '{0, 0, 0}, thi [3] = '{0, 0, 0};
+	logic   tseen [3] = '{0, 0, 0};
+
+	function automatic void tag_pair(input int k, input longint e, input longint g);
+		if (!tseen[k] || g - e < tlo[k]) tlo[k] = g - e;
+		if (!tseen[k] || g - e > thi[k]) thi[k] = g - e;
+		tseen[k] = 1;
+	endfunction
 
 	function automatic logic [31:0] lanes(input logic [3:0] s);
 		return {{8{s[3]}}, {8{s[2]}}, {8{s[1]}}, {8{s[0]}}};
@@ -122,11 +141,11 @@ module tb_lockstep;
 				end
 			end
 			else if (ref_dacc && mem_write) begin
-				if (ref_mmio) rpwq.push_back('{mem_addr[7:0], mem_wdata});
-				else rstq.push_back('{mem_addr & ~32'h3, mem_wdata & lanes(mem_wstrb), mem_wstrb});
+				if (ref_mmio) rpwq.push_back('{mem_addr[7:0], mem_wdata, rret});
+				else rstq.push_back('{mem_addr & ~32'h3, mem_wdata & lanes(mem_wstrb), mem_wstrb, rret});
 				if (ref_fault && ref_fault_ret < 0) ref_fault_ret = rret;
 			end else if (ref_dacc && ref_mmio)
-				mmq.push_back('{mem_addr[7:0], mem_rdata});
+				mmq.push_back('{mem_addr[7:0], mem_rdata, rret});
 			if (retire) begin
 				rec_t x;
 				x.pc = ref_rpc;
@@ -143,13 +162,14 @@ module tb_lockstep;
 		if (!dut_rst) begin
 			dcyc++;
 			if (pr_wait) dwait++;
-			if (st_valid) dstq.push_back('{st_addr & ~32'h3, st_data & lanes(st_strb), st_strb});
-			if (pw_valid) dpwq.push_back('{pw_addr, pw_data});
+			if (st_valid) dstq.push_back('{st_addr & ~32'h3, st_data & lanes(st_strb), st_strb, `DUT_N});
+			if (pw_valid) dpwq.push_back('{pw_addr, pw_data, `DUT_N});
 			if (pr_valid) begin
 				if (mmq.size() == 0) fail($sformatf("DUT read peripheral %02x with no replay entry", pr_addr));
 				else begin
 					if (mmq[0].a !== pr_addr)
 						fail($sformatf("peripheral read #%0d: DUT %02x, reference %02x", npr + 1, pr_addr, mmq[0].a));
+					tag_pair(2, mmq[0].n, `DUT_N);
 					void'(mmq.pop_front());
 					npr++;
 				end
@@ -200,6 +220,7 @@ module tb_lockstep;
 			e = rstq.pop_front();
 			g = dstq.pop_front();
 			nst++;
+			tag_pair(0, e.n, g.n);
 			if (e.a !== g.a || e.s !== g.s || e.d !== g.d) fail($sformatf("RAM store #%0d: DUT %08x/%1x=%08x, reference %08x/%1x=%08x",
 				nst, g.a, g.s, g.d, e.a, e.s, e.d));
 		end
@@ -208,6 +229,7 @@ module tb_lockstep;
 			e = rpwq.pop_front();
 			g = dpwq.pop_front();
 			npw++;
+			tag_pair(1, e.n, g.n);
 			if (e.a !== g.a || e.d !== g.d) fail($sformatf("peripheral write #%0d: DUT %02x=%08x, reference %02x=%08x",
 				npw, g.a, g.d, e.a, e.d));
 		end
@@ -280,6 +302,8 @@ module tb_lockstep;
 		$display("DUT: %0d retired in %0d clocks, %0d of them waiting for a replayed read (%.2f per instruction without those)",
 			dret, dcyc, dwait, (dcyc - dwait) * 1.0 / (dret > 0 ? dret : 1));
 		if (ref_fault_ret >= 0) $display("reference wrote FAULT = %02x", bup.fault_code);
+		$display("access tags, DUT minus reference: stores %0d..%0d, peripheral writes %0d..%0d, peripheral reads %0d..%0d",
+			tlo[0], thi[0], tlo[1], thi[1], tlo[2], thi[2]);
 		$display("mismatches: %0d", fails);
 		$display("%s", fails == 0 ? "LOCKSTEP PASS" : "LOCKSTEP FAIL");
 		$finish;

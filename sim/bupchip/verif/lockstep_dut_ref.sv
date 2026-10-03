@@ -133,6 +133,12 @@ module lockstep_dut_ref (
 		if (dload && nloads + 1 == inject) d_rdata = d_rdata ^ 32'h1;
 	end
 
+	// Instructions the core has retired before this clock. tb_lockstep.sv tags
+	// this shell's bus events with it, because the retire port below runs
+	// behind the bus.
+	longint nret = 0;
+	always @(posedge clk) if (!rst && d_retire) nret <= nret + 1;
+
 	always @(posedge clk)
 		if (rst) begin
 			halted <= 1'b0;
