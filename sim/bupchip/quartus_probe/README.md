@@ -3,7 +3,7 @@
 Step 3 of `docs/BUPCHIP_CORE.md`. The S1 core, `src/fpga/core/bupchip/bup_cpu.sv`, is compiled alone on the Pocket's 5CEBA4F23C8 with the memories it will have, once with `clk_arm` at 28.636364 MHz (S1) and once at 21.477273 MHz (the final clock). The full build (`src/fpga/ap_core.qsf`) is not touched.
 
 ```sh
-sim/bupchip/quartus_probe/run_probe.sh            # both clocks, about 4 min each in Docker
+sim/bupchip/quartus_probe/run_probe.sh            # both clocks, 2-4 min each in Docker
 sim/bupchip/quartus_probe/run_probe.sh 28.636364  # one clock
 ```
 
