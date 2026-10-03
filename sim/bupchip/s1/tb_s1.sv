@@ -18,7 +18,8 @@
 //
 // Song mode (the default): boot, send $80|song once the firmware has
 // enabled the PCM FIFO, then play +secs seconds (48,000 pops each). Writes
-// every frame the firmware pushes, from power-up, to +out, and one line
+// every frame the firmware pushes, from power-up, to +out (the "command"
+// line gives how many came before the song's first), and one line
 // "clocks instructions" per batch to +batches. Every clock is charged to the
 // instruction that retires at the end of it, or is still in progress, and
 // the instructions retired at 0x178-0x18c (the poll loop) are idle: idle is
@@ -148,7 +149,7 @@ module tb_s1;
 	// ---- measurement --------------------------------------------------------------
 	longint cyc = 0, charge = 0, nret = 0;
 	longint busy = 0, work = 0, mclk = 0, pops = 0, under = 0, pushes = 0, mpushes = 0;
-	longint bclk = 0, bins_n = 0, nbatch = 0, cmd_cyc = -1;
+	longint bclk = 0, bins_n = 0, nbatch = 0, cmd_cyc = -1, song_frame = -1, take_cyc = -1;
 	int     minlev = 1 << 30, pcm_fd = 0, bat_fd = 0;
 	logic   measuring = 0, in_batch = 0, check_clear = 1, fault_seen = 0, clear_ok = 1;
 	logic [7:0] fault_val = 0;
@@ -158,12 +159,17 @@ module tb_s1;
 		cyc++;
 		charge++;
 		if (rt_start && check_clear) begin
-			// The first instruction after a release must see r0-r14 = 0.
-			for (int k = 0; k < 15; k++)
-				if (cpu.rf[k] !== 32'd0) begin
+			// The first instruction after a release must see r0-r14 = 0, as the
+			// core reads them: last clock's write from the bypass, the rest
+			// from the array.
+			for (int k = 0; k < 15; k++) begin
+				logic [31:0] v;
+				v = cpu.byp_we && cpu.byp_idx == 4'(k) ? cpu.byp_data : cpu.rf[k];
+				if (v !== 32'd0) begin
 					clear_ok = 0;
-					$display("register clear: r%0d = %08x at the first instruction", k, cpu.rf[k]);
+					$display("register clear: r%0d = %08x at the first instruction", k, v);
 				end
+			end
 			check_clear = 0;
 		end
 		if (rt_valid) begin
@@ -202,6 +208,10 @@ module tb_s1;
 			if (pcm_fd != 0) $fwrite(pcm_fd, "%c%c%c%c", reg_wdata[7:0], reg_wdata[15:8],
 				reg_wdata[23:16], reg_wdata[31:24]);
 		end
+		if (per.cmd_pop && song_frame < 0) begin	// the firmware takes the command
+			song_frame = pushes;
+			take_cyc = cyc;
+		end
 		if (reg_sel && reg_write && reg_addr == 8'h1c && !fault_seen) begin
 			fault_seen = 1;
 			fault_val = reg_wdata[7:0];
@@ -224,6 +234,7 @@ module tb_s1;
 		while (!pcm_enabled && !halted && cyc < maxcyc) @(posedge clk);
 		$display("booted at clock %0d (%.3f ms): fault %02x, PCM enabled %0d, %0d frames pushed",
 			cyc, cyc / (ARM_MHZ * 1000.0), fault_code, pcm_enabled, pushes);
+		song_frame = -1;
 		@(posedge clk) begin cmd_valid <= 1; cmd_data <= 8'h80 | 8'(song[4:0]); end
 		@(posedge clk) cmd_valid <= 0;
 		cmd_cyc = cyc;
@@ -311,6 +322,8 @@ module tb_s1;
 			busy, 100.0 * busy / mclk, ARM_MHZ, busy / (secs * 1.0e6));
 		$display("work       %0d instructions, %.2f MIPS; CPI %.4f", work, work / (secs * 1.0e6), 1.0 * busy / work);
 		$display("batches    %0d", nbatch);
+		$display("command    taken by the firmware %0d clocks after it was sent, with %0d frames pushed",
+			take_cyc - cmd_cyc, song_frame);
 		$display("audio      %0d pops, %0d underruns; %0d frames pushed while playing, %0d in all; overflow %0d",
 			pops, under, mpushes, pushes, per.pcm_overflow);
 		$display("fifo       lowest level %0d of %0d while playing", minlev, PCM_DEPTH);

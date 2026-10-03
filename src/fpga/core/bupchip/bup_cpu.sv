@@ -59,7 +59,8 @@
 //              PC, MRS/MSR; and UMULL with RdHi == RdLo
 //   3  THUMB   BX to an address with bit 0 set (one clock later)
 //   4  FETCH   B, BL, BX or LDR pc to a target outside the ROM, or not word
-//              aligned (one clock later)
+//              aligned; running on past the last ROM word, 0x3FFC (both
+//              one clock later)
 //   5  DATA    a load or store outside every window, or past asset_size
 //   6  RO      a store to the ROM or the asset window
 //   7  BLOCK   LDM/STM outside the ROM and RAM (STM to ROM is RO)
@@ -316,6 +317,12 @@ module bup_cpu
 	// ---- register file ----------------------------------------------------------
 	// r0-r14; r15 reads as the instruction's address + 8. Last clock's write is
 	// held and bypassed, so an MLAB is only read for data at least two clocks old.
+	//
+	// The behavioural array shows a write on the next clock, so simulation
+	// alone would never need the bypass. Built with BUP_SIM_LATE_RF (simulation
+	// only), an entry holds garbage (the inverted data) for the clock after
+	// its write and the data from the clock after that: any read of the array
+	// that the bypass does not cover then goes wrong.
 	(* ramstyle = "MLAB, no_rw_check" *) logic [31:0] rf [0:15];
 	logic        rf_we;
 	logic  [3:0] rf_wa;
@@ -327,7 +334,12 @@ module bup_cpu
 	logic  [3:0] ia, ib;
 
 	always_ff @(posedge clk) begin
+`ifdef BUP_SIM_LATE_RF
+		if (byp_we) rf[byp_idx] <= byp_data;
+		if (rf_we) rf[rf_wa] <= ~rf_wd;		// wins when both hit one entry
+`else
 		if (rf_we) rf[rf_wa] <= rf_wd;
+`endif
 		byp_we <= rf_we;
 		byp_idx <= rf_wa;
 		byp_data <= rf_wd;
@@ -562,10 +574,12 @@ module bup_cpu
 	logic        acc_go;            // a single transfer or a beat accesses memory this clock
 	logic        late_go;
 	logic  [3:0] late_code_d;
+	logic        seq_next;          // npc is the next word (pc_next1)
 
 	always_comb begin
 		nstate = state;
 		npc = pc;
+		seq_next = 1'b0;
 		start = 1'b0;
 		done = 1'b0;
 		rf_we = 1'b0;
@@ -652,7 +666,10 @@ module bup_cpu
 						nstate = S_SEQ;
 					end
 				end
-				if (done) npc = (k_br || k_bx) && cond_ok ? npc : pc_next1[11:0];
+				if (done && !((k_br || k_bx) && cond_ok)) begin
+					npc = pc_next1[11:0];
+					seq_next = 1'b1;
+				end
 			end
 
 			S_W: begin
@@ -664,9 +681,11 @@ module bup_cpu
 				if (!w_wait) begin
 					done = 1'b1;
 					npc = pc_next1[11:0];
+					seq_next = 1'b1;
 					if (acc_load) begin
 						if (f_rd == 4'hF) begin		// LDR pc
 							npc = ldata[13:2];
+							seq_next = 1'b0;
 							late_go = ldata[1:0] != 2'b00 || ldata[31:14] != 18'd0;
 						end else begin
 							rf_we = 1'b1;
@@ -685,6 +704,7 @@ module bup_cpu
 			S_SHR2: begin
 				done = 1'b1;
 				npc = pc_next1[11:0];
+				seq_next = 1'b1;
 				rf_we = !dp_cmp;
 				flags_we = bit_l;
 			end
@@ -699,6 +719,7 @@ module bup_cpu
 					rf_wa = f_rn;				// MUL/MLA: Rd is bits 19:16
 					done = 1'b1;
 					npc = pc_next1[11:0];
+					seq_next = 1'b1;
 				end
 			end
 
@@ -708,6 +729,7 @@ module bup_cpu
 				rf_wd = prod[63:32];
 				done = 1'b1;
 				npc = pc_next1[11:0];
+				seq_next = 1'b1;
 			end
 
 			S_SEQ: begin
@@ -730,11 +752,22 @@ module bup_cpu
 					rf_wa = f_rn;
 					rf_wd = blk_wb;
 				end
-				if (done) npc = pc_next1[11:0];
+				if (done) begin
+					npc = pc_next1[11:0];
+					seq_next = 1'b1;
+				end
 			end
 
 			default: ;					// S_HALT
 		endcase
+
+		// Running on from the last ROM word: the ARM7TDMI's fetch from 0x4000
+		// aborts, so halt (one clock later, as for a branch out of the ROM)
+		// rather than wrap to 0. A fault of the instruction itself wins.
+		if (done && seq_next && pc_next1[12] && !late_go) begin
+			late_go = 1'b1;
+			late_code_d = HALT_FETCH;
+		end
 
 		// A halt, or rst, stops everything this clock.
 		if (rst || halt_now) begin

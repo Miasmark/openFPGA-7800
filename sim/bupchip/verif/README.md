@@ -10,6 +10,7 @@ Nothing here needs game data except the optional lockstep run on a real image. G
 sim/bupchip/setup_dev.sh                         # tools, and Unicorn in sim/work/bupchip/venv
 sim/bupchip/verif/run_all.sh                     # everything game-free, about 3 minutes
 sim/bupchip/verif/run_all.sh rv.a78              # plus lockstep on Misery_F, about 1 minute more
+sim/bupchip/verif/directed/run.sh                # the new core: more directed tests, end of ROM, fuzz
 ```
 
 `run_all.sh` runs, and each can be run alone:
@@ -20,8 +21,9 @@ sim/bupchip/verif/run_all.sh rv.a78              # plus lockstep on Misery_F, ab
 | `run_kernel.sh` | The mixer harness, `kernel/harness.S`: the firmware's own voice mixer on 16 made-up voices. On the reference it must reach its end marker with 4,800 nonzero frames; then lockstep to the end. |
 | `run_synth.sh` | A synthetic ARSC block (`make_synth_arsc.py`): the existing `tb_bupchip` (`../run_bupchip.sh`) boots it and renders nonzero PCM with no underrun; the fault paths give faults 2 and 3; Unicorn replays a reference trace of boot and song 0 (`iss_fw_replay.py`); lockstep through every command class, and over random-content blocks. |
 | `run_lockstep.sh IMAGE.a78 [+args]` | One lockstep run (below). |
+| `run_songs.sh GAME.a78 [SONG ...]` | Not in `run_all.sh`: lockstep through each song (default all 32) for `SECS` seconds (default 4), odd songs with random asset waits and throttle clocks; `DUT` defaults to `bup` here. About 75 minutes on 3 cores. |
 
-Environment: `WORK` (build products, default `sim/work/bupchip/verif`), `VERILATOR` (default `/opt/verilator-5.040/bin/verilator` if present), `VENV` or `PYTHON` (for Unicorn), `DUT` (`ref` or `bup`), `JOBS` and `OPS` for the ISA suite, `MAXRET` for `run_all.sh`'s game run.
+Environment: `WORK` (build products, default `sim/work/bupchip/verif`), `VERILATOR` (default `/opt/verilator-5.040/bin/verilator` if present), `VENV` or `PYTHON` (for Unicorn), `DUT` (`ref` or `bup`), `LATE_RF=1` with `DUT=bup` (the core built with `BUP_SIM_LATE_RF`: register-file writes land a clock late, with garbage in between, so only its bypass keeps results right), `JOBS` and `OPS` for the ISA suite, `MAXRET` for `run_all.sh`'s game run.
 
 Other files: `build.sh` (Verilator builds), `ref_system.svh` (the reference BupChip, shared by both testbenches), `tb_ref_trace.sv` (runs a program on the reference; trace, signature dump), `make_kernel.py` (the harness image), `isa/iss_run.py`, `isa/bin2hex.py`, `isa/link.ld`.
 
@@ -33,7 +35,7 @@ Other files: `build.sh` (Verilator builds), `ref_system.svh` (the reference BupC
 - **DUT:** `lockstep_dut_ref.sv` by default: a second `arm7tdmi_core` (`MUL_RETIRE_STAGE` off) on a zero-wait bus, with its retires turned into the retire-port stream described below. `-DDUT_BUP` (`DUT=bup`) selects `lockstep_dut_bup.sv`: the new core, `src/fpga/core/bupchip/bup_cpu.sv`, with its ROM and RAM in `cache_ram.v` blocks and a behavioural asset memory (step 2; its own checks are in `../s1/`).
 - **Peripheral reads are replayed.** Every read the reference makes of `0xE0009000`–`0xE00090FF` is queued with its value, and the DUT's reads are answered from that queue, in order. The DUT waits while the queue is empty. Both cores therefore see the same IDENT, commands and FIFO status, and the poll loops run the same number of times, whatever the timing.
 - **Compared, in program order:** every retire (PC, encoding, r0–r14 and NZCV after it), every RAM store (word address, byte lanes, data), every peripheral write, and the address of every peripheral read. Either side may run ahead. Both register files start at zero, and nothing is masked.
-- **Stop:** `+maxret` compared retires (default 1,000,000), `+maxcyc` reference clocks, the reference's FAULT write (the end marker of the ISA tests and the harness) once the DUT has caught up, `+maxfail` mismatches (default 5), or nothing compared for `+stall` clocks. The last line is `LOCKSTEP PASS` or `LOCKSTEP FAIL`.
+- **Stop:** `+maxret` compared retires (default 1,000,000), `+maxcyc` reference clocks, the reference's FAULT write (the end marker of the ISA tests and the harness) once the DUT has caught up, `+maxfail` mismatches (default 5), or nothing compared for `+stall` clocks. At a FAULT-write stop every RAM store, peripheral write and replayed read of either side must have found its partner, so a missing or extra last store fails. The last line is `LOCKSTEP PASS` or `LOCKSTEP FAIL`.
 - **Fault injection:** `+inject=N` flips bit 0 of the DUT's Nth data load (each shell implements it), `+inject_mmio=N` of the Nth replayed read (the testbench does, for any DUT). Either must end in `LOCKSTEP FAIL`.
 - Commands: `+song=N +songcyc=CLK`, or `+cmds=8d@1000000,81@3000000` (byte in hex, at that reference clock).
 
@@ -91,7 +93,7 @@ The shell also holds the core's ROM (`+romhex`, default the `ROMHEX` define), it
 
 ## Results with the new core (DUT=bup)
 
-`../s1/README.md` lists the step 2 results: the ISA suite in lockstep, the mixer harness, the synthetic ARSC checks, Rikki & Vikki through boot and five songs, and the fault injections, all with 0 mismatches against the reference.
+`../s1/README.md` lists the step 2 results: the ISA suite in lockstep, the mixer harness, the synthetic ARSC checks, Rikki & Vikki through boot and five songs, and the fault injections, all with 0 mismatches against the reference. `directed/` adds more directed tests (shifter carry-out from every bit, register shift amounts, LDM/STM of r0–r14, r15 as an operand, UNPREDICTABLE forms the core runs), running off the end of the ROM, and a random-encoding fuzz; its README has the results and a mutation check.
 
 ## Results (2026-10-03, reference against reference)
 

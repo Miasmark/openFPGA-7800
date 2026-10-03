@@ -2,7 +2,9 @@
 @ each type, with and without S, carry in 0 and 1, on values with both end
 @ bits set and clear; immediate amounts 1 and 31; the immediate encodings of
 @ amount 0 (LSR #32, ASR #32, RRX) with and without S, in data processing
-@ and as scaled register offsets; rotated immediates with rotation 0 and
+@ and as scaled register offsets; the immediate shifts' carry-out again on
+@ 0x00000001, 0x80000000 and 0xaaaaaaaa, where bit 0 differs from bit 31
+@ and each bit from its neighbours; rotated immediates with rotation 0 and
 @ not 0 (C from bit 31 or unchanged); logical and arithmetic S operations
 @ with every operand-2 form.
 @ SPDX-License-Identifier: MIT
@@ -102,6 +104,23 @@
 	adcs	r0, r5, \src, rrx
 	SIG	r0
 	SIGF
+	.endr
+	.endr
+
+	@ ---- the same carry-outs on values whose end bits and neighbouring bits
+	@ differ, so that taking C from the wrong bit shows
+	POOL
+	ldr	r7, =0x00000001
+	ldr	r8, =0x80000000
+	ldr	r9, =0xaaaaaaaa
+	.irp sh, "lsl #1", "lsl #31", "lsr #1", "lsr #31", "lsr #32", "asr #1", "asr #31", "asr #32", "ror #1", "ror #31", rrx
+	.irp cin, 0, 2
+	.irp src, r7, r8, r9
+	SETF	\cin
+	movs	r0, \src, \sh
+	SIG	r0
+	SIGF
+	.endr
 	.endr
 	.endr
 

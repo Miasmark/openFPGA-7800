@@ -10,6 +10,8 @@ IMAGE.a78 must hold 1 KiB of assets (run_directed.sh makes it), so that
 0x02000400 is the first byte past the asset window. Each program is the
 directed tests' start-up (directed/common.inc), a few set-up instructions,
 the case, and the end marker, which a core that does not halt reaches.
+The romend_* cases put the case in the last ROM word instead, where running
+on must halt (FETCH) rather than wrap to 0.
 Exit status 1 if any case fails.
 """
 import os
@@ -72,6 +74,24 @@ CASES = [
     ("ldm_mmio", BLOCK, "ldr r1, =0xe0009000\nexpect_halt: ldmia r1, {r0}"),
     ("ldm_assets", BLOCK, "ldr r1, =0x02000000\nexpect_halt: ldmia r1, {r0, r2}"),
     ("stm_past_ram", BLOCK, "ldr r1, =0x40003ffc\nexpect_halt: stmia r1, {r0, r2}"),
+    # Running on from the last ROM word (0x3FFC): MiSTer aborts the fetch from
+    # 0x4000. One case per kind of instruction; a fault of the instruction
+    # itself wins.
+    ("romend_alu", FETCH, "@end add r0, r0, #1"),
+    ("romend_bcc_fails", FETCH, "@end bne _start"),
+    ("romend_ldr", FETCH, "@end ldr r3, [r12]"),
+    ("romend_asset", FETCH, "ldr r1, =0x02000000\n@end ldrsh r3, [r1]"),
+    ("romend_mmio_read", FETCH, "ldr r1, =0xe0009000\n@end ldr r3, [r1]"),
+    ("romend_mmio_write", FETCH, "ldr r1, =0xe0009000\n@end str r0, [r1, #0x10]"),
+    ("romend_str", FETCH, "@end str r0, [r12]"),
+    ("romend_strh_reg", FETCH, "mov r2, #4\n@end strh r0, [r12, r2]"),
+    ("romend_shift_reg", FETCH, "mov r2, #3\n@end adds r0, r0, r0, lsl r2"),
+    ("romend_mla", FETCH, "@end mla r3, r0, r0, r0"),
+    ("romend_umull", FETCH, "@end umull r3, r4, r0, r0"),
+    ("romend_stm", FETCH, "@end stmia r12, {r0, r2, r3}"),
+    ("romend_ldm", FETCH, "@end ldmia r12!, {r0, r2, r3}"),
+    ("romend_msr_mode", UNDEF, "@end msr cpsr_c, #0x10"),
+    ("romend_store_nowhere", DATA, "ldr r1, =0x80000000\n@end str r0, [r1]"),
 ]
 
 tb, work, image = sys.argv[1:4]
@@ -89,10 +109,17 @@ for name, code, body in CASES:
     b = os.path.join(work, name)
     with open(b + ".S", "w") as f:
         f.write('#include "common.inc"\n\tSTART\n\tmov r0, #0x5a\n')
-        for line in body.split("\n"):
+        setup, at_end, last = body.partition("@end ")
+        for line in setup.split("\n") if setup else []:
             label, _, ins = line.rpartition(":") if line.startswith("expect_halt:") else ("", "", line)
             f.write(("expect_halt:\n" if label else "") + "\t" + ins.strip() + "\n")
-        f.write("\tEND\n")
+        if at_end:
+            # The case goes in the last ROM word (.text follows the 8 vectors).
+            # There is no end marker: a core that wraps to 0 starts again and
+            # never halts.
+            f.write("\tb\tromend\n\t.ltorg\n\t.org\t0x3ffc - 0x20\nromend:\nexpect_halt:\n\t%s\n" % last)
+        else:
+            f.write("\tEND\n")
     r = run(["arm-none-eabi-gcc", "-mcpu=arm7tdmi", "-marm", "-nostdlib", "-nostartfiles",
              "-I", os.path.join(here, "directed"), "-Wl,-T," + os.path.join(verif, "isa", "link.ld"),
              "-Wl,--no-warn-rwx-segments", "-o", b + ".elf", b + ".S"])

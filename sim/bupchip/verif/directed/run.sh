@@ -6,8 +6,9 @@
 #      or exception, and in lockstep with the new core (DUT=bup), plainly and
 #      with random asset waits and throttle clocks (+await=40 +throttle=25);
 #      the tests include ../../s1/directed/common.inc;
-#   2. romend.S on tb_s1.sv: running off the end of the ROM must halt (code
-#      4, FETCH), not wrap to 0;
+#   2. romend.S on tb_s1.sv: a taken branch in the last ROM word must not
+#      halt, and running off the end of the ROM must halt (code 4, FETCH, at
+#      0x3FFC after 14 retires), not wrap to 0;
 #   3. fuzz_run.py for each seed in FUZZ (default "1 2 3 4 5 6 7 8"), CELLS
 #      cells each (default 450): random encodings of every class; the core
 #      may halt on any of them, but the rest must match the reference in
@@ -70,10 +71,10 @@ for t in "${TESTS[@]}"; do
 	fi
 	if [ "$n" = romend ]; then
 		"$S1_BIN" +romhex="$b.hex" +rom="$IMG" +maxcyc=200000 > "$b.s1.log" 2>&1 || true
-		if grep -Eq "^result: halted=1 code=4 pc=0000(3ffc|4000)" "$b.s1.log"; then
-			echo "PASS $n (halts with code 4)"; pass=$((pass + 1))
+		if grep -Eq "^result: halted=1 code=4 pc=00003ffc fault=00 retired=14 " "$b.s1.log"; then
+			echo "PASS $n (halts with code 4 at 0x3ffc after 14 retires)"; pass=$((pass + 1))
 		else
-			echo "FAIL $n: running off the end of the ROM does not halt with code 4: $(grep '^result' "$b.s1.log")"
+			echo "FAIL $n: want a halt with code 4 at 0x3ffc after 14 retires: $(grep '^result' "$b.s1.log")"
 			fail=$((fail + 1))
 		fi
 		continue

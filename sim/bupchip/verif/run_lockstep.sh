@@ -2,7 +2,9 @@
 # Lockstep the reference BupChip against a core under test, retire by retire
 # (tb_lockstep.sv; README.md). DUT=ref (the default) runs the reference against
 # a second copy of itself on a zero-wait bus; DUT=bup runs the new core, built
-# from BUP_SRCS (default: src/fpga/core/bupchip/bup_cpu.sv and bup_regfile.sv).
+# from BUP_SRCS (default: src/fpga/core/bupchip/bup_cpu.sv and bup_regfile.sv);
+# with LATE_RF=1 it is built with BUP_SIM_LATE_RF, so register-file writes
+# land a clock late (bup_cpu.sv) and only the bypass keeps results right.
 #   ./run_lockstep.sh IMAGE.a78 [+plusargs...]
 #   ./run_lockstep.sh rv.a78 +song=13 +songcyc=1000000 +maxret=1000000
 #   ./run_lockstep.sh --build     only build, and print the binary's path
@@ -25,8 +27,10 @@ case "$DUT" in
 			BUP_SRCS="$CORE/bup_cpu.sv"
 			[ -f "$CORE/bup_regfile.sv" ] && BUP_SRCS="$BUP_SRCS $CORE/bup_regfile.sv"
 		fi
+		NAME=lockstep_bup
+		[ "${LATE_RF:-0}" = 0 ] || { NAME=lockstep_bup_laterf; BUP_SRCS="$BUP_SRCS -DBUP_SIM_LATE_RF"; }
 		# shellcheck disable=SC2086
-		BIN="$("$HERE/build.sh" lockstep_bup tb_lockstep lockstep_dut_bup.sv $BUP_SRCS -DDUT_BUP)" ;;
+		BIN="$("$HERE/build.sh" "$NAME" tb_lockstep lockstep_dut_bup.sv $BUP_SRCS -DDUT_BUP)" ;;
 	*)
 		echo "DUT must be ref or bup" >&2; exit 2 ;;
 esac

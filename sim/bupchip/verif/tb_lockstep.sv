@@ -36,8 +36,9 @@
 //
 // A write to the FAULT register (0xE000901C) by the reference ends the run
 // once the DUT has caught up: the firmware's fault path, or the end marker
-// of the ISA tests and the mixer harness. The last line is LOCKSTEP PASS or
-// LOCKSTEP FAIL.
+// of the ISA tests and the mixer harness. Every RAM store, peripheral write
+// and replayed read either side made must then have been matched. The last
+// line is LOCKSTEP PASS or LOCKSTEP FAIL.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -252,9 +253,25 @@ module tb_lockstep;
 			end
 		end
 		if (abort_ok && halt_seen && ref_abort_ret < 0) fail("DUT halted, but the reference did not abort");
-		if (why == "FAULT write" && rpwq.size() != 0)
-			fail($sformatf("DUT is missing %0d peripheral write(s), the first %02x=%08x",
-				rpwq.size(), rpwq[0].a, rpwq[0].d));
+		if (why == "FAULT write") begin
+			// Both cores have stopped at the same end marker, so every access
+			// either side made must have found its partner.
+			if (rpwq.size() != 0)
+				fail($sformatf("DUT is missing %0d peripheral write(s), the first %02x=%08x",
+					rpwq.size(), rpwq[0].a, rpwq[0].d));
+			if (dpwq.size() != 0)
+				fail($sformatf("DUT made %0d extra peripheral write(s), the first %02x=%08x",
+					dpwq.size(), dpwq[0].a, dpwq[0].d));
+			if (rstq.size() != 0)
+				fail($sformatf("DUT is missing %0d RAM store(s), the first %08x/%1x=%08x",
+					rstq.size(), rstq[0].a, rstq[0].s, rstq[0].d));
+			if (dstq.size() != 0)
+				fail($sformatf("DUT made %0d extra RAM store(s), the first %08x/%1x=%08x",
+					dstq.size(), dstq[0].a, dstq[0].s, dstq[0].d));
+			if (mmq.size() != 0)
+				fail($sformatf("DUT did not make %0d of the reference's peripheral read(s), the first at %02x",
+					mmq.size(), mmq[0].a));
+		end
 		$display("stop: %s", why);
 		$display("compared: %0d retires, %0d RAM stores, %0d peripheral writes; %0d peripheral reads replayed",
 			ncmp, nst, npw, npr);
