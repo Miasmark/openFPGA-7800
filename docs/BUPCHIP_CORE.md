@@ -866,6 +866,21 @@ The harnesses already exist from the study. Step 1 brings them into `sim/bupchip
 10. **Documentation.** Update `BUPCHIP.md` (load table, pointer to this document), `POCKET_CHANGES.md`, `THIRD_PARTY_NOTICES.md` (including `:49-54`), `README.md` and `DEVELOPING.md`.
     *Done when:* every number in them matches the shipped build's reports.
 
+## Later: 2600 ARM cartridges (bonus goal)
+
+Once the BupChip is complete and proven on hardware, the same CPU may also run the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+), which upstream runs on the shared ARM7TDMI and the Pocket build leaves out (`NO_ARM_MAPPER`). The two never run at once, so they can share the CPU, its block RAM and the PSRAM path. The main new work is a clean-room Thumb front end: these drivers are game code, so all of Thumb has to be exact, with the same exact-or-halt rule. lroby74's MiSTer Thumb core is CC BY-NC 4.0 and may be used only as a behavioural reference.
+
+Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/` (never committed):
+
+| Scheme | Demos |
+|---|---|
+| DPC+ | Scramble |
+| CDF (version 1) | Super Cobra |
+| CDFJ | Galagon, Lady Bug, Mappy, RobotWar 2684, Wizard of Wor, Zoo Keeper |
+| CDFJ+ | Elevator Agent (64 KB), Gorf, Qyx, Spiders, Turbo (128 KB), Tutankham, Zaxxon (64 KB) |
+
+First measurement: trace each demo's worst ARM call (instructions and memory accesses per call, against the time the 2600 code allows) on the reference core, to get the clock the Thumb front end needs. Elevator Agent is known to overrun VBlank even on MiSTer's own Thumb core, so it is a timing-model question as much as a speed one.
+
 ## Open questions and risks
 
 | # | Risk or question | Impact | Mitigation or check |
