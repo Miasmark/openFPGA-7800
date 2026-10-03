@@ -13,6 +13,7 @@ Every number carries a tag that says where it comes from:
 | [model] | Measured with the trace-driven cycle model (`sim/bupchip/model/cycles.py`). The model runs on a Python ARM model whose PCM matches MiSTer's RTL bit for bit: songs 6, 9, 10, 13 (Misery_F), 14 and 30, 4 s each, all 191,984 frames from power-up, of which 187,984 are the song's (`sim/bupchip/model/README.md`). |
 | [syn] | Yosys 0.69 `synth_intel_alm` cell counts, converted to ALMs as described under "Datapath blocks" |
 | [rpt] | The 2.0.21 Quartus reports. `src/fpga/output_files/` is gitignored (`.gitignore:4`), and every compile rewrites it. The figures below were copied from the build of 2026-10-03 01:45; the cited report sections are kept in `sim/bupchip/baseline-2.0.21.txt`. |
+| [probe] | The step 3 Quartus probe: Quartus Prime Lite 21.1.1 compiles the S1 `bup_cpu.sv` alone, with its ROM and RAM, on 5CEBA4F23C8 in an otherwise empty device (`sim/bupchip/quartus_probe/`). The figures are from the run of 2026-10-03, and that directory's README keeps them, because the reports in `sim/work/` are gitignored. |
 | [C] | Read from the code |
 | [E] | Estimate |
 
@@ -27,10 +28,10 @@ Every number carries a tag that says where it comes from:
 3. **Clock.** Use the lowest practical clock, synchronous to `clk_sys`.
 4. **Area.**
    - The whole BupChip must stay within 3,000–3,500 ALMs.
-   - This design estimates 1,900–2,555 ALMs for S3, plus 40–70 with `BUP_DEBUG` [E]. That is 79.7–83.7% of the device.
-   - Step 9 gates S3 at ≤ 84% ALMs, but the slack gates are the real criterion. S1 at 28.636 MHz (77.6–80.5%) is the fallback.
-   - Yosys counts the delivered S1 core about 44% above its estimate, which would put S1 at 79.9–83.5% with `BUP_DEBUG` ("Totals", risk 13). The Quartus probe (step 3) settles it.
-   - The worst register-file fallback is flip-flops, about +700 ALMs net of the MLABs they replace. It would put S3 at 83.6–87.3%, which breaks the gate and reaches the 85–90% zone where routing gets hard. So it is only an option together with S1. The area-safe fallback is the M10K register file (CPI 1.014).
+   - This design estimates 1,900–2,555 ALMs for S3, plus 40–70 with `BUP_DEBUG` [E]. That is 79.7–83.3% of the device, or 79.9–83.7% with `BUP_DEBUG`.
+   - Step 9 gates S3 at ≤ 84% ALMs, but the slack gates are the real criterion. The fallback is S1 at 28.636 MHz: 1,807–2,042 ALMs, which is 79.2–80.5% of the device, or 79.4–80.9% with `BUP_DEBUG`.
+   - The Quartus probe (step 3) measured the S1 CPU at 1,297 ALMs [probe], 5.5% above the top of its 960–1,230 estimate. Yosys had predicted 1,380–1,775. At the high end, with `BUP_DEBUG`, S1 sits 23 ALMs under step 5's 81% gate, and the uncounted firmware-load path (+20–30) uses that up ("Totals", risk 13). S3's CPU (1,390–1,810 [E]) is still unmeasured.
+   - The worst register-file fallback is flip-flops, about +700 ALMs net of the MLABs they replace. It would put S3 at 83.6–87.3%, which breaks the gate and reaches the 85–90% zone where routing gets hard. With S1 it would break step 5's 81% gate too. S1 does not need it, because the probe found S1's register file in MLAB. The area-safe fallback is the M10K register file (CPI 1.014).
 5. **Build switch.** One macro (`POCKET_BUPCHIP`) switches the BupChip in or out.
 6. **Licence.**
    - All new RTL is MIT.
@@ -38,18 +39,18 @@ Every number carries a tag that says where it comes from:
 
 **Budget, 2.0.21 build [rpt]:**
 
-| Resource | Used today | This design [E] |
+| Resource | Used today | This design [E; S1's CPU from the probe] |
 |---|---|---|
-| ALMs needed | 12,834 / 18,480, 69% (`ap_core.fit.rpt:4982`). Placement uses 14,101 (`:4984`), of which 1,328 are recoverable by dense packing (`:4989`). MLABs count here, as "[d] ALMs used for memory" (`:4988`). | S3: +1,900–2,555, or +1,940–2,625 with `BUP_DEBUG`, giving 79.7–83.7%. S1: +1,470–2,045, giving 77.4–80.5%. |
+| ALMs needed | 12,834 / 18,480, 69% (`ap_core.fit.rpt:4982`). Placement uses 14,101 (`:4984`), of which 1,328 are recoverable by dense packing (`:4989`). MLABs count here, as "[d] ALMs used for memory" (`:4988`). | S3: +1,900–2,555, giving 79.7–83.3%; +1,940–2,625 with `BUP_DEBUG`, giving 79.9–83.7%. S1, with the probe's CPU of 1,297 [probe]: +1,807–2,042, giving 79.2–80.5%; +1,847–2,112 with `BUP_DEBUG`, giving 79.4–80.9%. Neither includes the firmware-load path (+20–30, "Totals"). |
 | LABs touched | 1,649 / 1,848, 89%. 199 are untouched (`fit.rpt:4998`). | S3: +194–263 LABs: 181–250 logic LABs at 10 ALMs each, plus 13 MLAB LABs. The high end exceeds the 199 untouched LABs, so the fit relies on the fitter packing existing logic more densely. |
 | M10K | 46 / 308 (`fit.rpt:5024`) | +38, giving 84 |
-| MLAB bits | 0 (`fit.rpt:5025`) | Register file (12 MLABs), command FIFO (1 MLAB) |
-| DSP | 9 / 66 (`fit.rpt:5029`) | +3–4 |
+| MLAB bits | 0 (`fit.rpt:5025`) | Register file (12 MLABs), command FIFO (1 MLAB). S1's register file: 4 MLABs, 1,024 bits [probe]. |
+| DSP | 9 / 66 (`fit.rpt:5029`) | +3–4 (S1's CPU: 3 [probe]) |
 | Global clocks | 5 / 16 (`fit.rpt:5033`) | +1 |
 | `pll_core` counters | 3 (`pll_core.v:52`) | +1 |
 | SRAM | Everything except words 0x1E000–0x1FFFF (`sram_ctrl.sv:9`) | Not used |
 | PSRAM `cram0`/`cram1` | Tied off (`core_top.v:267-289`) | `cram0` die 0, assets only |
-| Worst setup slack, slow 85 °C (`ap_core.sta.summary`) | `clk_sdram` +1.320 ns, `clk_74a` +2.868 ns, `clk_sys` +8.906 ns | No BupChip logic on `clk_sdram` |
+| Worst setup slack over the four corners (`ap_core.sta.summary`; slow 85 °C is the worst corner for every clock today) | `clk_sdram` +1.320 ns, `clk_74a` +2.868 ns, `clk_sys` +8.906 ns | No BupChip logic on `clk_sdram`. S1's CPU alone at 28.636 MHz: `clk_arm` +5.916 ns, at slow 0 °C [probe] |
 
 **Why the SRAM's free 16 KiB is not used.** In 7800 mode the SRAM gets at most half an access slot per `clk_sys`, and it shares that slot with MARIA's cartridge reads (`sram_ctrl.sv:22-39`). The BupChip makes about 6.2 M data accesses a second. Block RAM is plentiful (262 blocks free).
 
@@ -158,7 +159,8 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
 | `clk_arm` NTSC / PAL | 28.636 / 28.375 MHz (VCO/24) | 21.477 / 21.281 MHz (VCO/32) |
 | Capacity | 20.7 / 20.5 MIPS (sketch); 20.8 / 20.6 MIPS (S1 core) | 21.2 / 21.0 MIPS |
 | Misery_F busy: average / busiest 0.1 s / worst batch after the song-start batch (with it) | Sketch: 73% / 75% / 82% (85%) [RTL]. S1 core: 72.8% / 75.0% / 80.4% (83.7%) [RTL; 80.4% from the model]. | 71.5% / 73.5% / 80% (83%) [model] |
-| CPU / whole BupChip, MLAB LABs at 10 ALMs each (+40–70 with `BUP_DEBUG`) | 960–1,230 / 1,470–1,975 ALMs [E]. Yosys on the delivered S1 core gives a CPU of 1,380–1,775 ALMs [syn→E], pending the Quartus probe (see "Totals"). | 1,390–1,810 / 1,900–2,555 ALMs [E] |
+| CPU / whole BupChip, MLAB LABs at 10 ALMs each (+40–70 with `BUP_DEBUG`) | 1,297 ALMs [probe] (1,257 of logic and 4 MLAB LABs; estimated 960–1,230) / 1,807–2,042 ALMs (the CPU measured, the rest [E]; see "Totals") | 1,390–1,810 / 1,900–2,555 ALMs [E]. The CPU is not measured yet. |
+| Worst setup slack of the CPU alone, worst of the four corners | +5.916 ns at 28.636 MHz (slow 0 °C; +6.323 at slow 85 °C); +15.654 ns at 21.477 MHz (slow 85 °C) [probe] | Not measured yet; step 8 needs +10 ns at 21.477 MHz |
 
 ## Clocking
 
@@ -214,14 +216,14 @@ cpu_run  = ~bup_hold_arm & fw_loaded & asset_ready & sweep_done   (clk_arm)
   - it invalidates the 64 cache tags;
   - it writes 0 to r0–r14 through write port E.
   
-  The S1 core clears its own registers: for 15 clocks after its synchronous `rst` falls it writes 0 to r0–r14, then fetches from 0 (`bup_cpu.sv:69-71, 601-607`). With S1 the sweep only has the tags to invalidate.
+  The S1 core clears its own registers: for 15 clocks after its synchronous `rst` falls it writes 0 to r0–r14, then fetches from 0 (`bup_cpu.sv:70-72, 602-608`). With S1 the sweep only has the tags to invalidate.
 
 **Held (in reset) while `cpu_run` is low:**
 - the CPU;
 - the peripheral and its FIFOs;
 - the pop and the frame register (the output reads 0);
 - the read cache's fill and prefetch state machines;
-- the halt status, which the reset clears (`bup_cpu.sv:800-802`).
+- the halt status, which the reset clears (`bup_cpu.sv:801-803`).
 
 **Not held:**
 - the capture (on `clk_sys`; only `load_start` restarts it);
@@ -253,9 +255,9 @@ The download happens exactly while the CPU is held, so the capture writes must k
   - asset offset < `asset_size`;
   - writes to ROM or assets;
   - LDM/STM outside ROM and RAM.
-- **Where they live.** The region decode, the exact checks and the sticky halt status are inside the CPU, `bup_cpu.sv` (region `:162-171`, checks `:492-512`, status `:128-131, 807-811`). The CPU therefore takes `asset_size` as an input (`:115`). In S1 each check runs in the clock after its access: W for a single transfer, the next beat for an LDM/STM beat.
+- **Where they live.** The region decode, the exact checks and the sticky halt status are inside the CPU, `bup_cpu.sv` (region `:163-172`, checks `:493-513`, status `:129-132, 808-812`). The CPU therefore takes `asset_size` as an input (`:116`). In S1 each check runs in the clock after its access (`:566, 815`): in W for a load or a two-clock store. For a one-clock store or an STM's last beat, it runs in the next instruction's first clock, and the halt wins over that instruction. For any other LDM/STM beat, it runs in the LDM/STM's next clock.
 - **Wild stores.** A store with addr[31:28] = 4 that lies beyond the 16 KiB RAM aliases into the RAM. It commits at the end of execute, one clock before W's exact check halts the core.
-  - In S1 that is a one-clock store (immediate offset) or an STM beat (`bup_cpu.sv:42-45, 658-662, 741`). A two-clock store to the same address writes nothing, because the check halts the core in its W clock, which gates the write (`:696, 773-780`).
+  - In S1 that is a one-clock store (immediate offset) or an STM beat (`bup_cpu.sv:43-46, 659-663, 742`). A two-clock store to the same address writes nothing, because the check halts the core in its W clock, which gates the write (`:697, 774-781`).
   - Upstream never writes in that case (`bupchip_memory.sv:85`).
   - It is harmless. The firmware never does it, and the core halts with the output silent either way.
   - Gating the write enable with the bounds check would put a 14-bit compare on the execute path [E].
@@ -292,7 +294,11 @@ Latencies are for S3, with S1 in brackets:
   6. A load that hits the line under fill completes only once its halfwords have arrived. Until then it stalls like a miss, without starting a fill.
   7. The tag is written valid when the fill ends.
   8. A condition-failed asset load does no lookup and starts no fill.
-- **S1's asset port.** In S1 the load's own second clock is W. The CPU raises `w_asset` with the access's `w_addr` and `w_size`, and the cache answers with the aligned word on `asset_q`, holding `w_wait` high until the halfwords the load touches are there. While `w_wait` is high, the CPU keeps the ROM, RAM and asset addresses on the access (`bup_cpu.sv:75-80, 114-119, 681, 865-867`).
+- **S1's asset port.** In S1 the load's own second clock is W.
+  - The cache's data and tag M10Ks take `d_addr` at the end of execute, as ROM port B and the RAM do, so that they answer in W. `bup_cpu.sv`'s header says the same: the memories answer in W from the address registered at the end of execute.
+  - In W the CPU raises `w_asset`, with `w_addr` (the same address, registered) and `w_size`. The cache compares the tag and the arrival bits, answers with the aligned word on `asset_q`, and holds `w_wait` high until the halfwords the load touches are there.
+  - While `w_wait` is high, the CPU keeps the ROM, RAM and asset addresses on the access, so `d_addr` stays put and the cache re-reads it (`bup_cpu.sv:76-81, 115-120, 682, 866-868`).
+  - So `w_wait` is a W-clock tag compare on an M10K output, and it feeds the CPU's `done` and next-PC logic in front of `rom_addr`. The step 3 probe drives `w_wait` from a flip-flop, so it does not time this path. Step 5 does.
 
 ## Pipeline and cycle counts
 
@@ -318,12 +324,12 @@ Latencies are for S3, with S1 in brackets:
 - SQUASH: the clock after `LDR pc`.
 - HALT.
 
-S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3 (UMULL's high word), SEQ and HALT (`bup_cpu.sv:192-201`). S1 needs no SQUASH: W is the load's own second clock, and `LDR pc` loads its data straight into the ROM's address register (`:686-689`).
+S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3 (UMULL's high word), SEQ and HALT (`bup_cpu.sv:193-202`). S1 needs no SQUASH: W is the load's own second clock, and `LDR pc` loads its data straight into the ROM's address register (`:687-690`).
 
 **Freeze** stops execute only. It happens on an asset miss or a fill stall in W, or for the debug throttle.
 - W is never frozen by the throttle. An asset load in W waits for its halfwords; every other W completes in its clock.
 - Hold does not freeze the core. It resets it (see "Reset and hold").
-- **S1 has two separate inputs** (`bup_cpu.sv:72-78, 96-97`). `freeze` is the throttle: it holds off the start of an instruction, and an instruction that has started always runs to its end (`:611`). `w_wait` holds W while an asset load's data is missing (`:681`). In S1, W belongs to the same instruction, so nothing else runs while it waits. The wrapper must never raise `w_wait` for an MMIO access: `reg_sel` would stay high, and the peripheral acts on every clock it sees it.
+- **S1 has two separate inputs** (`bup_cpu.sv:73-79, 97-98`). `freeze` is the throttle: it holds off the start of an instruction, and an instruction that has started always runs to its end (`:612`). `w_wait` holds W while an asset load's data is missing (`:682`). In S1, W belongs to the same instruction, so nothing else runs while it waits. The wrapper must never raise `w_wait` for an MMIO access: `reg_sel` would stay high, and the peripheral acts on every clock it sees it.
 
 **Commit gate.** `commit = advance & cond_pass & !halt` gates every side effect: register-file writes, NZCV, RAM write enable, `reg_sel`, fills and redirects.
 
@@ -345,7 +351,7 @@ S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3
 | LDM / STM of n registers | n+2 / n+1 | n / n |
 | Unsupported encoding | Halt | Halt |
 
-The S1 column is the delivered core's (`bup_cpu.sv:18-24`). B's sketch, on which the study measured CPI 1.383, takes the same except for LDM/STM: n+3 / n+2, with an extra first clock in its sequencer (`sim/bupchip/model/study/sketch/bup_cpu.sv:304-306, 324-331`). An S1 store with an immediate offset takes 1 clock only to RAM; to MMIO it takes 2.
+The S1 column is the delivered core's (`bup_cpu.sv:19-25`). B's sketch, on which the study measured CPI 1.383, takes the same except for LDM/STM: n+3 / n+2, with an extra first clock in its sequencer (`sim/bupchip/model/study/sketch/bup_cpu.sv:304-306, 324-331`). An S1 store with an immediate offset takes 1 clock only to RAM; to MMIO it takes 2.
 
 S2 is S3 with 2-clock MUL/MLA and 2-clock register-offset stores.
 
@@ -389,7 +395,7 @@ The whole iteration is 22 instructions:
 **Notes on the table:**
 - The model agrees with the RTL to within 0.3% on the sketch, and to within 0.1% on the S1 core. That supports using the model for S2 and S3.
 - The sketch's column comes from `cycles.py`'s `S1-sketch`, which charges LDM n+2 with write-back and n+1 without, and STM n (`sim/bupchip/model/cycles.py:51-52`). The sketch's RTL takes n+3 and n+2, which is about 9.6 per instruction [E]. That column therefore undercounts LDM/STM by about 0.003 CPI.
-- The S1 core takes LDM n+2 and STM n+1 (`bup_cpu.sv:24`), modelled as `S1`. Its halfword loads cost less than the sketch's only because `tb_s1.sv`'s asset memory answers at once, where the sketch's stream buffer stalls. With the design's asset cache instead, the S1 core's CPI is 1.378 [model].
+- The S1 core takes LDM n+2 and STM n+1 (`bup_cpu.sv:25`), modelled as `S1`. Its halfword loads cost less than the sketch's only because `tb_s1.sv`'s asset memory answers at once, where the sketch's stream buffer stalls. With the design's asset cache instead, the S1 core's CPI is 1.378 [model].
 - The figures are from `cycles.py ... --song 13 --secs 4` (`sim/bupchip/model/README.md`).
 - In S3, LDM/STM account for about 1.3% of clocks (0.19% × 7.06 / 1.013).
 - In S3, asset stalls account for 0.13%.
@@ -425,7 +431,8 @@ The whole iteration is 22 instructions:
 ALM estimates use ALM ≈ (0.6–0.8) × LUT + 0.5 × arithmetic cells, plus 10 ALMs per MLAB LAB.
 - The rule was checked against Quartus on `a78_cart_extent`: 106.5 predicted, 106.4 fitted.
 - It under-predicts flip-flop-heavy logic by 11–32% (`sram_ctrl`).
-- Quartus counts each MLAB LAB in "ALMs needed" ("[d] ALMs used for memory", `fit.rpt:4988`). The totals below therefore include MLAB LABs in the ALM column.
+- It over-predicts the S1 core by 7–38%. Yosys counts 1,885 LUT + 453 arithmetic cells ("Totals"), which the rule turns into 1,340–1,735 ALMs of logic. Quartus fits 1,257.3 (`bup_probe.fit.rpt`, 28.636 MHz) [probe]. The implied LUT factor is (1,257 − 0.5 × 453) / 1,885 = 0.55, below the rule's 0.6–0.8. Other [syn→E] figures converted this way, such as the cross-check of A's sketch (1,270–1,600) and the [syn] parts of the S3 CPU estimate, may be high as well. The per-block estimate for S1 (960–1,230) went the other way: it came out 5.5% low at its top end.
+- Quartus counts each MLAB LAB in "ALMs needed" ("[d] ALMs used for memory", `fit.rpt:4988`). The probe shows it: 20 ALMs for each 16 × 32 bank of 2 MLABs. The totals below therefore include MLAB LABs in the ALM column.
 - The per-block [syn] figures below are the study's. `sim/bupchip/model/study/area/parts.sv` keeps other forms of most blocks, and `run_area.sh` gives different counts for them: shifter 332 LUT + 7 arithmetic cells (shift and mask) or 192 + 239 (one rotator), multiplier 0 + 160 with 4 DSP, load lanes 48 LUT, LDM/STM priority encoder 42 LUT, peripheral at CMD 8 / PCM 1,024 54 + 59. Only the ALU (130 + 34) matches. The whole-core count of the S1 core under "Totals" is the better guide.
 
 ### Register file
@@ -443,19 +450,19 @@ ALM estimates use ALM ≈ (0.6–0.8) × LUT + 0.5 × arithmetic cells, plus 10 
 | Inference | `ramstyle "MLAB, no_rw_check"` |
 | Reset | The sweep after every hold writes 0 to r0–r14 through port E, and sets the live-value table to E. This matches the reference core, which zeroes its registers on reset (`arm7tdmi_core.sv:2550-2552`). It is needed because the firmware stores callee-saved registers it has never written, and later pops them back: `push {r4,r5}` at fw `0x88` and `push {r4-fp,lr}` at `0x880` (retires 6,279 and 6,306 of the reference trace), with the pop at `0x9b4`. Without the clear, a reboot would restore stale values where MiSTer restores 0, and lockstep would flag the pop. |
 
-The bypass means the array is only ever read for data written at least two clocks earlier. Correctness therefore does not depend on when the MLAB physically writes. That timing is not verified for this device, and no MLAB is used today (`fit.rpt:5025`).
+The bypass means the array is only ever read for data written at least two clocks earlier. Correctness therefore does not depend on when the MLAB physically writes. That timing is not verified for this device, and no MLAB is used today (`fit.rpt:5025`). The probe (step 3) confirms the read side for S1. Each of its two 16 × 32 banks is an MLAB `altdpram`, Simple Dual Port, with registered write inputs and an unregistered read address and output, in 2 MLABs [probe]. The critical path runs straight through the MLAB read, from `portbaddr` to `portbdataout` (0.66 ns).
 
-**S1** keeps its register file inside `bup_cpu.sv` (`:317-356`): one write port, two asynchronous read ports, and last clock's write held and bypassed. The clear after reset uses the same write port (see "Reset and hold"). In plain simulation the behavioural array shows a write on the next clock, so nothing would exercise the bypass. The simulation-only build `BUP_SIM_LATE_RF` (`LATE_RF=1` in the scripts) therefore makes each entry hold garbage for the clock after its write. `sim/bupchip/s1/check.sh` runs the directed, halt and ISA lockstep tests in that build too, and with the bypass removed all 13 of `sim/bupchip/s1/`'s directed tests fail there (`sim/bupchip/s1/README.md`).
+**S1** keeps its register file inside `bup_cpu.sv` (`:318-357`): one write port, two asynchronous read ports, and last clock's write held and bypassed. The clear after reset uses the same write port (see "Reset and hold"). In plain simulation the behavioural array shows a write on the next clock, so nothing would exercise the bypass. The simulation-only build `BUP_SIM_LATE_RF` (`LATE_RF=1` in the scripts) therefore makes each entry hold garbage for the clock after its write. `sim/bupchip/s1/check.sh` runs the directed, halt and ISA lockstep tests in that build too, and with the bypass removed all 13 of `sim/bupchip/s1/`'s directed tests fail there (`sim/bupchip/s1/README.md`).
 
 **Cost:**
 - 12 MLAB LABs, about 120 ALM-equivalents [E].
   - A Cyclone V MLAB has one write address and one read address, and is at most 20 bits wide (32 × 20).
   - So each 16 × 32 bank needs two MLABs, and banks cannot share one.
 - 150–200 ALMs of table, bypass and forwarding multiplexers [E], plus 10–20 ALMs for the clear [E].
-- S1 uses 1 write port and 2 read banks: 4 MLAB LABs, about 40 ALM-equivalents.
+- S1 uses 1 write port and 2 read banks: 4 MLAB LABs, about 40 ALM-equivalents. The probe measured exactly that: 4 MLABs, 1,024 bits, 40 ALMs [probe].
 
 **Fallback:**
-- A flip-flop file costs about +800 ALMs [syn: the whole-core sketch went from 1,631 to 2,865 LUTs and from 123 to 587 FF]. Net of the 12 MLAB LABs it replaces, that is about +700. With S3 it breaks the step 9 ALM gate (83.6–87.3%), so it is only paired with S1.
+- A flip-flop file costs about +800 ALMs [syn: the whole-core sketch went from 1,631 to 2,865 LUTs and from 123 to 587 FF]. Net of the 12 MLAB LABs it replaces, that is about +700. With S3 it breaks the step 9 ALM gate (83.6–87.3%). With S1 (79.4–80.9% with `BUP_DEBUG`) it breaks step 5's 81% gate. S1 does not need it, because its register file is in MLAB (step 3).
 - Alternatively, an M10K register file with one more pipeline stage: CPI 1.014 [model]. This is the area-safe fallback.
 
 ### Fetch, decode and control
@@ -464,7 +471,7 @@ The bypass means the array is only ever read for data written at least two clock
   - A 12-bit word address within the ROM window.
   - The `npc` mux takes: PC + 1, branch target, BX Rm, `LDR pc` data from W, or hold.
   - A target outside the window halts, and so does one that is not word-aligned. The check runs one clock later.
-  - So does running on past the last ROM word, 0x3FFC, where the ARM7TDMI's fetch from 0x4000 would abort; S1 does not wrap to 0 (`bup_cpu.sv:764-770`).
+  - So does running on past the last ROM word, 0x3FFC, where the ARM7TDMI's fetch from 0x4000 would abort; S1 does not wrap to 0 (`bup_cpu.sv:765-771`).
 - **Decode** works straight from the ROM's unregistered output. Register indices are raw instruction bits behind one mux level. `condition_pass` comes from `arm7tdmi_pkg.sv:82-111`.
 - **Supported encodings** are the firmware's inventory of 1,704 code words:
   - all 16 data-processing opcodes with every operand-2 form;
@@ -483,15 +490,15 @@ The bypass means the array is only ever read for data written at least two clock
   The halt codes below list every case.
 - **Cost:** 300–450 ALMs including the state machine [E].
 
-**Halt codes.** A halt stops the core and records a code and the address of the instruction responsible in `halt_code` and `halt_pc`. They stay until the next reset (`bup_cpu.sv:47-66, 148-154, 800-811`). A decode halt needs the instruction's condition to pass: a condition-failed halting encoding takes one clock and does nothing, as on the reference (`:565`). A fault found by an earlier clock's check wins over the instruction then in execute (`:564-567`).
+**Halt codes.** A halt stops the core and records a code and the address of the instruction responsible in `halt_code` and `halt_pc`. They stay until the next reset (`bup_cpu.sv:48-67, 149-155, 801-812`). A decode halt needs the instruction's condition to pass: a condition-failed halting encoding takes one clock and does nothing, as on the reference (`:566`). A fault found by an earlier clock's check wins over the instruction then in execute (`:565-568`).
 
 | Code | Name | Meaning | Instructions (S1) |
 |---|---|---|---|
-| 1 | UNDEF | Encoding outside the subset | SWP, SWI, coprocessor and undefined encodings; ARMv5 forms such as BLX (register), CLZ, QADD, BKPT and LDRD/STRD; SPSR access; MSR of the x or s field; MRS, MSR and BX whose should-be-one or should-be-zero bits differ from the ARM ARM's encoding (other should-be-zero fields are ignored, as on the ARM7TDMI: `sim/bupchip/s1/directed/sbz.S`); MULS, MLAS and every long multiply but UMULL without S; LDM/STM with S, with PC in the list or with an empty list. One clock later: MSR writing a control byte other than 0xD3, or nonzero bits 27:24 (`:309, 629-637`). |
-| 2 | REG | r15 where the ARM7TDMI reads PC + 12 or the result is UNPREDICTABLE | Data processing with Rd = PC, or with PC as Rm, Rs or Rn of a shift by register; PC as any register of MUL, MLA or UMULL, and UMULL with RdHi == RdLo; PC as a write-back base, an LDM/STM base, a register offset or a store's data; LDRB, LDRH, LDRSB or LDRSH into PC; BX PC; MRS into PC; MSR from PC (`:263-314`) |
-| 3 | THUMB | BX to a Thumb address | BX with bit 0 of Rm set (one clock later, `:647-651`) |
-| 4 | FETCH | Next PC outside the ROM | B, BL, BX or `LDR pc` to a target outside 0x0000–0x3FFF or not word-aligned (`LDR pc` with bit 0 set too: ARMv4 does not interwork there); running on past 0x3FFC. All one clock later (`:638-651, 686-689, 764-770`). |
-| 5 | DATA | Load or store outside every window | A load outside the ROM, the asset window below `asset_size`, the RAM and the MMIO window; a store outside the RAM and the MMIO window, other than RO's range below. A wild store to 0x4xxx_xxxx is first written to the RAM's alias ("Memory map"). Checked one clock later (`:492-512`). |
+| 1 | UNDEF | Encoding outside the subset | SWP, SWI, coprocessor and undefined encodings; ARMv5 forms such as BLX (register), CLZ, QADD, BKPT and LDRD/STRD; SPSR access; MSR of the x or s field; MRS, MSR and BX whose should-be-one or should-be-zero bits differ from the ARM ARM's encoding (other should-be-zero fields are ignored, as on the ARM7TDMI: `sim/bupchip/s1/directed/sbz.S`); MULS, MLAS and every long multiply but UMULL without S; LDM/STM with S, with PC in the list or with an empty list. One clock later: MSR writing a control byte other than 0xD3, or nonzero bits 27:24 (`:310, 630-638`). |
+| 2 | REG | r15 where the ARM7TDMI reads PC + 12 or the result is UNPREDICTABLE | Data processing with Rd = PC, or with PC as Rm, Rs or Rn of a shift by register; PC as any register of MUL, MLA or UMULL, and UMULL with RdHi == RdLo; PC as a write-back base, an LDM/STM base, a register offset or a store's data; LDRB, LDRH, LDRSB or LDRSH into PC; BX PC; MRS into PC; MSR from PC (`:264-315`) |
+| 3 | THUMB | BX to a Thumb address | BX with bit 0 of Rm set (one clock later, `:648-652`) |
+| 4 | FETCH | Next PC outside the ROM | B, BL, BX or `LDR pc` to a target outside 0x0000–0x3FFF or not word-aligned (`LDR pc` with bit 0 set too: ARMv4 does not interwork there); running on past 0x3FFC. All one clock later (`:639-652, 687-690, 765-771`). |
+| 5 | DATA | Load or store outside every window | A load outside the ROM, the asset window below `asset_size`, the RAM and the MMIO window; a store outside the RAM and the MMIO window, other than RO's range below. A wild store to 0x4xxx_xxxx is first written to the RAM's alias ("Memory map"). Checked one clock later (`:493-513`). |
 | 6 | RO | Store to read-only memory | A store or an STM beat to 0x0000_0000–0x0FFF_FFFF, which holds the ROM and the asset window |
 | 7 | BLOCK | LDM/STM outside the ROM and RAM | An LDM beat outside the ROM and the RAM; an STM beat outside the RAM, other than RO's range |
 
@@ -536,7 +543,7 @@ The bypass means the array is only ever read for data written at least two clock
 
 ### Load/store unit
 
-- **Address:** Rn plus or minus a 12-bit immediate, a split 8-bit immediate, or a shifted Rm (pre-index); or Rn alone (post-index). Write-back goes through port E in execute. (S1 writes a two-clock store's base back at the end of W, the clock in which it reads the store data, `bup_cpu.sv:379, 695-700`.)
+- **Address:** Rn plus or minus a 12-bit immediate, a split 8-bit immediate, or a shifted Rm (pre-index); or Rn alone (post-index). Write-back goes through port E in execute. (S1 writes a two-clock store's base back at the end of W, the clock in which it reads the store data, `bup_cpu.sv:380, 696-701`.)
 - **Stores:**
   - byte enables: one-hot from addr[1:0] for a byte, from addr[1] for a halfword, all four for a word;
   - data is replicated across the lanes.
@@ -562,7 +569,7 @@ The bypass means the array is only ever read for data written at least two clock
   - STM reads that register through P3.
   - LDM writes it through W, one clock later.
 - **Cost:** n clocks in S3.
-- **S1** takes LDM n+2 and STM n+1: execute computes the write-back value and the start address, the base is written in the first beat, and LDM's last register lands one clock after the last beat (`bup_cpu.sv:735-760, 839-860`). Its order of base and data writes is the same as described here.
+- **S1** takes LDM n+2 and STM n+1: execute computes the write-back value and the start address, the base is written in the first beat, and LDM's last register lands one clock after the last beat (`bup_cpu.sv:736-761, 840-861`). Its order of base and data writes is the same as described here.
 - **Base register in the list.** Writing the base in the first clock gives ARM7's results without special cases: for LDM the loaded value wins; for STM the first beat stores the old base and later beats store the new one. The firmware never does this.
 - **Cost:** 80–200 ALMs [E; 246 LUT + 109 arithmetic cells is an upper bound, syn].
 
@@ -574,7 +581,7 @@ The bypass means the array is only ever read for data written at least two clock
 | ROM, 4,096 × 32 | ≈0 | 16 | — |
 | RAM, 4,096 × 32 with byte enables | ≈0 | 16 | — |
 | Peripheral, CMD 8 / PCM 1,024 (reused): 70–85 [syn] + 1 MLAB LAB | 80–95 | 4 | — |
-| Bus glue, watermark remap, halt status (in S1 the decode and halt status are inside `bup_cpu.sv`, and in its Yosys count) | 40–70 | — | — |
+| Bus glue, watermark remap, halt status (in S1 the region decode and halt status are inside `bup_cpu.sv`, and in the probe's 1,297, so S1's total counts them twice) | 40–70 | — | — |
 | Asset cache, prefetch, fill state machine, per-halfword arrival bits | 140–210 | 2 | — |
 | PSRAM controller | 60–100 | — | — |
 | ARSC capture, byte-pair packer, message stream, `clk_arm` receiver, `asset_ready` | 100–130 | — | — |
@@ -582,21 +589,26 @@ The bypass means the array is only ever read for data written at least two clock
 | `top.sv` mixer once the audio is live (difference) | 30–60 [syn] | — | — |
 | **Total** | **1,900–2,555** | **38** | 3–4 DSP |
 | `BUP_DEBUG`: status word, shadow FIFO counters, throttle | +40–70 | — | — |
+| CPU, S1, measured in place of the S3 CPU row: logic 1,257.3 + 4 MLAB LABs (40), at 28.636 MHz [probe] | 1,297 | — | 3 DSP |
 
 - **Firmware load path** (packer, extra message types, ROM writes, `fw_loaded`; added after the study when the firmware became user-supplied): +20–30 ALMs [E], about 0.15% of the device. The totals and percentages in this document do not include it.
 - **Device total:** 14,734–15,389 ALMs (79.7–83.3%), or 14,774–15,459 (79.9–83.7%) with `BUP_DEBUG`, and 84 of 308 M10K.
-- **S1 total:** 1,470–1,975 ALMs (CPU 960–1,230 including 4 MLAB LABs), giving 77.4–80.1%; 77.6–80.5% with `BUP_DEBUG`.
+- **S1 total:** 1,807–2,042 ALMs: the probe's CPU of 1,297, with its 4 MLAB LABs [probe], plus 510–745 [E] for the other rows. That is 79.2–80.5% of the device, or 79.4–80.9% (14,681–14,946 ALMs) with `BUP_DEBUG`.
+  - Step 5's 81% gate is 14,968.8 ALMs, 22.8 above the high end. The firmware-load path (+20–30) takes the high end to 80.98–81.04%, so S1 is at the gate.
+  - The bus-glue row counts the halt status a second time, so the high end is slightly pessimistic.
+  - Before the probe the estimate was 1,470–1,975 (CPU 960–1,230): 77.4–80.1%, or 77.6–80.5% with `BUP_DEBUG`.
 - **The S1 core in Yosys.** `sim/bupchip/model/study/area/run_area.sh s1_core` counts the delivered `bup_cpu.sv` as Quartus would see it (`ALTERA_RESERVED_QIS`, so no retire port).
   - Result: 1,885 LUT + 453 arithmetic cells + 311 FF, 64 MLAB cells and 4 DSP [syn] (`sim/bupchip/model/study/README.md`; reproduced 2026-10-03). ABC moves the LUT count by a percent or two; another run gave 1,858.
   - By the rule above that is 1,340–1,735 ALMs of logic, or 1,380–1,775 with the 4 MLAB LABs [syn→E]. That is about 44% above the 960–1,230 estimated from B's sketch, which the same script counts at 1,178 LUT + 297 arithmetic cells + 155 FF.
-  - If Quartus confirms it, the S1 BupChip is 1,890–2,520 ALMs: 79.7–83.1% of the device, or 79.9–83.5% with `BUP_DEBUG`. The high end is above step 5's 81% gate.
-  - S3's CPU estimate (1,390–1,810, from A's sketch) has not been checked the same way. The Quartus probe (step 3) decides both.
+  - Quartus does not confirm it. The probe fits 1,257.3 ALMs of logic, or 1,297.3 with the MLAB LABs [probe]. That is 5.5% above the top of the 960–1,230 estimate and below the whole Yosys range: the rule over-predicts this core ("Datapath blocks").
+  - S3's CPU estimate (1,390–1,810, from A's sketch) is still unmeasured. The probe is re-run with S3's register file (step 3), and step 8 compiles the S3 CPU.
 - **LABs.**
   - The BupChip (S3, debug build) needs about 181–250 logic LABs at 10 ALMs each, plus 13 MLAB LABs: 194–263 LABs in all.
   - 199 LABs are untouched today (`fit.rpt:4998`). The upper part of the range therefore depends on the fitter packing existing logic more densely, as it does when the device fills (1,328 ALMs recoverable, `fit.rpt:4989`).
   - MLABs can only go in memory-capable LABs (up to half of all LABs, `fit.rpt:5000`), and today those hold logic.
   - Steps 3, 5 and 9 record "Total LABs", "Memory LABs" and the dense-packing estimate.
-- **Cross-check:** A's whole-core Yosys sketch, 1,631 LUT + 585 arithmetic cells + 123 FF, converts to 1,270–1,600 ALMs of logic [syn→E]. Its register file was in MLAB, so that figure excludes the MLAB LABs.
+  - In the probe's empty device the S1 CPU spreads over 180 logic LABs plus its 4 MLAB LABs (176 + 4 at 21.477 MHz), and the whole probe touches 199 LABs (195 logic, 4 memory; 196 at 21.477 MHz) [probe]. That fit is sparse. Packed at 10 ALMs a LAB, the CPU's 1,257 ALMs of logic would fill about 126 LABs (derived from ALMs, not measured). This document had no S1 LAB estimate to compare against.
+- **Cross-check:** A's whole-core Yosys sketch, 1,631 LUT + 585 arithmetic cells + 123 FF, converts to 1,270–1,600 ALMs of logic [syn→E]. Its register file was in MLAB, so that figure excludes the MLAB LABs. The rule over-predicted the S1 core, so this may be high too.
 
 ## ARMv4 behaviours that must be exact
 
@@ -623,7 +635,7 @@ The bypass means the array is only ever read for data written at least two clock
 | 17 | UMULL: unsigned 64-bit result, RdLo [15:12], RdHi [19:16] | 0x300, 0x1b20 | Unsigned DSP product |
 | 18 | LDM/STM order and start addresses; `stmib` without write-back starts at base + 4 | Push/pop; `stmib sp,{r0,r1}` at 0x888 | Sequencer |
 | 19 | Rd == Rn with write-back; base register in the list | Never | ARM7 results by construction; directed tests |
-| 20 | MRS CPSR = `{NZCV, 20'b0, 8'hD3}`; MSR CPSR_f writes NZCV; MSR CPSR_c may only write the byte it already holds, 0xD3 | 0x20–0x2c: `mrs`, `bic #31`, `orr #0xd3`, `msr CPSR_c` | Constant mode bits. A control byte other than 0xD3, nonzero bits 27:24, the x or s field, or SPSR halts (UNDEF; `bup_cpu.sv:309, 628-637`). |
+| 20 | MRS CPSR = `{NZCV, 20'b0, 8'hD3}`; MSR CPSR_f writes NZCV; MSR CPSR_c may only write the byte it already holds, 0xD3 | 0x20–0x2c: `mrs`, `bic #31`, `orr #0xd3`, `msr CPSR_c` | Constant mode bits. A control byte other than 0xD3, nonzero bits 27:24, the x or s field, or SPSR halts (UNDEF; `bup_cpu.sv:310, 629-638`). |
 | 21 | MMIO is 32-bit, one access per instruction, in program order | Every boot and poll | `reg_sel` driven from W as a one-clock pulse |
 | 22 | Where MiSTer aborts (`bupchip_memory.sv:125-136`), halt | Never in normal play | HALT. The visible result matches MiSTer's `b .` vectors: silence. |
 
@@ -704,7 +716,7 @@ The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and ch
 - **A miss** fills the critical halfword first, then wraps around the line. W completes as described under "Memory map": once the halfwords the load touches have arrived, with the replay read one clock after the last of them is written. A hit on the line under fill waits the same way.
 - **Prefetch:** after every asset access, the next line is probed. If it is absent and no fill is running, it is fetched from halfword 0.
 - **Pre-emption.** A demand miss to a line other than the one being filled waits for the halfword in flight (≤ 5 clocks; `psram.sv` cannot abort a read). It then pre-empts the fill. The pre-empted line's tag stays invalid, as written when that fill started.
-- The cycle model does not pre-empt. There, a demand miss waits for the whole fill in flight (691 late cases in 4 s). Step 4 compares the two on Misery_F and keeps pre-emption only if it stalls less.
+- The cycle model does not pre-empt. There, a demand miss waits for the whole fill in flight, and those waits are part of its 0.13% stall clocks. It does not count them separately. It does count 692 late hits in 4 s: loads that hit a line still being filled. Step 4 compares the two on Misery_F and keeps pre-emption only if it stalls less.
 
 ### Measured cost [model, Misery_F, 4 s, 2.62 M asset reads, S3]
 
@@ -760,14 +772,14 @@ The firmware reads samples sequentially, one `ldrsb` per voice per frame, which 
 | `bup_capture.sv` | ARSC header parse, byte-pair packer, firmware word packer, START/WRITE/END and FWSTART/FWWRITE/FWEND message stream (`clk_sys`) |
 | `bup_tick48k.sv` | The `clk_74a` accumulator and toggle |
 
-**`bup_cpu` ports (S1, `bup_cpu.sv:93-147`).** The wrapper of step 4 connects these:
+**`bup_cpu` ports (S1, `bup_cpu.sv:94-148`).** The wrapper of step 4 connects these:
 
 | Group | Ports |
 |---|---|
 | Control | `clk` (`clk_arm`); `rst`, synchronous, held while `cpu_run` is low; `freeze`, the throttle; `w_wait`, the asset data is missing |
 | Fetch | `rom_addr` (12-bit word address, the next PC) to ROM port A; `rom_q` back, unregistered |
-| Data | `d_addr` to ROM port B and RAM port A (`[13:2]`); `ram_we`, `ram_be`, `ram_wdata`; `rom_dq`, `ram_q` back |
-| Assets | `asset_size` in; `w_asset`, `w_addr`, `w_size` out; `asset_q` in, the aligned word |
+| Data | `d_addr` to ROM port B and RAM port A (`[13:2]`), and to the asset cache's data and tag M10Ks, which must answer in W like the others; `ram_we`, `ram_be`, `ram_wdata`; `rom_dq`, `ram_q` back |
+| Assets | `asset_size` in; `w_asset`, `w_addr`, `w_size` out; `asset_q` in, the aligned word; `w_wait` (under Control) is the cache's W-clock tag compare, which feeds the CPU's next-PC logic in front of `rom_addr` |
 | MMIO | `reg_sel`, `reg_addr`, `reg_write`, `reg_wdata` to the peripheral; `reg_rdata` back |
 | Status | `halted`, `halt_code`, `halt_pc`, sticky until `rst` |
 | Retire (simulation only) | `rt_start`, `rt_valid`, `rt_pc`, `rt_insn`, `rt_nzcv`, `rt_e_we/idx/data`, `rt_w_we/idx/data` |
@@ -823,8 +835,8 @@ Also:
 | `POCKET_BUPCHIP` | `top.sv` exports the command and takes in the audio; the Pocket files build the BupChip |
 | `BUP_DEBUG` | Adds a status word (halt code and PC; shadow-counter flags for command overflow, PCM overflow and PCM underflow; fault code; lowest PCM level) and the throttle |
 | `PCM_DEPTH`, `BUP_THROTTLE` | Parameters of `bupchip_pocket` |
-| `ALTERA_RESERVED_QIS` | Set by Quartus. The retire port is simulation-only, as in `cache_ram.v:31` (`bup_cpu.sv:132-146, 872-884`). |
-| `BUP_SIM_LATE_RF` | Simulation only: register-file writes land a clock late, with garbage in between, so that only the bypass keeps results right (`bup_cpu.sv:321-342`; `LATE_RF=1` in the scripts) |
+| `ALTERA_RESERVED_QIS` | Set by Quartus. The retire port is simulation-only, as in `cache_ram.v:31` (`bup_cpu.sv:133-147, 873-885`). |
+| `BUP_SIM_LATE_RF` | Simulation only: register-file writes land a clock late, with garbage in between, so that only the bypass keeps results right (`bup_cpu.sv:322-343`; `LATE_RF=1` in the scripts) |
 
 ## Verification plan
 
@@ -835,11 +847,11 @@ The harnesses came from the study. Step 1 brought them into `sim/bupchip/` (`ver
 | ISA | `sample.S`, plus `gen_random.py` (200 seeds × 300 operations) against Unicorn | All signatures equal. Unicorn models an ARM926 (ARMv5), so unaligned accesses and unpredictable forms are excluded here and covered against the reference RTL. | 201 of 201: the reference equals Unicorn, and the S1 core matches the reference in lockstep (362,371 retires) |
 | Directed tests, against the reference RTL | See the list below this table | 0 mismatches; halts exactly where expected | Pass, plainly and with `LATE_RF=1` (step 2, below) |
 | Lockstep, against `arm7tdmi_core` (`tb_lockstep.sv`, peripheral reads replayed) | Boot + Misery_F, 1 M instructions; mixer harness, 1.74 M; all 32 songs × 4 s overnight (local data); synthetic ARSC with every command class; random-content ARSC seeds; an injected load bit-flip | 0 mismatches and 0 halts, with no register masking (both cores start from zeroed registers). The injected fault must be caught. | 0 mismatches on every run. The one halt, random-content seed 4, matches a reference abort after the same 88,940 retires (step 2, below). |
-| PCM | Misery_F, 4 s, against MiSTer's `sim/work/bupchip/ref/song13.pcm` from `run_bupchip.sh` (191,984 frames: the boot's 4,000 prefill frames, then 187,984 of the song); songs 14, 9 and 30 the same way. The Python model equals all six local references (songs 6, 9, 10, 13, 14, 30) over every frame. | Identical from the song's first frame. `sim/bupchip/s1/pcm_check.py` lines the two up on the frame pushed after the firmware took the command (MiSTer's frame 4,000), so a different run of leading silence fails, and so does a nonzero frame before the song starts. Given no such frame, it lines them up on the first nonzero frame. | Songs 13, 14, 9 and 30: all 187,984 song frames identical |
+| PCM | Misery_F, 4 s, against MiSTer's `sim/work/bupchip/ref/song13.pcm` from `run_bupchip.sh` (191,984 frames: the boot's 4,000 prefill frames, then 187,984 of the song); songs 14, 9 and 30 the same way. The Python model equals all six local references (songs 6, 9, 10, 13, 14, 30) over every frame. | Identical from the song's first frame. `sim/bupchip/s1/pcm_check.py` lines the two up on the frame pushed after the firmware took the command (MiSTer's frame 4,000), so a different run of leading silence fails, and so does a nonzero frame before the song starts. Without a song-start frame (`--song-start`), it lines them up on the first nonzero frame. | Songs 13, 14, 9 and 30: all 187,984 song frames identical |
 | Performance | Clocks per batch, from the retire of 0x190 to that batch's return to 0x178: the retire of 0x1dc after a render, or of 0x274 after a silent batch. Idle is defined by the *retired* PC. | S1 within ±1% of 1.383; S2 and S3 within ±2% of the model; per-batch worst case within ±3% | 1.3772, −0.4% (zero-wait assets) |
 | PSRAM | `psram.sv` against a PSRAM model (`psram.sv:36-53` timings), with `CLOCK_SPEED` = 28.636364 at clock periods of 28.636, 21.477 and 21.281 MHz | Every read and write completes in 5 clocks; the `$info` state numbers are distinct | Study, on agg23's file: 5 clocks at all three [sim]. Step 4 runs it on the vendored copy. |
 | System | Wrapper with the PSRAM model, the loader at 175–250 ns per byte, the `clk_74a` tick and the real clock ratio. Also: firmware load (missing file: CPU held and silent; a short file; firmware loaded before the cartridge, as the Pocket does), 2–3 cart reloads, a PAL retune, pause (driven in simulation; it is tied to 0 on hardware), a non-Souper cart, and a hold during a fill. | 0 underflow and 0 overflow from the shadow counters (the existing testbench checks only underruns, `tb_bupchip.sv:151`); lowest FIFO level ≥ 600; no capture message lost; misses within ±20% of the model | Step 4 |
-| Quartus | CPU alone, then the integrated build | The gates in steps 3, 5, 8 and 9 | Step 3 |
+| Quartus | CPU alone, then the integrated build | The gates in steps 3, 5, 8 and 9. Every slack gate is the worst setup slack over the four corners in `sta.summary` (slow and fast, 0 and 85 °C). | Step 3, partly done: the S1 probe passes the MLAB, slack and ALM gates. The 12-MLAB check waits for the 2W/3R register file. |
 | Hardware | 32 songs, NTSC and PAL, with the `BUP_DEBUG` status visible; throttle sweep; A/B against a MiSTer capture | Shadow-counter flags clear; fault code 0 | Steps 5 and 9 |
 
 **Directed tests, all checked against the reference RTL:**
@@ -867,7 +879,7 @@ The harnesses came from the study. Step 1 brought them into `sim/bupchip/` (`ver
 Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/directed/`, `sim/bupchip/s1/halt_tests.py` and `sim/bupchip/verif/directed/`. That includes the throttle with an MMIO access in W and the condition-failed MMIO read (`v_mmio`, and every lockstep run with `+throttle`), the register read after a hold (`regzero.S`; `tb_s1.sv`'s `+rehold`) and the wild store (`wild_store`). The asset-miss, fill and pre-emption items wait for the cache (step 4), and E and W writing one register in one clock waits for the second write port (step 6).
 
 **Lockstep retire port.** The record is `{pc, insn, the register writes from ports E and W, NZCV}`, in program order.
-- The core marks the first clock of each instruction with `rt_start`, condition-failed ones included and never while frozen, and its last with `rt_valid`, which carries `rt_pc`, `rt_insn` and `rt_nzcv`. Register writes come as `rt_e_*` and `rt_w_*` on the clock they land (`bup_cpu.sv:132-146, 872-884`). S1 has one write port; it reports load data as W and every other write as E.
+- The core marks the first clock of each instruction with `rt_start`, condition-failed ones included and never while frozen, and its last with `rt_valid`, which carries `rt_pc`, `rt_insn` and `rt_nzcv`. Register writes come as `rt_e_*` and `rt_w_*` on the clock they land (`bup_cpu.sv:133-147, 873-885`). S1 has one write port; it reports load data as W and every other write as E.
 - Loads complete one clock after their execute clock, so the testbench applies each record to a shadow state. It closes an instruction's record at the next `rt_start`, so load data that lands with the next instruction's first clock still counts with the load.
 - It does not snapshot the live register file.
 - The rules are in `sim/bupchip/verif/README.md`, "The retire port".
@@ -883,6 +895,8 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
 - Check overflow as well as underflow.
 
 ## Implementation steps
+
+Every slack gate below is the worst setup slack over the four corners in `sta.summary`. For the S1 CPU, slow 0 °C is the worst corner, not slow 85 °C (step 3).
 
 1. **Tools into the repository** (`sim/bupchip/`): lockstep and ISA harnesses, mixer harness, Python model, cycle models, synthetic ARSC generator.
    *Done when:* reference against reference runs 1 M instructions with 0 mismatches; ISA passes 200/200 on the reference against Unicorn; the Python model's Misery_F PCM equals MiSTer's `sim/work/bupchip/ref/song13.pcm` (with local data); the synthetic ARSC renders non-zero PCM.
@@ -904,9 +918,9 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
    *Done when:* ISA and directed tests pass; lockstep has 0 mismatches on all the lockstep runs listed in the verification plan; Misery_F PCM is bit-exact for 4 s; CPI is within ±1% of 1.383.
    
    **Done** (2026-10-03, after three independent verification rounds; no open core faults). Commands and results (`sim/bupchip/s1/README.md`, `sim/bupchip/verif/directed/README.md`):
-   - `sim/bupchip/s1/check.sh [sim/work/bupchip/game/rv.a78]`: 11 of 11 checks with the game (8 min 39 s on 4 cores), 7 of 7 without the firmware. It runs the directed and halt tests, `verif/directed/run.sh`, `verif/directed/run_vfy.sh`, the same again with `LATE_RF=1`, `verif/run_all.sh` with `DUT=bup LOCKSTEP=1`, and songs 13, 14, 9 and 30.
+   - `sim/bupchip/s1/check.sh [sim/work/bupchip/game/rv.a78]`: 11 of 11 checks with the game (8 min 39 s on 4 cores), 7 of 7 without the firmware. It runs the directed and halt tests, `verif/directed/run.sh` and `verif/directed/run_vfy.sh`. It then runs the directed and halt tests, `run_vfy.sh` and the ISA suite in lockstep again with `LATE_RF=1`, then `verif/run_all.sh` with `DUT=bup LOCKSTEP=1`, and songs 13, 14, 9 and 30.
      - ISA suite in lockstep: 201 of 201, 362,371 retires and 122,330 stores, 0 mismatches.
-     - Directed: 13 of 13 in `s1/directed/`, plainly and with `+await=40 +throttle=25`; 6 more hand-written and 16 generated tests in `verif/directed/`; halt tests 66 of 66 and `vhalt.py`'s 67 of 67; none of the firmware's 1,704 code words decodes as a halt. All pass with `LATE_RF=1` too.
+     - Directed: 13 of 13 in `s1/directed/`, plainly and with `+await=40 +throttle=25`; 6 more hand-written and 16 generated tests in `verif/directed/`; halt tests 66 of 66 and `vhalt.py`'s 67 of 67; none of the firmware's 1,704 code words decodes as a halt. All pass with `LATE_RF=1` too. `verif/directed/run.sh` was run with `LATE_RF=1` separately, with fuzz seeds 1–16 (`verif/directed/README.md`).
      - Lockstep on CoreTone: mixer harness 1,742,652 retires, synthetic ARSC 2,135,928, Rikki & Vikki boot + Misery_F 1,000,000 (4,000,000 with `+await=20`), 0 mismatches; `+inject=50000` and `+inject_mmio=5000` caught.
      - PCM: songs 13, 14, 9 and 30, 4 s each, all 187,984 song frames identical to MiSTer's, 0 underruns and 0 overflows, lowest FIFO level 660, 756, 722 and 801.
      - CPI on Misery_F: 1.3772 against 1.383 (−0.4%), with zero-wait assets; 60,574,078 work instructions, 15.14 MIPS, busy 72.8% at 28.636 MHz.
@@ -918,10 +932,16 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
 3. **Quartus probe** (once the baseline frees Quartus): S1 plus the 2-write/3-read register file, compiled alone on 5CEBA4F23C8 with 28.636 MHz and 21.477 MHz constraints.
    *Done when:*
    - The RAM summary shows the register-file banks in MLAB (12 MLABs) with unregistered read, and the memories in M10K.
-   - Slack is ≥ +5 ns at 28.636 MHz (slow 85 °C).
-   - ALMs and LABs are within ±25% of this document.
+   - Slack is ≥ +5 ns at 28.636 MHz (worst of the four corners).
+   - ALMs are within ±25% of this document. LABs are recorded; the document has no S1 LAB estimate to hold them to.
    
    If MLAB fails, choose a fallback here. The M10K register file is the area-safe one.
+
+   **Partly done** (2026-10-03). The S1 CPU passes, but the 2W/3R register file does not exist yet, so the probe compiled S1 alone. `sim/bupchip/quartus_probe/run_probe.sh` runs Quartus Prime Lite 21.1.1 from `raetro/quartus:21.1` and builds both clocks in about 4 minutes. It puts `bup_cpu.sv` with its ROM and RAM (`cache_ram_dp`, `cache_ram_tdp_dc_be`) on 5CEBA4F23C8, with the settings of `ap_core.qsf` and a flip-flop on every other port. The results are in `sim/bupchip/quartus_probe/README.md`; the reports are in `sim/work/bupchip/qprobe/<MHz>/`.
+   - **MLAB: pass for S1.** The register file is two `altdpram` instances (`rf_rtl_0`, `rf__dual_rtl_0`), one per read port. Each is MLAB, Simple Dual Port, with registered write inputs, an unregistered read address and output, and 2 MLABs: 4 MLABs, 1,024 bits and 40 ALMs in all. The ROM and RAM are 16 M10K each. S3's 6 banks would take the 12 MLABs planned, but that figure is extrapolated, not measured. The 12-MLAB check stays open until `bup_regfile.sv` exists, before step 6 or step 8, and the probe is then re-run with it.
+   - **Slack: pass.** At 28.636 MHz the worst setup slack is +5.916 ns, at slow 0 °C. It is +6.323 ns at slow 85 °C, and Fmax there is 34.97 MHz. Worst hold slack is +0.005 ns (fast 0 °C). At 21.477 MHz setup slack is +15.654 ns (slow 85 °C) and hold +0.131 ns. The critical path is under risk 2.
+   - **ALMs: pass.** `bup_cpu` needs 1,297.3 ALMs at 28.636 MHz: 1,257.3 of logic plus 40 for the MLABs, with 2,058 ALUTs, 607 registers (308 after synthesis, the rest from retiming and duplication) and 3 DSP. At 21.477 MHz it needs 1,271.9. That is 5.5% above the top of the 960–1,230 estimate. The whole probe needs 1,527 ALMs, 141 of them for virtual I/O.
+   - **LABs: recorded, not gated.** 180 logic LABs plus 4 MLAB LABs hold `bup_cpu` logic in this sparse fit (176 + 4 at 21.477 MHz). The whole probe touches 199 LABs: 195 logic, 4 memory.
 4. **Wrapper, memories and asset path in simulation.** Peripheral 8/1024 with remap and shadow counters, ROM filled through the firmware-load path, RAM, the 64-line cache with per-halfword arrival bits, the capture message stream and receiver, and the 48 kHz tick. `psram.sv` runs with `CLOCK_SPEED` = 28.636364 against a PSRAM model at clock periods of 28.636, 21.477 and 21.281 MHz.
    *Done when:*
    - A download of `rv.a78` followed by 4 s of Misery_F gives PCM identical to MiSTer's `song13.pcm` (as compared under "Verification plan", PCM), with 0 underflow, 0 overflow and a lowest level ≥ 600.
@@ -930,7 +950,7 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
    - Reloads, retune and pause (in simulation) pass.
 5. **Integrate S1 at 28.636 MHz** (C3 = 24).
    *Done when:*
-   - Full compile with `BUP_DEBUG`: `clk_arm` slack ≥ +3 ns; `clk_sdram` ≥ +1.0 ns; `clk_74a` ≥ +2.0 ns; ALMs ≤ 81% (estimate 77.6–80.5%). LAB use is recorded.
+   - Full compile with `BUP_DEBUG`: `clk_arm` slack ≥ +3 ns; `clk_sdram` ≥ +1.0 ns; `clk_74a` ≥ +2.0 ns; ALMs ≤ 81% (estimate 79.4–80.9% with `BUP_DEBUG`, from the probe's CPU, and 80.98–81.04% at the high end with the firmware-load path; "Totals"). LAB use is recorded.
    - Non-Souper simulation regressions are unchanged, with `run_sim.sh` building `POCKET_BUPCHIP`.
    - On hardware, Rikki & Vikki plays all 32 songs with the shadow-counter flags clear and fault code 0.
 6. **S2 in simulation:** second write port, bypass, load forwarding.
@@ -969,11 +989,11 @@ First measurement: trace each demo's worst ARM call (instructions and memory acc
 
 | # | Risk or question | Impact | Mitigation or check |
 |---|---|---|---|
-| 1 | Asynchronous-read MLAB inference on Cyclone V. No MLAB is used today (`fit.rpt:5025`). | +700 ALMs net as flip-flops (only viable with S1), or one more pipeline stage with an M10K register file (CPI 1.014) | Step 3. The bypass already removes any dependence on MLAB write timing. If next-clock reads turn out to be safe, the bypass (about 100 ALMs) could be dropped. |
-| 2 | Single-clock execute timing on a C8 part at about 80% fill. Estimates: S3 25–27 ns, S1 19–30 ns [E]. | Lower clock or less forwarding | 46.56 ns period at 21.477 MHz; reduced-forwarding variants; region decode from the base register; a LogicLock region. Steps 3 and 8. |
+| 1 | Asynchronous-read MLAB inference on Cyclone V. No MLAB is used today (`fit.rpt:5025`). | +700 ALMs net as flip-flops (too much for either gate), or one more pipeline stage with an M10K register file (CPI 1.014) | **Confirmed for 16 × 32 banks with one write port** (step 3): S1's two banks are MLAB with an unregistered read address and output, 2 MLABs each, and the critical path runs through the MLAB read [probe]. Still open: S3's six-bank 2W/3R file (step 3 re-run); MLAB write timing, which is still unverified and which the bypass covers (if next-clock reads turn out to be safe, the bypass, about 100 ALMs, could be dropped); and whether the full build finds memory-capable LABs for the MLABs, which today hold logic (step 5). |
+| 2 | Single-clock execute timing on a C8 part at about 80% fill. Estimates: S3 25–27 ns [E]. S1, measured in an empty device: 27.263 ns of data delay at 14 levels, 62% of it interconnect; setup slack +5.916 ns at slow 0 °C and +6.323 ns at slow 85 °C at 28.636 MHz [probe]. | Lower clock or less forwarding | S1's critical path is the one-clock-store decision: ROM `q` → decode → register-file read select → MLAB read → bypass → shifter → operand mux → adder → region decode → one-clock store or not → `rom_addr` or `ram_we`. Its shifter leg is functionally false, because a one-clock store needs an immediate offset (`bup_cpu.sv:434-435, 659`). If step 5 misses +3 ns, the first fix is to decide the store from the base register's region ("region decode from the base register"), or from Rn ± imm12 on its own adder. Other options: the 46.56 ns period at 21.477 MHz; reduced-forwarding variants. A LogicLock region is not available: Quartus Lite removes every region (Critical Warning 140003; tried on the probe). Steps 3, 5 and 8. |
 | 3 | PSRAM: 1.8 V I/O with no I/O constraints; tCEM and page mode unverified; `FAST_INPUT_REGISTER` needs DQ captured straight into the I/O register (agg23 samples DQ in fabric). `psram.sv` breaks at `CLOCK_SPEED` = 21.477/21.281. | Slower fills; no fills at all if misconfigured | `CLOCK_SPEED` fixed at 28.636364 (5 clocks per halfword), checked in step 4. Cache stall is 0.13%; 13.7 ms of FIFO margin; even uncached, the core manages 23.8 MIPS at 28.636 MHz [model]. Hardware CRC readback of the ARSC. |
 | 4 | S2 and S3 figures come from the cycle model | CPI higher than planned | The model agrees with the RTL to 0.3% on the study's sketch and to 0.1% on the S1 core (1.377 against 1.3772). Steps 6 and 7 measure RTL. Fall back to S1 or S2 at 28.636 MHz. |
-| 5 | Congestion: `clk_sdram` has +1.32 ns of slack today; only 199 LABs are untouched against 194–263 needed | `clk_sdram` timing failure; a fit that relies on denser packing | No BupChip logic on `clk_sdram`; slack, ALM and LAB checks in steps 3, 5 and 9; LogicLock; S1 fallback |
+| 5 | Congestion: `clk_sdram` has +1.32 ns of slack today; only 199 LABs are untouched against 194–263 needed | `clk_sdram` timing failure; a fit that relies on denser packing | No BupChip logic on `clk_sdram`; slack, ALM and LAB checks in steps 3, 5 and 9; S1 fallback. LogicLock is not available in Quartus Lite (risk 2). |
 | 6 | Deviations from the firmware contract: watermark remap; halt instead of an abort spin; fixed mode bits; CPU not paused; music starts about 64 ms earlier than on MiSTer | Visible only to other firmware | CoreTone never reads the FIFO depth or mode bits (lockstep). Document them. |
 | 7 | Firmware licence. The firmware's source is not published (`BUPCHIP.md:16-17`), so building it in would contradict `THIRD_PARTY_NOTICES.md:49-54`. | Resolved: the user supplies `bupchip.bin` ("Firmware load"). The vendored `mister/rtl/bupchip.hex`/`.mif` are removed from the tree and gitignored; simulation reads a local copy at the same path. | Not removed from the git history: unlike the HSC and Supercharger rewrite (README, "History rewrite"), that would rewrite `main` and the release tags, so the owner chose a removal commit. Commits up to 2.0.21 still contain them. |
 | 8 | Clean-room status of B's sketch, said to be written from the ARM ARM | GPL contamination | Reviewed in step 2 (`sim/bupchip/s1/README.md`, "Clean-room review"; `sim/bupchip/model/study/README.md`, "Clean room"), and `bup_cpu.sv` was then written anew. Reuse only MIT code (`arm7tdmi_pkg`, peripheral, capture parse, `cache_ram`, `psram.sv`). RRX and the immediate-shift normalisation are written from the ARM ARM. |
@@ -981,4 +1001,4 @@ First measurement: trace each demo's worst ARM call (instructions and memory acc
 | 10 | Command bursts beyond 8 between pops | Lost command | `BUP_DEBUG` shadow overflow flag; raise `CMD_DEPTH` (1 MLAB either way) |
 | 11 | BupChip audio passes through `audio_filter`'s 256-sample boxcar (about 55.9 kHz) before I2S | Small resampling loss | Kept as MiSTer's mix for identical levels. Open: mix at the I2S input instead. |
 | 12 | ROM depth | 8 M10K | A 2,048-deep ROM frees 8 blocks if M10K ever runs short, but caps `bupchip.bin` at 8 KiB |
-| 13 | S1 area. Yosys puts the delivered core at 1,380–1,775 ALMs with its MLAB LABs, about 44% above the 960–1,230 estimated from B's sketch ("Totals") | S1 BupChip up to 83.1% of the device (83.5% with `BUP_DEBUG`), above step 5's 81% gate; S3 may be larger than estimated too | The Quartus probe in step 3 measures the real figure; the gates in steps 5 and 9 decide what ships |
+| 13 | S1 area. The probe measured the CPU at 1,297 ALMs, 5.5% above the 960–1,230 estimated from B's sketch [probe] (Yosys had predicted 1,380–1,775) | S1 is at step 5's 81% gate once the firmware-load path is counted: 79.4–80.9% with `BUP_DEBUG`, and 80.98–81.04% at the high end with that path ("Totals"). S3's CPU (1,390–1,810 [E]) is still unmeasured. | Step 5's full compile measures the integrated figure and decides. The halt status that the estimate counts twice gives back a little. Steps 3 (re-run with the 2W/3R file) and 8 measure S3's CPU. |

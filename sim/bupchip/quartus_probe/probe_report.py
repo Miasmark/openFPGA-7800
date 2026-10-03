@@ -319,7 +319,7 @@ def main():
           sum(stats[b]["luts"] for b in ORDER), sum(stats[b]["ffs"] for b in ORDER), sum(stats[b]["dsp"] for b in ORDER)))
     print("  (register file includes %d MLAB LABs at 10 ALMs each)" % nmlab)
     print("  LABs holding bup_cpu logic: %d, plus %d MLAB LABs (a sparse fit in an empty device;"
-          " packed 10 ALMs to a LAB, %.0f ALMs of logic need %d)" % (nlabs, nmlab,
+          " derived from ALMs, not measured: packed 10 ALMs to a LAB, %.0f ALMs of logic need %d)" % (nlabs, nmlab,
           need - 10 * nmlab, -(-(need - 10 * nmlab) // 10)))
 
 
