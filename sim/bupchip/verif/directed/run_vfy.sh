@@ -1,6 +1,6 @@
 #!/bin/bash
-# The verifier's directed tests for the new core (vgen.py, vhalt.py), in
-# three parts:
+# The verifier's directed tests for the new core (vgen.py, vhalt.py,
+# tb_vdec.sv), in four parts:
 #   1. vgen.py writes the v_*.S tests; run.sh runs each on the reference RTL
 #      (end marker, no abort), on tb_s1.sv (no halt) and in lockstep with
 #      the new core (DUT=bup), plainly and with random asset waits and
@@ -17,8 +17,8 @@
 # LATE_RF=1 builds the core with BUP_SIM_LATE_RF throughout. Work files go to
 # $WORK (default sim/work/bupchip/verif/vfy, or vfy_laterf); the reference
 # and lockstep builds are shared with ../ ($VWORK) and tb_s1 with ../../s1
-# ($S1WORK). Unicorn as for run_isa.sh (VENV or PYTHON). About 4 minutes on
-# 4 cores. Exits 0 when everything passes.
+# ($S1WORK). Unicorn as for run_isa.sh (VENV or PYTHON). About 30 seconds
+# once those are built. Exits 0 when everything passes.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 VERIF="$(cd "$HERE/.." && pwd)"

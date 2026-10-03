@@ -70,3 +70,25 @@ LATE_RF=1 sim/bupchip/verif/directed/run_vfy.sh   # the core built with BUP_SIM_
 | `vhalt.py` | 47 halt cases beyond `../../s1/halt_tests.py` (ARMv5 and coprocessor encodings, r15 in the remaining operand positions, PSR forms, S and signed multiplies, block transfers with PC, S or an empty list, branches below 0, one byte past each window) and 20 cases that must reach the end marker (the last byte or word of each window, LDM from the ROM, MSR forms that write only what the core has, condition-failed halting encodings). |
 | `tb_vdec.sv` | Every one of the firmware's 1,704 code words (`../../model/inventory.py`) on the core's instruction input: none may decode as a halt, so a decode change that breaks a path no test reaches still fails. |
 | `run_vfy.sh` | Runs all of the above. Work files go to `sim/work/bupchip/verif/vfy` (`vfy_laterf` with `LATE_RF=1`). |
+
+**Results (2026-10-03).** All pass, plainly and with `LATE_RF=1`: the 16 tests in lockstep (122,660 retires and 5,795 RAM stores compared per pass; `v_mmio` adds 119 peripheral writes and 235 replayed reads); the five Unicorn-checked tests equal Unicorn's signature and instruction count; 67 of 67 `vhalt.py` cases; 1,704 code words, none decoding as a halt.
+
+**Mutants.** 24 single faults, each patched into a copy of `bup_cpu.sv` and run through `run_vfy.sh` (one-off; the patch script is not kept). All 24 are caught:
+
+| Fault | Caught by |
+|---|---|
+| RRX carry from bit 31; LSR #0 or ASR #0 not made #32 | `v_shift` (also against Unicorn) |
+| Rotated-immediate carry taken from bit 31 with rotation 0 | `v_imm` |
+| Loads and stores run when their condition fails | `v_cond`, `v_mmio`, `v_nv`, two `vhalt.py` cases |
+| NV condition passing | `v_nv` |
+| A peripheral pulse from a condition-failed access | `v_mmio` |
+| UMULL low word = high word; MLA accumulator from Rd | `v_mul`, `v_cond`, `v_deps*` (`v_unpred` too) |
+| LDM/STM start offset wrong for DA and DB | `v_blk`, `v_blkx`, `v_cond` |
+| STM base written back before the first beat (stores the new base when it is lowest) | `v_blkx` |
+| Odd LDRH not rotated; LDRSB zero-extended | `v_align` (and `v_cond`, `v_deps2`, `v_wb`) |
+| Register-offset store loses its write-back | `v_wb`, `v_shift`, `v_mmio` |
+| V cleared by logical operations; ADC without carry in | `v_shift`, `v_imm` (`v_cond`) |
+| Rs[4:0] as the shift amount | `v_shift`, `v_deps*` |
+| BL link = address + 8 | `v_cond`, `v_deps5` |
+| Bypass removed on either read port, `LATE_RF=1` | every test |
+| MSR control-byte check removed; LDR pc with bit 0 set accepted; STRH of PC accepted; asset offset == size accepted | `vhalt.py` (`msr_sys_mode`, `msr_irq_enable`; `ldr_pc_bit0`; `strh_pc`; `ldrh_past_assets`) |
