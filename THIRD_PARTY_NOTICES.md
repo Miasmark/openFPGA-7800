@@ -51,7 +51,10 @@ High Score Cartridge firmware (`mem4`) and the Starpath Supercharger BIOS
 (`ar`), which are the original makers' code with no license given. This port
 removes both from the repository and builds with `EXTERNAL_FIRMWARE`, which
 loads them at run time from the user's own `highscor.rom` (or `hsc.a78`)
-and `supercharger.bin`, as it already did for the 7800 BIOS.
+and `supercharger.bin`, as it already did for the 7800 BIOS. The same goes
+for the BupChip's CoreTone firmware (`bupchip.hex`/`.mif`), whose source is
+not published: it is not in the repository, and the planned Pocket BupChip
+loads it from the user's `bupchip.bin` (docs/BUPCHIP.md).
 
 ## Platform files
 

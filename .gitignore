@@ -8,4 +8,8 @@ src/fpga/*.qws
 release/
 dist/Cores/Miasmark.7800/*.rbf_r
 sim/work*
+# BupChip firmware: user-supplied, never committed (docs/BUPCHIP.md). A local
+# copy may sit here for the simulation scripts.
+src/fpga/mister/rtl/bupchip.hex
+src/fpga/mister/rtl/bupchip.mif
 dist/Cores/Miasmark.7800/licenses/

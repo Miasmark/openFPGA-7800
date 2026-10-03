@@ -20,7 +20,7 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 Seven upstream files are modified (`top.sv`, `Maria/DMA.sv`,
 `EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
-`banks2600.sv`), two firmware images are removed, and the POKEY is swapped
+`banks2600.sv`), three firmware images are removed, and the POKEY is swapped
 for an older one.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
@@ -100,6 +100,13 @@ license is given for either, so this copy leaves both files out. They were
 also removed from this branch's git history (see the README, "History
 rewrite").
 
+The BupChip's CoreTone firmware (`rtl/bupchip.hex`/`.mif`, used by
+`bupchip_memory.sv`) is left out for the same reason: its source is not
+published. The Pocket build has no BupChip yet (`NO_BUPCHIP`), so nothing
+reads it; the planned Pocket BupChip loads it from the user's `bupchip.bin`
+(`../../../docs/BUPCHIP_CORE.md`, "Firmware load"). Simulation scripts read a
+local copy at `rtl/bupchip.hex`, which `.gitignore` keeps out of git.
+
 With `EXTERNAL_FIRMWARE` defined, those two ROMs are built empty and gain a
 write port (`fw_*` ports through `top.sv` -> `cart.sv`, and `top.sv` ->
 `cart2600.sv` -> `mapper_AR` in `banks2600.sv`). The Pocket wrapper fills
@@ -168,7 +175,7 @@ is required. That frees 256 M10K blocks.
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in
 `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv` and `EEPROM_24LC256.sv`, and the holey DMA fix
 in `Maria/DMA.sv` (unless upstream has fixed it; check with
-`sim/extra_tests.sh`). Delete `rtl/mem4.*` and `rtl/ar.*` again, update
+`sim/extra_tests.sh`). Delete `rtl/mem4.*`, `rtl/ar.*` and `rtl/bupchip.hex`/`.mif` again, update
 `UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.
 New upstream source files need adding to `../core/core.qip` (and to
 `sim/run_sim.sh`).

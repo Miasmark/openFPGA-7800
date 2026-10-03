@@ -14,7 +14,8 @@ replaces it with three parts:
 
 - **A firmware program**, `rtl/bupchip.hex`: 1,956 words (7.8 KB) of ARM
   code that Jamie Blanks wrote, called CoreTone after the original engine. Its
-  source is not published.
+  source is not published, so this repository does not carry it (see
+  *Files the user supplies on the Pocket*).
 - **A soft ARM7TDMI**, `rtl/arm7tdmi/arm7tdmi_core.sv`, derived from
   GBA_MiSTer's CPU and shared with the 2600 ARM mappers. It runs at 71.58 MHz
   (`clk_arm`).
@@ -150,6 +151,10 @@ python3 tools/hex2bin.py bupchip.hex > bupchip.bin
 ```
 
 Check the result against the CRC32 or SHA-1 above.
+
+**For simulation,** the scripts in `sim/bupchip/` read the firmware from
+`src/fpga/mister/rtl/bupchip.hex`, the path upstream uses. Put your own copy
+of MiSTer's file there; `.gitignore` keeps it out of git.
 
 ### Music: the ARSC block appended to the game
 
