@@ -1,6 +1,7 @@
 #!/bin/bash
-# Set up a BupChip ARM-core work area: installs tools (apt), builds the
-# testbench, and disassembles the firmware to $WORK/fw.dis for reference.
+# Set up a BupChip ARM-core work area: installs tools (apt, and Unicorn in a
+# virtualenv at $WORK/venv for verif/), builds the testbench, and
+# disassembles the firmware to $WORK/fw.dis for reference.
 #   ./setup_dev.sh
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,6 +17,11 @@ if [ ! -x /opt/verilator-5.040/bin/verilator ]; then
 	git clone -q --depth 1 --branch v5.040 https://github.com/verilator/verilator "$T/v"
 	(cd "$T/v" && autoconf && ./configure --prefix=/opt/verilator-5.040 && make -j"$(nproc)" && make install)
 fi
+# Unicorn, the independent ARM model the ISA suite checks against (verif/),
+# in a virtualenv at $WORK/venv.
+python3 -m venv --help >/dev/null 2>&1 || apt-get install -y -q python3-venv
+[ -x "$WORK/venv/bin/python" ] || python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/python" -c "import unicorn" 2>/dev/null || "$WORK/venv/bin/pip" install -q "unicorn==2.1.1"
 # Quartus Prime Lite 21.1.1 runs from the same image CI uses (needs a running dockerd).
 docker image inspect raetro/quartus:21.1 >/dev/null 2>&1 || docker pull raetro/quartus:21.1
 python3 - "$RTL/bupchip.hex" "$WORK/fw.bin" <<'PY'
