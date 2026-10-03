@@ -178,25 +178,29 @@ working; 960 distinct instruction addresses ran):
 | Assets | 212 KiB for Rikki & Vikki. Latency barely matters, so PSRAM, SDRAM or SRAM all work. |
 | Output | 48 kHz stereo 16-bit. The FIFO can be much smaller than MiSTer's 85 ms. |
 
-For scale, MiSTer's ARM core alone is about 16,200 LUTs. The Pocket build has
-about 4,200 ALMs free.
+For scale, MiSTer's ARM core alone is about 16,200 LUTs. The 2.0.21 Pocket
+build uses 12,834 of 18,480 ALMs (69%) and 46 of 308 M10K blocks, so about
+5,600 ALMs are free. Routing gets hard well before 100%, so a whole BupChip
+(CPU, registers, FIFOs and asset path) should aim for about 3,000-3,500 ALMs.
 
 ### Memory options
 
 **Update, 2.0.21:** the core now does what this section proposed. The
 cartridge RAM, Flicker Blend frame, SaveKey and BIOS live in the SRAM
-(`core/sram_ctrl.sv`), and 262 M10K blocks are free. The SRAM is full apart
-from its last 16 KiB, so a BupChip's own memories would go in block RAM, and
+(`core/sram_ctrl.sv`): 12,834 of 18,480 ALMs (69%) and 46 of 308 M10K blocks
+are used, so 262 blocks are free. The SRAM is full apart from its last 16 KiB
+(words 0x1E000-0x1FFFF), so a BupChip's own memories would go in block RAM, and
 its assets in the PSRAM. The analysis below is how it was worked out.
 
-The Pocket's memories, with the parts Analogue fitted. The speed figures are
+The Pocket's memories, with the parts Analogue fitted, as they were before
+2.0.21 (the "used by" column is updated). The speed figures are
 the parts' asynchronous access times; check the datasheets before designing
 to them.
 
 | Memory | Part | Size and width | Speed | Used by this core |
 |---|---|---|---|---|
-| FPGA block RAM | Cyclone V M10K | 308 blocks, 1 KB each at ×8/×16/×32 | 1 clock | All 308 |
-| SRAM (`sram_*`) | AS6C2016-55 | 256 KB (128K × 16) | 55 ns asynchronous | No |
+| FPGA block RAM | Cyclone V M10K | 308 blocks, 1 KB each at ×8/×16/×32 | 1 clock | 46 of 308 since 2.0.21 (all 308 before) |
+| SRAM (`sram_*`) | AS6C2016-55 | 256 KB (128K × 16) | 55 ns asynchronous | All but the last 16 KiB since 2.0.21 |
 | PSRAM (`cram0_*`, `cram1_*`) | AS1C8M16PL-70 | 16 MB (8M × 16) each, address/data multiplexed on the Pocket (`cram*_a[21:16]` plus `dq`) | 70 ns asynchronous; page and synchronous burst modes | No |
 | SDRAM (`dram_*`) | — | 64 MB, 16-bit | Fast bursts; each row change and refresh costs several clocks | The cartridge |
 
