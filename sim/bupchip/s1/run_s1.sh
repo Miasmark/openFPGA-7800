@@ -13,6 +13,8 @@
 # reference, every frame matched. About 3 minutes per second of audio.
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
+[ -f "$FW" ] || { echo "run_s1.sh: no firmware at $FW (docs/BUPCHIP.md, \"Firmware: bupchip.bin\")" >&2; exit 2; }
 WORK="${WORK:-$HERE/../../work/bupchip/s1}"
 DEPTH="${PCM_DEPTH:-1024}"
 GAME="$(realpath "${1:?usage: run_s1.sh GAME.a78 [SONG] [SECONDS] [+plusargs...]}")"

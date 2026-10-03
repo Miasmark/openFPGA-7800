@@ -4,11 +4,13 @@ Checks for the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`, "Verification plan"
 
 Nothing here needs game data except the optional lockstep run on a real image. Game files, and traces or PCM made from them, stay out of the repository (`sim/work*` is ignored).
 
+The firmware is not in the repository either. The ISA suite and the directed, halt and fuzz tests run their own programs and need nothing else. The mixer harness, the synthetic ARSC checks, the Unicorn firmware replay, `run_songs.sh` and every game run execute CoreTone: put your copy of MiSTer's `bupchip.hex` at `src/fpga/mister/rtl/` (`docs/BUPCHIP.md`, "Firmware: bupchip.bin"). Without it `run_all.sh` lists those steps as SKIP and refuses a game argument, and the scripts that need it stop with a message.
+
 ## Running
 
 ```sh
 sim/bupchip/setup_dev.sh                         # tools, and Unicorn in sim/work/bupchip/venv
-sim/bupchip/verif/run_all.sh                     # everything game-free, about 3 minutes
+sim/bupchip/verif/run_all.sh                     # everything game-free, about 3 minutes (firmware needed for steps 2-3)
 sim/bupchip/verif/run_all.sh rv.a78              # plus lockstep on Misery_F, about 1 minute more
 sim/bupchip/verif/directed/run.sh                # the new core: more directed tests, end of ROM, fuzz
 ```
@@ -35,7 +37,14 @@ Other files: `build.sh` (Verilator builds), `ref_system.svh` (the reference BupC
 - **DUT:** `lockstep_dut_ref.sv` by default: a second `arm7tdmi_core` (`MUL_RETIRE_STAGE` off) on a zero-wait bus, with its retires turned into the retire-port stream described below. `-DDUT_BUP` (`DUT=bup`) selects `lockstep_dut_bup.sv`: the new core, `src/fpga/core/bupchip/bup_cpu.sv`, with its ROM and RAM in `cache_ram.v` blocks and a behavioural asset memory (step 2; its own checks are in `../s1/`).
 - **Peripheral reads are replayed.** Every read the reference makes of `0xE0009000`–`0xE00090FF` is queued with its value, and the DUT's reads are answered from that queue, in order. The DUT waits while the queue is empty. Both cores therefore see the same IDENT, commands and FIFO status, and the poll loops run the same number of times, whatever the timing.
 - **Compared, in program order:** every retire (PC, encoding, r0–r14 and NZCV after it), every RAM store (word address, byte lanes, data), every peripheral write, and the address of every peripheral read. Either side may run ahead. Both register files start at zero, and nothing is masked.
-- **Stop:** `+maxret` compared retires (default 1,000,000), `+maxcyc` reference clocks, the reference's FAULT write (the end marker of the ISA tests and the harness) once the DUT has caught up, `+maxfail` mismatches (default 5), or nothing compared for `+stall` clocks. At a FAULT-write stop every RAM store, peripheral write and replayed read of either side must have found its partner, so a missing or extra last store fails. The last line is `LOCKSTEP PASS` or `LOCKSTEP FAIL`.
+- **Which instruction made each access.** Every RAM store, peripheral write and peripheral read carries the number of instructions its side had retired before it. Partners must carry the same number, so a store made by the wrong instruction fails even with the right address and data. `lockstep_dut_ref.sv` counts its core's own retires (`nret`), because its retire port runs behind its bus. Both cores make every access no later than the clock in which its instruction retires, so the numbers agree exactly; they did on every run so far.
+- **Stop:** `+maxret` compared retires (default 1,000,000), `+maxcyc` reference clocks, the reference's FAULT write (the end marker of the ISA tests and the harness) once the DUT has caught up, `+maxfail` mismatches (default 5), or nothing compared for `+stall` clocks. Then:
+  - **At a FAULT-write stop,** every RAM store, peripheral write and replayed read of either side must have found its partner.
+  - **At an instruction- or clock-limit stop,** either side may have run ahead. Every access made by an instruction that has been compared must still have found its partner, so a missing or extra last store fails there too.
+  - **The DUT's newest record** waits for its next start (rule 3 below). If the reference already has its partner, the testbench runs on to that start and compares it.
+  - **After a reference abort** (`+abort_ok`), the DUT must have halted having retired at most the aborting instruction beyond the reference.
+  
+  The last line is `LOCKSTEP PASS` or `LOCKSTEP FAIL`.
 - **Fault injection:** `+inject=N` flips bit 0 of the DUT's Nth data load (each shell implements it), `+inject_mmio=N` of the Nth replayed read (the testbench does, for any DUT). Either must end in `LOCKSTEP FAIL`.
 - Commands: `+song=N +songcyc=CLK`, or `+cmds=8d@1000000,81@3000000` (byte in hex, at that reference clock).
 

@@ -7,9 +7,14 @@
 # GAME.a78 (Rikki & Vikki with its ARSC block), each song<N>.pcm that
 # run_bupchip.sh left in REF_DIR (default $WORK/../ref) must come out
 # identical. About 20 s, plus 10-65 s per reference song.
+# Every step runs CoreTone, which is not in the repository: put your copy of
+# MiSTer's bupchip.hex at src/fpga/mister/rtl/ (docs/BUPCHIP.md, "Firmware:
+# bupchip.bin"). Without it the script stops at once.
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$HERE/../../work/bupchip/model}"
+FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
+[ -f "$FW" ] || { echo "check.sh: no firmware at $FW (docs/BUPCHIP.md, \"Firmware: bupchip.bin\")" >&2; exit 2; }
 GAME="${1:+$(realpath "$1")}"
 REF="$(realpath -m "${2:-$WORK/../ref}")"
 mkdir -p "$WORK"

@@ -86,7 +86,7 @@ for t in "${TESTS[@]}"; do
 		> "$b.lock2.log" 2>&1 || true
 	why=""
 	grep -q "^result: fault=aa .* aborts=0 exceptions=0" "$b.ref.log" || why="$why reference did not reach the end marker cleanly;"
-	grep -q "^result: halted=0 .* fault=aa" "$b.s1.log" || why="$why the core halted on tb_s1 ($(grep '^result' "$b.s1.log"));"
+	grep -q "^result: halted=0 .* fault=aa" "$b.s1.log" || why="$why did not reach the end marker on tb_s1 ($(grep '^result' "$b.s1.log"));"
 	grep -q "^LOCKSTEP PASS" "$b.lock.log" || why="$why lockstep failed;"
 	grep -q "^LOCKSTEP PASS" "$b.lock2.log" || why="$why lockstep with waits and throttle failed ($b.lock2.log);"
 	if [ -z "$why" ]; then

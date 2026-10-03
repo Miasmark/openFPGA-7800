@@ -17,8 +17,9 @@
 // at zero like the reference's; nothing is masked. Compared, in program
 // order: every retire (PC, encoding, r0-r14, NZCV), every RAM store (word
 // address, byte lanes, data), every peripheral write, and the address of
-// every peripheral read. Either side may run ahead; heads are compared as
-// they become available.
+// every peripheral read, each with the instruction that made it (counted in
+// retires; lockstep_dut_ref counts its core's own). Either side may run
+// ahead; heads are compared as they become available.
 //
 //   +maxret=N       stop after N compared retires (default 1,000,000)
 //   +maxcyc=N       stop after N reference clocks (default: no limit)
@@ -37,8 +38,10 @@
 // A write to the FAULT register (0xE000901C) by the reference ends the run
 // once the DUT has caught up: the firmware's fault path, or the end marker
 // of the ISA tests and the mixer harness. Every RAM store, peripheral write
-// and replayed read either side made must then have been matched. The last
-// line is LOCKSTEP PASS or LOCKSTEP FAIL.
+// and replayed read either side made must then have been matched. At any
+// other stop, the DUT's newest record is compared too when the reference
+// has its partner, and every access made by a compared instruction must
+// have been matched. The last line is LOCKSTEP PASS or LOCKSTEP FAIL.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -81,7 +84,11 @@ module tb_lockstep;
 	// ---- scoreboard -----------------------------------------------------------
 	typedef struct { logic [31:0] pc, insn; logic [31:0] r [15]; logic [3:0] f; } rec_t;
 	// Each access carries n, the number of instructions its side had retired
-	// when it happened.
+	// before the clock it happened in. Both cores make every access no later
+	// than the clock in which its instruction retires, so n + 1 is the
+	// instruction that made it. Partners must carry the same n, and at the
+	// stop no access with n below the number of compared retires may be left
+	// without one.
 	typedef struct { logic [31:0] a, d; logic [3:0] s; longint n; } st_t;
 	typedef struct { logic [7:0] a; logic [31:0] d; longint n; } io_t;
 
@@ -92,20 +99,10 @@ module tb_lockstep;
 	rec_t   pend_rec;
 	logic   in_flight = 0, pend = 0, halt_seen = 0;
 	longint fails = 0, ncmp = 0, nst = 0, npw = 0, npr = 0, rret = 0, dret = 0;
-	longint dcyc = 0, dwait = 0, ref_fault_ret = -1, ref_abort_ret = -1, progress_cyc = 0;
+	longint dcyc = 0, dwait = 0, ref_fault_ret = -1, ref_abort_ret = -1, progress_cyc = 0, dn_halt = -1;
 	logic   abort_ok = 0;
 	longint inject_mmio = -1;
 	int     maxfail = 5;
-	// Per stream (RAM stores, peripheral writes, peripheral reads): the lowest
-	// and highest n(DUT) - n(reference) over the matched pairs.
-	longint tlo [3] = '{0, 0, 0}, thi [3] = '{0, 0, 0};
-	logic   tseen [3] = '{0, 0, 0};
-
-	function automatic void tag_pair(input int k, input longint e, input longint g);
-		if (!tseen[k] || g - e < tlo[k]) tlo[k] = g - e;
-		if (!tseen[k] || g - e > thi[k]) thi[k] = g - e;
-		tseen[k] = 1;
-	endfunction
 
 	function automatic logic [31:0] lanes(input logic [3:0] s);
 		return {{8{s[3]}}, {8{s[2]}}, {8{s[1]}}, {8{s[0]}}};
@@ -130,7 +127,36 @@ module tb_lockstep;
 		progress_cyc = ref_cyc;
 	endfunction
 
-	always @(posedge clk_arm) begin
+	function automatic string by(input longint e, input longint g);
+		return e == g ? "" : $sformatf(" (made in DUT instruction #%0d, reference #%0d)", g + 1, e + 1);
+	endfunction
+
+	// Compare the heads of the queues as far as both sides have got.
+	function automatic void match_heads();
+		while (refq.size() != 0 && dutq.size() != 0) compare_rec(refq.pop_front(), dutq.pop_front());
+		while (rstq.size() != 0 && dstq.size() != 0) begin
+			st_t e, g;
+			e = rstq.pop_front();
+			g = dstq.pop_front();
+			nst++;
+			if (e.a !== g.a || e.s !== g.s || e.d !== g.d || e.n != g.n)
+				fail($sformatf("RAM store #%0d: DUT %08x/%1x=%08x, reference %08x/%1x=%08x%s",
+					nst, g.a, g.s, g.d, e.a, e.s, e.d, by(e.n, g.n)));
+		end
+		while (rpwq.size() != 0 && dpwq.size() != 0) begin
+			io_t e, g;
+			e = rpwq.pop_front();
+			g = dpwq.pop_front();
+			npw++;
+			if (e.a !== g.a || e.d !== g.d || e.n != g.n)
+				fail($sformatf("peripheral write #%0d: DUT %02x=%08x, reference %02x=%08x%s",
+					npw, g.a, g.d, e.a, e.d, by(e.n, g.n)));
+		end
+	endfunction
+
+	logic stopped = 0;		// set once the verdict is being written
+
+	always @(posedge clk_arm) if (!stopped) begin
 		// Reference: retires, stores, peripheral writes and reads (to replay).
 		if (ref_running) begin
 			if (ref_dacc && mem_abort) begin
@@ -167,9 +193,9 @@ module tb_lockstep;
 			if (pr_valid) begin
 				if (mmq.size() == 0) fail($sformatf("DUT read peripheral %02x with no replay entry", pr_addr));
 				else begin
-					if (mmq[0].a !== pr_addr)
-						fail($sformatf("peripheral read #%0d: DUT %02x, reference %02x", npr + 1, pr_addr, mmq[0].a));
-					tag_pair(2, mmq[0].n, `DUT_N);
+					if (mmq[0].a !== pr_addr || mmq[0].n != `DUT_N)
+						fail($sformatf("peripheral read #%0d: DUT %02x, reference %02x%s", npr + 1, pr_addr,
+							mmq[0].a, by(mmq[0].n, `DUT_N)));
 					void'(mmq.pop_front());
 					npr++;
 				end
@@ -209,30 +235,13 @@ module tb_lockstep;
 			end
 			if (halted && !halt_seen) begin
 				halt_seen = 1;
+				dn_halt = `DUT_N;
 				if (abort_ok) $display("DUT halted (%08x) after %0d retires", halt_pc, dret);
 				else fail($sformatf("DUT halted (%08x) after %0d retires", halt_pc, dret));
 			end
 		end
 
-		while (refq.size() != 0 && dutq.size() != 0) compare_rec(refq.pop_front(), dutq.pop_front());
-		while (rstq.size() != 0 && dstq.size() != 0) begin
-			st_t e, g;
-			e = rstq.pop_front();
-			g = dstq.pop_front();
-			nst++;
-			tag_pair(0, e.n, g.n);
-			if (e.a !== g.a || e.s !== g.s || e.d !== g.d) fail($sformatf("RAM store #%0d: DUT %08x/%1x=%08x, reference %08x/%1x=%08x",
-				nst, g.a, g.s, g.d, e.a, e.s, e.d));
-		end
-		while (rpwq.size() != 0 && dpwq.size() != 0) begin
-			io_t e, g;
-			e = rpwq.pop_front();
-			g = dpwq.pop_front();
-			npw++;
-			tag_pair(1, e.n, g.n);
-			if (e.a !== g.a || e.d !== g.d) fail($sformatf("peripheral write #%0d: DUT %02x=%08x, reference %02x=%08x",
-				npw, g.a, g.d, e.a, e.d));
-		end
+		match_heads();
 
 		// The replay head, for the DUT's next clock.
 		pr_avail <= mmq.size() != 0;
@@ -275,6 +284,20 @@ module tb_lockstep;
 			end
 		end
 		if (abort_ok && halt_seen && ref_abort_ret < 0) fail("DUT halted, but the reference did not abort");
+		if (why == "instruction limit" || why == "clock limit" || why == "FAULT write") begin
+			// The DUT's newest record is closed by its next start (rule 3). If
+			// the reference already has the partner, run on until that start.
+			longint target;
+			target = ncmp + 1;
+			for (int i = 0; i < 2000 && ncmp < target && pend && dutq.size() == 0 && refq.size() != 0 && !halted; i++)
+				@(posedge clk_arm);
+			match_heads();
+		end
+		// The DUT may have retired the aborting instruction itself (a core that
+		// checks the address a clock later), but nothing after it.
+		if (why == "reference abort, DUT halted" && dn_halt > ref_abort_ret + 1)
+			fail($sformatf("DUT retired %0d instructions before it halted, the reference %0d before its abort",
+				dn_halt, ref_abort_ret));
 		if (why == "FAULT write") begin
 			// Both cores have stopped at the same end marker, so every access
 			// either side made must have found its partner.
@@ -293,7 +316,26 @@ module tb_lockstep;
 			if (mmq.size() != 0)
 				fail($sformatf("DUT did not make %0d of the reference's peripheral read(s), the first at %02x",
 					mmq.size(), mmq[0].a));
+		end else if (why != "too many mismatches" && why != "no progress") begin
+			// Elsewhere either side may have run ahead, but every access made
+			// by an instruction that has been compared must have its partner.
+			if (rpwq.size() != 0 && rpwq[0].n < ncmp)
+				fail($sformatf("DUT is missing the peripheral write %02x=%08x of instruction #%0d",
+					rpwq[0].a, rpwq[0].d, rpwq[0].n + 1));
+			if (dpwq.size() != 0 && dpwq[0].n < ncmp)
+				fail($sformatf("DUT made an extra peripheral write %02x=%08x in instruction #%0d",
+					dpwq[0].a, dpwq[0].d, dpwq[0].n + 1));
+			if (rstq.size() != 0 && rstq[0].n < ncmp)
+				fail($sformatf("DUT is missing the RAM store %08x/%1x=%08x of instruction #%0d",
+					rstq[0].a, rstq[0].s, rstq[0].d, rstq[0].n + 1));
+			if (dstq.size() != 0 && dstq[0].n < ncmp)
+				fail($sformatf("DUT made an extra RAM store %08x/%1x=%08x in instruction #%0d",
+					dstq[0].a, dstq[0].s, dstq[0].d, dstq[0].n + 1));
+			if (mmq.size() != 0 && mmq[0].n < ncmp)
+				fail($sformatf("DUT did not make the peripheral read at %02x of instruction #%0d",
+					mmq[0].a, mmq[0].n + 1));
 		end
+		stopped = 1;
 		$display("stop: %s", why);
 		$display("compared: %0d retires, %0d RAM stores, %0d peripheral writes; %0d peripheral reads replayed",
 			ncmp, nst, npw, npr);
@@ -302,8 +344,6 @@ module tb_lockstep;
 		$display("DUT: %0d retired in %0d clocks, %0d of them waiting for a replayed read (%.2f per instruction without those)",
 			dret, dcyc, dwait, (dcyc - dwait) * 1.0 / (dret > 0 ? dret : 1));
 		if (ref_fault_ret >= 0) $display("reference wrote FAULT = %02x", bup.fault_code);
-		$display("access tags, DUT minus reference: stores %0d..%0d, peripheral writes %0d..%0d, peripheral reads %0d..%0d",
-			tlo[0], thi[0], tlo[1], thi[1], tlo[2], thi[2]);
 		$display("mismatches: %0d", fails);
 		$display("%s", fails == 0 ? "LOCKSTEP PASS" : "LOCKSTEP FAIL");
 		$finish;

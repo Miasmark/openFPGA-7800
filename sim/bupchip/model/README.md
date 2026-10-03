@@ -3,7 +3,14 @@
 Python tools from the design study behind `docs/BUPCHIP_CORE.md`. They need
 only Python 3; the inventory's objdump cross-check also uses
 `arm-none-eabi-objdump` when it is installed. Game files and anything made
-from them (PCM, batch CSVs) stay in `sim/work/` and out of git.
+from them (PCM, batch CSVs) stay in `sim/work/` and out of git. The study's
+RTL sketch, PSRAM fact check, FIFO sizing experiment and Yosys counts are in
+`study/` (its README).
+
+Every tool here runs CoreTone, which is not in the repository: put your copy
+of MiSTer's `bupchip.hex` at `src/fpga/mister/rtl/` (`docs/BUPCHIP.md`,
+"Firmware: bupchip.bin"). "Game-free" below means no game data; the
+firmware is still needed, and `check.sh` stops at once without it.
 
 | File | What it is |
 |---|---|
@@ -14,6 +21,7 @@ from them (PCM, batch CSVs) stay in `sim/work/` and out of git.
 | `synth_arsc.py` | A game-free ARSC block built from the formats read out of the firmware |
 | `coverage.py` | What the synthetic block exercises: 1,516 of 1,704 code words, all 21 bytecode handlers, all command classes, all three faults |
 | `check.sh` | Regression: the game-free checks, and with a game the PCM against MiSTer's |
+| `study/` | The study's RTL sketch (proposal B), PSRAM and FIFO experiments, Yosys counts |
 
 ## Commands
 
@@ -65,8 +73,9 @@ instructions):
 
 | Core / asset path | CPI | MHz at 100% busy: average / busiest 0.1 s / worst batch | Lowest clock without underrun | FIFO low at 21.477 / 21.281 MHz |
 |---|---|---|---|---|
-| S1 / stream | 1.387 | 21.02 / 21.72 / 24.27 (23.31 without the song-start batch) | 21.49 | — |
-| S1 / cache | 1.377 | 20.88 / 21.48 / 24.07 | 21.24 | — |
+| S1-sketch / stream | 1.387 | 21.02 / 21.72 / 24.27 (23.31 without the song-start batch) | 21.49 | — |
+| S1 / cache | 1.378 | 20.89 / 21.50 / 24.11 | 21.25 | — |
+| S1 / none | 1.377 | 20.87 / 21.48 / 23.98 | 21.23 | — |
 | S2 / stream | 1.123 | 17.03 / 17.75 / 19.54 | 17.55 | 641 / 639 |
 | S2 / cache | 1.103 | 16.72 / 17.18 / 19.29 | 16.99 | 643 / 642 |
 | S3 / cache | 1.013 | 15.35 / 15.78 / 17.87 | 15.59 | 657 / 655 |
@@ -76,7 +85,11 @@ instructions):
 | ref / none | 2.299 | 34.84 / 35.86 / 40.04 | — | — |
 
 - `stream` is proposal B's two-line stream buffer, the asset path of the RTL
-  that measured S1 at CPI 1.383; `cache` is the design's 64 × 16 B cache.
+  sketch that measured S1 at CPI 1.383 (`study/`); `cache` is the design's
+  64 × 16 B cache; `none` is a zero-wait asset memory, as on `tb_s1.sv`.
+- S1 is `src/fpga/core/bupchip/bup_cpu.sv` (LDM n+2, STM n+1), S1-sketch the
+  study's sketch (LDM without write-back n+1, STM n). On `tb_s1.sv` the core
+  measures CPI 1.3772 and 20.87 / 21.48 / 23.98 MHz, the S1 / none row.
 - `docs/BUPCHIP_CORE.md`'s S2 figures (CPI 1.116) came from the study's
   variant with loads 1, LDM n+1, MMIO stores 2 and the stream buffer's
   stalls taken from S1's clock. S2 as the document defines it (S3 with

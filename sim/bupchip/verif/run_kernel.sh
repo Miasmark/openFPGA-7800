@@ -8,6 +8,8 @@
 # Work files go to $WORK/kernel; exits 0 when every check passes.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
+FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
+[ -f "$FW" ] || { echo "run_kernel.sh: no firmware at $FW (docs/BUPCHIP.md, \"Firmware: bupchip.bin\")" >&2; exit 2; }
 WORK="${WORK:-$HERE/../../work/bupchip/verif}"
 mkdir -p "$WORK/kernel"
 WORK="$(cd "$WORK" && pwd)"

@@ -16,10 +16,10 @@ FUZZ="$(seq 1 140)" sim/bupchip/verif/directed/run.sh   # about 15 minutes
 | `pcops.S` | r15 as an operand that reads as the address + 8: Rm, Rn, flag-setting forms, load bases with immediate and register offsets |
 | `unpred.S` | UNPREDICTABLE forms the core runs rather than halts on: halfword post-index with W set, Rd == Rm, two-clock store of the base with write-back, overlapping multiply registers |
 | `romend.S` | The last ROM word, on `tb_s1.sv`: a branch there that is taken must not halt; one whose condition fails runs off the end, and as MiSTer aborts the fetch from 0x4000, the core must halt with code 4 at 0x3FFC (after exactly 14 retires) rather than wrap to 0. `../../s1/halt_tests.py` has one `romend_*` case per kind of instruction in that word. |
-| `fuzz.py`, `fuzz_run.py` | Random encodings from every instruction class except branches (see `fuzz.py`). The core may halt on any of them; `fuzz_run.py` swaps each one it halts on for a NOP, and everything left must match the reference in lockstep. |
+| `fuzz.py`, `fuzz_run.py` | Random encodings from every instruction class except branches (see `fuzz.py`). The core may halt on any of them; `fuzz_run.py` swaps each one it halts on for a NOP, and everything left must match the reference in lockstep. A DATA or RO halt says the reference would abort there, so before its NOP goes in the program runs in lockstep with `+abort_ok=1`, and the reference must take a data abort in that same instruction. |
 | `run.sh` | Runs all of the above. Work files go to `sim/work/bupchip/verif/directed`. |
 
-The hand-written tests use `../../s1/directed/common.inc`. Each one ends by summing what it stored into a register. They were written when `tb_lockstep.sv` did not check, at the end marker, that both cores' store queues were empty; it now does, and the sums remain as a second check. `../../s1/check.sh` runs `run.sh` with the default fuzz seeds.
+The hand-written tests use `../../s1/directed/common.inc`. Each one ends by summing what it stored into a register. They were written when `tb_lockstep.sv` did not check, at the end marker, that both cores' store queues were empty; it now does, and the sums remain as a second check. `../../s1/check.sh` runs `run.sh` with the default fuzz seeds, and `run_vfy.sh` plainly and with `LATE_RF=1`. Nothing here needs the firmware except `run_vfy.sh`'s decode probe, which is skipped without it.
 
 ## Results (2026-10-03)
 
@@ -30,6 +30,8 @@ The hand-written tests use `../../s1/directed/common.inc`. Each one ends by summ
 | Fuzz seeds 1–440, 450 cells each | 440 of 440 pass. Of 198,000 encodings, 129,771 ran in lockstep (3,540,411 retires and 480,771 stores compared, 0 mismatches). The other 68,229 halted: UNDEF 43,459, RO 12,227, REG 5,868, DATA 4,003, BLOCK 2,672. (Before the ROM-end fix and the end-of-run queue checks in `tb_lockstep.sv`.) |
 | After both: the hand-written tests and fuzz seeds 1–48 | All pass. Of 21,600 encodings, 14,175 ran in lockstep (386,268 retires and 52,606 stores compared, 0 mismatches). |
 | The same with `LATE_RF=1`, fuzz seeds 1–16 | All pass. Of 7,200 encodings, 4,669 ran in lockstep (128,784 retires and 17,407 stores compared, 0 mismatches). |
+| Round 2: fuzz seeds 9–40 with the DATA/RO check | All pass. Of 14,400 encodings, 9,487 ran in lockstep (257,529 retires and 35,081 stores compared, 0 mismatches); every one of the 1,147 DATA and RO halts was matched by a reference abort in the same instruction. |
+| Over-strict halts (verification round 2) | Before the DATA/RO check, any halt passed the fuzz. Two mutants that halt where the reference does not abort passed seeds 1–4 under the old `fuzz_run.py` and fail all four now: DATA on an odd-address halfword load, and the asset window cut to half its size. A mutant that halts on the last 64 bytes of the asset window passes both versions, because the fuzz never loads that far in; `vhalt.py`'s window-edge cases cover it. |
 
 ## Mutants
 

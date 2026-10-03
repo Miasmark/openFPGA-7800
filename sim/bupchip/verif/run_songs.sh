@@ -13,6 +13,8 @@
 # when every song ends in LOCKSTEP PASS.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
+FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
+[ -f "$FW" ] || { echo "run_songs.sh: no firmware at $FW (docs/BUPCHIP.md, \"Firmware: bupchip.bin\")" >&2; exit 2; }
 WORK="${WORK:-$HERE/../../work/bupchip/verif}"
 mkdir -p "$WORK/songs"
 WORK="$(cd "$WORK" && pwd)"

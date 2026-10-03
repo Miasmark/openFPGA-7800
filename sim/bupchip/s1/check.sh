@@ -3,29 +3,46 @@
 #   1. the directed and halt tests (run_directed.sh);
 #   2. the further directed tests, running off the end of the ROM, and the
 #      random-encoding fuzz (../verif/directed/run.sh);
-#   3. with the core built with BUP_SIM_LATE_RF (LATE_RF=1: register-file
+#   3. the verifier's directed tests (../verif/directed/run_vfy.sh: corner
+#      cases in lockstep and against Unicorn, more halt and no-halt cases,
+#      and, with the firmware, the decoder on every code word);
+#   4. with the core built with BUP_SIM_LATE_RF (LATE_RF=1: register-file
 #      writes land a clock late, so only the bypass keeps results right):
-#      the directed and halt tests again, and the ISA suite in lockstep;
-#   4. ../verif/run_all.sh with DUT=bup and LOCKSTEP=1: the ISA suite against
+#      the directed and halt tests again, run_vfy.sh again, and the ISA
+#      suite in lockstep;
+#   5. ../verif/run_all.sh with DUT=bup and LOCKSTEP=1: the ISA suite against
 #      Unicorn and in lockstep, the mixer harness in lockstep, the synthetic
 #      ARSC checks in lockstep, and with GAME.a78 the lockstep through boot and
 #      Misery_F with the corrupted-load check;
-#   5. with GAME.a78, SONGS (default "13 14 9 30") for SECS seconds (default
+#   6. with GAME.a78, SONGS (default "13 14 9 30") for SECS seconds (default
 #      4) on tb_s1.sv (run_s1.sh, up to JOBS at once, default nproc): PCM
 #      identical to MiSTer's ($REFDIR/song<N>.pcm, default
 #      sim/work/bupchip/ref) from the song's first frame, with no halt,
 #      underrun or overflow, and Misery_F (song 13) at a CPI within 1% of
 #      1.383.
 #   ./check.sh [GAME.a78]
-# About 4 minutes without a game, 7 with one on 4 cores. Exits 0 when
+# About 5 minutes without a game, 8 with one on 4 cores. Exits 0 when
 # everything passes.
+#
+# Steps 1-4 need no firmware. Step 5's mixer harness and synthetic ARSC, and
+# step 6, run CoreTone, which is not in the repository: put your copy of
+# MiSTer's bupchip.hex at src/fpga/mister/rtl/ (docs/BUPCHIP.md, "Firmware:
+# bupchip.bin"). Without it run_all.sh skips those, and a GAME argument is
+# an error.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$HERE/../../work/bupchip/s1}"
+FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 REFDIR="${REFDIR:-$WORK/../ref}"
 GAME="${1:+$(realpath "$1")}"
+if [ ! -f "$FW" ] && [ -n "$GAME" ]; then
+	echo "check.sh: the game checks need the firmware, $FW (docs/BUPCHIP.md, \"Firmware: bupchip.bin\")" >&2
+	exit 2
+fi
+NOFW=""
+[ -f "$FW" ] || NOFW=" (no firmware: the mixer harness and synthetic ARSC skipped)"
 RESULTS=()
 step() {
 	local name="$1"; shift
@@ -36,11 +53,16 @@ step() {
 step "directed and halt tests" "$HERE/run_directed.sh"
 step "further directed tests, end of ROM and fuzz (../verif/directed/run.sh)" \
 	env WORK="$WORK/../verif/directed" VWORK="$WORK/../verif" S1WORK="$WORK" "$HERE/../verif/directed/run.sh"
+step "the verifier's directed tests (../verif/directed/run_vfy.sh)" \
+	env WORK="$WORK/../verif/vfy" VWORK="$WORK/../verif" S1WORK="$WORK" "$HERE/../verif/directed/run_vfy.sh"
 step "directed and halt tests, register-file writes late (LATE_RF=1)" \
 	env LATE_RF=1 WORK="$WORK/directed_laterf" VWORK="$WORK/../verif" "$HERE/run_directed.sh"
+step "the verifier's directed tests, register-file writes late (LATE_RF=1)" \
+	env LATE_RF=1 WORK="$WORK/../verif/vfy_laterf" VWORK="$WORK/../verif" S1WORK="$WORK" \
+	"$HERE/../verif/directed/run_vfy.sh"
 step "ISA suite in lockstep, register-file writes late (LATE_RF=1)" \
 	env DUT=bup LOCKSTEP=1 LATE_RF=1 ISS=0 WORK="$WORK/../verif" "$HERE/../verif/isa/run_isa.sh"
-step "verification suite with DUT=bup (../verif/run_all.sh)" \
+step "verification suite with DUT=bup (../verif/run_all.sh)$NOFW" \
 	env DUT=bup LOCKSTEP=1 WORK="$WORK/../verif" "$HERE/../verif/run_all.sh" ${GAME:+"$GAME"}
 
 if [ -n "$GAME" ]; then

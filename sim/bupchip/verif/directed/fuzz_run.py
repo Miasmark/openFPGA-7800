@@ -7,7 +7,10 @@
 2. The program runs on the new core (TB_S1, s1/build_s1.sh's binary, in
    program mode). Where it halts, the encoding there (a cell's fz<k>) is
    replaced with a NOP and the run repeats, until the end marker. A halt
-   anywhere but a cell's encoding is a failure.
+   anywhere but a cell's encoding is a failure. A DATA or RO halt claims
+   that the reference aborts there, so before the NOP goes in, the program
+   runs in lockstep with +abort_ok=1: the reference must take a data abort
+   in the same instruction, after the same retires.
 3. The patched program runs in lockstep (LOCKSTEP, run_lockstep.sh --build
    with DUT=bup), plainly and with +await=40 +throttle=25: everything the
    core did not halt on must match the reference, and the reference must
@@ -73,6 +76,16 @@ for it in range(cells + 2):
         break
     if pc not in labels:
         fail(f"halt code {code} at {pc:08x}, which is not a fuzzed encoding")
+    if code in (5, 6):
+        out = run([lock, "+rom=" + image, "+romhex=" + b + ".patched.hex", "+maxret=10000000",
+                   "+abort_ok=1", "+stall=200000"]).stdout
+        open(b + ".abort.log", "w").write(out)
+        if not ("LOCKSTEP PASS" in out and re.search(r"^stop: reference abort, DUT halted", out, re.M)
+                and re.search(r"^reference data abort at", out, re.M)
+                and re.search(rf"^DUT halted \({pc:08x}\)", out, re.M)):
+            first = [l for l in out.splitlines() if l.startswith(("MISMATCH", "stop", "reference data abort"))][:3]
+            fail(f"{NAMES[code]} halt at fz{labels[pc]} ({rom[pc // 4]:08x}), but the reference does not abort "
+                 f"there ({b}.abort.log): " + " | ".join(first))
     halts[code].append((labels[pc], rom[pc // 4]))
     rom[pc // 4] = NOP
 open(b + ".patched.hex", "w").write("".join(f"{w:08x}\n" for w in rom))

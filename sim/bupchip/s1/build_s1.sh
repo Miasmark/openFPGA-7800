@@ -29,4 +29,5 @@ mkdir -p "$OBJ"
 	--top-module tb_s1 -DROMHEX="\"$RTL/bupchip.hex\"" -DPCM_DEPTH="$DEPTH" "${DEFS[@]}" \
 	-Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
 	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2; echo "build failed: $OBJ.log" >&2; exit 1; }
+find "$OBJ" -name '*.gch' -delete		# only vtb is used again
 echo "$OBJ/vtb"

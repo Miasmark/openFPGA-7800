@@ -8,13 +8,16 @@ each candidate core would take, each core with its own clock and asset path.
   cycles.py --synth loop|oneshot|reverse [--secs S] ...   16 voices (synth_arsc.py)
   cycles.py --loops                                       the mixer loops, statically
 
-CORE is S1, S2 or S3 (the design's steps), S3-f1 (no load forwarding into
-the multiplier), S3-f2 (no load forwarding, 2-clock MUL/MLA), S3-m10k (M10K
+CORE is S1 (src/fpga/core/bupchip/bup_cpu.sv), S1-sketch (the study's RTL
+sketch, study/sketch/bup_cpu.sv: LDM without write-back n+1, STM n), S2 or
+S3 (the design's steps), S3-f1 (no load forwarding into the multiplier),
+S3-f2 (no load forwarding, 2-clock MUL/MLA), S3-m10k (M10K
 register file: BX 2, LDR pc 3), arm7 (ARM7TDMI cycle counts on zero-wait
 memory) or ref (MiSTer's arm7tdmi_core on zero-wait memory: arm7 plus one
 clock per multiply and four per asset load). ASSET is one of ASSETS below:
 cache is the design's 64 x 16 B cache; stream is proposal B's two-line
-stream buffer, the asset path of the RTL that measured S1's CPI.
+stream buffer, the asset path of the RTL sketch that measured CPI 1.383;
+none is a zero-wait asset memory, as on s1/tb_s1.sv.
 
 Prints, per pair: CPI; the clock needed at 100% busy on average, in the
 busiest 0.1 s, in the worst batch and in the worst batch after the
@@ -45,7 +48,8 @@ S3 = dict(load=1, ldr_pc=2, store=1, store_reg=1, store_mmio=1, ldm_wb=0, ldm=0,
 ARM7 = dict(S3, load=3, ldr_pc=5, store=2, store_reg=2, store_mmio=2, ldm_wb=2, ldm=2, stm=1, mul=None, umull=None,
             b=3, bx=3)
 CORES = {
-    'S1': dict(S3, load=2, store_reg=2, store_mmio=2, ldm_wb=2, ldm=1, mul=2, umull=3),    # B's bup_cpu.sv
+    'S1': dict(S3, load=2, store_reg=2, store_mmio=2, ldm_wb=2, ldm=2, stm=1, mul=2, umull=3),  # bup_cpu.sv
+    'S1-sketch': dict(S3, load=2, store_reg=2, store_mmio=2, ldm_wb=2, ldm=1, mul=2, umull=3),  # the study's
     'S2': dict(S3, store_reg=2, mul=2, umull=3),
     'S3': S3,
     'S3-f1': dict(S3, ldu='mul'),
@@ -241,8 +245,8 @@ ASSETS = {
     'stream': lambda: StreamBuffer(),
     'none': lambda: None,
 }
-DEFAULT_RUN = ['S1/stream', 'S1/cache', 'S2/stream', 'S2/cache', 'S3/cache', 'S3-f1/cache', 'S3-f2/cache',
-               'S3-m10k/cache', 'arm7/none', 'ref/none']
+DEFAULT_RUN = ['S1-sketch/stream', 'S1/cache', 'S1/none', 'S2/stream', 'S2/cache', 'S3/cache', 'S3-f1/cache',
+               'S3-f2/cache', 'S3-m10k/cache', 'arm7/none', 'ref/none']
 
 
 class Pair:
