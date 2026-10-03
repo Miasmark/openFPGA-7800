@@ -219,6 +219,18 @@ wire        cq_lane = c_new ? c_addr[0] : cp_lane;
 wire  [7:0] cq_data = c_new ? c_wdata : cp_data;
 
 // ------------------------------------------------------- Flicker Blend ------
+// Taken on the falling edge, half a clk_sdram after the clk_sys edge that
+// changes them. Sampled on the coincident rising edge, the frame pointer's
+// short route failed hold by 0.13 ns (clk_sys to clk_sdram skew).
+reg [15:0] fbn_addr = 16'd0;
+reg  [7:0] fbn_wdata = 8'd0;
+reg        fbn_we = 1'b0, fbn_en = 1'b0;
+always @(negedge clk) begin
+	fbn_addr  <= fb_addr;
+	fbn_wdata <= fb_wdata;
+	fbn_we    <= fb_we;
+	fbn_en    <= fb_en;
+end
 reg        fb_we_q = 1'b0;
 reg [15:0] fb_cur = 16'd0;
 reg  [7:0] fb_cur_d = 8'd0, fb_nxt_d = 8'd0;
@@ -231,7 +243,7 @@ reg [15:0] fb_rd_a = 16'd0;
 assign fb_q = fb_cur_d;
 
 wire [15:0] fb_nxt = fb_cur + 16'd1;
-wire        fb_need_rd = fb_en & ~fb_rd_fly & (~fb_cur_ok | ~fb_nxt_ok);
+wire        fb_need_rd = fbn_en & ~fb_rd_fly & (~fb_cur_ok | ~fb_nxt_ok);
 wire [15:0] fb_need_a = fb_cur_ok ? fb_nxt : fb_cur;
 
 // ------------------------------------------------------------- SaveKey ------
@@ -338,22 +350,22 @@ always @(posedge clk) begin
 	if (done_v && done_cl == CL_CART) c_rdata <= done_byte;
 
 	// Flicker Blend: follow the address, keep a byte for it and the next one.
-	fb_we_q <= fb_we;
-	if (fb_addr != fb_cur) begin
-		fb_cur <= fb_addr;
-		if (fb_nxt_ok && fb_addr == fb_nxt) begin
+	fb_we_q <= fbn_we;
+	if (fbn_addr != fb_cur) begin
+		fb_cur <= fbn_addr;
+		if (fb_nxt_ok && fbn_addr == fb_nxt) begin
 			fb_cur_d <= fb_nxt_d;
 			fb_cur_ok <= 1'b1;
 		end else
 			fb_cur_ok <= 1'b0;
 		fb_nxt_ok <= 1'b0;
 	end
-	if (fb_en && fb_we && !fb_we_q) begin
-		fb_wq <= 1'b1; fb_wq_a <= fb_addr; fb_wq_d <= fb_wdata;
+	if (fbn_en && fbn_we && !fb_we_q) begin
+		fb_wq <= 1'b1; fb_wq_a <= fbn_addr; fb_wq_d <= fbn_wdata;
 		// The byte just written is the byte to read back (new-data, as the
 		// spram did); a read of it still in flight is stale and dropped.
-		if (fb_addr == fb_cur) begin fb_cur_d <= fb_wdata; fb_cur_ok <= 1'b1; end
-		if (fb_rd_fly && fb_addr == fb_rd_a) fb_rd_fly <= 1'b0;   // stale: fetch again
+		if (fbn_addr == fb_cur) begin fb_cur_d <= fbn_wdata; fb_cur_ok <= 1'b1; end
+		if (fb_rd_fly && fbn_addr == fb_rd_a) fb_rd_fly <= 1'b0;   // stale: fetch again
 	end else if (take && go_cl == CL_FB && go_we)
 		fb_wq <= 1'b0;
 	if (take && go_cl == CL_FB && !go_we) begin
@@ -362,7 +374,7 @@ always @(posedge clk) begin
 	end
 	if (done_v && done_cl == CL_FB && fb_rd_fly && done_tag[15:0] == fb_rd_a) begin
 		fb_rd_fly <= 1'b0;
-		if (fb_addr == fb_cur) begin
+		if (fbn_addr == fb_cur) begin
 			if (done_tag[15:0] == fb_cur && !fb_cur_ok) begin
 				fb_cur_d <= done_byte; fb_cur_ok <= 1'b1;
 			end else if (done_tag[15:0] == fb_nxt) begin
@@ -370,7 +382,7 @@ always @(posedge clk) begin
 			end
 		end
 	end
-	if (!fb_en) begin
+	if (!fbn_en) begin
 		fb_cur_ok <= 1'b0; fb_nxt_ok <= 1'b0; fb_wq <= 1'b0; fb_rd_fly <= 1'b0;
 	end
 
