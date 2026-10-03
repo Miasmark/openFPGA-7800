@@ -1,0 +1,6 @@
+# Sources of the BupChip CPU Quartus probe (bup_probe.qsf). Paths are relative
+# to this file, so the project can be compiled from any directory.
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../../../src/fpga/mister/rtl/arm7tdmi/arm7tdmi_pkg.sv]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) ../../../src/fpga/mister/rtl/cache_ram.v]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../../../src/fpga/core/bupchip/bup_cpu.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bup_probe_top.sv]

@@ -13,3 +13,5 @@ sim/work*
 src/fpga/mister/rtl/bupchip.hex
 src/fpga/mister/rtl/bupchip.mif
 dist/Cores/Miasmark.7800/licenses/
+# Python bytecode
+__pycache__/

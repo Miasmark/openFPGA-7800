@@ -13,6 +13,8 @@ sim/bupchip/setup_dev.sh                         # tools, and Unicorn in sim/wor
 sim/bupchip/verif/run_all.sh                     # everything game-free, about 3 minutes (firmware needed for steps 2-3)
 sim/bupchip/verif/run_all.sh rv.a78              # plus lockstep on Misery_F, about 1 minute more
 sim/bupchip/verif/directed/run.sh                # the new core: more directed tests, end of ROM, fuzz
+sim/bupchip/verif/directed/run_vfy.sh            # the new core: the verifier's directed, halt and decode tests
+sim/bupchip/verif/directed/run_vrand.sh          # the new core: dense random programs, shifter sweep
 ```
 
 `run_all.sh` runs, and each can be run alone:
@@ -102,7 +104,7 @@ The shell also holds the core's ROM (`+romhex`, default the `ROMHEX` define), it
 
 ## Results with the new core (DUT=bup)
 
-`../s1/README.md` lists the step 2 results: the ISA suite in lockstep, the mixer harness, the synthetic ARSC checks, Rikki & Vikki through boot and five songs, and the fault injections, all with 0 mismatches against the reference. `directed/` adds more directed tests (shifter carry-out from every bit, register shift amounts, LDM/STM of r0–r14, r15 as an operand, UNPREDICTABLE forms the core runs), running off the end of the ROM, and a random-encoding fuzz; its README has the results and a mutation check.
+`../s1/README.md` lists the step 2 results: the ISA suite in lockstep, the mixer harness, the synthetic ARSC checks, Rikki & Vikki through boot and five songs, and the fault injections, all with 0 mismatches against the reference. `directed/` adds more directed tests (shifter carry-out from every bit, register shift amounts, LDM/STM of r0–r14, r15 as an operand, UNPREDICTABLE forms the core runs), running off the end of the ROM and a random-encoding fuzz (`run.sh`); an independent verifier's generated tests, halt cases and decode probe (`run_vfy.sh`); and dense random programs with a full shifter sweep (`run_vrand.sh`). `directed/README.md` has the commands, the results and the mutation checks. `../s1/check.sh` runs `run.sh` and `run_vfy.sh`; `run_vrand.sh` runs on its own.
 
 ## Results (2026-10-03, reference against reference)
 
