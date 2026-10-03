@@ -105,7 +105,10 @@ The BupChip's CoreTone firmware (`rtl/bupchip.hex`/`.mif`, used by
 published. The Pocket build has no BupChip yet (`NO_BUPCHIP`), so nothing
 reads it; the planned Pocket BupChip loads it from the user's `bupchip.bin`
 (`../../../docs/BUPCHIP_CORE.md`, "Firmware load"). Simulation scripts read a
-local copy at `rtl/bupchip.hex`, which `.gitignore` keeps out of git.
+local copy at `rtl/bupchip.hex`, which `.gitignore` keeps out of git. The
+files were removed by a commit after 2.0.21; unlike `mem4` and `ar`, they
+were not removed from the history, which would have rewritten `main` and
+the release tags.
 
 With `EXTERNAL_FIRMWARE` defined, those two ROMs are built empty and gain a
 write port (`fw_*` ports through `top.sv` -> `cart.sv`, and `top.sv` ->
