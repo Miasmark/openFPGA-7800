@@ -1,6 +1,6 @@
 # The BupChip: what it needs
 
-The design of the Pocket's BupChip core is in [BUPCHIP_CORE.md](BUPCHIP_CORE.md).
+The design of **ARIA**, the Pocket's BupChip CPU, is in [BUPCHIP_CORE.md](BUPCHIP_CORE.md).
 
 These are the notes for anyone building a BupChip that fits the Pocket. The
 Pocket core leaves it out (`NO_BUPCHIP`; see the README). Everything here was

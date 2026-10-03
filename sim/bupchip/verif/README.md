@@ -1,6 +1,6 @@
 # BupChip verification
 
-Checks for the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`, "Verification plan"). The oracle is MiSTer's reference core, `arm_host` with `arm7tdmi_core` and `bupchip_subsystem` from `src/fpga/mister/rtl`; Unicorn, an independent ARM model, checks the reference in turn. `arm7tdmi_core.sv` is GPL-2.0-only: these testbenches only instantiate it and read its simulation-only state, and nothing in this directory is taken from it.
+Checks for ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`, "Verification plan"). The oracle is MiSTer's reference core, `arm_host` with `arm7tdmi_core` and `bupchip_subsystem` from `src/fpga/mister/rtl`; Unicorn, an independent ARM model, checks the reference in turn. `arm7tdmi_core.sv` is GPL-2.0-only: these testbenches only instantiate it and read its simulation-only state, and nothing in this directory is taken from it.
 
 Nothing here needs game data except the optional lockstep run on a real image. Game files, and traces or PCM made from them, stay out of the repository (`sim/work*` is ignored).
 

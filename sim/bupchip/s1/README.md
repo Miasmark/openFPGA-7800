@@ -1,6 +1,6 @@
-# BupChip S1 core: simulation
+# ARIA (BupChip CPU), S1: simulation
 
-Step 2 of `docs/BUPCHIP_CORE.md`: the S1 core, `src/fpga/core/bupchip/bup_cpu.sv`, running CoreTone in simulation, checked against MiSTer's reference BupChip. The verification harness it plugs into is `../verif/` (lockstep, ISA suite, mixer harness, synthetic ARSC); this directory adds the S1 system testbench, the directed tests and the halt tests.
+Step 2 of `docs/BUPCHIP_CORE.md`: ARIA's S1 configuration, `src/fpga/core/bupchip/bup_cpu.sv`, running CoreTone in simulation, checked against MiSTer's reference BupChip. The verification harness it plugs into is `../verif/` (lockstep, ISA suite, mixer harness, synthetic ARSC); this directory adds the S1 system testbench, the directed tests and the halt tests.
 
 Game files, and anything made from them (PCM, logs), stay in `sim/work/` and out of git. The firmware is not in the repository either: the directed, halt, fuzz and ISA tests run their own programs, but `tb_s1.sv`'s song mode, the mixer harness, the synthetic ARSC checks and every game run execute CoreTone. Put your copy of MiSTer's `bupchip.hex` at `src/fpga/mister/rtl/` (`docs/BUPCHIP.md`, "Firmware: bupchip.bin"); without it `check.sh` skips those steps (SKIP in `run_all.sh`'s summary) and refuses a game argument.
 

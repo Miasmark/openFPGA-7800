@@ -1,6 +1,8 @@
-# BupChip core for the Pocket: design
+# ARIA: the Pocket's BupChip core
 
-This document describes the CPU that runs CoreTone on the Pocket, together with its memories, asset path and glue. It builds on `docs/BUPCHIP.md`, which covers what the firmware needs, and on a design study that compared three proposals. Step 1 moved the study's tools into `sim/bupchip/`: the Python model and cycle models to `sim/bupchip/model/`, the RTL sketch, PSRAM and FIFO experiments and Yosys counts to `sim/bupchip/model/study/`, and the lockstep, ISA and mixer harnesses to `sim/bupchip/verif/`. The game data did not move. The measurements used Rikki & Vikki's ARSC block, built locally with `sim/bupchip/make_arsc.py` and kept out of git (`.gitignore:10`, `sim/work*`). The firmware is not in the repository either: the scripts read the user's copy of MiSTer's `bupchip.hex` at `src/fpga/mister/rtl/bupchip.hex`, which is gitignored (`.gitignore:11-14`).
+**ARIA** (Atari RISC Interface Accelerator) is the name of the CPU that runs CoreTone on the Pocket. It joins the 7800's own named chips, MARIA and SALLY, and its musical name fits its job. If it also comes to run the 2600 ARM cartridges (see "Later: 2600 ARM cartridges"), it becomes **DARIA**, the dual-use version. The RTL keeps its descriptive file and module names (`bup_cpu.sv`, `bup_*`).
+
+This document describes ARIA, together with its memories, asset path and glue. It builds on `docs/BUPCHIP.md`, which covers what the firmware needs, and on a design study that compared three proposals. Step 1 moved the study's tools into `sim/bupchip/`: the Python model and cycle models to `sim/bupchip/model/`, the RTL sketch, PSRAM and FIFO experiments and Yosys counts to `sim/bupchip/model/study/`, and the lockstep, ISA and mixer harnesses to `sim/bupchip/verif/`. The game data did not move. The measurements used Rikki & Vikki's ARSC block, built locally with `sim/bupchip/make_arsc.py` and kept out of git (`.gitignore:10`, `sim/work*`). The firmware is not in the repository either: the scripts read the user's copy of MiSTer's `bupchip.hex` at `src/fpga/mister/rtl/bupchip.hex`, which is gitignored (`.gitignore:11-14`).
 
 Every number carries a tag that says where it comes from:
 
@@ -950,7 +952,7 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
 
 ## Later: 2600 ARM cartridges (bonus goal)
 
-Once the BupChip is complete and proven on hardware, the same CPU may also run the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+), which upstream runs on the shared ARM7TDMI and the Pocket build leaves out (`NO_ARM_MAPPER`). The two never run at once, so they can share the CPU, its block RAM and the PSRAM path. The main new work is a clean-room Thumb front end: these drivers are game code, so all of Thumb has to be exact, with the same exact-or-halt rule. lroby74's MiSTer Thumb core is CC BY-NC 4.0 and may be used only as a behavioural reference.
+Once the BupChip is complete and proven on hardware, the same CPU may also run the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+), which upstream runs on the shared ARM7TDMI and the Pocket build leaves out (`NO_ARM_MAPPER`). The two never run at once, so they can share the CPU, its block RAM and the PSRAM path. The main new work is a clean-room Thumb front end: these drivers are game code, so all of Thumb has to be exact, with the same exact-or-halt rule. lroby74's MiSTer Thumb core is CC BY-NC 4.0 and may be used only as a behavioural reference. With Thumb added and the 2600 cartridges running, ARIA becomes **DARIA**: the Dual-use Atari RISC Interface Accelerator.
 
 Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/` (never committed):
 

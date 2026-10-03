@@ -1,5 +1,6 @@
 //------------------------------------------------------------------------------
-// The BupChip CPU, configuration S1 (docs/BUPCHIP_CORE.md): the ARMv4
+// ARIA (Atari RISC Interface Accelerator), the Pocket's BupChip CPU,
+// configuration S1 (docs/BUPCHIP_CORE.md): the ARMv4
 // ARM-state subset that CoreTone's firmware (mister/rtl/bupchip.hex) uses,
 // built small for the Pocket. Written from the ARM Architecture Reference
 // Manual (ARMv4) and the design document; the reference core
