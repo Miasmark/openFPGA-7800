@@ -22,7 +22,7 @@ https://github.com/Miasmark/openFPGA-7800
 | Paddle timing, light gun | `src/fpga/mister/rtl/paddles.sv`, `lightgun.sv` | Jamie Blanks (`paddles.sv`); `lightgun.sv` has no header and matches the light-gun module in Sorgelig's MiSTer cores | MIT with the rest of the MiSTer 7800 repository; `lightgun.sv` may also be under those cores' GPL (`LICENSES/GPL-3.0.txt`) | Built (from 2.0.13) |
 | Souper mapper | `src/fpga/mister/rtl/souper.v` | Osman Celimli | zlib-style (file header) | Built |
 | SN76489 | `src/fpga/mister/rtl/SN76489/` | Jamie Blanks | MIT | Built |
-| `data_loader`, `sound_i2s`, `sync_fifo` | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built |
+| `data_loader`, `sound_i2s`, `sync_fifo`; `psram` (asynchronous PSRAM controller, vendored unmodified from https://github.com/agg23/analogue-pocket-utils `ip/mem/psram.sv`: last changed upstream in `56391c11` of 2022-09-09, identical at `78482d1b` of 2023-08-10, git blob `2f7797f3`) | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built; `psram` simulation only until the Pocket BupChip is built (docs/BUPCHIP_CORE.md, step 5) |
 | APF framework | `src/fpga/apf/` | Analogue | Analogue's APF Software License Agreement (file headers); `mf_*.v` also carry the Intel Program License | Built |
 | PLL and PLL reconfiguration IP (generated) | `src/fpga/core/pll/` | Intel | Intel Program License (file headers): for use with Intel devices | Built |
 | Core template glue (`core_top.v`, `core_bridge_cmd.v`) | `src/fpga/core/` | Analogue, modified for this port | Analogue's APF terms | Built |

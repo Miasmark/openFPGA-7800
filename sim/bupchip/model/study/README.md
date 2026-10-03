@@ -67,7 +67,7 @@ With `CLOCK_SPEED` = 28.636364, every read and every write takes 5 clocks, and t
 - the read and write totals collide with an earlier state (write states 1 2 3 3, read states 20 21 22 22);
 - no read or write completes in 200 clocks.
 
-This is why the design keeps `CLOCK_SPEED` at 28.636364. The copy of `psram.sv` checked was the study's. The script reads `src/fpga/pocket_utils/psram.sv` once step 4 vendors it there.
+This is why the design keeps `CLOCK_SPEED` at 28.636364. The study checked its own copy of `psram.sv`. Step 4 vendored the same file, unmodified, to `src/fpga/pocket_utils/psram.sv`, which the script now reads by default; the results are the same, and `../../s4/run_psram_ctl.sh` runs this script as one of its checks (`../../s4/README.md`).
 
 ### PCM FIFO depth (synthetic ARSC, 100 ms)
 

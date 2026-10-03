@@ -1,0 +1,681 @@
+//------------------------------------------------------------------------------
+// Step 4 of docs/BUPCHIP_CORE.md: the whole Pocket BupChip
+// (src/fpga/core/bupchip/bupchip_pocket.sv) with its three real clocks, fed
+// the way the Pocket feeds it.
+//
+//   clk_sys  14.318 MHz, clk_arm 28.636 MHz (2 x, edge aligned; both x 0.99088
+//            in PAL), clk_74a 74.25 MHz (asynchronous)
+//   loader   one byte per +bytens ns (174.6, data_loader.sv's 10 clk_sdram)
+//            plus a random 0..+bytejit ns, as a one-clock clk_sys strobe,
+//            first the firmware slot (+fw, bupchip.bin), then the cartridge
+//            (+rom); the cartridge's header byte 53 sets souper_profile, as
+//            atari7800_pocket.sv's cart_flags does
+//   PSRAM    agg23's psram.sv (src/fpga/pocket_utils/) at CLOCK_SPEED =
+//            28.636364 on a psram_model.sv die, or, built with
+//            -DPSRAM_STANDIN, psram_standin.sv (the same port timing)
+//   command  $80|+song on the clk_sys command port once the firmware has
+//            enabled PCM, as cart.sv's $8007 pair does
+//
+// Checks while it runs: the CPU never halts; the firmware words in the ROM
+// and the ARSC bytes in the PSRAM equal the files once each download is
+// published; no capture message is lost (bup_capture's seq_err and lost,
+// bup_asset_wr's overrun); every frame the wrapper hands to clk_sys arrives
+// once, in order, with the mute and souper_profile applied; the BUP_DEBUG
+// shadow counters equal the peripheral's own levels on every clock.
+//
+// Outputs (+out=PREFIX): PREFIX.pcm, every frame the firmware pushed since the
+// last (re)boot; PREFIX.out.pcm, every frame the wrapper returned to clk_sys
+// since then; PREFIX.batches, "clocks instructions" per batch. The log gives
+// the frame index where the song starts in each ("song start: pushed N,
+// output M") for pcm_check.py --song-start. Busy, CPI and MIPS are counted by
+// the retired PC, as tb_s1.sv does; the FIFO's lowest level and underflow /
+// overflow are counted from the command on, and underflow also from boot.
+//
+// Plusargs:
+//   +fw=FILE        firmware slot image; without it no firmware is loaded
+//   +rom=FILE       cartridge image (.a78 with its ARSC block)
+//   +song=N +secs=S command $80|N (default 13), S seconds of pops (default 4)
+//   +out=PREFIX     output files (default s4)
+//   +bytens=NS +bytejit=NS   loader byte period and random extra (174.6, 0)
+//   +endgap=N       clk_sys clocks from the last byte to the end of a
+//                   download (default 1)
+//   +skiprom        do not send the cartridge ROM's own bytes (header and
+//                   ARSC block only): quicker, the BupChip ignores them
+//   +pal            PAL clocks from the start
+//   +silent=MS      no song: after the downloads, run MS ms and require the
+//                   BupChip held and silent (missing or short firmware)
+//   +reload=MS      MS ms into the song, download +rom2 (default +rom) again,
+//                   then boot, command and play +secs again
+//   +retune=MS      MS ms into the song, a PAL retune (pll_busy, pll_locked
+//                   low, clocks x 0.99088), then boot, command and play again
+//   +pause=MS +pauselen=MS   drive pause for pauselen ms from MS ms into the
+//                   song (default 20 ms): no pop and silence meanwhile
+//   +forcetick      force a 48 kHz tick into the first clock in which
+//                   pcm_available is high but was low the clock before (the
+//                   firmware enabling PCM, or a push into an empty FIFO,
+//                   where the peripheral's head is not valid yet): the
+//                   wrapper must take it a clock later ("pop" in the log)
+//   +seed=S         loader jitter (default 1)
+//   +maxms=MS       stop after MS ms of simulated time (default 6000)
+//
+// The last line, "result: ...", is for run_s4.sh.
+//
+// SPDX-License-Identifier: MIT
+//------------------------------------------------------------------------------
+`timescale 1ps/1ps
+`ifndef PCM_DEPTH
+`define PCM_DEPTH 1024
+`endif
+`ifndef PREEMPT
+`define PREEMPT 1
+`endif
+`ifndef PREFETCH
+`define PREFETCH 1
+`endif
+`ifndef BUP_THROTTLE
+`define BUP_THROTTLE 16
+`endif
+
+module tb_s4;
+	localparam int PCM_DEPTH = `PCM_DEPTH;
+
+	// ---- clocks ------------------------------------------------------------------------
+	longint arm_half = 17460;           // ps: 28.636 MHz; clk_sys is half the rate
+	real    arm_mhz = 28.636364;
+	logic   clk_arm = 0, clk_sys = 0, clk_74a = 0;
+	initial forever begin
+		#(arm_half); clk_arm = 1; clk_sys = 1;
+		#(arm_half); clk_arm = 0;
+		#(arm_half); clk_arm = 1;
+		#(arm_half); clk_arm = 0; clk_sys = 0;
+	end
+	always #6734 clk_74a = ~clk_74a;
+
+	task automatic set_pal(input bit pal);
+		arm_half = pal ? 17621 : 17460;
+		arm_mhz = pal ? 28.636364 * 0.99088 : 28.636364;
+	endtask
+
+	// ---- the wrapper's inputs ----------------------------------------------------------------
+	logic        pll_locked = 0, pll_busy = 0, souper = 0, pause = 0;
+	logic        cart_dl = 0, cart_dl_q = 0, fw_dl = 0, ld_wr = 0;
+	logic [24:0] ld_addr = 0;
+	logic  [7:0] ld_data = 0;
+	logic        cmd_valid = 0;
+	logic  [7:0] cmd_data = 0;
+	always @(posedge clk_sys) cart_dl_q <= cart_dl;
+	// cart_flags[12], from header byte 53 as it streams past
+	always @(posedge clk_sys) if (cart_dl && ld_wr && ld_addr == 25'd53) souper <= ld_data[4];
+
+	wire [15:0] audio_l, audio_r;
+	wire        p_bank, p_we, p_hi, p_lo, p_re, p_avail, p_busy;
+	wire [21:0] p_addr;
+	wire [15:0] p_din, p_dout;
+	wire [31:0] dbg_status, dbg_halt_pc;
+
+	bupchip_pocket #(.PCM_DEPTH(PCM_DEPTH), .PREEMPT(`PREEMPT), .PREFETCH(`PREFETCH),
+		.BUP_THROTTLE(`BUP_THROTTLE)) dut (
+		.clk_sys, .clk_arm, .clk_74a,
+		.pll_locked, .pll_busy, .souper_profile(souper), .pause,
+		.load_start(cart_dl && !cart_dl_q), .load_addr(ld_addr), .load_valid(ld_wr && cart_dl),
+		.load_data(ld_data), .load_end(!cart_dl && cart_dl_q),
+		.fw_download(fw_dl), .fw_valid(ld_wr && fw_dl),
+		.cmd_valid, .cmd_data,
+		.audio_l, .audio_r,
+		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
+		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
+		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
+		.dbg_status, .dbg_halt_pc);
+
+`ifdef PSRAM_STANDIN
+	psram_standin ps (
+		.clk(clk_arm), .bank_sel(p_bank), .addr(p_addr), .write_en(p_we), .data_in(p_din),
+		.write_high_byte(p_hi), .write_low_byte(p_lo), .read_en(p_re),
+		.read_avail(p_avail), .data_out(p_dout), .busy(p_busy));
+	function automatic logic [8:0] psram_byte(input int b);	// {written, byte}
+		logic [15:0] h;
+		h = ps.mem[b >> 1];
+		return {1'b1, b[0] ? h[15:8] : h[7:0]};
+	endfunction
+	localparam string PSRAM_KIND = "stand-in (psram_standin.sv)";
+`else
+	wire [21:16] cram_a;
+	wire  [15:0] cram_dq;
+	wire         cram_wait, cram_clk, cram_adv_n, cram_cre, cram_ce0_n, cram_ce1_n;
+	wire         cram_oe_n, cram_we_n, cram_ub_n, cram_lb_n;
+	psram #(.CLOCK_SPEED(28.636364)) ps (
+		.clk(clk_arm), .bank_sel(p_bank), .addr(p_addr), .write_en(p_we), .data_in(p_din),
+		.write_high_byte(p_hi), .write_low_byte(p_lo), .read_en(p_re),
+		.read_avail(p_avail), .data_out(p_dout), .busy(p_busy),
+		.cram_a, .cram_dq, .cram_wait, .cram_clk, .cram_adv_n, .cram_cre, .cram_ce0_n, .cram_ce1_n,
+		.cram_oe_n, .cram_we_n, .cram_ub_n, .cram_lb_n);
+	psram_model chip (
+		.cram_a, .cram_dq, .cram_wait, .cram_clk, .cram_adv_n, .cram_cre, .cram_ce0_n, .cram_ce1_n,
+		.cram_oe_n, .cram_we_n, .cram_ub_n, .cram_lb_n);
+	function automatic logic [8:0] psram_byte(input int b);
+		logic [15:0] h;
+		logic  [1:0] w;
+		h = chip.bd_read(0, b >> 1);
+		w = chip.bd_written(0, b >> 1);
+		return {b[0] ? w[1] : w[0], b[0] ? h[15:8] : h[7:0]};
+	endfunction
+	localparam string PSRAM_KIND = "psram.sv + psram_model.sv";
+`endif
+
+	// ---- images and the loader ------------------------------------------------------------------
+	logic [7:0] img [0:4194303];
+	logic [7:0] fwb [0:65535];
+	int         img_n = 0, fw_n = 0, a_base = 0, a_size = 0;
+	real        byte_ps = 174.6, jit_ps = 0.0;    // ns until the plusargs are read, then ps
+	int         endgap = 1;
+	bit         skiprom = 0;
+
+	task automatic read_image(input string f);
+		int fd;
+		fd = $fopen(f, "rb");
+		if (fd == 0) $fatal(1, "cannot open %s", f);
+		img_n = $fread(img, fd);
+		$fclose(fd);
+		a_base = 128 + {img[49], img[50], img[51], img[52]};
+		a_size = img_n > a_base ? img_n - a_base : 0;
+		if (a_size >= (1 << 23)) a_size = 1 << 23;
+	endtask
+
+	// One byte per strobe, as core_top.v's clk_sys register presents
+	// data_loader.sv's: byte k is sampled on the first clk_sys edge at or
+	// after k byte periods from the start.
+	task automatic loader_send(input bit fw, input int n);
+		real t, p;
+		@(posedge clk_sys);
+		t = $realtime;
+		for (int k = 0; k < n; k++) begin
+			if (!fw && skiprom && k >= 128 && k < a_base) continue;
+			t += byte_ps + (jit_ps > 0.0 ? real'($urandom_range(1000)) * jit_ps / 1000.0 : 0.0);
+			p = 4.0 * arm_half;
+			while ($realtime < t - p) @(posedge clk_sys);
+			ld_wr <= 1;
+			ld_addr <= 25'(k);
+			ld_data <= fw ? fwb[k] : img[k];
+			@(posedge clk_sys);
+			ld_wr <= 0;
+		end
+	endtask
+
+	longint t_dl_start, t_dl_end;
+	task automatic download(input bit fw);
+		if (fw) fw_dl <= 1; else cart_dl <= 1;
+		repeat (20) @(posedge clk_sys);
+		t_dl_start = $time;
+		loader_send(fw, fw ? fw_n : img_n);
+		repeat (endgap) @(posedge clk_sys);
+		if (fw) fw_dl <= 0; else cart_dl <= 0;
+		t_dl_end = $time;
+		@(posedge clk_sys);
+	endtask
+
+	// ---- what the downloads left behind ------------------------------------------------------------
+	int rom_bad = 0, psram_bad = 0;
+	task automatic check_rom();
+		int bad;
+		bad = 0;
+		for (int w = 0; w < 4096; w++) begin
+			logic [31:0] e;
+			e = 0;
+			for (int b = 0; b < 4; b++)
+				if (4 * w + b < fw_n && 4 * w + b < 16384) e[8 * b +: 8] = fwb[4 * w + b];
+			if (dut.rom.mem_q[w] !== e) begin
+				if (bad < 5) $display("ROM word %0d: %08x, file %08x", w, dut.rom.mem_q[w], e);
+				bad++;
+			end
+		end
+		rom_bad += bad;
+		$display("ROM check: %0d of 4,096 words differ from the firmware file (%0d bytes)", bad, fw_n);
+	endtask
+
+	task automatic check_psram();
+		int bad;
+		bad = 0;
+		for (int b = 0; b < a_size; b++) begin
+			logic [8:0] v;
+			v = psram_byte(b);
+			if (!v[8] || v[7:0] !== img[a_base + b]) begin
+				if (bad < 5) $display("PSRAM byte %0d: %s%02x, file %02x", b, v[8] ? "" : "unwritten ", v[7:0], img[a_base + b]);
+				bad++;
+			end
+		end
+		psram_bad += bad;
+		$display("PSRAM check: %0d of %0d ARSC bytes differ; asset_size %0d, asset_ready %0d",
+			bad, a_size, dut.asset_size, dut.asset_ready);
+	endtask
+
+	// ---- measurement on clk_arm ------------------------------------------------------------------
+	longint cyc = 0, charge = 0, nret = 0;
+	longint busy = 0, work = 0, mclk = 0, pops = 0, under = 0, over = 0, pushes = 0, mpushes = 0;
+	longint under_all = 0, over_all = 0;
+	longint bclk = 0, bins_n = 0, nbatch = 0, cmd_cyc = -1, song_frame = -1, take_cyc = -1;
+	longint c_miss = 0, c_pf = 0, c_pre = 0, c_late = 0, c_stall = 0, c_wasset = 0;
+	longint shadow_bad = 0, held_push = 0, pause_pops = 0;
+	int     minlev = 1 << 30, pcm_fd = 0, out_fd = 0, bat_fd = 0;
+	logic   measuring = 0, in_batch = 0, check_clear = 0, clear_ok = 1, halt_seen = 0, in_pause = 0;
+	logic   run_q = 0;
+	longint tick_idx = 0, rec_base = 0, apops = 0, song_tick = -1;
+	longint unf_since_hold = 0, ovf_since_hold = 0;
+	logic   tick_q = 0, tick_paused = 0, tick_held = 0;
+	longint n_tick_hold = 0;
+	typedef struct { longint idx; logic [31:0] val; logic paused, held; } frame_t;
+	frame_t fq[$];
+
+	always @(posedge clk_arm) begin
+		cyc++;
+		charge++;
+		// the wrapper's frame register, one clock after each tick
+		if (tick_q) begin
+			frame_t f;
+			f.idx = tick_idx++;
+			f.val = dut.frame_arm;
+			f.paused = tick_paused;
+			f.held = tick_held;
+			fq.push_back(f);
+		end
+		tick_q = dut.do_tick;
+		tick_paused = dut.paused;
+		tick_held = !dut.cpu_run;
+		if (dut.tick_hold) n_tick_hold++;
+
+		if (!dut.cpu_run) begin
+			unf_since_hold = 0;
+			ovf_since_hold = 0;
+			if (dut.ram_we || dut.reg_sel) held_push++;
+		end else begin
+			if (!run_q) check_clear = 1;
+			// shadow counters against the peripheral's own
+			if (dut.sh_pcm !== dut.per.pcm_level || dut.sh_cmd !== 4'(dut.per.cmd_level)) begin
+				if (shadow_bad < 5) $display("shadow mismatch at clock %0d: PCM %0d / %0d, command %0d / %0d",
+					cyc, dut.sh_pcm, dut.per.pcm_level, dut.sh_cmd, dut.per.cmd_level);
+				shadow_bad++;
+			end
+			if (dut.sh_pcm_unf !== (unf_since_hold != 0) || dut.sh_pcm_ovf !== (ovf_since_hold != 0)) begin
+				if (shadow_bad < 5) $display("shadow flags at clock %0d: underflow %0d (%0d), overflow %0d (%0d)",
+					cyc, dut.sh_pcm_unf, unf_since_hold, dut.sh_pcm_ovf, ovf_since_hold);
+				shadow_bad++;
+			end
+		end
+		run_q = dut.cpu_run;
+
+		if (dut.cpu_run && dut.cpu.rt_start && check_clear) begin
+			for (int k = 0; k < 15; k++) begin
+				logic [31:0] v;
+				v = dut.cpu.byp_we && dut.cpu.byp_idx == 4'(k) ? dut.cpu.byp_data : dut.cpu.rf[k];
+				if (v !== 32'd0) begin
+					clear_ok = 0;
+					$display("register clear: r%0d = %08x at the first instruction", k, v);
+				end
+			end
+			check_clear = 0;
+		end
+		if (dut.halted && !halt_seen) begin
+			halt_seen = 1;
+			$display("HALT at clock %0d: code %0d, pc %08x", cyc, dut.halt_code, dut.halt_pc);
+		end
+		if (dut.cpu.rt_valid) begin
+			nret++;
+			if (measuring) begin
+				if (!(dut.cpu.rt_pc >= 32'h178 && dut.cpu.rt_pc <= 32'h18c)) begin
+					busy += charge;
+					work++;
+				end
+				if (dut.cpu.rt_pc == 32'h190 && !in_batch) begin
+					in_batch = 1; bclk = 0; bins_n = 0;
+				end
+				if (in_batch) begin
+					bclk += charge;
+					bins_n++;
+					if (dut.cpu.rt_pc == 32'h1dc || dut.cpu.rt_pc == 32'h274) begin
+						in_batch = 0;
+						nbatch++;
+						if (bat_fd != 0) $fdisplay(bat_fd, "%0d %0d", bclk, bins_n);
+					end
+				end
+			end
+			charge = 0;
+		end
+		if (measuring) begin
+			mclk++;
+			if (dut.pcm_enabled && int'(dut.per.pcm_level) < minlev) minlev = int'(dut.per.pcm_level);
+			if (dut.cache.st_miss) c_miss++;
+			if (dut.cache.st_pf) c_pf++;
+			if (dut.cache.st_preempt) c_pre++;
+			if (dut.cache.st_late) c_late++;
+			if (dut.cache.st_stall) c_stall++;
+			if (dut.w_asset && !dut.w_wait) c_wasset++;
+		end
+		if (dut.pcm_pop) begin
+			pops++;
+			if (dut.paused) pause_pops++;
+			if (!dut.pcm_available) begin
+				under_all++;
+				unf_since_hold++;
+				if (measuring) under++;
+			end else begin
+				if (apops == song_frame && song_tick < 0) song_tick = tick_idx;
+				apops++;
+			end
+		end
+		if (dut.per.pcm_push && dut.per.pcm_full) begin
+			over_all++;
+			ovf_since_hold++;
+			if (measuring) over++;
+		end
+		if (dut.reg_sel && dut.reg_write && dut.reg_addr == 8'h10) begin
+			pushes++;
+			if (measuring) mpushes++;
+			if (pcm_fd != 0) $fwrite(pcm_fd, "%c%c%c%c", dut.reg_wdata[7:0], dut.reg_wdata[15:8],
+				dut.reg_wdata[23:16], dut.reg_wdata[31:24]);
+		end
+		if (dut.per.cmd_pop && song_frame < 0 && cmd_cyc >= 0) begin	// the firmware takes the command
+			song_frame = pushes;
+			take_cyc = cyc;
+		end
+	end
+
+	// ---- M10K read-during-write ------------------------------------------------------------------
+	// A read registered on the same edge as a write to the same address
+	// through the other port is undefined on the device (the models return
+	// the old data). Checked from the RAM instances' own ports: the cache's
+	// data and tag M10Ks when a load completes, and the PCM FIFO's when a
+	// tick takes its head.
+	longint rdw_bad = 0;
+	logic   col_d = 0, col_t = 0, col_p = 0;
+	always @(posedge clk_arm) begin
+		if (dut.w_asset && !dut.w_wait && (col_d || col_t)) begin
+			if (rdw_bad < 5) $display("read-during-write: asset load at %08x completed on a collided read (data %0d, tag %0d)",
+				dut.w_addr, col_d, col_t);
+			rdw_bad++;
+		end
+		if (dut.do_tick && dut.pcm_available && col_p) begin
+			if (rdw_bad < 5) $display("read-during-write: a tick took the PCM head from a collided read");
+			rdw_bad++;
+		end
+		col_d = dut.cache.data.wren_b_i && dut.cache.data.addr_b_i == dut.cache.data.addr_a_i;
+		col_t = dut.cache.tags.wren_b_i && dut.cache.tags.addr_b_i == dut.cache.tags.addr_a_i;
+		col_p = dut.per.pcm_fifo.wren_a_i && dut.per.pcm_fifo.addr_a_i == dut.per.pcm_fifo.addr_b_i;
+	end
+
+	// ---- +forcetick ---------------------------------------------------------------------------------
+	bit forcetick = 0;
+	int forced = 0;
+	always @(posedge clk_arm) begin
+		#1;
+		if (forcetick && forced == 0 && dut.pcm_available && !dut.avail_q && !dut.tick) begin
+			forced = 1;
+			force dut.tick = 1'b1;
+			@(posedge clk_arm);
+			#1 release dut.tick;
+		end
+	end
+
+	// ---- the frames on clk_sys ---------------------------------------------------------------------
+	longint ncap = 0, cross_bad = 0, nz_held = 0, n_paused = 0, nz_paused = 0;
+	logic   cap_q = 0, souper_q = 0, muted_q = 0;
+	always @(posedge clk_sys) begin
+		if (cap_q) begin
+			frame_t f;
+			logic [31:0] got, want;
+			got = {audio_r, audio_l};
+			if (fq.size() == 0) begin
+				cross_bad++;
+				$display("frame crossing: a capture with no frame ticked");
+			end else begin
+				f = fq.pop_front();
+				want = !souper_q || muted_q ? 32'd0 : f.val;
+				if (got !== want) begin
+					if (cross_bad < 5) $display("frame crossing: tick %0d gave %08x, expected %08x", f.idx, got, want);
+					cross_bad++;
+				end
+				// Ticks while paused pop nothing and must play 0; they are
+				// left out of the file, which then holds the popped frames.
+				if (f.paused) begin
+					n_paused++;
+					if (got != 0) nz_paused++;
+				end else if (f.idx >= rec_base && out_fd != 0)
+					$fwrite(out_fd, "%c%c%c%c", got[7:0], got[15:8], got[23:16], got[31:24]);
+			end
+			ncap++;
+			if (f.held && got != 0) nz_held++;	// ticked while held: must be 0
+		end
+		cap_q = dut.frame_cap;
+		souper_q = souper;
+		muted_q = dut.muted;
+	end
+
+	// ---- run ---------------------------------------------------------------------------------------
+	string  fw_file = "", rom_file = "", rom2_file = "", out = "s4";
+	int     song = 13, secs = 4, seed = 1, silent_ms = 0, reload_ms = 0, retune_ms = 0;
+	int     pause_ms = 0, pauselen_ms = 20, maxms = 6000;
+	longint t_release = 0, t_boot = 0;
+
+	function automatic real ms(input longint ps);
+		return ps / 1.0e9;
+	endfunction
+
+	task automatic open_outputs();
+		if (pcm_fd != 0) $fclose(pcm_fd);
+		if (out_fd != 0) $fclose(out_fd);
+		pcm_fd = $fopen({out, ".pcm"}, "wb");
+		out_fd = $fopen({out, ".out.pcm"}, "wb");
+		pushes = 0;
+		apops = 0;
+		song_frame = -1;
+		song_tick = -1;
+		cmd_cyc = -1;
+		rec_base = tick_idx;
+		// the measurement covers the last play only
+		busy = 0; work = 0; mclk = 0; nbatch = 0; in_batch = 0; minlev = 1 << 30;
+		under = 0; over = 0; mpushes = 0;
+		c_miss = 0; c_pf = 0; c_pre = 0; c_late = 0; c_stall = 0; c_wasset = 0;
+	endtask
+
+	// Wait for the hold to drop (cpu_run), then for the firmware to enable PCM.
+	task automatic boot_and_command();
+		while (!dut.cpu_run && $time < longint'(maxms) * 1000000000) @(posedge clk_arm);
+		t_release = $time;
+		while (!dut.pcm_enabled && !dut.halted && $time < longint'(maxms) * 1000000000) @(posedge clk_arm);
+		t_boot = $time;
+		$display("booted %.3f ms after the release (%.3f ms): fault %02x, PCM enabled %0d, %0d frames pushed",
+			ms(t_boot - t_release), ms(t_boot), dut.fault_code, dut.pcm_enabled, pushes);
+		@(posedge clk_sys) begin cmd_valid <= 1; cmd_data <= 8'h80 | 8'(song[4:0]); end
+		@(posedge clk_sys) cmd_valid <= 0;
+		cmd_cyc = cyc;
+		$display("song %0d (command $%02x)", song, 8'h80 | song[4:0]);
+		$fflush;
+	endtask
+
+	// Play until npops more pops (or a halt), with the optional pause.
+	task automatic play(input longint npops);
+		longint p0;
+		p0 = pops;
+		measuring = 1;
+		while (pops - p0 < npops && !dut.halted && $time < longint'(maxms) * 1000000000) begin
+			@(posedge clk_arm);
+			if (pause_ms > 0 && !in_pause && $time - t_boot >= longint'(pause_ms) * 1000000000 && pause == 0) begin
+				pause <= 1;
+				in_pause = 1;
+				$display("pause at %.3f ms for %0d ms", ms($time), pauselen_ms);
+			end
+			if (in_pause && $time - t_boot >= longint'(pause_ms + pauselen_ms) * 1000000000) begin
+				pause <= 0;
+				in_pause = 0;
+				pause_ms = 0;
+				$display("resume at %.3f ms (%0d pops while paused)", ms($time), pause_pops);
+			end
+		end
+		measuring = 0;
+	endtask
+
+	// Run until the hold begins, return the clocks it took from t0.
+	task automatic await_hold(input longint t0, output longint dt);
+		while (dut.cpu_run && $time < longint'(maxms) * 1000000000) @(posedge clk_arm);
+		dt = ($time - t0) / (2 * arm_half);
+	endtask
+
+	longint hold_clk;
+	initial begin
+		void'($value$plusargs("fw=%s", fw_file));
+		void'($value$plusargs("rom=%s", rom_file));
+		void'($value$plusargs("rom2=%s", rom2_file));
+		void'($value$plusargs("song=%d", song));
+		void'($value$plusargs("secs=%d", secs));
+		void'($value$plusargs("out=%s", out));
+		void'($value$plusargs("bytens=%f", byte_ps));
+		void'($value$plusargs("bytejit=%f", jit_ps));
+		void'($value$plusargs("endgap=%d", endgap));
+		void'($value$plusargs("seed=%d", seed));
+		void'($value$plusargs("silent=%d", silent_ms));
+		void'($value$plusargs("reload=%d", reload_ms));
+		void'($value$plusargs("retune=%d", retune_ms));
+		void'($value$plusargs("pause=%d", pause_ms));
+		void'($value$plusargs("pauselen=%d", pauselen_ms));
+		void'($value$plusargs("maxms=%d", maxms));
+		skiprom = $test$plusargs("skiprom");
+		forcetick = $test$plusargs("forcetick");
+		byte_ps *= 1000.0;
+		jit_ps *= 1000.0;
+		void'($urandom(seed));
+		set_pal($test$plusargs("pal"));
+		if (rom2_file == "") rom2_file = rom_file;
+
+		if (fw_file != "") begin
+			int fd;
+			fd = $fopen(fw_file, "rb");
+			if (fd == 0) $fatal(1, "cannot open %s", fw_file);
+			fw_n = $fread(fwb, fd);
+			$fclose(fd);
+		end
+		if (rom_file == "") $fatal(1, "no +rom");
+		read_image(rom_file);
+		$display("BupChip at %.3f MHz, PCM FIFO %0d, pre-emption %0d, prefetch %0d, throttle %0d/16; PSRAM: %s",
+			arm_mhz, PCM_DEPTH, `PREEMPT, `PREFETCH, `BUP_THROTTLE, PSRAM_KIND);
+		begin
+			string fw_s, skip_s;
+			fw_s = fw_file == "" ? "(none)" : fw_file;
+			skip_s = skiprom ? ", ROM bytes skipped" : "";
+			$display("firmware %s (%0d bytes); cartridge %s (%0d bytes, %0d of ARSC at %0d); loader %.1f ns + 0..%.1f ns per byte%s",
+				fw_s, fw_n, rom_file, img_n, a_size, a_base, byte_ps / 1000.0, jit_ps / 1000.0, skip_s);
+		end
+		bat_fd = $fopen({out, ".batches"}, "w");
+		open_outputs();
+
+		#1000000;
+		pll_locked = 1;
+		if (fw_file != "") begin
+			download(1);
+			repeat (40) @(posedge clk_arm);
+			$display("firmware slot: %0d bytes in %.3f ms; fw_loaded %0d", fw_n, ms(t_dl_end - t_dl_start), dut.fw_loaded);
+			check_rom();
+		end
+		download(0);
+		while (!dut.asset_ready && a_size >= 4 && $time - t_dl_end < 1000000000) @(posedge clk_arm);
+		$display("cartridge: %0d bytes in %.3f ms; asset_ready %0d %.3f us after the download ended",
+			img_n, ms(t_dl_end - t_dl_start), dut.asset_ready, ($time - t_dl_end) / 1.0e6);
+		check_psram();
+		$fflush;
+
+		if (silent_ms > 0) begin
+			longint c0, n0;
+			c0 = cyc;
+			n0 = ncap;
+			while ($time < t_dl_end + longint'(silent_ms) * 1000000000) @(posedge clk_arm);
+			$display("held for %0d ms: cpu_run %0d, fw_loaded %0d, asset_ready %0d, retired %0d, pushed %0d, %0d frames out (%0d nonzero)",
+				silent_ms, dut.cpu_run, dut.fw_loaded, dut.asset_ready, nret, pushes, ncap - n0, nz_held);
+			report(0);
+			$display("result: silent=%0d run=%0d fw_loaded=%0d asset_ready=%0d retired=%0d pushed=%0d frames=%0d nonzero=%0d rom=%0d psram=%0d lost=%0d cross=%0d",
+				dut.cpu_run == 0 && nret == 0 && pushes == 0 && nz_held == 0, dut.cpu_run, dut.fw_loaded,
+				dut.asset_ready, nret, pushes, ncap - n0, nz_held, rom_bad, psram_bad,
+				dut.cap_seq_err | dut.cap_lost | dut.wr_overrun | dut.capture.seq_sim, cross_bad);
+			$finish;
+		end
+
+		boot_and_command();
+		if (reload_ms > 0 || retune_ms > 0) begin
+			play(48 * (reload_ms > 0 ? reload_ms : retune_ms));
+			if (reload_ms > 0) begin
+				longint t0;
+				read_image(rom2_file);
+				$display("reload: %s at %.3f ms", rom2_file, ms($time));
+				fork
+					download(0);
+					begin
+						do @(posedge clk_sys); while (!(cart_dl && !cart_dl_q));
+						t0 = $time;
+						await_hold(t0, hold_clk);
+						$display("reload: the CPU is held %0d clk_arm clocks after load_start", hold_clk);
+						open_outputs();
+					end
+				join
+				while (!dut.asset_ready && $time - t_dl_end < 1000000000) @(posedge clk_arm);
+				check_psram();
+			end else begin
+				longint t0;
+				$display("retune to PAL at %.3f ms", ms($time));
+				t0 = $time;
+				pll_busy = 1;
+				await_hold(t0, hold_clk);
+				$display("retune: the CPU is held %0d clk_arm clocks after pll_busy", hold_clk);
+				open_outputs();
+				#5000000;
+				pll_locked = 0;
+				set_pal(1);
+				#5000000;
+				pll_locked = 1;
+				#2000000;
+				pll_busy = 0;
+			end
+			boot_and_command();
+		end
+		play(48000 * secs);
+		report(1);
+		$finish;
+	end
+
+	task automatic report(input bit result_line);
+		real secs_r;
+		secs_r = secs;
+		if (pcm_fd != 0) $fclose(pcm_fd);
+		if (out_fd != 0) $fclose(out_fd);
+		if (bat_fd != 0) $fclose(bat_fd);
+		pcm_fd = 0;
+		out_fd = 0;
+		$display("");
+		$display("clocks     %0d in %0d s of pops (%.0f per second)", mclk, secs, 1.0 * mclk / secs_r);
+		$display("busy       %0d clocks, %.2f%% of %.3f MHz; %.2f MHz needed at 100%% busy",
+			busy, 100.0 * busy / (mclk > 0 ? mclk : 1), arm_mhz, busy / (secs_r * 1.0e6));
+		$display("work       %0d instructions, %.2f MIPS; CPI %.4f", work, work / (secs_r * 1.0e6),
+			1.0 * busy / (work > 0 ? work : 1));
+		$display("batches    %0d", nbatch);
+		$display("command    taken by the firmware %0d clocks after it was sent, with %0d frames pushed",
+			take_cyc - cmd_cyc, song_frame);
+		$display("song start: pushed %0d, output %0d", song_frame, song_tick - rec_base);
+		$display("audio      %0d pops, %0d underflows while playing (%0d since power-up), %0d overflows (%0d); %0d frames pushed while playing",
+			pops, under, under_all, over, over_all, mpushes);
+		$display("fifo       lowest level %0d of %0d while playing; shadow lowest %0d, status %08x",
+			minlev, PCM_DEPTH, dut.dbg_status[10:0], dut.dbg_status);
+		$display("cache      %0d asset loads, %0d demand misses, %0d prefetches, %0d pre-emptions, %0d late hits, %0d stall clocks (%.3f%% of clocks)",
+			c_wasset, c_miss, c_pf, c_pre, c_late, c_stall, 100.0 * c_stall / (mclk > 0 ? mclk : 1));
+		$display("capture    seq_err %0d (bytes out of order %0d), lost %0d, overrun %0d; ROM words differing %0d, PSRAM bytes differing %0d",
+			dut.cap_seq_err, dut.capture.seq_sim, dut.cap_lost, dut.wr_overrun, rom_bad, psram_bad);
+		$display("pop        %0d ticks waited a clock for the FIFO's head (pcm_available had just risen)", n_tick_hold);
+		$display("crossing   %0d frames to clk_sys, %0d wrong, %0d still queued; %0d nonzero ticked while held; %0d CPU accesses while held; shadow mismatches %0d",
+			ncap, cross_bad, fq.size(), nz_held, held_push, shadow_bad);
+		$display("m10k       %0d completed reads that collided with a write", rdw_bad);
+		if (n_paused != 0) $display("pause      %0d ticks while paused, %0d of them not silent; %0d pops", n_paused, nz_paused, pause_pops);
+		$display("status     fault %02x, halted %0d (code %0d, pc %08x), register clear %0s",
+			dut.fault_code, dut.halted, dut.halt_code, dut.halt_pc, clear_ok ? "ok" : "FAILED");
+`ifndef PSRAM_STANDIN
+		chip.report();
+`endif
+		if (result_line) $display("result: busy=%0d work=%0d cpi=%.4f mips=%.3f under=%0d under_all=%0d over=%0d minlev=%0d fault=%02x halted=%0d clear=%0d lost=%0d rom=%0d psram=%0d cross=%0d shadow=%0d miss=%0d pf=%0d pre=%0d late=%0d stall=%0d rdw=%0d held=%0d held_nz=%0d pause_nz=%0d pause_pops=%0d",
+			busy, work, 1.0 * busy / (work > 0 ? work : 1), work / (secs_r * 1.0e6), under, under_all, over,
+			minlev, dut.fault_code, dut.halted, clear_ok, dut.cap_seq_err | dut.cap_lost | dut.wr_overrun | dut.capture.seq_sim,
+			rom_bad, psram_bad, cross_bad, shadow_bad, c_miss, c_pf, c_pre, c_late, c_stall, rdw_bad, held_push, nz_held, nz_paused, pause_pops);
+	endtask
+endmodule
