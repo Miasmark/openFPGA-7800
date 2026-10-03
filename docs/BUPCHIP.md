@@ -109,6 +109,110 @@ Vikki has no sound-effect bank. For Rikki & Vikki the block is 211.8 KiB:
 Use the Steam `.a78` image with the header patch from the MiSTer forum
 (`--bps`), or an already headered `.a78`.
 
+## Files the user supplies on the Pocket
+
+Neither the firmware nor any game's music is in this repository or in a
+release. The firmware's source is not published and its licence is unclear,
+so it is treated like the High Score Cartridge firmware and the Supercharger
+BIOS (README, *Firmware files*): the user supplies it, and the core loads it
+from the SD card. The music is the game's own data, so it belongs with the
+user's copy of the game. These are the planned files and formats; they
+apply once the Pocket BupChip is built (design: BUPCHIP_CORE.md).
+
+```
+/Assets/7800/
+    common/
+        bupchip.bin          BupChip firmware (CoreTone), fixed name
+        7800bios.bin         (the other firmware files, unchanged)
+        highscor.rom
+        supercharger.bin
+    <any folder>/
+        Rikki & Vikki.a78    Souper game with its ARSC music block appended
+```
+
+### Firmware: `bupchip.bin`
+
+| Property | Value |
+|---|---|
+| Location | `/Assets/7800/common/bupchip.bin`. The name is fixed, as for the other firmware files. |
+| Loaded | Once, when the core starts. It is not a menu item; to change it, replace the file and restart the core. |
+| Format | Raw ARM code: 32-bit words, little-endian, the word for address `0x00000000` first. No header. |
+| Size | Up to 16 KiB, the firmware ROM window. The known image is 7,824 bytes (1,956 words). |
+| Known image | CRC32 `95b8b4f8`, SHA-1 `230c5c4417b6b954b40f3ad498ea747317706057` |
+| Without it | Souper games run, with every other sound source, but the BupChip stays silent. Nothing else changes. |
+| Wrong file | The ARM halts on the first instruction it does not implement, or the firmware faults its own start-up checks. Either way the BupChip is silent. |
+
+MiSTer's Atari7800 core carries the firmware as `rtl/bupchip.hex` (one
+32-bit word per line) and `rtl/bupchip.mif`. Either converts:
+
+```sh
+python3 tools/hex2bin.py bupchip.hex > bupchip.bin
+```
+
+Check the result against the CRC32 or SHA-1 above.
+
+### Music: the ARSC block appended to the game
+
+The Pocket uses the same file as MiSTer: the game's `.a78` with its music
+appended as an ARSC block. One file per game keeps the cartridge slot the
+only thing to choose, needs no extra menu row, and works on both cores.
+
+| Offset | Contents |
+|---|---|
+| 0 | A78 header, 128 bytes. Bytes 49–52 hold the ROM size, big-endian. The cartridge type (bytes 53–54) must have bit 12, the Souper mapper, set: Rikki & Vikki's is `0x1000`. |
+| 128 | The cartridge ROM, exactly the size the header declares |
+| 128 + ROM size | The ARSC block (layout above): `"ARSC"`, the CSMP and CINS offsets, 32 song offsets, then the chunks, each 4-byte aligned |
+
+- **Size.** The whole file must fit the Pocket's cartridge slot, 4 MiB
+  (`data.json`, `size_maximum`). Rikki & Vikki is 741,344 bytes: 524,416
+  for the headered cartridge and 216,928 for the block.
+- **Song numbers.** Song n is the game's command `$80 | n`, so the songs must
+  be in the order the game expects. That order is the `CORETONE` section of
+  the install's `Data/FoxBox.cdf`.
+- **Without the block,** or with a block that does not start with `ARSC`,
+  the game runs and the BupChip stays silent.
+
+**Building it.** `sim/bupchip/make_arsc.py` reads a ProSystem/FoxBox install
+in its own layout:
+
+```
+<install>/
+    Data/FoxBox.cdf          lists the files below, relative to Data/
+    Music/RV_Samples.smp     sample bank   -> CSMP
+    Music/RV_Macros.ins      instruments   -> CINS
+    Music/RV_*.mus           songs         -> CMUS, one per song
+```
+
+`FoxBox.cdf` is plain text (CR LF line ends). Its first lines name the
+system, mapper, title and cartridge image; the `CORETONE` line follows, then
+the sample bank, the instrument macros and the songs, one path per line.
+Blank lines are skipped, so the songs' order alone sets their numbers. For
+Rikki & Vikki:
+
+```
+CORETONE
+..\Music\RV_Samples.smp
+..\Music\RV_Macros.ins
+
+..\Music\RV_Rock_0.mus        song 0, command $80
+..\Music\RV_Rock_1.mus        song 1, command $81
+...                           (32 songs; Metal is 6, Misery_F 13, Title 14, Irregular 30)
+```
+
+The `Music/` folder can hold banks that other games use (`GN_*`, `ZX_*`);
+only the files the `.cdf` names are read. Then:
+
+```sh
+python3 sim/bupchip/make_arsc.py "<install>" "Rikki & Vikki.a78" --bps "Rikki and Vikki.bps" --list
+# or, with an already headered image:
+python3 sim/bupchip/make_arsc.py "<install>" "Rikki & Vikki.a78" --rom headered.a78 --list
+```
+
+`--list` prints each song's number and command. The tool checks the chunk
+tags and the header's declared size before it writes anything. Copy the
+output anywhere under `/Assets/7800/`. A block built this way for Rikki &
+Vikki is 211.8 KiB, matching the table above.
+
 ## Measured load
 
 These figures come from `sim/bupchip/run_bupchip.sh`, measuring 4 s of each

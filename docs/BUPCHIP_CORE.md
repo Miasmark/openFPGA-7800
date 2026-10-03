@@ -17,7 +17,7 @@ Every number carries a tag that says where it comes from:
 ## Goals and budget
 
 **Goals:**
-1. **Unmodified firmware.** Run `bupchip.hex` (1,956 words) unchanged, with PCM output identical to MiSTer's.
+1. **Unmodified firmware.** Run CoreTone (MiSTer's `bupchip.hex`, 1,956 words) unchanged, with PCM output identical to MiSTer's. The user supplies it as `/Assets/7800/common/bupchip.bin`; nothing of it is built into the bitstream (see "Firmware load").
 2. **Throughput.** Sustain 16 MIPS of firmware work plus 25%, which is 20 MIPS.
    - The measured work on Misery_F is 15.14 MIPS on average and 15.58 MIPS in the busiest 0.1 s.
    - The worst 200-frame batch is equivalent to 17.43 MIPS.
@@ -130,7 +130,7 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
 | 48 kHz pop tick from `clk_74a` | B, C | Clocking |
 | MIT `arm7tdmi_pkg` functions verbatim; exact NZCV everywhere | C (A) | Shifter, ALU |
 | One-clock-old write bypass, so the design does not depend on MLAB write timing | C | Register file |
-| Stock `bupchip.mif` (4,096 words) | C | ROM |
+| ROM 4,096 words deep (16 KiB window), filled at run time from the user's `bupchip.bin` | C (depth); owner's decision (no built-in firmware) | ROM |
 | Clean-room rule; reference core only as an oracle; Quartus run of the CPU alone before integration; slack and ALM gates | C | Steps |
 | Retire record carrying both write ports, for lockstep | A | Verification |
 | Region decode from the base register | B | Held in reserve as a timing fix |
@@ -144,7 +144,8 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
 | B's two-chip 32-bit PSRAM | Only needed with B's 2-line buffer |
 | B's trimmed flags | Breaks lockstep |
 | A's support for data-processing writes to PC | Unused; halts instead |
-| A 2,048-deep ROM MIF | Saves 8 M10K, but adds a generated file to keep in step with upstream |
+| A 2,048-deep ROM | Saves 8 M10K, but caps the user's firmware file at 8 KiB |
+| Building `bupchip.hex` into the bitstream | Licence unclear, like the HSC and Supercharger firmware this port already loads from files |
 
 ### Configurations
 
@@ -202,10 +203,10 @@ The toggles stay on the timed paths too. They cost about 20 ALMs [E] and keep th
 
 ```
 bup_hold = ~pll_locked_s | pll_busy_s | ~souper_profile          (clk_sys)
-cpu_run  = ~bup_hold_arm & asset_ready & sweep_done               (clk_arm)
+cpu_run  = ~bup_hold_arm & fw_loaded & asset_ready & sweep_done   (clk_arm)
 ```
 
-- `asset_ready` is a `clk_arm` flag owned by the write receiver; see "Capture" below.
+- `asset_ready` and `fw_loaded` are `clk_arm` flags owned by the write receiver; see "Capture" and "Firmware load" below.
 - `sweep_done` makes the CPU wait for a 64-clock sweep (3 µs) after every release. The sweep restarts whenever the CPU is held. It does two things:
   - it invalidates the 64 cache tags;
   - it writes 0 to r0–r14 through write port E.
@@ -222,6 +223,7 @@ cpu_run  = ~bup_hold_arm & asset_ready & sweep_done               (clk_arm)
 - the `clk_arm` write receiver;
 - `psram.sv`;
 - `asset_ready` and `asset_size`;
+- `fw_loaded` and the ROM's write path;
 - the 48 kHz tick.
 
 The download happens exactly while the CPU is held, so the capture writes must keep flowing. Upstream likewise resets its write path only with `reset_arm` (`bupchip_asset_ddr.sv:228-293`). A PSRAM read still in flight when hold rises finishes on its own (≤ 5 clocks) and is discarded. The receiver starts a write only when the controller is idle.
@@ -255,7 +257,7 @@ Latencies are for S3, with S1 in brackets:
 
 | Region | Address | Implementation | Load | Store |
 |---|---|---|---|---|
-| Fetch | 0x0000_0000–0x0000_3FFF | ROM 4,096 × 32, `cache_ram_dp` port A (`cache_ram.v:292`), stock `bupchip.mif` (found through `ap_core.qsf:750`), 16 M10K | No added clocks: the next PC drives the M10K address | — |
+| Fetch | 0x0000_0000–0x0000_3FFF | ROM 4,096 × 32, `cache_ram_dp` port A (`cache_ram.v:292`), no initial contents: filled from `bupchip.bin` at core start ("Firmware load"), 16 M10K | No added clocks: the next PC drives the M10K address | — |
 | ROM data | Same | Port B: literals, the jump table at 0x1f0, the note table, `.data`, the silent sample at 0x1e38 | 1 [2] | Halt |
 | Assets | 0x0200_0000 + [0, `asset_size`) | 64 × 16 B direct-mapped cache (data 1 M10K, tags 1 M10K) in front of PSRAM `cram0` die 0 | Hit 1 [2]. A miss adds T_hw + 3 = 8; an LDR, which needs two halfwords, adds 13. | Halt |
 | RAM | 0x4000_0000–0x4000_3FFF | 4,096 × 32 with byte enables, `cache_ram_tdp_dc_be` port A (`cache_ram.v:190`), 16 M10K | 1 [2] | 1 [1] |
@@ -540,6 +542,7 @@ The bypass means the array is only ever read for data written at least two clock
 | **Total** | **1,900–2,555** | **38** | 3–4 DSP |
 | `BUP_DEBUG`: status word, shadow FIFO counters, throttle | +40–70 | — | — |
 
+- **Firmware load path** (packer, extra message types, ROM writes, `fw_loaded`; added after the study when the firmware became user-supplied): +20–30 ALMs [E], about 0.15% of the device. The totals and percentages in this document do not include it.
 - **Device total:** 14,734–15,389 ALMs (79.7–83.3%), or 14,774–15,459 (79.9–83.7%) with `BUP_DEBUG`, and 84 of 308 M10K.
 - **S1 total:** 1,470–1,975 ALMs (CPU 960–1,230 including 4 MLAB LABs), giving 77.4–80.1%; 77.6–80.5% with `BUP_DEBUG`.
 - **LABs.**
@@ -600,6 +603,18 @@ The bypass means the array is only ever read for data written at least two clock
   - The cycle model already assumes 5 clocks per halfword.
 - Fixing the file instead means making each total at least one clock longer than its phases, plus an elaboration check that the state numbers are distinct. That still takes 5 clocks at 21.477 MHz. A 4-clock controller would need a different state machine, and gains little: the model's 4-clock variant stalls 0.10% instead of 0.13%.
 - `psram.sv` defines `` `MAX`` (`:30`), which `data_loader.sv:61` also defines, and declares `rtoi` at compilation-unit scope (`:25-27`). Expect Quartus redefinition warnings once both files are in `core.qip`. The two `` `MAX`` definitions are identical.
+
+### Firmware load
+
+The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and checksums: `BUPCHIP.md`, "Files the user supplies on the Pocket"). Nothing of it is in the bitstream.
+
+- **Slot.** Data slot `0x109`, loaded once when the core starts, like the HSC and Supercharger firmware (`data.json` slots `0x106`/`0x107`). Parameters `0x88`: not reloadable, so it takes no menu row (`DEVELOPING.md`, "Menu limits").
+- **Path.** The bytes come through the loader on `clk_sys`, exactly like the cartridge's. `bup_capture` packs four bytes into a little-endian word and sends the same message stream the asset capture uses: FWSTART, one FWWRITE per word (word address and data), FWEND with the byte count. Words arrive at most every 698 ns, far slower than the asset halfwords the receiver already handles.
+- **Writes.** The `clk_arm` receiver writes each word into the ROM through `cache_ram_dp` port B, which has a write port (`cache_ram.v:292-311`). FWSTART clears `fw_loaded`, so the CPU is held and port B carries no CPU reads while the ROM is written. FWEND sets `fw_loaded` if at least 8 bytes arrived; a trailing partial word is zero-padded. Bytes past 16 KiB are dropped.
+- **Lifetime.** `fw_loaded` and the ROM contents survive cartridge loads, console resets, holds and PAL retunes. Only a new firmware download (a core restart) clears them.
+- **Without the file,** `fw_loaded` stays low and the CPU stays held: Souper games run with the BupChip silent, and the output reads 0 as for any hold.
+- **A wrong file** runs until the CPU meets an encoding it does not implement and halts, or until the firmware's own start-up checks write a fault. Either way the output is silent.
+- **Cost.** About 20–30 ALMs for the packer, the extra message types and `fw_loaded` [E]. The ROM still needs no MIF, and its 16 M10K are unchanged.
 
 ### Capture (on `clk_sys`) and the write receiver (on `clk_arm`)
 1. The declared size comes from header bytes 49–52, and the block starts at 128 + the declared size. This is copied from `bupchip_asset_ddr.sv:82-104` (MIT).
@@ -695,13 +710,13 @@ The firmware reads samples sequentially, one `ldrsb` per voice per frame, which 
 | `bup_cpu.sv` | The CPU: S1, later S3 |
 | `bup_regfile.sv` | Live-value-table register file with bypass and the clear after hold |
 | `bup_asset_cache.sv` | Tags, data, per-halfword arrival bits, fill and prefetch state machines (held by `bup_hold`) |
-| `bup_asset_wr.sv` | `clk_arm` message receiver, `asset_ready` and `asset_size`, PSRAM arbitration between writes and fills (not held) |
-| `bup_capture.sv` | ARSC header parse, byte-pair packer, START/WRITE/END message stream (`clk_sys`) |
+| `bup_asset_wr.sv` | `clk_arm` message receiver: `asset_ready` and `asset_size`, ROM writes and `fw_loaded`, PSRAM arbitration between writes and fills (not held) |
+| `bup_capture.sv` | ARSC header parse, byte-pair packer, firmware word packer, START/WRITE/END and FWSTART/FWWRITE/FWEND message stream (`clk_sys`) |
 | `bup_tick48k.sv` | The `clk_74a` accumulator and toggle |
 
 Also:
 - `src/fpga/pocket_utils/psram.sv`: agg23, MIT, vendored unmodified, instantiated with `CLOCK_SPEED = 28.636364`.
-- The ROM uses the stock `mister/rtl/bupchip.mif`. No new MIF is needed.
+- The ROM has no initial contents. Nothing from `bupchip.hex` or `bupchip.mif` is built in; the firmware arrives through the data slot below.
 
 ### Vendored file (`POCKET_CHANGES.md` rule: `ifdef` blocks only, identical to upstream without the macro, `:90-92`)
 
@@ -730,16 +745,17 @@ Also:
 
 | File | Change |
 |---|---|
-| `core/atari7800_pocket.sv` | Add `ifdef POCKET_BUPCHIP` ports `clk_arm`, `clk_74a` and `cram0_*`. Instantiate `bupchip_pocket` next to the `mapper_load_*` expressions (`:946-950`). Connect `pause_core` (`:53`; tied to 0 at `core_top.v:850`), `pll_locked` (raw; the wrapper synchronises it), `pll_busy` and the new `top.sv` ports. |
-| `core/core_top.v` | Connect `outclk_3` → `clk_arm` on `pll_core` (`:320-329`). Route `cram0_*` instead of the tie-offs (`:267-277`); `cram1` stays tied. |
+| `core/atari7800_pocket.sv` | Add `ifdef POCKET_BUPCHIP` ports `clk_arm`, `clk_74a`, `bupfw_download` and `cram0_*`. Hand `ioctl_wr`/`ioctl_addr`/`ioctl_dout` to `bup_capture` while `bupfw_download` is high, and add `bupfw_download` to the core reset (`:137-138`), as for the other firmware slots. Instantiate `bupchip_pocket` next to the `mapper_load_*` expressions (`:946-950`). Connect `pause_core` (`:53`; tied to 0 at `core_top.v:850`), `pll_locked` (raw; the wrapper synchronises it), `pll_busy` and the new `top.sv` ports. |
+| `core/core_top.v` | Connect `outclk_3` → `clk_arm` on `pll_core` (`:320-329`). Route `cram0_*` instead of the tie-offs (`:267-277`); `cram1` stays tied. Add `SLOT_BUPFW = 16'h0109` next to `:349-353` and a `bupfw_download` flag built like `arfw_download` (`:701-720`). |
+| `dist/Cores/Miasmark.7800/data.json` | Add the firmware slot: name "BupChip firmware", id `0x109`, filename `bupchip.bin`, parameters `0x88` (loaded at start, not reloadable, so no menu row), extensions `bin`, `size_maximum` `0x4000`, address `0x0A000000`. |
 | `core/pll/pll_core.v` | Regenerate with 4 clocks; C3 = 24, then 32 (`DEVELOPING.md:245-271`). |
 | `ap_core.qsf` | Add `VERILOG_MACRO "POCKET_BUPCHIP=1"` next to `:736-746`. Keep `NO_ARM_MAPPER`, `NO_BUPCHIP` and `NO_DDRAM`. Add `FAST_*_REGISTER` on `cram0_*`, as for the SRAM (`:758-765`). |
-| `sim/run_sim.sh` | Add `-DPOCKET_BUPCHIP` to the macro list (`:77-81`), the new files and `psram.sv` to `SRCS`, and `bupchip.hex` to the `rtl/` links (`:14`). `ap_core.qsf:741-743` promises that simulation builds the same set as the qsf. |
+| `sim/run_sim.sh` | Add `-DPOCKET_BUPCHIP` to the macro list (`:77-81`), the new files and `psram.sv` to `SRCS`. The testbenches load the firmware through the data-slot path from a file named at run time (a local `bupchip.bin`, never committed). `ap_core.qsf:741-743` promises that simulation builds the same set as the qsf. |
 | `sim/tb_system.sv`, `sim/tb_load.sv` | Drive `clk_arm`, `clk_74a` and a `cram0` PSRAM model on the `atari7800_pocket` instances (`tb_system.sv:49`, `tb_load.sv:85`). |
 | `core/core.qip` | Add the new files, `../mister/rtl/bupchip_peripheral.sv` and `../pocket_utils/psram.sv`. Fix the stale "unmodified except `top.sv`" comment (`:3-5`). Expect the `` `MAX`` redefinition warning described under "Controller". |
 | `core/core_constraints.sdc` | Comment only: add counter[3] (`:3-11`) |
 | `mister/POCKET_CHANGES.md` | Add a `POCKET_BUPCHIP` row to the switch table (`:80-92`) and update "Three build switches" and "all four" |
-| `THIRD_PARTY_NOTICES.md` | Add `psram.sv` to the agg23 row (`:25`). Note `bupchip.hex`/`.mif` as built in. Rewrite the paragraph at `:49-54`, which says no console or peripheral firmware is included and explains why the HSC and Supercharger firmware are loaded at run time. |
+| `THIRD_PARTY_NOTICES.md` | Add `psram.sv` to the agg23 row (`:25`). Add the BupChip firmware to the user-supplied list in the paragraph at `:49-54`, which stays true: no console or peripheral firmware is built in. |
 | `docs/` | `BUPCHIP.md` (load table, pointer to this document), `DEVELOPING.md` (clock plan with 4 counters), `README.md` resource figures |
 
 ### Macros and parameters
@@ -763,7 +779,7 @@ The harnesses already exist from the study. Step 1 brings them into `sim/bupchip
 | PCM | Misery_F, 4 s, against `rtl13.pcm` (187,984 frames); other songs against the Python model | Identical |
 | Performance | Clocks per batch, from the retire of 0x190 to that batch's return to 0x178: the retire of 0x1dc after a render, or of 0x274 after a silent batch. Idle is defined by the *retired* PC. | S1 within ±1% of 1.383; S2 and S3 within ±2% of the model; per-batch worst case within ±3% |
 | PSRAM | `psram.sv` against a PSRAM model (`psram.sv:36-53` timings), with `CLOCK_SPEED` = 28.636364 at clock periods of 28.636, 21.477 and 21.281 MHz | Every read and write completes in 5 clocks; the `$info` state numbers are distinct |
-| System | Wrapper with the PSRAM model, the loader at 175–250 ns per byte, the `clk_74a` tick and the real clock ratio. Also: 2–3 cart reloads, a PAL retune, pause (driven in simulation; it is tied to 0 on hardware), a non-Souper cart, and a hold during a fill. | 0 underflow and 0 overflow from the shadow counters (the existing testbench checks only underruns, `tb_bupchip.sv:151`); lowest FIFO level ≥ 600; no capture message lost; misses within ±20% of the model |
+| System | Wrapper with the PSRAM model, the loader at 175–250 ns per byte, the `clk_74a` tick and the real clock ratio. Also: firmware load (missing file: CPU held and silent; a short file; firmware loaded before the cartridge, as the Pocket does), 2–3 cart reloads, a PAL retune, pause (driven in simulation; it is tied to 0 on hardware), a non-Souper cart, and a hold during a fill. | 0 underflow and 0 overflow from the shadow counters (the existing testbench checks only underruns, `tb_bupchip.sv:151`); lowest FIFO level ≥ 600; no capture message lost; misses within ±20% of the model |
 | Quartus | CPU alone, then the integrated build | The gates in steps 3, 5, 8 and 9 |
 | Hardware | 32 songs, NTSC and PAL, with the `BUP_DEBUG` status visible; throttle sweep; A/B against a MiSTer capture | Shadow-counter flags clear; fault code 0 |
 
@@ -822,7 +838,7 @@ The harnesses already exist from the study. Step 1 brings them into `sim/bupchip
    - ALMs and LABs are within ±25% of this document.
    
    If MLAB fails, choose a fallback here. The M10K register file is the area-safe one.
-4. **Wrapper, memories and asset path in simulation.** Peripheral 8/1024 with remap and shadow counters, ROM from the stock MIF, RAM, the 64-line cache with per-halfword arrival bits, the capture message stream and receiver, and the 48 kHz tick. `psram.sv` runs with `CLOCK_SPEED` = 28.636364 against a PSRAM model at clock periods of 28.636, 21.477 and 21.281 MHz.
+4. **Wrapper, memories and asset path in simulation.** Peripheral 8/1024 with remap and shadow counters, ROM filled through the firmware-load path, RAM, the 64-line cache with per-halfword arrival bits, the capture message stream and receiver, and the 48 kHz tick. `psram.sv` runs with `CLOCK_SPEED` = 28.636364 against a PSRAM model at clock periods of 28.636, 21.477 and 21.281 MHz.
    *Done when:*
    - A download of `rv.a78` followed by 4 s of Misery_F gives PCM identical to `rtl13.pcm`, with 0 underflow, 0 overflow and a lowest level ≥ 600.
    - The PSRAM and directed cache tests pass; no capture message is lost at 175 ns per byte.
@@ -860,9 +876,9 @@ The harnesses already exist from the study. Step 1 brings them into `sim/bupchip
 | 4 | S2 and S3 figures come from the cycle model | CPI higher than planned | S1's model and RTL agree to 0.3%. Steps 6 and 7 measure RTL. Fall back to S1 or S2 at 28.636 MHz. |
 | 5 | Congestion: `clk_sdram` has +1.32 ns of slack today; only 199 LABs are untouched against 194–263 needed | `clk_sdram` timing failure; a fit that relies on denser packing | No BupChip logic on `clk_sdram`; slack, ALM and LAB checks in steps 3, 5 and 9; LogicLock; S1 fallback |
 | 6 | Deviations from the firmware contract: watermark remap; halt instead of an abort spin; fixed mode bits; CPU not paused; music starts about 64 ms earlier than on MiSTer | Visible only to other firmware | CoreTone never reads the FIFO depth or mode bits (lockstep). Document them. |
-| 7 | `bupchip.hex` in the bitstream. `mister/rtl` is MIT (`THIRD_PARTY_NOTICES.md:17`), but the firmware's source is not published (`BUPCHIP.md:13-15`). Building it in contradicts `THIRD_PARTY_NOTICES.md:49-54`. | Release blocker | Confirm with upstream before release. *Fallback:* load the 7.8 KB image at run time from a data slot, as the HSC and Supercharger firmware are (`EXTERNAL_FIRMWARE`, `ap_core.qsf:739`; slots `0x106`/`0x107` in `data.json`). It is written into the ROM M10K through `cache_ram_dp` port B, which has a write port (`cache_ram.v:292-311`), while the CPU is held; a `fw_loaded` flag joins `cpu_run`. |
+| 7 | Firmware licence. The firmware's source is not published (`BUPCHIP.md:13-15`), so building it in would contradict `THIRD_PARTY_NOTICES.md:49-54`. | Resolved: the user supplies `bupchip.bin` ("Firmware load"). Open: the vendored `mister/rtl/bupchip.hex`/`.mif` are still in the repository, which the HSC and Supercharger precedent (README, *Firmware files*) argues against. | The owner decides whether to remove them; the simulation scripts then take the firmware path as an argument. |
 | 8 | Clean-room status of B's sketch, said to be written from the ARM ARM | GPL contamination | Reviewer sign-off in step 2. Reuse only MIT code (`arm7tdmi_pkg`, peripheral, capture parse, `cache_ram`, `psram.sv`). RRX and the immediate-shift normalisation are written from the ARM ARM. |
 | 9 | Only Rikki & Vikki has been measured | Other content could need more | The firmware caps at 16 voices, and that bound fits at 83% |
 | 10 | Command bursts beyond 8 between pops | Lost command | `BUP_DEBUG` shadow overflow flag; raise `CMD_DEPTH` (1 MLAB either way) |
 | 11 | BupChip audio passes through `audio_filter`'s 256-sample boxcar (about 55.9 kHz) before I2S | Small resampling loss | Kept as MiSTer's mix for identical levels. Open: mix at the I2S input instead. |
-| 12 | ROM depth | 8 M10K | A 2,048-deep MIF frees 8–9 blocks if M10K ever runs short |
+| 12 | ROM depth | 8 M10K | A 2,048-deep ROM frees 8 blocks if M10K ever runs short, but caps `bupchip.bin` at 8 KiB |
