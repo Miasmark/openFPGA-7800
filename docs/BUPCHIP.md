@@ -174,7 +174,7 @@ working; 960 distinct instruction addresses ran):
 | Instruction set | ARMv4 ARM state only, conditional execution, the barrel shifter, halfword and signed loads, LDM/STM. |
 | Can drop | Thumb, IRQ/FIQ/abort/SWI entry, SPSRs and banked registers (one mode), SWP, coprocessor. |
 | Multiply | MUL/MLA at about 1.3 million a second (8% of instructions), so several clocks each is fine. UMULL is very rare and can be slow. |
-| ROM and RAM | 7.8 KB of code and 16 KiB of RAM, answering in one clock for the throughput above, so block RAM or caches. Block RAM is full in this build; see *Memory options* for how to free it. |
+| ROM and RAM | 7.8 KB of code and 16 KiB of RAM, answering in one clock for the throughput above, so block RAM or caches. Since 2.0.21 the core uses 46 of 308 M10K blocks, so about 26 for this is easy. |
 | Assets | 212 KiB for Rikki & Vikki. Latency barely matters, so PSRAM, SDRAM or SRAM all work. |
 | Output | 48 kHz stereo 16-bit. The FIFO can be much smaller than MiSTer's 85 ms. |
 
@@ -182,6 +182,12 @@ For scale, MiSTer's ARM core alone is about 16,200 LUTs. The Pocket build has
 about 4,200 ALMs free.
 
 ### Memory options
+
+**Update, 2.0.21:** the core now does what this section proposed. The
+cartridge RAM, Flicker Blend frame, SaveKey and BIOS live in the SRAM
+(`core/sram_ctrl.sv`), and 262 M10K blocks are free. The SRAM is full apart
+from its last 16 KiB, so a BupChip's own memories would go in block RAM, and
+its assets in the PSRAM. The analysis below is how it was worked out.
 
 The Pocket's memories, with the parts Analogue fitted. The speed figures are
 the parts' asynchronous access times; check the datasheets before designing

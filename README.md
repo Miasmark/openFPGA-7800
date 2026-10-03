@@ -168,17 +168,20 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.20) meets timing on all four corners: worst setup
-slack +2.03 ns, worst hold slack +0.11 ns (setup slack moves by a
-nanosecond or so between builds with placement).
+The Quartus build (2.0.21) meets timing on all four corners: worst setup
+slack +1.32 ns (on clk_sdram, from the bus into the SRAM controller's slot
+choice), worst hold slack +0.06 ns (setup slack moves by a nanosecond or so
+between builds with placement).
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
-core clock, which gives those paths 10 ns or more (from 2.0.14). It uses 75% of the ALMs
-(64% before the virtual controllers, mostly the four paddle timers) and all
-308 M10K blocks. The PLL produces the NTSC and PAL master clocks
+core clock, which gives those paths 10 ns or more (from 2.0.14). 2.0.21
+uses 12,834 of 18,480 ALMs (69%) and 46 of 308 M10K blocks: the cartridge
+RAM, Flicker Blend frame, SaveKey and BIOS moved to the Pocket's SRAM, and
+the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
+all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to the 2.0.21 test builds, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.0.21, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -202,7 +205,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Rikki & Vikki (Souper) | Runs, without the BupChip music (2.0.21-test). Needs an A78 header: Jamie Blanks's patch for the Steam ROM |
 | Summer Games, Winter Games | Work (2.0.21-test), with a correctly headered dump |
 | Crystal Castles (2600) | Works (2.0.21-test) |
-| SRAM memories (2.0.21-test) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass |
+| SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
+| Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 
