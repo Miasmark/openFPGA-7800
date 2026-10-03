@@ -27,7 +27,7 @@ The hand-written tests use `../../s1/directed/common.inc`. Each one ends by summ
 |---|---|
 | `carry`, `rsamt`, `blk15`, `pcops`, `unpred` | Pass, in lockstep and with waits and throttle. The signatures of `carry`, `rsamt` and `pcops` also equal Unicorn's. `blk15` differs from Unicorn only where the base is in an STM list that is not first: the ARM7TDMI stores the written-back base, ARMv5 the original. |
 | `romend` | **Fails.** The core wraps from 0x3FFC to 0 (`pc_next1[11:0]`) instead of halting. The reference takes a prefetch abort at 0x4000. |
-| Fuzz seeds 1–340, 450 cells each | 340 of 340 pass. Of 153,000 encodings, 100,242 ran in lockstep (2,735,795 retires and 371,566 stores compared, 0 mismatches). The other 52,758 halted: UNDEF 33,469, RO 9,506, REG 4,587, DATA 3,114, BLOCK 2,082. |
+| Fuzz seeds 1–440, 450 cells each | 440 of 440 pass. Of 198,000 encodings, 129,771 ran in lockstep (3,540,411 retires and 480,771 stores compared, 0 mismatches). The other 68,229 halted: UNDEF 43,459, RO 12,227, REG 5,868, DATA 4,003, BLOCK 2,672. |
 
 ## Mutants
 
