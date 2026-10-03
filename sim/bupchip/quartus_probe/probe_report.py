@@ -5,7 +5,7 @@ file's RAM summary, timing, and an estimate of the CPU's ALMs by block.
     probe_report.py BUILD_DIR
 
 BUILD_DIR holds output_files/ (the Quartus reports), paths.txt (five worst
-setup paths), cells.txt (every placed cell: name, type, location, from the
+setup paths), classes.txt (the worst path into each kind of endpoint), cells.txt (every placed cell: name, type, location, from the
 Timing Analyzer) and simulation/modelsim/bup_probe.vo (the fitted netlist,
 for its connections).
 
@@ -277,7 +277,7 @@ def main():
             print("  %-34s %s" % (r[0], r[1]))
 
     sta = out + ".sta.rpt"
-    print("\n# Timing (setup, per operating condition)")
+    print("\n# Timing (per operating condition)")
     text = open(sta, errors="replace").read()
     for cond in re.findall(r"^; ((?:Slow|Fast) \d+mV -?\d+C) Model Fmax Summary", text, re.M):
         rows = section(sta, cond + " Model Fmax Summary")
@@ -285,13 +285,16 @@ def main():
     typ = None
     for line in open(out + ".sta.summary"):
         if line.startswith("Type"):
-            typ = line.split(":", 1)[1].strip() if "Setup" in line else None
+            typ = line.split(":", 1)[1].strip() if " Setup " in line or " Hold " in line else None
         elif line.startswith("Slack") and typ:
-            print("  setup slack, %s: %s" % (typ, line.split(":", 1)[1].strip()))
+            print("  %-46s %s" % (typ.replace(" Model", "").replace("1100mV ", "") + ":", line.split(":", 1)[1].strip()))
             typ = None
     print("\n# Five worst setup paths, slow 85 C (slack, data delay, logic levels)")
     for line in open(d + "/paths.txt"):
         print("  " + line.rstrip())
+    print("\n# Worst setup path into each kind of endpoint, slow 85 C")
+    for line in open(d + "/classes.txt"):
+        print("  " + re.sub(r"altsyncram:u_ram\|altsyncram_\w+:auto_generated\||dpram_\w+:auto_generated\|", "", line.rstrip()))
 
     vo = d + "/simulation/modelsim/bup_probe.vo"
     cells = read_cells(d + "/cells.txt")

@@ -5,8 +5,9 @@
 #   ./run_probe.sh [MHZ ...]       default: 28.636364 21.477273
 # Each clock builds in $WORK/<MHZ>/ (default sim/work/bupchip/qprobe):
 # Analysis & Synthesis, Fitter and Timing Analyzer (no Assembler), a Timing
-# Analyzer script for the five worst setup paths at slow 85 C and a list of
-# the placed cells (cells.txt), and the fitted netlist from EDA Netlist
+# Analyzer script for the five worst setup paths at slow 85 C (paths.txt),
+# the worst into each kind of endpoint (classes.txt) and a list of the
+# placed cells (cells.txt), and the fitted netlist from EDA Netlist
 # Writer for its connections. probe_report.py then writes summary.txt: the
 # resources, the RAM summary, the timing and an estimate of the CPU's ALMs
 # by block. The reports stay in <MHZ>/output_files/, and paths.rpt has the
@@ -41,8 +42,8 @@ for mhz in "${CLOCKS[@]}"; do
 	sed "s/^set period .*/set period $period/" "$HERE/bup_probe.sdc" > "$dir/bup_probe.sdc"
 	grep -q "^set period $period\$" "$dir/bup_probe.sdc" || { echo "run_probe.sh: no period line in bup_probe.sdc" >&2; exit 1; }
 
-	# The five worst setup paths at slow 85 C, with their logic levels, and
-	# the placed cells.
+	# The five worst setup paths at slow 85 C, with their logic levels, the
+	# worst into each kind of endpoint, and the placed cells.
 	cat > "$dir/paths.tcl" <<'EOF'
 project_open bup_probe
 create_timing_netlist
@@ -61,6 +62,24 @@ foreach_in_collection p [get_timing_paths -setup -npaths 5 -nworst 1] {
 }
 close $f
 report_timing -setup -npaths 5 -nworst 1 -detail full_path -file paths.rpt
+# The worst setup path into each kind of endpoint.
+proc worst {f label k} {
+	foreach_in_collection p [get_timing_paths -setup -to $k -npaths 1] {
+		puts $f [format "%-36s %4d %8.3f %8.3f %6d %s -> %s" $label [get_collection_size $k] \
+			[get_path_info $p -slack] [get_path_info $p -data_delay] [get_path_info $p -num_logic_levels] \
+			[get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
+	}
+}
+set f [open "classes.txt" w]
+puts $f [format "%-36s %4s %8s %8s %6s %s -> %s" "endpoints" "n" "slack" "data" "levels" "from" "to"]
+worst $f "ROM port A address (fetch)" [get_keepers *rom|*porta_address_reg*]
+worst $f "ROM port B (data, firmware write)" [get_keepers *rom|*portb_*]
+worst $f "RAM port A (address, data, we, be)" [get_keepers *cache_ram_tdp_dc_be:ram|*porta_*]
+worst $f "Register file MLAB write port" [get_keepers *rf*rtl_0*]
+worst $f "DSP data inputs (multiplier)" [get_pins -compatibility_mode "cpu|Mult0*|a?\[*\]"]
+worst $f "CPU flip-flops and MLAB inputs" [get_keepers cpu|*]
+worst $f "Output boundary flip-flops" [get_keepers *_o*~reg0]
+close $f
 # Every placed cell, for probe_report.py's breakdown by block.
 set f [open "cells.txt" w]
 foreach_in_collection c [get_cells -compatibility_mode *] {
