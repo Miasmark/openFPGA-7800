@@ -21,7 +21,8 @@ any opcode, S or not; MUL, MLA and UMULL; LDR/STR/LDRB/STRB and the
 halfword and signed forms at any byte offset (unaligned word and odd
 halfword accesses take the ARM7TDMI's rotations), immediate and register
 offsets, pre and post index, write-back, Rd == Rn; LDM/STM in the four
-modes with and without write-back, the base in an STM list too; push/pop,
+modes with and without write-back, the base in the list too (STM, or LDM
+without write-back); push/pop,
 conditional pops; loads from the ROM, the asset window and the
 peripheral; MRS, MSR of the flags and of the fixed control byte; forward
 B, BL and BX, LDR pc (from a literal and popped from the stack), all of

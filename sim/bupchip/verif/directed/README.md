@@ -94,3 +94,21 @@ LATE_RF=1 sim/bupchip/verif/directed/run_vfy.sh   # the core built with BUP_SIM_
 | BL link = address + 8 | `v_cond`, `v_deps5` |
 | Bypass removed on either read port, `LATE_RF=1` | every test |
 | MSR control-byte check removed; LDR pc with bit 0 set accepted; STRH of PC accepted; asset offset == size accepted | `vhalt.py` (`msr_sys_mode`, `msr_irq_enable`; `ldr_pc_bit0`; `strh_pc`; `ldrh_past_assets`) |
+
+## Dense random programs and the shifter sweep (`run_vrand.sh`)
+
+Added in verification round 3. The tests above check one behaviour at a time: `fuzz.py` puts a known state before each encoding, and `../isa/gen_random.py` stores every result before the next operation. Here random operations follow each other directly and read what the last few wrote, so the multi-clock instructions run back to back in every order. Nothing here needs game data or the firmware.
+
+```sh
+sim/bupchip/verif/directed/run_vrand.sh                        # seeds 1-64, about 1 minute
+SEEDS="$(seq 1 400)" sim/bupchip/verif/directed/run_vrand.sh   # about 8 minutes on 4 cores
+LATE_RF=1 sim/bupchip/verif/directed/run_vrand.sh              # the core built with BUP_SIM_LATE_RF
+```
+
+| File | What it checks |
+|---|---|
+| `vrand.py` | One program per seed, 1,800 operations, every one of them defined on the ARM7TDMI and implemented by the core: data processing in every operand form (r15 as Rn or Rm too), MUL/MLA/UMULL, every single-transfer size and addressing mode at any byte offset (so unaligned words and odd halfwords), Rd == Rn, LDM/STM in every mode, with the base in the list (STM, or LDM without write-back), conditional pops, loads from the ROM, the asset window and the peripheral, MRS/MSR, forward B/BL/BX and LDR pc. About a quarter are conditional. The sources are biased to the registers written in the last few operations. With `--iss` it keeps to what ARMv4 and ARMv5 do alike and stores r0–r9, lr and the CPSR every 40 operations, so that Unicorn can check it. |
+| `vshift_all.S` | MOVS with every shift type by every register amount 0–259 and by every immediate encoding (LSL #0–31, LSR #1–32, ASR #1–32, ROR #1–31, RRX), on 16 values, with NZCV in as 0000 and 1111. The reference and the new core share `arm7tdmi_pkg`'s shifter, so lockstep alone cannot fault it; Unicorn can. |
+| `run_vrand.sh` | For each seed: the full mix through `run.sh` (reference to the end marker without an abort, `tb_s1.sv` without a halt, lockstep plainly and with waits and throttle); the `--iss` mix and `vshift_all.S` through `../isa/run_isa.sh` (signature and instruction count equal to Unicorn's, and lockstep). Work files go to `sim/work/bupchip/verif/vrand` (`vrand_laterf` with `LATE_RF=1`). |
+
+**Results (2026-10-03).** Seeds 1–400 pass, plainly and with `LATE_RF=1` (about 6 minutes each on 4 cores, beside other runs). The full mix: 400 of 400 programs in lockstep, 2,572,076 retires, 1,372,994 RAM stores, 4,013 peripheral writes and 8,138 replayed reads compared per pass, 0 mismatches; about 1.19 M of the retires are the random operations, the rest the RAM fill. Against Unicorn: `vshift_all.S` (199,406 instructions, 32 signature words) and the 400 `--iss` programs, 401 of 401 equal in signature and instruction count, and 2,733,943 retires in lockstep. Two deliberate faults in a copy of `bup_cpu.sv`, run with `BUP_SRCS` set to the copy, failed all of seeds 1–16: the bypass compared on three index bits, and LDM retiring as its last beat issues (the last register landing in the next instruction's first clock). No fault in the core was found.
