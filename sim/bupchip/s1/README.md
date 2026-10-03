@@ -55,7 +55,7 @@ sim/bupchip/verif/run_songs.sh GAME.a78                  # all 32 songs × 4 s i
 | The same, 4,000,000 retires with `+await=20` | 445,679 stores, 14,002 peripheral writes; 0 mismatches |
 | The same, 2,000,000 retires with `+throttle=20 +await=30` | 0 mismatches; also with `LATE_RF=1` (209,627 stores, 8,802 peripheral writes, 148,951 replayed reads) |
 | Songs 14, 9, 30 and 6, lockstep, 3,000,000 retires each | 0 mismatches |
-| All 32 songs × 4 s, lockstep, odd songs with `+await=20 +throttle=10` (run once by the step 2 review, before the ROM-end fix, which no firmware path reaches) | 32 of 32: 2,455,321,557 retires, 108,396,668 stores, 6,300,064 peripheral writes, 552,342,467 replayed reads; 0 mismatches, 0 halts |
+| All 32 songs × 4 s, lockstep, odd songs with `+await=20 +throttle=10` (`../verif/run_songs.sh`, 56 min on 4 cores) | 32 of 32: 2,455,321,557 retires, 108,396,668 stores, 6,300,064 peripheral writes, 552,342,467 replayed reads; 0 mismatches, 0 halts |
 | `+inject=50000` / `+inject_mmio=5000` | Caught at retire 247,167 / 112,261 |
 | PCM, songs 13, 14, 9, 30, 4 s each | All 187,984 song frames identical to MiSTer's for each, compared from the song's first frame (ours 1,000, MiSTer's 4,000; neither has silence before the first note); 0 underruns, 0 overflows; lowest FIFO level 660, 756, 722, 801 of 1,024 |
 | Misery_F, 4 s | CPI 1.3772 (−0.4% from 1.383); 60,574,078 work instructions, 15.14 MIPS; busy 72.8% of 28.636 MHz, 20.86 MHz at 100%; busiest 0.1 s 21.48 MHz, worst batch 23.98 MHz |

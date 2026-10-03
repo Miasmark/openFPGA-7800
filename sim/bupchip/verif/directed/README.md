@@ -54,3 +54,19 @@ To see what these tests catch, single faults were put into a copy of `bup_cpu.sv
 | Register file written one clock late (as an MLAB might be) | nothing, as it should be: the bypass covers it |
 | The same, with the bypass removed | nearly every test |
 | The bypass removed, array written at once | nothing in a plain build. The behavioural array makes a write visible on the next clock, so simulation never exercises the bypass unless the write is delayed as above. `bup_cpu.sv` therefore has a simulation-only `BUP_SIM_LATE_RF` build (an entry holds garbage for the clock after its write, and the data from the clock after that); `LATE_RF=1` selects it in the build scripts, and `../../s1/check.sh` runs the directed, halt and ISA lockstep tests with it. With the bypass removed, all 13 `s1` directed tests fail in that build and pass in the plain one. |
+
+## The verifier's tests (`run_vfy.sh`)
+
+An independent set, written from `docs/BUPCHIP_CORE.md` without reference to the tests above: `vgen.py` generates them as `.S` files into the work directory, `vhalt.py` holds further halt cases, and `tb_vdec.sv` probes the decoder. Nothing here needs game data; the decode probe needs the user's firmware and is skipped without it.
+
+```sh
+sim/bupchip/verif/directed/run_vfy.sh             # about 30 s on 4 cores
+LATE_RF=1 sim/bupchip/verif/directed/run_vfy.sh   # the core built with BUP_SIM_LATE_RF
+```
+
+| File | What it checks |
+|---|---|
+| `vgen.py` | 16 tests, each run by `run.sh` (reference, `tb_s1.sv` without a halt, lockstep plain and with waits and throttle). `v_shift`: each shift type by register amounts 0, 1, 31, 32, 33, 64, 224, 255, 256, 0x1f1, 0xffffff20 and 0x80000021 and by immediate 1, 31, LSL #0, LSR #32, ASR #32 and RRX, through MOV, MOVS, ADCS, RSCS, BICS, TEQ and CMN with the flags both ways, on ten values; scaled register offsets. `v_imm`: rotated immediates through all 16 opcodes, rotation 0 against a rotation giving the same value. `v_cond`: the 16 NZCV values against the 15 conditions for 14 instruction classes. `v_mul`: 12 x 12 corner values, the overlaps ARMv4 defines. `v_blk`: LDM/STM in every mode, list and write-back form. `v_deps1`-`5`: 19 producers of a register against 22 consumer positions, at once and one instruction later, plus BL's link. `v_wb`: Rd == Rn with write-back in every size and addressing mode, Rm == Rn, Rd == Rm, the T forms. `v_align`: every byte offset in RAM, ROM, the asset window (to its last byte) and the peripheral; unaligned stores. `v_blkx`: the base in the list. `v_mmio`: peripheral accesses under every NZCV and condition, offsets, write-back, sizes. `v_nv`: the NV condition on every class. `v_unpred`: MUL/MLA Rd == Rm and UMULL RdLo/RdHi == Rm. The five in `iss.txt` (`v_shift`, `v_imm`, `v_cond`, `v_mul`, `v_blk`) stay inside the subset ARMv4 and ARMv5 share, and also go through `../isa/run_isa.sh`, where the reference's signature must equal Unicorn's. |
+| `vhalt.py` | 47 halt cases beyond `../../s1/halt_tests.py` (ARMv5 and coprocessor encodings, r15 in the remaining operand positions, PSR forms, S and signed multiplies, block transfers with PC, S or an empty list, branches below 0, one byte past each window) and 20 cases that must reach the end marker (the last byte or word of each window, LDM from the ROM, MSR forms that write only what the core has, condition-failed halting encodings). |
+| `tb_vdec.sv` | Every one of the firmware's 1,704 code words (`../../model/inventory.py`) on the core's instruction input: none may decode as a halt, so a decode change that breaks a path no test reaches still fails. |
+| `run_vfy.sh` | Runs all of the above. Work files go to `sim/work/bupchip/verif/vfy` (`vfy_laterf` with `LATE_RF=1`). |

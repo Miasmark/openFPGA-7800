@@ -9,7 +9,7 @@
 #   ./run_songs.sh GAME.a78 [SONG ...]       default: songs 0-31
 # SECS (default 4), JOBS at once (default nproc), DUT and LATE_RF as for
 # run_lockstep.sh. Logs go to $WORK/songs/song<N>.log (WORK defaults to
-# sim/work/bupchip/verif). About 75 minutes for 32 songs on 3 cores. Exits 0
+# sim/work/bupchip/verif). About an hour for 32 songs on 4 cores. Exits 0
 # when every song ends in LOCKSTEP PASS.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"

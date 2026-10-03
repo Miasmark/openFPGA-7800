@@ -21,7 +21,7 @@ sim/bupchip/verif/directed/run.sh                # the new core: more directed t
 | `run_kernel.sh` | The mixer harness, `kernel/harness.S`: the firmware's own voice mixer on 16 made-up voices. On the reference it must reach its end marker with 4,800 nonzero frames; then lockstep to the end. |
 | `run_synth.sh` | A synthetic ARSC block (`make_synth_arsc.py`): the existing `tb_bupchip` (`../run_bupchip.sh`) boots it and renders nonzero PCM with no underrun; the fault paths give faults 2 and 3; Unicorn replays a reference trace of boot and song 0 (`iss_fw_replay.py`); lockstep through every command class, and over random-content blocks. |
 | `run_lockstep.sh IMAGE.a78 [+args]` | One lockstep run (below). |
-| `run_songs.sh GAME.a78 [SONG ...]` | Not in `run_all.sh`: lockstep through each song (default all 32) for `SECS` seconds (default 4), odd songs with random asset waits and throttle clocks; `DUT` defaults to `bup` here. About 75 minutes on 3 cores. |
+| `run_songs.sh GAME.a78 [SONG ...]` | Not in `run_all.sh`: lockstep through each song (default all 32) for `SECS` seconds (default 4), odd songs with random asset waits and throttle clocks; `DUT` defaults to `bup` here. About an hour on 4 cores. |
 
 Environment: `WORK` (build products, default `sim/work/bupchip/verif`), `VERILATOR` (default `/opt/verilator-5.040/bin/verilator` if present), `VENV` or `PYTHON` (for Unicorn), `DUT` (`ref` or `bup`), `LATE_RF=1` with `DUT=bup` (the core built with `BUP_SIM_LATE_RF`: register-file writes land a clock late, with garbage in between, so only its bypass keeps results right), `JOBS` and `OPS` for the ISA suite, `MAXRET` for `run_all.sh`'s game run.
 
