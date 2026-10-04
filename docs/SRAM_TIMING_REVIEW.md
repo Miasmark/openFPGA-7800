@@ -161,4 +161,38 @@ Fix A should make it much less sensitive:
 
 ## Fix A, implemented
 
-Results to be filled in from the three-seed build.
+Implemented in `cart2600.sv` under `NO_ARM_MAPPER`, as `SRAM_TIMING.md`
+describes, plus `mapper_init_busy` tied to 0 and `arm_mapper_writeback`
+left out with the rest. Recorded in `mister/POCKET_CHANGES.md`.
+
+**Quartus, three seeds** (slow 1100 mV 85 °C):
+
+| | 2.1.1 | With Fix A |
+|---|---|---|
+| `clk_sdram` worst setup, seeds 1 / 2 / 3 | +0.26 / +0.44 / +0.28 ns | **+1.17 / +1.76 / +2.31 ns** |
+| ALMs | 79% | 68% (12,630-12,641) |
+| Worst hold (any clock) | | +0.29 ns |
+
+**The new worst path** starts at `a78_cart_extent`'s size registers
+(`hcart_size`, `cart_size_eof`). It runs through the 7800 mappers' decode to
+`sram_ctrl`'s write-data pad register (`dq_out`).
+
+- The DPC+ leg is gone; what's left is the 7800 cone, as the note predicted.
+- Its source only changes while a cartridge loads. An exception on it would
+  be sound in logic, but carries the hierarchy-name risk the note describes.
+  Not worth it at +1.2 ns.
+
+**Simulation:**
+
+- `sim/run_sim.sh` passes: tones, frame geometry, loads, the PLL region
+  switch, the audio filter and the virtual axes.
+- A 29,696-byte 2600 image (detected as DPC+, mapper 21) now shows the bad
+  game screen ("out of order").
+
+**Still to do on hardware:**
+
+- 2600 games with RAM mappers (an E7, FA, 3E or SB title, and a Superchip
+  game);
+- Pitfall II (DPC, which must still work);
+- a plain 2600 game;
+- a DPC+ cartridge, which should show the screen.
