@@ -47,6 +47,8 @@
 //                  forcing their clock enables (the core's pause inputs):
 //                  a reference K times slower, to check call budgets
 //                  against real overruns                       (default 1)
+//                  NOTE: with K = 2 the run makes no progress (seen
+//                  2026-10-04 on Galagon and Elevator Agent); not debugged
 //   +dtrace=1      also write dtrace.txt: every ARM data read from
 //                  cartridge ROM as one hex word, size << 24 | address,
 //                  and "c CALL FRAME" where each call starts   (default 0)
