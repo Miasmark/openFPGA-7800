@@ -152,8 +152,16 @@ module cart2600
 
 	assign rom_mask = rom_size[18:0] - 1'd1;
 	assign rom_read = mapper == BANKAR ? ar_read : ~address_change;
+`ifdef NO_ARM_MAPPER
+	// Pocket: without the ARM the DPC+, CDF and BUS front ends are left out
+	// (below), so their cartridges get the bad game screen instead of
+	// running broken.
+	wire is_bad_game = mapper == BANKELF || mapper == BANKDPCP ||
+		mapper == BANKCDF || mapper == BANKBUS;
+`else
 	wire is_bad_game = mapper == BANKELF ||
 		(mapper == BANKBUS && mapper_revision == 3'd0);
+`endif
 
 	// Handle unsupportable ARM mappers :(
 	spram #(
@@ -565,17 +573,85 @@ module cart2600
 			load_end_d <= load_end;
 	end
 
+	assign fa2_nvram_request = fa2_nvram_request_raw && mapper == BANKFA2;
+	assign fa2_nvram_write = fa2_nvram_write_raw;
+	assign fa2_nvram_addr = fa2_nvram_addr_raw;
+	assign fa2_nvram_wdata = fa2_nvram_wdata_raw;
+	assign fa2_nvram_dirty = fa2_nvram_dirty_raw && mapper == BANKFA2;
+
+`ifdef NO_ARM_MAPPER
+	// Pocket (NO_ARM_MAPPER): the DPC+, CDF and BUS front ends and their
+	// tables, RAM initialisation, writeback, audio and fast-jump map can't run
+	// a game without the ARM, so they are left out with it (about 1,750 ALMs).
+	// That also takes the DPC+ decode off the SRAM's clk_sdram request path
+	// (docs/SRAM_TIMING.md, Fix A). Those three schemes get the bad game screen.
+	// Everything the left-out blocks drove is idle here.
+	assign mapper_init_busy = 1'b0;
+	assign mapper_dma_request = 1'b0;
+	assign mapper_dma_fill = 1'b0;
+	assign mapper_dma_source = '0;
+	assign mapper_dma_dest = '0;
+	assign mapper_dma_count = '0;
+	assign mapper_dma_value = '0;
+	assign init_ram_en = 1'b0;
+	assign init_ram_addr = '0;
+	assign mapper_wb_idle = 1'b1;
+	assign mapper_wb_en = 1'b0;
+	assign mapper_wb_write = 1'b0;
+	assign mapper_wb_addr = '0;
+	assign mapper_wb_wdata = '0;
+	assign mapper_wb_wstrb = '0;
+	assign audio_ram_en = 1'b0;
+	assign audio_ram_addr = '0;
+	assign arm_sample_request = 1'b0;
+	assign arm_sample_addr = '0;
+	assign arm_audio_amplitude = '0;
+	assign arm_audio_counter0 = '0;
+	assign arm_audio_counter1 = '0;
+	assign arm_audio_counter2 = '0;
+	assign arm_audio_frequency0 = '0;
+	assign arm_audio_frequency1 = '0;
+	assign arm_audio_frequency2 = '0;
+	assign dpc_service_request = 1'b0;
+	assign dpc_service_fill = 1'b0;
+	assign dpc_service_source = '0;
+	assign dpc_service_dest = '0;
+	assign dpc_service_count = '0;
+	assign dpc_service_value = '0;
+	assign bus_stuff_valid = 1'b0;
+	assign bus_stuff_data = 8'hFF;
+	assign arm_call_request = 1'b0;
+	assign arm_call_entry = '0;
+	assign arm_call_stack = '0;
+	assign arm_call_thumb = 1'b0;
+	assign direct_do[BANKDPCP] = bg_data;
+	assign flags_out[BANKDPCP] = 16'd1;
+	assign out_en[BANKDPCP]    = 8'hFF;
+	assign ram_sel[BANKDPCP]   = 0;
+	assign ram_rw[BANKDPCP]    = 1;
+	assign ram_a[BANKDPCP]     = '0;
+	assign rom_addr[BANKDPCP]  = '0;
+	assign direct_do[BANKCDF]  = bg_data;
+	assign flags_out[BANKCDF]  = 16'd1;
+	assign out_en[BANKCDF]     = 8'hFF;
+	assign ram_sel[BANKCDF]    = 0;
+	assign ram_rw[BANKCDF]     = 1;
+	assign ram_a[BANKCDF]      = '0;
+	assign rom_addr[BANKCDF]   = '0;
+	assign direct_do[BANKBUS]  = bg_data;
+	assign flags_out[BANKBUS]  = 16'd1;
+	assign out_en[BANKBUS]     = 8'hFF;
+	assign ram_sel[BANKBUS]    = 0;
+	assign ram_rw[BANKBUS]     = 1;
+	assign ram_a[BANKBUS]      = '0;
+	assign rom_addr[BANKBUS]   = '0;
+`else
 	assign table_family = mapper == BANKBUS ? 2'd1 :
 		(mapper == BANKCDF ? 2'd2 : 2'd0);
 	assign bus_map_update_selected = bus_map_update && mapper == BANKBUS;
 	assign bus_stuff_valid = bus_stuff_valid_raw && mapper == BANKBUS;
 	assign bus_stuff_data = bus_stuff_data_raw;
 	assign dpc_service_request = dpc_service_request_raw && mapper == BANKDPCP;
-	assign fa2_nvram_request = fa2_nvram_request_raw && mapper == BANKFA2;
-	assign fa2_nvram_write = fa2_nvram_write_raw;
-	assign fa2_nvram_addr = fa2_nvram_addr_raw;
-	assign fa2_nvram_wdata = fa2_nvram_wdata_raw;
-	assign fa2_nvram_dirty = fa2_nvram_dirty_raw && mapper == BANKFA2;
 	assign init_family = mapper == BANKDPCP ? 2'd1 :
 		(mapper == BANKBUS ? 2'd2 :
 		(mapper == BANKCDF ? 2'd3 : 2'd0));
@@ -872,6 +948,7 @@ module cart2600
 		(mapper == BANKCDF ? cdf_call_stack : bus_call_stack);
 	assign arm_call_thumb = mapper == BANKDPCP ? dpc_call_thumb :
 		(mapper == BANKCDF ? cdf_call_thumb : bus_call_thumb);
+`endif
 
 	// ELF is not an ARM7 mapper; retain the explicit unsupported screen.
 	assign direct_do[BANKELF]     = bg_data;

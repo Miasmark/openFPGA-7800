@@ -105,7 +105,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 
 | Feature | Why |
 |---|---|
-| 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on MiSTer's soft ARM CPU, which doesn't fit. ARIA may run them later, with a Thumb front end (DARIA); the measurements so far are in [docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md), "Later: 2600 ARM cartridges". |
+| 2600 ARM cartridges (DPC+, CDF, CDFJ, BUS) | These run on MiSTer's soft ARM CPU, which doesn't fit; the core shows its unsupported-cartridge screen for them. ARIA may run them later, with a Thumb front end (DARIA); the measurements so far are in [docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md), "Later: 2600 ARM cartridges". |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
