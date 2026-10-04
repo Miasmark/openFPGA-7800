@@ -752,6 +752,12 @@ set_global_assignment -name VERILOG_MACRO "POCKET_BUPCHIP=1"
 # and its status cells on screen (core/bupchip/bup_status_osd.sv). Remove it
 # for a release (docs/DEVELOPING.md, "Before a release").
 set_global_assignment -name VERILOG_MACRO "BUP_DEBUG=1"
+# Fitter seed. With the BupChip the device is 79% full and clk_sdram's worst
+# path (MARIA / 2600 mapper address into sram_ctrl's pad registers) is
+# placement-sensitive: seeds 1, 2 and 3 gave +0.56, +1.04 and +1.26 ns, the
+# build wants +1.0 (docs/BUPCHIP_CORE.md, step 5). Check it again whenever
+# the design changes; another seed may then do better.
+set_global_assignment -name SEED 3
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister
@@ -774,7 +780,9 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to sram_dq[*]
 
 # PSRAM cram0 (POCKET_BUPCHIP: psram.sv, asynchronous mode): likewise every
 # pin from or into an I/O register. The pins are 1.8 V with 4 mA drive, set
-# above with the board's other pins. cram0_clk and cram0_cre stay 0.
+# above with the board's other pins. cram0_clk and cram0_cre stay 0, and
+# cram0_ce1_n stays high (only die 0 is used), so the fitter ignores its
+# assignment (warning 176250); it stays, as the seed above was chosen with it.
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_a[*]
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_adv_n
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_ce0_n

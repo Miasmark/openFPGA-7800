@@ -495,6 +495,49 @@ module tb_load;
 	bit have_save = 0;
 	int save_diffs;
 
+`ifdef POCKET_BUPCHIP
+	// +bupfw=FILE: the BupChip firmware (bupchip.bin) through its data slot
+	// (0x109, bridge address 0x0A000000), before the cartridge, or after it
+	// with +bupfwlast, which is the Pocket's order (data.json's). Its ROM
+	// must then hold the file, word w = bytes 4w..4w+3 little-endian,
+	// zero-padded.
+	task automatic load_bupfw();
+		int n;
+		if ($value$plusargs("bupfw=%s", fw_path)) begin
+			fw_img.delete();
+			fd = $fopen(fw_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fw_path); $finish; end
+			c = $fgetc(fd);
+			while (c != -1) begin fw_img.push_back(c[7:0]); c = $fgetc(fd); end
+			$fclose(fd);
+			n = fw_img.size();
+			while (fw_img.size() % 4) fw_img.push_back(8'h00);
+			bupfw_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			for (int i = 0; i < fw_img.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = 32'h0A000000 + i;
+				bridge_wr_data = {fw_img[i], fw_img[i+1], fw_img[i+2], fw_img[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			bupfw_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
+			mismatches = 0;
+			for (int w = 0; w < 4096; w++) begin
+				automatic logic [31:0] e = 4 * w < fw_img.size() ?
+					{fw_img[4*w+3], fw_img[4*w+2], fw_img[4*w+1], fw_img[4*w]} : 32'd0;
+				if (dut.bupchip.rom.mem_q[w] !== e) mismatches++;
+			end
+			$display("BUPCHIP firmware slot: %0d byte file, %0d of 4096 ROM words differ from it, fw_loaded=%0d",
+				n, mismatches, dut.bupchip.fw_loaded);
+		end
+	endtask
+`endif
+
 	initial begin
 		if (!$value$plusargs("image=%s", path)) path = "load_test.a78";
 		if (!$value$plusargs("audf=%d", audf)) audf = 7;
@@ -577,43 +620,7 @@ module tb_load;
 					slot == 0 ? "HSC" : "Supercharger", fw_img.size(), mismatches, dut.hscfw_loaded);
 			end
 `ifdef POCKET_BUPCHIP
-		// +bupfw=FILE: the BupChip firmware (bupchip.bin) through its data slot
-		// (0x109, bridge address 0x0A000000), before the cartridge, as the
-		// Pocket loads it at core start. Its ROM must then hold the file, word
-		// w = bytes 4w..4w+3 little-endian, zero-padded.
-		if ($value$plusargs("bupfw=%s", fw_path)) begin
-			int n;
-			fw_img.delete();
-			fd = $fopen(fw_path, "rb");
-			if (fd == 0) begin $display("cannot open %s", fw_path); $finish; end
-			c = $fgetc(fd);
-			while (c != -1) begin fw_img.push_back(c[7:0]); c = $fgetc(fd); end
-			$fclose(fd);
-			n = fw_img.size();
-			while (fw_img.size() % 4) fw_img.push_back(8'h00);
-			bupfw_download = 1'b1;
-			repeat (100) @(posedge clk_74a);
-			for (int i = 0; i < fw_img.size(); i += 4) begin
-				@(posedge clk_74a);
-				bridge_addr = 32'h0A000000 + i;
-				bridge_wr_data = {fw_img[i], fw_img[i+1], fw_img[i+2], fw_img[i+3]};
-				bridge_wr = 1'b1;
-				@(posedge clk_74a);
-				bridge_wr = 1'b0;
-				repeat (78) @(posedge clk_74a);
-			end
-			repeat (2000) @(posedge clk_74a);
-			bupfw_download = 1'b0;
-			repeat (100) @(posedge clk_sys);
-			mismatches = 0;
-			for (int w = 0; w < 4096; w++) begin
-				automatic logic [31:0] e = 4 * w < fw_img.size() ?
-					{fw_img[4*w+3], fw_img[4*w+2], fw_img[4*w+1], fw_img[4*w]} : 32'd0;
-				if (dut.bupchip.rom.mem_q[w] !== e) mismatches++;
-			end
-			$display("BUPCHIP firmware slot: %0d byte file, %0d of 4096 ROM words differ from it, fw_loaded=%0d",
-				n, mismatches, dut.bupchip.fw_loaded);
-		end
+		if (!$test$plusargs("bupfwlast")) load_bupfw();
 `endif
 		repeat (100) @(posedge clk_74a);
 		cart_download = 1'b1;
@@ -631,6 +638,12 @@ module tb_load;
 		repeat (2000) @(posedge clk_74a);
 		cart_download = 1'b0;
 		repeat (100) @(posedge clk_sys);
+`ifdef POCKET_BUPCHIP
+		if ($test$plusargs("bupfwlast")) begin
+			repeat (100) @(posedge clk_74a);
+			load_bupfw();
+		end
+`endif
 
 		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
 		begin

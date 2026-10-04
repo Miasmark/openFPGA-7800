@@ -135,7 +135,8 @@ python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.s
 ./obj_load/vtb +image=load_test.a26 +audf=14 | grep -E "LOAD|TONE"
 
 # The BupChip end to end in the whole core: its firmware through the
-# bupchip.bin data slot, a Souper cartridge (souper_test.py: a 6502 program
+# bupchip.bin data slot (after the cartridge, in data.json's order, as the
+# Pocket loads them), a Souper cartridge (souper_test.py: a 6502 program
 # that sends command $80 through $8007 after 30 ms) with the synthetic ARSC
 # block appended, the PSRAM model on cram0. The song's PCM, as the firmware
 # pushes it and as it returns to clk_sys, must equal the Python model's
@@ -153,7 +154,7 @@ if [ "${BUPCHIP:-1}" = 1 ]; then
 		python3 "$HERE/souper_test.py" "$B/souper.a78" --arsc "$B/synth.arsc" > /dev/null
 		[ -s "$B/song0_model.pcm" ] && [ "$B/song0_model.pcm" -nt "$B/synth.arsc" ] || \
 			(cd "$HERE/bupchip/model" && python3 armemu.py "$B/synth.arsc" --song 0 --secs 1 --pcm "$B/song0_model.pcm" > "$B/armemu.log")
-		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupms="${BUPMS:-250}" +bupout=e2e > e2e.log)
+		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupfwlast +bupms="${BUPMS:-250}" +bupout=e2e > e2e.log)
 		grep -E "^(LOAD|BUPCHIP)" "$B/e2e.log"
 		PS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\1/p' "$B/e2e.log")"
 		OS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\2/p' "$B/e2e.log")"

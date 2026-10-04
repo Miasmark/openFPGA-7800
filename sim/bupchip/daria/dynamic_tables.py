@@ -3,7 +3,7 @@
 
   dynamic_tables.py [--scan scan.json] [--margin F] [--only SECTION,...] RUN_DIR...
 
-Sections: overview, types, clock, overruns, cache, mix, rom, ram, harmony, polls,
+Sections: schemes, overview, types, clock, overruns, late, cache, mix, rom, ram, harmony, polls,
 determinism
 (--ref DIR: compare each run with the run of the same name under DIR).
 
@@ -54,6 +54,10 @@ CACHES = [  # (label, list of miss columns, t_miss)
     ("I 4K/16 + D 2K/16", ["miss_I_4k_16", "miss_D_2k_16"], T16),
     ("I 8K/16 + D 4K/16", ["miss_I_8k_16", "miss_D_4k_16"], T16),
     ("I 16K/16 + D 8K/16", ["miss_I_16k_16", "miss_D_8k_16"], T16),
+    # Code span in block RAM, every ROM data read through a D-cache (literal
+    # pools included, so the miss count is an upper bound).
+    ("code in BRAM + D 4K/16", ["miss_D_4k_16"], T16),
+    ("code in BRAM + D 8K/32", ["miss_D_8k_32"], T32),
     ("U 8K/16, PSRAM 1.4 us", ["miss_U_8k_16"], T_PS),
 ]
 SHORT = {"Elevator-Agent": "Elevator Agent", "Super-Cobra-Arcade": "Super Cobra",
@@ -373,7 +377,7 @@ def dtrace_stats(R):
 
     with gzip.open(p, "rt") as f:
         for line in f:
-            if line[0] == "c":
+            if line.startswith("c "):
                 close_call()
                 ncalls += 1
                 recent = []
@@ -412,7 +416,8 @@ def dtrace_stats(R):
     return {
         "tot": tot, "reg": reg, "by_size": by_size, "seq": seq, "nout": nout,
         "call_kib_max": max(call_lines) * 32 / 1024.0 if call_lines else 0,
-        "call_kib_p50": pct(call_lines, 50) * 32 / 1024.0 if call_lines else 0,
+        "call_kib_p50": pct([x for x in call_lines if x], 50) * 32 / 1024.0 if any(call_lines) else 0,
+        "calls_with_data": sum(1 for x in call_lines if x) / max(1, len(call_lines)),
         "all_kib": len(all_lines) * 32 / 1024.0,
         "reuse": sum(reuse) / len(reuse) if reuse else 0,
         "variants": [(v, m) for v, m in zip(variants, vmiss)],
@@ -423,7 +428,7 @@ def sec_rom(runs, margin):
     hdr = ["Demo", "ROM data reads / instr", "byte / half / word %", "KiB read (count, lowest-highest)",
            "Code span %", "Below code %",
            "Above code %", "Outside code vs last 4 lines: same / next / new %",
-           "Data KiB per call p50 / max", "Data KiB whole run",
+           "Calls reading data outside code %", "Their data KiB p50 / max", "Data KiB whole run",
            "Lines reused from 2 calls back %", "D hit 4K/16 / 16K/32 %"]
     rows = []
     var_rows = []
@@ -438,7 +443,7 @@ def sec_rom(runs, margin):
         kr = "%d, %d-%d" % (len(kib), kib[0], kib[-1]) if kib else "-"
         if d is None:
             rows.append([R.short, "%.3f" % (t["rd_rom"] / n), "%.0f / %.0f / %.0f" % (
-                100.0 * b / tot, 100.0 * h / tot, 100.0 * w / tot), kr] + ["-"] * 7 + [
+                100.0 * b / tot, 100.0 * h / tot, 100.0 * w / tot), kr] + ["-"] * 8 + [
                 "%.1f / %.1f" % (100.0 * (1 - mm["4k/16"] / max(1, acc)), 100.0 * (1 - mm["16k/32"] / max(1, acc)))])
             continue
         rg, sq = d["reg"], d["seq"]
@@ -449,6 +454,7 @@ def sec_rom(runs, margin):
             "%.1f" % (100.0 * rg["code span"] / d["tot"]), "%.1f" % (100.0 * rg["below code"] / d["tot"]),
             "%.1f" % (100.0 * rg["above code"] / d["tot"]),
             "%.0f / %.0f / %.0f" % (100.0 * sq["recent"] / no, 100.0 * sq["next"] / no, 100.0 * sq["new"] / no),
+            "%.0f" % (100.0 * d["calls_with_data"]),
             "%.2f / %.2f" % (d["call_kib_p50"], d["call_kib_max"]), "%.1f" % d["all_kib"],
             "%.0f" % (100.0 * d["reuse"]),
             "%.1f / %.1f" % (100.0 * (1 - mm["4k/16"] / max(1, acc)), 100.0 * (1 - mm["16k/32"] / max(1, acc)))])
@@ -479,6 +485,75 @@ def sec_ram(runs, margin):
     if ex:
         out += ["", "Unaligned examples: " + " | ".join(ex)]
     return "\n".join(out)
+
+
+def sec_schemes(runs, margin):
+    """One line per scheme: the worst of its demos."""
+    hdr = ["Scheme", "Demos", "Calls/frame", "Instr/call max (demo)", "Typical VB / OS call instr (p50 range)",
+           "Ref max % of safe budget", "MHz @CPI 1.0 / 1.2 / 1.4, margin", "S1 / S3 est. MHz, margin",
+           "Late calls S1@28.636 / S3@21.477 / S3 CPI@28.636", "Code KiB run / per call", "Thumb %"]
+    by = defaultdict(list)
+    for R in runs:
+        by[R.scheme].append(R)
+    rows = []
+    for sch in sorted(by, key=lambda s: SCHEME_ORDER.get(s, 9)):
+        rs = by[sch]
+        allc = [r for R in rs for r in R.rows]
+        fr = sum(len(set(r["frame"] for r in R.rows)) for R in rs)
+        mx = max(((r["instr"], R.short) for R in rs for r in R.rows))
+        vb = [pct([r["instr"] for r in R.rows if r["type"].startswith("VB")], 50) for R in rs]
+        os_ = [pct([r["instr"] for r in R.rows if r["type"].startswith("OS")], 50) for R in rs]
+        ref = max(r["stall_sys"] / r["safe"] for R in rs for r in R.budgeted)
+        cl = [clock_rows(R, margin) for R in rs]
+        mxk = lambda k: max(c[k][0] for c in cl) if all(k in c for c in cl) else float("nan")
+        late = [0, 0, 0]
+        for R in rs:
+            if not R.has_s:
+                continue
+            for r in R.budgeted:
+                b = r["safe"] / SYS_HZ
+                late[0] += r["s1_cyc"] / (S1_MHZ * 1e6) > b
+                late[1] += r["s3_cyc"] / (S3_MHZ * 1e6) > b
+                late[2] += r["s3_cyc"] / (S1_MHZ * 1e6) > b
+        t = [R.summ["total"] for R in rs]
+        rows.append([
+            sch, ", ".join(R.short for R in rs), "%.2f" % (len(allc) / max(1, fr)), "%d (%s)" % mx,
+            "%d-%d / %d-%d" % (min(vb), max(vb), min(os_), max(os_)), "%.0f%%" % (100 * ref),
+            "%.1f / %.1f / %.1f" % (mxk("cpi1.0"), mxk("cpi1.2"), mxk("cpi1.4")),
+            "%.1f / %.1f" % (mxk("s1"), mxk("s3")), "%d / %d / %d" % tuple(late),
+            "%.1f / %.1f" % (max(R.summ["misc"]["dl16"] * 16 / 1024.0 for R in rs),
+                             max(max(r["dist_l16"] for r in R.rows) * 16 / 1024.0 for R in rs)),
+            "%.2f" % (100.0 * sum(x["thumb"] for x in t) / sum(x["thumb"] + x["arm"] for x in t))])
+    return table(hdr, rows)
+
+
+def frame_runs(frames):
+    out = []
+    for f in sorted(set(frames)):
+        if out and f == out[-1][1] + 1:
+            out[-1][1] = f
+        else:
+            out.append([f, f])
+    return ", ".join("%d" % a if a == b else "%d-%d" % (a, b) for a, b in out)
+
+
+def sec_late(runs, margin):
+    """Frames whose calls would end after the INTIM-zero deadline (block RAM, zero-wait)."""
+    hdr = ["Demo", "S3 @21.477: late calls (frames)", "S1 @28.636: late calls (frames)",
+           "Steady play (frames >= 600): max S3 / S1 share of safe budget"]
+    rows = []
+    for R in runs:
+        if not R.has_s:
+            continue
+        bud = R.budgeted
+        l3 = [r["frame"] for r in bud if r["s3_cyc"] / (S3_MHZ * 1e6) > r["safe"] / SYS_HZ]
+        l1 = [r["frame"] for r in bud if r["s1_cyc"] / (S1_MHZ * 1e6) > r["safe"] / SYS_HZ]
+        steady = [r for r in bud if r["frame"] >= 600]
+        sh3 = max((r["s3_cyc"] / (S3_MHZ * 1e6)) / (r["safe"] / SYS_HZ) for r in steady) if steady else 0
+        sh1 = max((r["s1_cyc"] / (S1_MHZ * 1e6)) / (r["safe"] / SYS_HZ) for r in steady) if steady else 0
+        rows.append([R.short, "%d (%s)" % (len(l3), frame_runs(l3) or "-"),
+                     "%d (%s)" % (len(l1), frame_runs(l1) or "-"), "%.0f%% / %.0f%%" % (100 * sh3, 100 * sh1)])
+    return table(hdr, rows)
 
 
 def sec_harmony(runs, margin):
@@ -516,6 +591,8 @@ def sec_overruns(runs, margin):
               ("S1 @28.636, block RAM", "s1_cyc", S1_MHZ, [], 0.0),
               ("S1 @28.636, U 16K/16", "s1_cyc", S1_MHZ, ["miss_U_16k_16"], T16),
               ("S1 @28.636, I 4K + D 2K", "s1_cyc", S1_MHZ, ["miss_I_4k_16", "miss_D_2k_16"], T16),
+              ("S3 CPI @28.636, block RAM", "s3_cyc", S1_MHZ, [], 0.0),
+              ("S3 CPI @28.636, code in BRAM + D 8K/32", "s3_cyc", S1_MHZ, ["miss_D_8k_32"], T32),
               ("S3 @42.955, block RAM", "s3_cyc", 42.955, [], 0.0)]
     hdr = ["Demo", "Budgeted calls"] + ["%s: late / over 80%%" % m[0] for m in models]
     rows = []
@@ -567,7 +644,7 @@ def sec_determinism(runs, margin, ref):
     return table(hdr, rows)
 
 
-SECTIONS = ["overview", "types", "clock", "overruns", "cache", "mix", "rom", "ram", "harmony", "polls",
+SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "cache", "mix", "rom", "ram", "harmony", "polls",
             "determinism"]
 
 

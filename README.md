@@ -95,8 +95,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 
 | Feature | Why |
 |---|---|
-| **BupChip** (Souper music co-processor) | **Doesn't fit on the Pocket.** See below. Souper games run, but without the extra music channel. |
-| 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on the same soft ARM CPU as the BupChip, so they don't fit either. |
+| **BupChip** (Souper music co-processor) | **In development, not in a release yet.** MiSTer's BupChip doesn't fit on the Pocket (see below), so this port is getting its own: **ARIA**, a small ARM-compatible CPU that runs MiSTer's unmodified CoreTone firmware, with the music in the Pocket's PSRAM ([docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md)). It plays bit-exactly in simulation, through the whole core; a hardware test build is next, and the first release with it will be 2.1.1. Until then, Souper games run without the extra music channel. |
+| 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on MiSTer's soft ARM CPU, which doesn't fit. ARIA may run them later (DARIA). |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
@@ -122,7 +122,10 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
   speed grade.
 
 Running the BupChip on the Pocket would need a much smaller ARM
-implementation. That would be a project of its own.
+implementation. That would be a project of its own. It is now under way:
+ARIA ([docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md)) runs the firmware in
+about 1,830 ALMs at 28.6 MHz, with its music in PSRAM; the whole core then
+uses 79% of the FPGA.
 
 [docs/BUPCHIP.md](docs/BUPCHIP.md) has the details such a project would start
 from:

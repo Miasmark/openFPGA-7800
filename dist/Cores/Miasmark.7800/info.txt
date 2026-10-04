@@ -8,6 +8,9 @@ Firmware (all optional, in /Assets/7800/common/):
   highscor.rom      High Score Cartridge firmware (4 KiB), needed for the HSC;
   or hsc.a78        the same firmware with an A78 header
   supercharger.bin  Starpath Supercharger BIOS (2 KiB), for 2600 SC games
+  bupchip.bin       BupChip firmware (CoreTone), for the music of Souper
+                    games such as Rikki & Vikki, whose .a78 must carry its
+                    music block (docs/BUPCHIP.md in the source)
 
 Controls: A/Y left button, B/X right button, L pause (2600: colour/B&W),
 Select, Start = Reset.
