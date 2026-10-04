@@ -117,8 +117,8 @@ release. The firmware's source is not published and its licence is unclear,
 so it is treated like the High Score Cartridge firmware and the Supercharger
 BIOS (README, *Firmware files*): the user supplies it, and the core loads it
 from the SD card. The music is the game's own data, so it belongs with the
-user's copy of the game. These are the planned files and formats; they
-apply once the Pocket BupChip is built (design: BUPCHIP_CORE.md).
+user's copy of the game. The Pocket BupChip (from 2.1.1; design:
+BUPCHIP_CORE.md) uses these files and formats.
 
 ```
 /Assets/7800/
@@ -298,6 +298,12 @@ working; 960 distinct instruction addresses ran):
 12.8% of the instructions are conditional.
 
 ## What a Pocket BupChip would need
+
+**Update, 2.1.1:** ARIA (BUPCHIP_CORE.md) meets this. It is ARM state only, at
+28.636 MHz and about 1.38 clocks per instruction, with the firmware ROM and
+RAM in block RAM and the assets in PSRAM behind a 1 KiB cache. The BupChip
+takes about 1,810 ALMs, and the whole 2.1.1 build 14,596 of 18,480 (79%) and
+86 of 308 M10K blocks. The requirements as they were worked out:
 
 | Need | Requirement |
 |---|---|
