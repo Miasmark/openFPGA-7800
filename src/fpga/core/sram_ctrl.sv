@@ -111,10 +111,14 @@ module sram_ctrl (
 	initial sk_rdata = 8'hFF;
 	initial br_rdata = 32'hFFFFFFFF;
 	initial sram_a = 17'd0;
-	initial sram_oe_n = 1'b1;
 	initial sram_we_n = 1'b1;
-	initial sram_ub_n = 1'b1;
-	initial sram_lb_n = 1'b1;
+	// sram_oe_n, sram_ub_n and sram_lb_n have no power-up value on purpose.
+	// They are the pins' fast output registers, at the end of clk_sdram's
+	// worst path (the cartridge request through the arbiter), and powering
+	// them up high makes Quartus invert them there: the 2.1.1 builds lost
+	// their margin to it (+0.05 to +0.11 ns). Low at power-up with WE# high is
+	// a read of address 0, with the FPGA not driving DQ: harmless, and what
+	// 2.0.21 shipped.
 
 localparam [16:0] FB_BASE   = 17'h10000;
 localparam [16:0] SK_BASE   = 17'h18000;
