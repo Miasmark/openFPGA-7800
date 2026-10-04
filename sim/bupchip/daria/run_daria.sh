@@ -6,10 +6,11 @@
 #   ./run_daria.sh ROM.bin [+plusargs...]       (see tb_daria.sv for plusargs)
 #   ./run_daria.sh --build-only
 # Writes $WORK/runs/<rom name>/ (WORK defaults to sim/work/bupchip/daria):
-# calls.csv.gz, slack.csv, frames.csv, summary.txt, pcs.txt.gz, snapshots as
-# PNG, run.log and report.txt. Everything there derives from the game: it
-# stays in sim/work (gitignored). Tested with Verilator 5.040; about 1 minute
-# of wall time per emulated second. Set NAME= to name the run directory.
+# calls.csv.gz, slack.csv, frames.csv, summary.txt, pcs.txt.gz, dtrace.txt.gz
+# (the ARM's ROM data reads; DTRACE=0 leaves it out), snapshots as PNG, run.log
+# and report.txt. Everything there derives from the game: it stays in sim/work
+# (gitignored). Tested with Verilator 5.040; about 1 minute of wall time per
+# emulated second, on one CPU. Set NAME= to name the run directory.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -74,9 +75,10 @@ mkdir -p "$OUT"
 rm -f "$OUT"/snap_*.ppm "$OUT"/snap_*.png
 cd "$WORK"
 start=$(date +%s)
-nice -n 10 "$BIN" +rom="$ROM" +out="$OUT/" "$@" > "$OUT/run.log" 2>&1
+nice -n 10 "$BIN" +rom="$ROM" +out="$OUT/" +dtrace="${DTRACE:-1}" "$@" > "$OUT/run.log" 2>&1
 echo "wall $(( $(date +%s) - start )) s" >> "$OUT/run.log"
 python3 "$HERE/ppm2png.py" "$OUT"/snap_*.ppm 2>/dev/null && rm -f "$OUT"/snap_*.ppm || true
 gzip -f "$OUT/calls.csv" "$OUT/pcs.txt"
+[ ! -f "$OUT/dtrace.txt" ] || gzip -f "$OUT/dtrace.txt"
 python3 "$HERE/summarize.py" "$OUT" > "$OUT/report.txt"
 cat "$OUT/report.txt"
