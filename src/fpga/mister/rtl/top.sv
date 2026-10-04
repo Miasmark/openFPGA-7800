@@ -1216,6 +1216,9 @@ module Atari7800 #(
 		.oe             (cart_2600_DB_oe),
 		.tape_in        (tape_in),
 		.tape_audio     (tape_audio),
+`ifdef POCKET_SUPERCHARGER
+		.tape_rewind    (loading),
+`endif
 		.fix_sc_cs      (fix_sc_cs)
 	);
 

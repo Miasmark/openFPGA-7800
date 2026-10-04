@@ -1,6 +1,7 @@
 # Supercharger without the BIOS: plan
 
-Status: plan, not started. The real-BIOS path stays as it is.
+Status: built (`POCKET_SUPERCHARGER`); hardware test pending. The real-BIOS
+path stays, apart from keeping the tape position through a reset.
 
 ## Why
 
@@ -48,139 +49,141 @@ does.
 Nothing else. The progress bars and tones are cosmetic, and Stella skips
 them as an option.
 
-## Design
+## Design (as built, `POCKET_SUPERCHARGER`)
+
+### The load image
+
+A `.bin` holds one to four 8,448-byte images: 8,192 bytes of pages, then a
+256-byte header. Checked against released games (Dragonstomper's first
+load starts at `$F100` with control byte `$0B`):
+
+| Header byte | Meaning |
+|---|---|
+| 0, 1 | Start address, low and high |
+| 2 | Control byte: bank configuration (bits 4:2), RAM write enable (bit 1), ROM power off (bit 0) |
+| 3 | Page count (at most 24) |
+| 4 | Header checksum: bytes 0-7 sum to `$55` |
+| 5 | Load number |
+| 6, 7 | Loading-bar speed and colour; `$24`, `$02` in every image seen |
+| 16 + j | Page j's place: RAM bank in bits 1:0, page in bits 4:2 |
+| 64 + j | Page j's checksum: the page, its place byte and this sum to `$55` |
+
+Page j of the file is at offset `j * 256`.
 
 ### Which path
 
 | `supercharger.bin` loaded | Path |
 |---|---|
-| Yes | Today's tape path, unchanged: authentic loading screen and timing |
-| No | Fast path, below |
+| Yes | The tape path: authentic loading screen and timing |
+| No | The fast path, below |
 
-The wrapper latches a flag when the firmware slot delivers a full 2 KiB,
-the way it does for the High Score Cart firmware. `mapper_AR` takes the flag
-as an input.
+`mapper_AR` decides by itself: a write into its BIOS ROM from the firmware
+slot sets `real_bios`, which turns the fast path off until the core is
+reloaded.
+
+### The tape keeps its place through a reset
+
+Upstream rewinds the tape to its first image on every reset. Here only a
+cartridge load does (`tape_rewind`, from `top.sv`'s `loading`). A real tape
+stays where it stopped through a power cycle, and compilation tapes rely
+on it: Party Mix and Sweat number every image 0, and the next game is the
+next one on the tape. A reset during a load leaves the tape on the image
+being played, so it plays again from its start. Both paths share this.
 
 ### The stub ROM
 
-The fast path puts a small 6502 program of our own in the BIOS's 2 KiB
-(`ar_rom`, which already exists and is filled from `supercharger.bin` when
-there is one). It becomes `ar_rom`'s power-up contents, and a loaded BIOS
-file overwrites it. It's our own code, written to the behaviour above, and
-MIT. Stella's `scrom.asm` is GPL, so it's a reference, not a source to copy.
+`core/ar_stub.asm`: our own 6502 code, MIT, about 300 bytes. Stella's
+`scrom.asm` is GPL; it was not used. The stub is `ar_rom`'s power-up
+contents (`core/ar_stub.mif`), and a BIOS file overwrites it.
 
 | Entry | What it does |
 |---|---|
-| Reset vector | `SEI`, `CLD`, clear zero page, then load number 0 |
-| `$F800` (multiload) | Copy `$FA` to `$80`, clear page 7 of RAM bank 1, then load |
-| Load | Read `$F900 + load number` (see "Talking to the mapper"); the CPU is held until the RAM is filled |
-| After the load | Read the header's control byte and start address from the mapper; clear `$04-$2C` and `$81-$9D`; set the control byte with the write trick; set A, X, Y, SP; jump to the start |
+| Reset vector | Clear TIA and RAM (load number 0 in `$80`), then load |
+| `$F800` (multiload) | Copy `$FA` to `$80`, then load |
+| Load | Find the image: start at the tape position, take the first whose header load number matches, wrapping at the end of the file. Copy its pages into the RAM. Move the tape position on |
+| Start | Clear TIA `$04-$2C` and RAM `$81-$9D`; A from the RIOT timer, X = `$FF`, Y = 0, SP = `$FF`; set the header's control byte and jump to its start address |
+| Not found | A red screen |
 
-About 150 bytes. It needs no progress screen. A short one could be added
-later, for players who like to see something happen.
+The control byte can switch the ROM out, so the last two instructions
+(`CMP $FFF8` / `JMP start`) run from RAM at `$FA-$FF`, which Stella's own
+BIOS replacement also uses. Until then the stub touches only `$80-$9D`,
+where it is cleared anyway: a multiload game keeps its state above that.
 
 ### Talking to the mapper
 
-The mapper can't read the 2600's RAM (Stella's emulator can), so the stub
-passes values over the bus, the way the Supercharger's write trick does:
+The stub reads the image through a port in the ROM's own address space.
+The pages it occupies hold no stub code, and it exists only on the fast
+path with the ROM mapped at `$F800`:
 
-- **Load number.** The stub reads `$F9xx` (ROM bank, fast path only), where
-  `xx` is the load number. The mapper latches the low byte and starts.
-- **Header values.** While the fast path is active, ROM reads of three fixed
-  addresses (for example `$FFE0-$FFE2`) return the loaded header's control
-  byte and start address instead of ROM.
+| Read | Effect |
+|---|---|
+| `$F9xx` | Image `xx >> 6`; pointer bits 13:8 = `xx & $3F` |
+| `$FAxx` | Pointer bits 7:0 = `xx` |
+| `$FB00` | The image byte at the pointer; the pointer steps on after it |
+| `$FB01` | Bits 5:4 the tape position, bits 1:0 the file's last image |
+| `$FC0x` | The tape position becomes `x` |
 
-Both decodes apply only when the fast-path flag is set and ROM bank 3 is
-mapped in, so a real BIOS never sees them.
-
-### The mapper's fast loader
-
-A small state machine in `mapper_AR`, beside the tape player:
-
-1. **Find the load image.** The `.bin` holds one or more 8,448-byte images
-   (8,192 bytes of pages, then a 256-byte header), at the `tape_offset`
-   stride (`$2100`) the tape player uses. Search the way a tape does: start
-   at the image after the last one loaded (`tape_num`), wrap at the end of
-   the file, and take the first whose header byte 5 (load number) matches.
-   Taking the first match from the start of the file is not enough: Party
-   Mix (3 images) and Sweat (2) number every image 0, and on tape the next
-   one is reached by its position.
-2. **Copy the pages.** For each page `j` below header byte 3 (page count, at
-   most 24):
-   - the header's page map (byte `16 + j`) gives the RAM bank (bits 1:0)
-     and the page (bits 4:2);
-   - read the 256 bytes from the image in SDRAM (`rom_a` / `rom_do`, as
-     the header reads do today);
-   - write them into cartridge RAM.
-
-   Checksums are not checked: the tape path checks them because a tape can
-   be misread, and a file can't.
-3. **Hold the CPU.** `cart2600` already has an output that stalls the 6507
-   (`arm_call_busy`, which drives `top.sv`'s `arm_call_stall` onto RDY). It is
-   idle under `NO_ARM_MAPPER` (Fix A), so the fast loader can drive it while
-   it copies. The stub's read of `$F9xx` then simply completes after the
-   load. No `top.sv` change.
-4. **Then** expose the header bytes and drop the stall.
+The mapper fetches the byte at `image * $2100 + pointer` from SDRAM
+through the tape player's own ROM port (`rom_a` / `rom_do`, a read every
+3.58 MHz `ce`), and holds it for the stub.
 
 ### Writing the RAM
 
-`cart2600` always takes RAM write data from the bus (`cartram_wrdata = d_in`).
-During the fast load the bus carries the stub's stalled fetch, not our data.
+The stub writes each byte the way the BIOS does, with the write trick:
+`CMP $F000,X` puts the byte in the data hold register, and `CMP (PTR),Y`
+makes the target address the fifth access after it. So the RAM sees the
+same kind of writes the tape path makes, through the same `cart2600` and
+`sram_ctrl` path, and nothing outside `mapper_AR` changes. This replaces
+the plan's hardware copier, which would have needed the 6507 held on RDY
+and a write-data mux in `cart2600`.
 
-- **Write data.** One `ifdef` in `cart2600.sv` muxes the AR fast loader's
-  data in instead.
-- **Strobe and address.** These come from `mapper_AR`'s `ram_sel` /
-  `ram_rw` / `ram_a`, driven by the loader during the copy.
-- **Write gating** stays the existing gating (`~phi1 & ~address_change &
-  ~access_taken`): one write per 6507 cycle (838 ns).
+About 20 cycles a byte: a full 6 KiB load takes about 0.1 s, against about
+20 s from tape.
 
-A full 6 KiB load is then about 5 ms instead of about 20 s. `sram_ctrl`
-sees ordinary 2600 RAM writes, one per cycle, well inside its budget.
+Checksums are not checked: a file can't be misread, and some converted
+images have them all 0. The tape path now recomputes them
+(`fix_sc_cs`, MiSTer's "Fix Supercharger Checksums", on for good), so those
+images load there too.
 
 ## Cost
 
-- **Logic:** the loader state machine and the two decodes, an estimated
-  150-300 ALMs. Tape-path logic is unchanged.
+- **Logic:** the port, the pointer and its address adder in `mapper_AR`:
+  about 260 ALMs (12,899, 70%, against 12,630 for Fix A alone). `clk_sdram`
+  worst setup +1.92 ns (seed 2), all corners positive.
 - **Memory:** none new. The stub lives in `ar_rom`.
-- **Vendored files:** `banks2600.sv` (`mapper_AR`) and `cart2600.sv` (the
-  write-data mux), in `ifdef` blocks, recorded in `POCKET_CHANGES.md`.
-- **Tools:** the stub is assembled with `dasm` (already built by
-  `sim/extra_tests.sh`). The assembled `.mif` / `.hex` is committed beside
-  its source, so a core build doesn't need `dasm`.
+- **Vendored files:** `banks2600.sv`, with the `tape_rewind` port through
+  `cart2600.sv` and `top.sv`, in `ifdef` blocks recorded in
+  `POCKET_CHANGES.md`.
+- **Tools:** the stub is assembled with `dasm` (built by
+  `sim/extra_tests.sh`) and `tools/bin2mem.py`. The `.mif` and `.hex` are
+  committed, so a core build needs neither.
 
 ## Tests
 
-**Simulation:**
+**Simulation** (`sim/extra_tests.sh`, "Supercharger"; images from
+`sim/ar_test.py`, each load setting its own background colour and TIA
+tone, which `tb_load +arprobe` logs):
 
-- A synthetic single-load image (header, pages, and a short program that
-  plays a known tone, as `tone_test.py` does) loads with no BIOS and plays
-  its tone.
-- A synthetic multiload image whose load 0 asks for load 1, which plays a
-  different tone.
-- RAM contents checked against the image's pages.
-- The same images with `sim/extra_tests.sh`'s fetched BIOS still take the
-  tape path. This is a long run: the tape takes simulated seconds.
+| Test | Result |
+|---|---|
+| No BIOS: a full 24-page load, RAM dumped from the SRAM model and compared | Running about 0.1 s after start; 0 of 6,144 bytes differ |
+| No BIOS: multiload, load 0 asks for load 1 after 60 frames | Load 1 running 1 ms after the request |
+| No BIOS: two loads both numbered 0, reset after the first | The second loads after the reset |
+| With the BIOS (`AR_TAPE=1`): the same full load and multiload from tape | See below |
 
 **Hardware:**
 
-- A single-load game and a multiload game (Dragonstomper, Escape from the
-  Mindmaster), each:
-  - without `supercharger.bin` (fast path);
-  - with it (tape path, which also confirms that path on hardware for the
-    first time).
+- `ar_multi.bin` and `ar_tape.bin` from `sim/ar_test.py`: red then green;
+  blue, then yellow after a reset.
+- Games, with and without `supercharger.bin`: Fireball (single load),
+  Dragonstomper or Escape from the Mindmaster (multiload), Party Mix (its
+  second game after a reset), Excalibur or Meteroid (checksums all 0).
 
 ## Open points
 
-- **Stella's random A value.** Games shouldn't depend on it, but the real
-  BIOS leaves one. Use a free-running counter.
-- **Load not found.** If a multiload asks for a load number that isn't in
-  the file, the stub should do something visible: hold a coloured screen,
-  as Stella reports an error.
-- **Images without checksums.** Some converted prototypes (Excalibur,
-  Meteroid) have every checksum byte 0. The fast path ignores checksums. The
-  tape path needs MiSTer's "Fix Supercharger Checksums" (`fix_sc_cs`), which
-  the Pocket wrapper ties to 0 today; it recomputes the same values for a
-  good image, so tying it to 1 costs nothing.
 - **Image size.** Some `.bin` dumps are 6,144 bytes (pages only) with no
-  header. Stella supplies a default header for those (from z26). Decide
-  whether to do the same; it is a fixed 256-byte table.
+  header. Stella supplies a default header for those (from z26). Neither
+  path loads them yet; it would be a fixed 256-byte table in the mapper.
+- **What the BIOS leaves in RAM.** The stub uses `$80-$9D` and `$FA-$FF`.
+  The real BIOS's own use of zero page is not known exactly; Stella's
+  replacement uses the same top bytes, and released games run with it.

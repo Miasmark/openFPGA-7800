@@ -42,7 +42,7 @@
 # ========================
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 18.1.1
 set_global_assignment -name PROJECT_CREATION_TIME_DATE "21:31:36  JANUARY 22, 2020"
-set_global_assignment -name LAST_QUARTUS_VERSION "18.1.1 Lite Edition"
+set_global_assignment -name LAST_QUARTUS_VERSION "21.1.1 Lite Edition"
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 set_global_assignment -name PRE_FLOW_SCRIPT_FILE "quartus_sh:apf/build_id_gen.tcl"
 set_global_assignment -name SMART_RECOMPILE ON
@@ -738,6 +738,10 @@ set_global_assignment -name VERILOG_MACRO "NO_BUPCHIP=1"
 set_global_assignment -name VERILOG_MACRO "NO_DDRAM=1"
 set_global_assignment -name VERILOG_MACRO "EXTERNAL_FIRMWARE=1"
 set_global_assignment -name VERILOG_MACRO "EEPROM_NACK_ENDS_READ=1"
+# Supercharger: the tape keeps its place through a reset, and without
+# supercharger.bin a loader stub of our own loads games straight from the
+# file (docs/SUPERCHARGER_FASTLOAD.md). Needs EXTERNAL_FIRMWARE.
+set_global_assignment -name VERILOG_MACRO "POCKET_SUPERCHARGER=1"
 # Cartridge RAM, Flicker Blend frame, SaveKey and BIOS in the SRAM, and no
 # In-System Memory Content Editor (since 2.0.21). sim/run_sim.sh builds the
 # same set; SRAM=0 there builds the block RAM version.

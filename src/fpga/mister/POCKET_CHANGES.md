@@ -191,6 +191,27 @@ It saves about 1,750 ALMs and takes the DPC+ decode off the SRAM's
 `clk_sdram` request path: Fix A in `../../../docs/SRAM_TIMING.md`. Without
 the macro the file is unchanged from upstream.
 
+### Supercharger: tape position and loading without the BIOS (`POCKET_SUPERCHARGER`)
+
+In `rtl/banks2600.sv` (`mapper_AR`), with a `tape_rewind` port through
+`rtl/cart2600.sv` and `rtl/top.sv` (driven by `loading`). Needs
+`EXTERNAL_FIRMWARE`.
+
+- **The tape keeps its place through a reset.** Upstream sends it back to
+  the first image on every reset. Here only a cartridge load does, so a
+  compilation tape (Party Mix, Sweat) reaches its next game after a reset,
+  as on a real Supercharger after a power cycle.
+- **No BIOS file: a loader stub of our own.** The BIOS ROM's power-up
+  contents are `../core/ar_stub.mif` (source `../core/ar_stub.asm`). It
+  reads the `.bin` through a small port in the ROM's address space
+  (`$F900-$FCFF`) and writes the RAM with the Supercharger's write trick, as
+  the BIOS does: a full load takes about 0.1 s. A `supercharger.bin` loaded
+  into the ROM turns the port off for good, and the tape path runs as
+  upstream.
+
+`../../../docs/SUPERCHARGER_FASTLOAD.md` has the design. Without the macro
+the files are unchanged from upstream.
+
 ## Updating
 
 Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in

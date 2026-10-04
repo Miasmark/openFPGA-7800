@@ -1059,7 +1059,10 @@ Atari7800 main
 	.decomb       (decomb),
 	.mapper       (6'd0),
 	.tape_in      (2'b00),
-	.fix_sc_cs    (1'b0),
+	// Recompute the tape's checksums (MiSTer's "Fix Supercharger
+	// Checksums", always on): converted images with every checksum 0
+	// (Excalibur, Meteroid) then load, and a good image's are unchanged.
+	.fix_sc_cs    (1'b1),
 
 	// Palette loading (not used)
 	.pal_load     (1'b0),

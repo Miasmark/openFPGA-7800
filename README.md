@@ -60,8 +60,12 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   ([docs/BUPCHIP.md](docs/BUPCHIP.md), "Files the user supplies on the
   Pocket", has the tool and the layout). Without either, Souper games run
   without the extra music channel.
-- 2600 Starpath Supercharger games, given the Supercharger BIOS as a file.
-  Untested on hardware.
+- 2600 Starpath Supercharger games (`.bin` tape images, 8,448 bytes a load).
+  With the Supercharger BIOS as a file they load as from tape, loading
+  screen and all; without it a loader of the core's own loads them in about
+  0.1 s ([docs/SUPERCHARGER_FASTLOAD.md](docs/SUPERCHARGER_FASTLOAD.md)).
+  The tape keeps its place through a reset, so a compilation tape (Party
+  Mix) loads its next game after one.
 - Settings (the Pocket shows at most 16, so related ones share an entry):
   - *Difficulty*: both difficulty switches.
   - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
@@ -213,7 +217,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | SaveKey (Triple Punch) | Works from 2.0.8: shows "Save SK", saves, and the high score is back after reloading. 2.0.7 showed "Save ER" (EEPROM model bug on reads, and a zero-filled file); delete an all-zero `savekey.sav` left by older versions |
 | Triple Punch, HSC and SaveKey together | Header asks for both (2.0.6): uses the HSC when present, the SaveKey with the HSC off |
 | High score cart (Dig Dug, Food Fight) | Works, scores persist, one personalisation for all games (2.0.4, shared `hsc.sav`). From 2.0.7 the firmware comes from the user's file; works with `hsc.a78` |
-| Supercharger BIOS file | New in 2.0.7; not tested on hardware |
+| Supercharger, BIOS file | Fireball and Dragonstomper load from tape (Fix A test build, after 2.1.1). Party Mix plays its first game; its others need the tape position kept through a reset (next build) |
 | PAL games (Choplifter, Mario Bros.) | 2.0.9: correct speed, but the picture sat low and was cut off at the bottom (224-line display mode). 2.0.10: whole screen shown; colours match comparison screenshots |
 | Show Overscan | Before 2.0.10 it shifted the picture down without showing more lines. 2.0.10: fixed for NTSC (242-line modes); Triple Punch's bonus timer shows in full. PAL with it on was still cut off, because a 9th and 10th display mode are more than the Pocket accepts. 2.0.11: PAL ignores the setting (274 lines already show everything); confirmed on hardware |
 | Settings menu | 2.0.12 showed only its first 12 entries; 2.0.14 to 2.0.16 refused to load ("Load error in 'interact'"). 2.0.17 loads, all 15 entries shown: 16 entries at most, and the whole menu kept to 49 list options (see docs/DEVELOPING.md) |
@@ -338,7 +342,7 @@ files go in `/Assets/7800/common/`:
 |---|---|---|---|
 | `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. Only one can be installed: to boot PAL carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
-| `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games do not load |
+| `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games load through the core's own loader, without the tape loading screen |
 | `bupchip.bin` | BupChip firmware (CoreTone), from MiSTer's `bupchip.hex`: `python3 tools/hex2bin.py bupchip.hex > bupchip.bin` ([docs/BUPCHIP.md](docs/BUPCHIP.md)) | 7,824 bytes (CRC32 `95b8b4f8`); up to 16 KiB | Souper games run without the BupChip's music |
 
 The core loads these when it starts. From 2.0.16 they are no longer listed

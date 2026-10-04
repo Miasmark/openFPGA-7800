@@ -123,6 +123,9 @@ module cart2600
 	// Tape Signals
 	output          tape_audio, // Tape audio output
 	input    [1:0]  tape_in,    // ADC tape input
+`ifdef POCKET_SUPERCHARGER
+	input           tape_rewind, // a cartridge load: Supercharger tape back to its start
+`endif
 	input           fix_sc_cs   // Fix Supercharger Checksums menu option
 );
 	`define NUM_MAPPERS BANKEND
@@ -1296,6 +1299,9 @@ module cart2600
 		.rom_size   (rom_size[18:0]),
 		.audio_data (tape_audio),
 		.tape_in    (tape_in),
+`ifdef POCKET_SUPERCHARGER
+		.tape_rewind(tape_rewind),
+`endif
 		.fix_sc_cs  (fix_sc_cs)
 	);
 

@@ -136,7 +136,7 @@ module tb_load;
 	);
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
-	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0, fire_at = 0, fire_at2 = 0;
+	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0, fire_at = 0, fire_at2 = 0, reset_at = 0;
 	logic capture = 0, old_vs2 = 0, old_hb2 = 1;
 	logic [23:0] fb [0:299][0:399];
 	always @(posedge clk_sys) begin
@@ -172,6 +172,7 @@ module tb_load;
 	wire [15:0] filt_l, filt_r;
 	audio_filter afilt (.clk(clk_sys), .in_l(AUDIO_L), .in_r(AUDIO_R), .out_l(filt_l), .out_r(filt_r));
 	int wav_raw, wav_filt, wav_ms = 0;
+	string ar_dump;
 	logic recording = 0;
 	int rec_div = 0;
 	always @(posedge clk_sys) if (recording) begin
@@ -269,6 +270,34 @@ module tb_load;
 		if (!old_wr41 && !dut.RW && dut.bios_addr == 16'h0041) main_writes <= main_writes + 1;
 		old_wr4k <= !dut.RW && dut.bios_addr == 16'h4000;
 		if (!old_wr4k && !dut.RW && dut.bios_addr == 16'h4000) audf_writes <= audf_writes + 1;
+	end
+
+	// ---------------- Supercharger probe (+arprobe) ----------------
+	// Tape starts and ends (mapper_AR's playback, with the image it plays),
+	// and 2600 writes to COLUBK and AUDF0 that change the value (ar_test.py's
+	// loads each set their own).
+	logic ar_probe = 1'b0, old_play = 1'b0, old_tiawr = 1'b0;
+	logic [7:0] last_colubk = 8'hxx, last_audf0 = 8'hxx, tia_d = 0;
+	logic [5:0] tia_a = 0;
+	initial ar_probe = $test$plusargs("arprobe");
+	always @(posedge clk_sys) if (ar_probe && dut.tia_mode) begin
+		old_play <= dut.main.cart2600.mapper_AR.playback;
+		if (dut.main.cart2600.mapper_AR.playback != old_play)
+			$display("AR %0d ms: tape %0s, image %0d", $time / 1000000,
+				old_play ? "stops" : "starts", dut.main.cart2600.mapper_AR.tape_num);
+		// Logged at the end of the write cycle, when the data is settled.
+		old_tiawr <= !dut.RW && !dut.bios_addr[12] && !dut.bios_addr[7];
+		tia_a <= dut.bios_addr[5:0]; tia_d <= dut.main.write_DB;
+		if (old_tiawr && !(!dut.RW && !dut.bios_addr[12] && !dut.bios_addr[7])) begin
+			if (tia_a == 6'h09 && tia_d !== last_colubk) begin
+				last_colubk <= tia_d;
+				$display("AR %0d ms: COLUBK = $%02x", $time / 1000000, tia_d);
+			end
+			if (tia_a == 6'h17 && tia_d !== last_audf0) begin
+				last_audf0 <= tia_d;
+				$display("AR %0d ms: AUDF0 = %0d", $time / 1000000, tia_d);
+			end
+		end
 	end
 
 	// ---------------- save device probe ----------------
@@ -839,6 +868,16 @@ module tb_load;
 					joy0[4] = 1'b0;
 				end
 			join_none
+			// +resetat=MS: a 10 ms reset (the Pocket's Reset) MS into the run.
+			if ($value$plusargs("resetat=%d", reset_at)) fork
+				begin
+					repeat (longint'(14318) * reset_at) @(posedge clk_sys);
+					reset_in = 1'b1;
+					$display("RESET at %0d ms", $time / 1000000);
+					repeat (longint'(14318) * 10) @(posedge clk_sys);
+					reset_in = 1'b0;
+				end
+			join_none
 			// +image2=FILE +image2at=MS: load a second cart MS into the run,
 			// as picking another game on the Pocket does (no reset_in).
 			if ($value$plusargs("image2=%s", image2_path)) fork
@@ -884,6 +923,14 @@ module tb_load;
 			recording = 0;
 			$fclose(wav_raw); $fclose(wav_filt);
 			$display("WAV recorded %0d ms", wav_ms);
+			// +ardump=FILE: the Supercharger's 6 KiB RAM (banks 0-2) as the
+			// SRAM holds it, for ar_test.py check.
+			if ($value$plusargs("ardump=%s", ar_dump)) begin
+				automatic int fd_d = $fopen(ar_dump, "wb");
+				for (int i = 0; i < 6144; i++)
+					$fwrite(fd_d, "%c", i[0] ? sram_chip.mem[i >> 1][15:8] : sram_chip.mem[i >> 1][7:0]);
+				$fclose(fd_d);
+			end
 			$display("PROBE NMIs %0d, main-loop writes to $41 %0d, POKEY AUDF1 writes %0d",
 				nmis, main_writes, audf_writes);
 			$display("DEVICES hsc_en %0d use_sk %0d; HSC RAM writes %0d reads %0d, HSC ROM reads %0d; SaveKey SCL edges %0d, EEPROM bytes written %0d",

@@ -10,6 +10,9 @@
 #   pokey4000    POKEY at $4000 (type 0x0001, the retail location): same
 #   savekey      SaveKey on port 2 and its save slot
 #   firmware     HSC firmware / Supercharger BIOS data slots
+#   supercharger Supercharger loads without the BIOS (POCKET_SUPERCHARGER's
+#                stub), from ar_test.py's images; AR_TAPE=1 adds the
+#                tape path with the BIOS (long: about 20 simulated seconds)
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$HERE/work}"
@@ -114,4 +117,25 @@ echo "  Both files loaded (expect 0 bytes differ, HSC_EN 1, save intact):"
 	| grep -E "FIRMWARE|HSC_EN|TONE|SAVE after"
 echo "  HSC firmware as hsc.a78 (expect its header skipped: 0 bytes differ from the payload, HSC_EN 1):"
 "$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=hsc.a78 | grep -E "FIRMWARE|HSC_EN"
+cd - >/dev/null
+
+echo "-- Supercharger without the BIOS: the core's loader stub (POCKET_SUPERCHARGER)"
+mkdir -p "$X/ar"; ln -sfn "$WORK/rtl" "$X/ar/rtl"
+cd "$X/ar"
+python3 "$HERE/ar_test.py" multi > ar_multi.bin
+python3 "$HERE/ar_test.py" tape > ar_tape.bin
+python3 "$HERE/ar_test.py" full > ar_full.bin
+echo "  Full 24-page load (expect magenta \$54 / AUDF0 5 within about 0.1 s, 0 RAM bytes differ):"
+"$WORK/obj_load/vtb" +image=ar_full.bin +arprobe +wav=400 +ardump=ram.bin | grep -E "^AR "
+python3 "$HERE/ar_test.py" check ram.bin ar_full.bin
+echo "  Multiload (expect red \$44 / AUDF0 7, then at about 1 s the stub's clear and green \$c4 / AUDF0 14):"
+"$WORK/obj_load/vtb" +image=ar_multi.bin +arprobe +wav=1500 | grep -E "^AR "
+echo "  Two loads numbered 0, reset after the first (expect blue \$84 / AUDF0 3, then after the reset yellow \$1e / AUDF0 20):"
+"$WORK/obj_load/vtb" +image=ar_tape.bin +arprobe +wav=1000 +resetat=500 | grep -E "^AR |RESET"
+if [ "${AR_TAPE:-0}" = 1 ]; then
+	echo "  With the BIOS, from tape: full load (expect 0 RAM bytes differ) and multiload (expect red, then green):"
+	"$WORK/obj_load/vtb" +image=ar_full.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=22000 +ardump=ram_tape.bin | grep -E "^AR "
+	python3 "$HERE/ar_test.py" check ram_tape.bin ar_full.bin
+	"$WORK/obj_load/vtb" +image=ar_multi.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=12000 | grep -E "^AR "
+fi
 cd - >/dev/null
