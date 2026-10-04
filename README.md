@@ -187,14 +187,15 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.1.1) meets timing on all four corners: worst setup
-slack +0.44 ns (on clk_sdram, from MARIA's DMA and the 6502's halt through
-the SRAM controller's arbiter into the SRAM's byte-lane pins), worst hold
-slack +0.12 ns. It uses 14,596 of 18,480 ALMs (79%; the BupChip about
-1,810 of them), 86 of 308 M10K blocks and 12 DSP blocks. Setup slack on
-that path moves by a nanosecond or so between builds with placement, and
-the fuller device leaves it less room: 2.0.21 had +1.32 ns. A structural
-fix in the SRAM controller is planned. The 2.0.21 build: worst setup
+The Quartus build (2.1.2) meets timing on all four corners: worst setup
+slack +1.92 ns (on clk_sdram, the SRAM request path), worst hold slack
++0.04 ns. It uses 12,899 of 18,480 ALMs (70%), 78 of 308 M10K blocks and 12
+DSP blocks. 2.1.2 leaves out the 6507-side logic of the ARM cartridge
+schemes, which can't run without the ARM: about 1,750 ALMs, and the slowest
+leg of that path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md), Fix A). 2.1.1
+had +0.44 ns and 79%; a structural fix in the SRAM controller (Fix B) is
+still planned before 2600 ARM cartridges come back.
+The 2.0.21 build: worst setup
 slack +1.32 ns, worst hold +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
@@ -213,6 +214,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Midnight Mutants, Commando, Dig Dug sprites | No corruption (holey DMA fix) |
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct. Also a full match with upstream's POKEY and the adapter fix (2.0.21-test); before the fix the music fell to near silence |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
+| 2600 after Fix A (2.1.2 test build) | Pitfall II (DPC), Crystal Castles, Omega Race and other 2600 games work |
 | Commando POKEY music | Works: typing intro, title theme and attract music. Needs a dump whose header flags the POKEY (see below) |
 | SaveKey (Triple Punch) | Works from 2.0.8: shows "Save SK", saves, and the high score is back after reloading. 2.0.7 showed "Save ER" (EEPROM model bug on reads, and a zero-filled file); delete an all-zero `savekey.sav` left by older versions |
 | Triple Punch, HSC and SaveKey together | Header asks for both (2.0.6): uses the HSC when present, the SaveKey with the HSC off |
