@@ -169,7 +169,8 @@ tone, which `tb_load +arprobe` logs):
 | No BIOS: a full 24-page load, RAM dumped from the SRAM model and compared | Running about 0.1 s after start; 0 of 6,144 bytes differ |
 | No BIOS: multiload, load 0 asks for load 1 after 60 frames | Load 1 running 1 ms after the request |
 | No BIOS: two loads both numbered 0, reset after the first | The second loads after the reset |
-| With the BIOS (`AR_TAPE=1`): the same full load and multiload from tape | See below |
+| With the BIOS (`AR_TAPE=1`): the full load from tape | Running at 16.8 s, after the BIOS's descending loading tone; 0 of 6,144 bytes differ |
+| With the BIOS: the multiload from tape | Load 0 running at 3.3 s; load 1 at 7.1 s, after its own pass of the tape |
 
 **Hardware:**
 
