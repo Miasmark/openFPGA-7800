@@ -134,7 +134,7 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 **ARIA** ([docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md)), a clean-room,
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
-1,830 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
+1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
 the whole core uses 79% of the FPGA. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
@@ -183,10 +183,15 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.21) meets timing on all four corners: worst setup
-slack +1.32 ns (on clk_sdram, from the bus into the SRAM controller's slot
-choice), worst hold slack +0.06 ns (setup slack moves by a nanosecond or so
-between builds with placement).
+The Quartus build (2.1.1) meets timing on all four corners: worst setup
+slack +0.44 ns (on clk_sdram, from MARIA's DMA and the 6502's halt through
+the SRAM controller's arbiter into the SRAM's byte-lane pins), worst hold
+slack +0.12 ns. It uses 14,596 of 18,480 ALMs (79%; the BupChip about
+1,810 of them), 86 of 308 M10K blocks and 12 DSP blocks. Setup slack on
+that path moves by a nanosecond or so between builds with placement, and
+the fuller device leaves it less room: 2.0.21 had +1.32 ns. A structural
+fix in the SRAM controller is planned. The 2.0.21 build: worst setup
+slack +1.32 ns, worst hold +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
 core clock, which gives those paths 10 ns or more (from 2.0.14). 2.0.21

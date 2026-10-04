@@ -753,11 +753,13 @@ set_global_assignment -name VERILOG_MACRO "POCKET_BUPCHIP=1"
 # screen (core/bupchip/bup_status_osd.sv). Releases leave it out
 # (docs/DEVELOPING.md, "Before a release"); sim/run_sim.sh follows this file.
 # Fitter seed. With the BupChip the device is 79% full and clk_sdram's worst
-# path (MARIA / 2600 mapper address into sram_ctrl's pad registers) is
-# placement-sensitive: seeds 1, 2 and 3 gave +0.56, +1.04 and +1.26 ns, the
-# build wants +1.0 (docs/BUPCHIP_CORE.md, step 5). Check it again whenever
-# the design changes; another seed may then do better.
-set_global_assignment -name SEED 3
+# path (MARIA's DMA / the 6502's halt through sram_ctrl's arbiter into the
+# SRAM's byte-lane pad registers) is placement-sensitive. The 2.1.1 release
+# build: seeds 1, 2 and 3 gave +0.26, +0.44 and +0.28 ns (the BUP_DEBUG test
+# builds had +0.65 to +1.26). A structural fix belongs in sram_ctrl
+# (docs/BUPCHIP_CORE.md, step 5). Check it again whenever the design
+# changes; another seed may then do better.
+set_global_assignment -name SEED 2
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister
