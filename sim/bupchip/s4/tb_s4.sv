@@ -807,6 +807,10 @@ module tb_s4;
 		pll_locked = 1;
 		if (fw_file != "") begin
 			download(1);
+			// FWEND, and a partial last word, leave when the capture's window
+			// closes, 64 clk_sys after the flag falls (bup_capture.sv): wait
+			// for fw_loaded, or 200 clk_sys for a file too short to set it.
+			for (int i = 0; i < 200 && !dut.fw_loaded; i++) @(posedge clk_sys);
 			repeat (40) @(posedge clk_arm);
 			$display("firmware slot: %0d bytes in %.3f ms; fw_loaded %0d", fw_n, ms(t_dl_end - t_dl_start), dut.fw_loaded);
 			check_rom();
