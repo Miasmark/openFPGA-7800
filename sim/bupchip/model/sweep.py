@@ -19,7 +19,9 @@ Per song it prints the work in MIPS (average, busiest 0.1 s = 24 batches,
 worst batch) and where the peaks are, and the clock ARIA needs at 100% busy:
 S1 at the song's measured CPI band (1.37-1.47, here 1.47, the highest any
 song showed on the RTL) and S3 at 1.03. --ref DIR compares the first 4 s of
-PCM with DIR/song<N>.pcm where present (aligned on the first nonzero frame).
+PCM with DIR/song<N>.pcm where present (aligned on the first nonzero frame);
+--pcm DIR writes every song's frames from its command, as a long reference
+for the RTL testbenches (sim/bupchip/s1/pcm_check.py).
 Needs the unicorn package (sim/bupchip/setup_dev.sh puts it in
 sim/work/bupchip/venv). Game data and outputs stay in sim/work/.
 """
@@ -200,6 +202,7 @@ def main():
     ap.add_argument('--max-secs', type=float, default=600.0)
     ap.add_argument('--csv', help='write per-batch instruction counts to DIR/song<N>.csv')
     ap.add_argument('--ref', help='compare the first 4 s of PCM with DIR/song<N>.pcm')
+    ap.add_argument('--pcm', help='write each song\'s frames, from its command, to DIR/song<N>.pcm')
     ap.add_argument('--fw', default=FW_HEX)
     a = ap.parse_args()
     if not os.path.exists(a.fw):
@@ -231,6 +234,11 @@ def main():
             end += '; PCM vs ref: ' + compare_ref(s.p.frames[s.prefill:], os.path.join(a.ref, 'song%d.pcm' % n))
         print('%-4d %7.1fs  %7.2f %7.2f %7.2f %7.2f  %8.2f s     %8.2f s      %6.2f %6.2f  %s  [%.0f s]' % (
             n, secs, avg, peak, worst, first, peak_at, worst_at, worst * CPI_S1, worst * CPI_S3, end, time.time() - t0), flush=True)
+        if a.pcm:
+            os.makedirs(a.pcm, exist_ok=True)
+            fr = s.p.frames[s.prefill:]
+            with open(os.path.join(a.pcm, 'song%d.pcm' % n), 'wb') as f:
+                f.write(struct.pack('<%dI' % len(fr), *fr))
         if a.csv:
             os.makedirs(a.csv, exist_ok=True)
             with open(os.path.join(a.csv, 'song%d.csv' % n), 'w') as f:

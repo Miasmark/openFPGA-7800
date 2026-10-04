@@ -424,7 +424,20 @@ The whole iteration is 22 instructions:
 | 16 looped voices (synthetic) | Needs 17.92 MHz, 83% of 21.477 [model] |
 | Song-start batch | Absorbed by the FIFO |
 
-**FIFO level at 21.477 MHz.** The lowest level on Misery_F is 657 frames (NTSC) and 655 frames (PAL), about 13.7 ms [model].
+**FIFO level at 21.477 MHz.** The lowest level on Misery_F is 657 frames (NTSC) and 655 frames (PAL), about 13.7 ms, over its first 4 s [model]; over its whole length it is 614 (see below).
+
+**Full-length sweep (2026-10-04).** The figures above come from each song's first 4 s. `sim/bupchip/model/sweep.py` (Unicorn, about 1 s of wall time per second of music) played all 32 songs of Rikki & Vikki from their commands until each ended, or its whole machine state repeated (an exact loop), or 10 minutes. Two songs peak later than their opening:
+
+| Song | Busiest 0.1 s / worst batch, MIPS (first 4 s) | Whole length | Where | Lowest clock without underrun, S1 / S3 | Lowest FIFO level at 28.636 (S1) / 21.477 (S3) |
+|---|---|---|---|---|---|
+| 13 Misery_F | 15.58 / 16.69 | 17.61 / 19.04 | 32 s; loops every 49.1 s from 38.9 s | 23.78 / 17.47 MHz [model] | 620 [model], **639 [RTL, 40 s]** / 614 [model] |
+| 24 Never_Lose | 1.6 / 1.9 | 17.68 / 18.34 | 17 s; still changing at 10 min | **23.98 / 17.55 MHz** [model] | 643 [model], **648 [RTL, 20 s]** / 647 [model] |
+| the other 30 | | ≤ 14.4 busiest 0.1 s | | | |
+
+- Never_Lose, not Misery_F, sets the lowest clock: 24.0 MHz for S1 (28.636 MHz has 19% to spare) and 17.6 MHz for S3 (21.477 MHz has 22% to spare). Both stay inside the 16-voice bound.
+- Single batches at Misery_F's peak need up to 29.0 MHz on S1 and 22.5 MHz on S3 [model]; the FIFO absorbs them.
+- The RTL runs (`sim/bupchip/s4/run_s4.sh`, the full download, PSRAM and cache path on S1) give 0 underflows and PCM bit-identical to the sweep's for all 1,919,800 and 959,800 song frames; the sweep matches MiSTer's references exactly where they exist (the first 4 s of songs 6, 9, 10, 13, 14 and 30).
+- Step 9's throttle test should use Never_Lose and Misery_F past their peaks, not Misery_F's opening.
 
 ## Datapath blocks
 
