@@ -21,7 +21,9 @@
 #      tick's crossing), run_bounds.sh (the asset window's bounds through the
 #      whole wrapper), run_pophead.sh (pushes into the empty PCM FIFO at every
 #      tick phase, a forced tick on that clock, a FAULT write muting the
-#      output, and a wrapper without tick_hold that must fail);
+#      output, and a wrapper without tick_hold that must fail), run_xing.sh
+#      (the command, frame, tick and pause crossings, synchronous and
+#      asynchronous clk_arm, and three mutants that must fail);
 #   4. with the firmware, game-free, on a synthetic ARSC block
 #      (../verif/make_synth_arsc.py, its cartridge type set to Souper) and the
 #      firmware slot: song 0 for 2 s with PCM identical to the Python model's
@@ -67,7 +69,11 @@ mkdir -p "$WORK/synth" "$WORK/logs"
 WORK="$(cd "$WORK" && pwd)"
 export WORK
 REFDIR="${REFDIR:-$HERE/../../work/bupchip/ref}"
-GAME="${1:+$(realpath "$1")}"
+GAME=
+if [ -n "$1" ]; then
+	[ -f "$1" ] || { echo "check.sh: no $1" >&2; exit 2; }
+	GAME="$(realpath "$1")"
+fi
 JOBS="${JOBS:-3}"
 SECS="${SECS:-4}"
 SONGS="${SONGS:-13 14 9 30}"
@@ -126,6 +132,8 @@ job "stress: the asset window's bounds through the wrapper (stress/run_bounds.sh
 	"$WORK/logs/stress_bounds.log" env WORK="$WORK/stress" "$ST/run_bounds.sh"
 job "stress: pushes into the empty PCM FIFO, forced tick, FAULT mute, no-tick_hold mutant (stress/run_pophead.sh)" \
 	"$WORK/logs/stress_pophead.log" env WORK="$WORK/stress" "$ST/run_pophead.sh"
+job "stress: command, frame, tick and pause crossings, three mutants (stress/run_xing.sh)" \
+	"$WORK/logs/stress_xing.log" env WORK="$WORK/stress" "$ST/run_xing.sh"
 
 # ---- 4 --------------------------------------------------------------------------------------
 if [ -f "$HEX" ]; then

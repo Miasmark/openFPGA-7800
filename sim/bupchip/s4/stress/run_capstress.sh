@@ -11,7 +11,9 @@
 # after a cartridge's ends, while the cartridge's tail WRITE and END still
 # wait (README.md, "Findings" 1: bup_capture sent FWWRITE at once and broke
 # the 5-clock spacing; it now queues it). Last, +fwrise: the firmware's first
-# byte in the clock fw_download rises (finding 4: that byte was dropped).
+# byte in the clock fw_download rises (finding 4: that byte was dropped),
+# and +fwfall: the last byte in the clock it falls (a tail FWWRITE used to
+# rewrite that word with a zero byte).
 #   ./run_capstress.sh
 # Environment: N (downloads per run, default 300), CAPTURE (another
 # bup_capture.sv to test, e.g. a fix), WORK (default
@@ -55,6 +57,7 @@ run() {         # run NAME EXPECT(pass|lost|overrun|cross) plusargs...
 	esac
 	# +fwrise runs must have had downloads with byte 0 in the rising clock
 	case "$*" in *+fwrise*) grep -Eq "; [1-9][0-9]* firmware downloads with byte 0" "$log" || r=0 ;; esac
+	case "$*" in *+fwfall*) grep -Eq "; [1-9][0-9]* with the last byte in the clock it fell" "$log" || r=0 ;; esac
 	if [ "$r" = 1 ]; then echo "PASS $name ($exp): ${res#result: }"
 	else echo "FAIL $name ($exp): ${res#result: } ($log)"; ok=0; fi
 	grep -E "^capture stress" "$log" | sed 's/^/  /'
@@ -75,5 +78,7 @@ run xstream_15x   pass +seed=13 +ratio=15 +xstream
 run xstream_async pass +seed=14 +async +arm_ps=23529 +armjit=3000 +xstream
 run fwrise_2x     pass +seed=15 +fwrise
 run fwrise_xstream pass +seed=16 +ratio=15 +xstream +fwrise
+run fwfall_2x     pass +seed=17 +fwfall
+run fwfall_15x_pal pass +seed=18 +ratio=15 +pal +fwfall
 [ "$ok" = 1 ] && echo "run_capstress.sh: all passed" || echo "run_capstress.sh: FAILED"
 [ "$ok" = 1 ]

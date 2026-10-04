@@ -53,6 +53,8 @@
 //           first byte comes as early as the loader allows: the case directed
 //   +fwrise half the firmware downloads present their first byte in the
 //           clock fw_download rises
+//   +fwfall half the firmware downloads present their last byte in the
+//           clock fw_download falls (fw_valid high with fw_download low)
 // The last line, "result: ...", is for run_capstress.sh.
 //
 // SPDX-License-Identifier: MIT
@@ -107,6 +109,7 @@ module tb_capstress;
 
 	// ---- the path ------------------------------------------------------------------------------------
 	logic        cart_dl = 0, cart_dl_q = 0, fw_dl = 0, ld_wr = 0;
+	logic        fwv_extra = 0;	// +fwfall: fw_valid in the clock fw_download falls
 	logic [24:0] ld_addr = 0;
 	logic  [7:0] ld_data = 0;
 	always @(posedge clk_sys) cart_dl_q <= cart_dl;
@@ -118,7 +121,7 @@ module tb_capstress;
 		.clk(clk_sys),
 		.load_start(cart_dl && !cart_dl_q), .load_addr(ld_addr), .load_valid(ld_wr && cart_dl),
 		.load_data(ld_data), .load_end(!cart_dl && cart_dl_q),
-		.fw_download(fw_dl), .fw_valid(ld_wr && fw_dl),
+		.fw_download(fw_dl), .fw_valid((ld_wr && fw_dl) || fwv_extra),
 		.msg_type, .msg_pl, .msg_tog, .seq_err, .lost);
 
 	wire        asset_ready, fw_loaded, rom_we, overrun;
@@ -295,8 +298,8 @@ module tb_capstress;
 
 	// ---- the downloads ---------------------------------------------------------------------------------
 	int     ndl = 300, maxblock = 70000, seed = 1;
-	bit     b2bfw = 0, prev_b2b = 0, prev_fw = 0, xstream = 0, fwrise = 0;
-	longint n_fwrise = 0;
+	bit     b2bfw = 0, prev_b2b = 0, prev_fw = 0, xstream = 0, fwrise = 0, fwfall = 0;
+	longint n_fwrise = 0, n_fwfall = 0;
 	longint n_checks = 0, n_bad = 0, n_cart = 0, n_fw = 0, n_b2b = 0, n_noblock = 0;
 	longint pwr0 = 0, romwr0 = 0;
 
@@ -366,6 +369,7 @@ module tb_capstress;
 		b2bfw = $test$plusargs("b2bfw");
 		xstream = $test$plusargs("xstream");
 		fwrise = $test$plusargs("fwrise");
+		fwfall = $test$plusargs("fwfall");
 		if (xstream) b2bfw = 1;
 		void'($urandom(seed));
 		repeat (20) @(posedge clk_sys);
@@ -406,7 +410,21 @@ module tb_capstress;
 					loader_send(1, n, 1);
 				end else begin
 					repeat (prev_b2b && xstream ? 1 : 2 + $urandom_range(20)) @(posedge clk_sys);
-					loader_send(1, n);
+					if (fwfall && n > 1 && n <= 16384 && $urandom_range(1) == 0) begin
+						// the last byte in the clock fw_download falls
+						n_fwfall++;
+						loader_send(1, n - 1);
+						repeat (3) @(posedge clk_sys);
+						ld_wr <= 1;
+						ld_addr <= 25'(n - 1);
+						ld_data <= fwf[n - 1];
+						fw_dl <= 0;
+						fwv_extra <= 1;
+						@(posedge clk_sys);
+						ld_wr <= 0;
+						fwv_extra <= 0;
+					end else
+						loader_send(1, n);
 				end
 				repeat (1 + $urandom_range(3)) @(posedge clk_sys);
 				fw_dl <= 0;
@@ -451,8 +469,8 @@ module tb_capstress;
 		$display("capture stress, clk_arm %s%s: %0d downloads (%0d cartridges, %0d of them without a block, %0d followed straight by the next; %0d firmware), %0d checked, %0d wrong",
 			async_ ? "asynchronous" : ratio == 15 ? "1.5 x clk_sys" : "2 x clk_sys", pal ? ", PAL" : "",
 			ndl, n_cart, n_noblock, n_b2b, n_fw, n_checks, n_bad);
-		$display("  %0d PSRAM writes, %0d ROM writes; reader: %0d reads checked, %0d wrong, %0d dropped at a hold; %0d firmware downloads with byte 0 in the clock fw_download rose",
-			n_pwr, n_romwr, n_rd, rd_bad, rd_drop, n_fwrise);
+		$display("  %0d PSRAM writes, %0d ROM writes; reader: %0d reads checked, %0d wrong, %0d dropped at a hold; %0d firmware downloads with byte 0 in the clock fw_download rose; %0d with the last byte in the clock it fell",
+			n_pwr, n_romwr, n_rd, rd_bad, rd_drop, n_fwrise, n_fwfall);
 		$display("  seq_err %0d, byte order %0d, lost %0d (messages too close: %0d within a download stream, %0d across streams), overrun %0d",
 			seq_err, cap.seq_sim, lost, n_lost_s, n_lost_x, overrun);
 `ifndef PSRAM_VAR

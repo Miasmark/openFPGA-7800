@@ -235,7 +235,9 @@ module bup_capture (
 			end
 		end
 		if (fw_fall) begin
-			p_fwtail <= fw_have;
+			// A byte in the falling clock counts: it either completed a word
+			// (sent above, no tail) or left a partial one.
+			p_fwtail <= f_byte ? !f_word : fw_have;
 			p_fwend <= 1'b1;
 		end
 	end

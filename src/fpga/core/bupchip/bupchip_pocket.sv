@@ -65,7 +65,8 @@
 //              [23] command overflow [22] PCM overflow [21] PCM underflow
 //              [20] muted        [19:12] fault code [11] capture error
 //              [10:0] lowest PCM level since the FIFO first reached its
-//                     watermark (the boot's prefill)
+//                     watermark (the boot's prefill), saturating at 2,047
+//                     (only reachable with PCM_DEPTH above 1,024)
 //
 // The flags are sticky until the next hold. Shadow counters: command level
 // +1 on cmd_valid, -1 on a read of 0x04 while not empty, 0 on a flush;
@@ -363,9 +364,10 @@ module bupchip_pocket #(
 	always_ff @(posedge clk_sys) cap_err_sys <= cap_seq_err | cap_lost;
 	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
 
+	wire [10:0] sh_min11 = (sh_min > LW'(2047)) ? 11'h7FF : 11'(sh_min);
 	assign dbg_status = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
 		sh_cmd_ovf, sh_pcm_ovf, sh_pcm_unf, muted, fault_code,
-		cap_err_a[1] | wr_overrun, 11'(sh_min)};
+		cap_err_a[1] | wr_overrun, sh_min11};
 	assign dbg_halt_pc = halt_pc;
 `endif
 endmodule

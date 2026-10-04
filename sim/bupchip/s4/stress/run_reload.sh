@@ -26,7 +26,7 @@ set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 HEX="$(cd "$HERE/../../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
 WORK="${WORK:-$HERE/../../../work/bupchip/s4stress}"
-[ -f "$HEX" ] || { echo "run_reload.sh: no firmware at $HEX: skipped"; exit 0; }
+[ -f "$HEX" ] || { echo "run_reload.sh: no firmware at $HEX: skipped"; exit 2; }
 mkdir -p "$WORK/reload"
 WORK="$(cd "$WORK" && pwd)"
 S="$WORK/reload"

@@ -194,7 +194,7 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
 | 48 kHz tick | `clk_74a` → `clk_arm` | Toggle into three flops. Asynchronous; covered by the clock groups (`core_constraints.sdc:16-20`). |
 | Audio frame | `clk_arm` → `clk_sys` | Frame held, plus a toggle captured on `tog2 ^ tog3`, not upstream's `tog1 ^ tog2` (`bupchip_subsystem.sv:168-175`). The mute is applied on `clk_arm`, to the frame register as each frame is ticked, so `muted` does not cross (upstream applies `muted ? 0 : frame` at its `clk_sys` capture, `bupchip_subsystem.sv:173-179`). The capture gives zero while `souper_profile` is low, as upstream does. Timed. |
 
-The toggles stay on the timed paths too. They cost about 20 ALMs [E] and keep the design correct if `clk_arm` ever moves to its own fPLL. Nothing else crosses: under `BUP_DEBUG` the capture's sticky error flags (`clk_sys`) reach the `clk_arm` status word through two flops.
+The toggles stay on the timed paths too. They cost about 20 ALMs [E]. If `clk_arm` ever moves to its own fPLL, the toggles still order the messages, but the held multi-bit buses (message type and payload, command byte, audio frame) then fall between asynchronous clock groups: constrain them with `set_max_skew` or `set_max_delay -datapath_only` below about two destination periods, and keep `clk_arm` above about 12 MHz so the receiver copies each message within the 5-`clk_sys` spacing. On the shared VCO none of this is needed. Nothing else crosses: under `BUP_DEBUG` the capture's sticky error flags (`clk_sys`) reach the `clk_arm` status word through two flops.
 
 ### 48 kHz
 
@@ -699,7 +699,7 @@ The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and ch
 | PSRAM write (`CLOCK_SPEED` = 28.636364) | 5 | 235 |
 | Toggle to write done | ≤ 8 | ≤ 376 |
 
-- The chain is longer than the 349 ns spacing. The receiver must therefore copy each message when it detects it (a one-entry buffer); it cannot read the `clk_sys` register when it starts the write.
+- The chain is longer than the 349 ns spacing. `psram.sv` latches the address, data and byte lanes when it accepts a request, so the receiver's copy of each message (a one-entry buffer) matters only if a WRITE has to wait for a busy controller when the next message arrives. At the loader's rate that never happens: START holds the CPU, so cache reads and capture writes never overlap. The copy, END's wait for an idle controller and the arbiter's write priority are defensive paths that no bench reaches.
 - With the copy, write k finishes ≤ 376 ns after its toggle. Message k+1 cannot be seen before 349 + 94 = 443 ns.
 - So the controller is idle whenever a message arrives, busy 5 of every ≥ 7.4 clocks (68%), and needs no second entry and no backpressure [E]. Step 4 checks this with the loader at 175 ns per byte.
 

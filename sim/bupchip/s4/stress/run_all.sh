@@ -11,11 +11,13 @@
 # Environment: WORK (default sim/work/bupchip/s4stress), VERILATOR, NICE.
 # About 27 minutes on one core.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ok=1
+ok=1 skipped=
 for s in run_cstress.sh run_capstress.sh run_tick.sh run_bounds.sh run_pophead.sh run_xing.sh run_reload.sh; do
 	echo "=== $s"
-	"$HERE/$s" || ok=0
+	rc=0; "$HERE/$s" || rc=$?
+	if [ "$rc" = 2 ]; then skipped="$skipped $s"; elif [ "$rc" != 0 ]; then ok=0; fi
 done
 echo
+[ -z "$skipped" ] || echo "stress: skipped (exit 2):$skipped"
 [ "$ok" = 1 ] && echo "stress: all passed" || echo "stress: FAILED"
 [ "$ok" = 1 ]
