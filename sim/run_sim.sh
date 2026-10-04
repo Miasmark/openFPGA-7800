@@ -89,13 +89,16 @@ SRCS=(
 SRAM_DEFS=""
 # KEEP_NOCART_ROM keeps the built-in cartridge image tb_system runs from.
 [ "${SRAM:-1}" = 1 ] && SRAM_DEFS="-DPOCKET_SRAM -DEXTERNAL_CARTRAM -DNO_MEM_EDITOR -DKEEP_NOCART_ROM"
-# The Pocket's BupChip (ARIA, docs/BUPCHIP_CORE.md) with BUP_DEBUG, as the qsf
-# defines them; the testbenches put the PSRAM model on cram0. BUP_DEBUG=0
-# leaves out the debug status (a release build); BUPCHIP=0 the whole BupChip.
+# The Pocket's BupChip (ARIA, docs/BUPCHIP_CORE.md), and BUP_DEBUG when the
+# qsf sets it (hardware test builds); the testbenches put the PSRAM model on
+# cram0. BUP_DEBUG=1 or 0 overrides the qsf; BUPCHIP=0 leaves out the whole
+# BupChip.
+QSF_BUP_DEBUG=0
+grep -q '^set_global_assignment -name VERILOG_MACRO "BUP_DEBUG=1"' "$FPGA/ap_core.qsf" && QSF_BUP_DEBUG=1
 BUP_DEFS=""
 if [ "${BUPCHIP:-1}" = 1 ]; then
 	BUP_DEFS="-DPOCKET_BUPCHIP"
-	[ "${BUP_DEBUG:-1}" = 1 ] && BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"
+	[ "${BUP_DEBUG:-$QSF_BUP_DEBUG}" = 1 ] && BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"
 fi
 
 build() {   # build <top> <objdir>

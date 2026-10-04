@@ -748,10 +748,10 @@ set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
 # cartridge's music co-processor, on clk_arm, its assets in PSRAM cram0. It
 # replaces upstream's, which NO_BUPCHIP keeps out.
 set_global_assignment -name VERILOG_MACRO "POCKET_BUPCHIP=1"
-# Hardware test builds only: the BupChip's status word, shadow FIFO counters
-# and its status cells on screen (core/bupchip/bup_status_osd.sv). Remove it
-# for a release (docs/DEVELOPING.md, "Before a release").
-set_global_assignment -name VERILOG_MACRO "BUP_DEBUG=1"
+# Hardware test builds add VERILOG_MACRO "BUP_DEBUG=1" here: the BupChip's
+# status word, shadow FIFO counters, load probe and its status cells on
+# screen (core/bupchip/bup_status_osd.sv). Releases leave it out
+# (docs/DEVELOPING.md, "Before a release"); sim/run_sim.sh follows this file.
 # Fitter seed. With the BupChip the device is 79% full and clk_sdram's worst
 # path (MARIA / 2600 mapper address into sram_ctrl's pad registers) is
 # placement-sensitive: seeds 1, 2 and 3 gave +0.56, +1.04 and +1.26 ns, the
