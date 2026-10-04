@@ -95,23 +95,29 @@
 		end
 	end
 
+	// Where r0-r14 of mode m live in the reference's flat register file (its
+	// layout): 0-14 the user and system registers, 15-21 FIQ's r8-r14, then
+	// r13-r14 of IRQ (22), SVC (24), ABT (26) and UND (28). tb_lockstep.sv's
+	// shadow uses the same layout.
+	function automatic int bank(input int k, input logic [4:0] m);
+		if (k < 8 || m == 5'h10 || m == 5'h1f) return k;
+		if (m == 5'h11) return k + 7;                             // FIQ r8-r14
+		if (k < 13) return k;
+		case (m)                                                  // banked r13/r14
+			5'h12:   return 22 + k - 13;                          // IRQ
+			5'h13:   return 24 + k - 13;                          // SVC
+			5'h17:   return 26 + k - 13;                          // ABT
+			default: return 28 + k - 13;                          // UND
+		endcase
+	endfunction
+
 	// Architectural view of the reference: r0-r14 of the current mode (the
 	// firmware runs in SVC mode throughout) and NZCV. Sampled on the edge where
 	// `retire` is high, this is the state after the retired instruction: the
 	// core writes every register and flag on or before the edge that raises
 	// `retire`.
 	function automatic logic [31:0] ref_reg(input int k);
-		logic [4:0] m;
-		m = cpu.arm_cpu.cpsr[4:0];
-		if (k < 8 || m == 5'h10 || m == 5'h1f) return cpu.arm_cpu.rf[k];
-		if (m == 5'h11) return cpu.arm_cpu.rf[k + 7];             // FIQ r8-r14
-		if (k < 13) return cpu.arm_cpu.rf[k];
-		case (m)                                                  // banked r13/r14
-			5'h12:   return cpu.arm_cpu.rf[22 + k - 13];          // IRQ
-			5'h13:   return cpu.arm_cpu.rf[24 + k - 13];          // SVC
-			5'h17:   return cpu.arm_cpu.rf[26 + k - 13];          // ABT
-			default: return cpu.arm_cpu.rf[28 + k - 13];          // UND
-		endcase
+		return cpu.arm_cpu.rf[bank(k, cpu.arm_cpu.cpsr[4:0])];
 	endfunction
 	wire  [3:0] ref_nzcv = cpu.arm_cpu.cpsr[31:28];
 	wire [31:0] ref_rpc  = cpu.arm_cpu.trace_retire_pc;

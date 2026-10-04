@@ -28,6 +28,7 @@ module lockstep_dut_bup (
 	output logic [31:0] rt_pc,
 	output logic [31:0] rt_insn,
 	output logic  [3:0] rt_nzcv,
+	output logic  [4:0] rt_mode,
 	output logic        rt_e_we,
 	output logic  [3:0] rt_e_idx,
 	output logic [31:0] rt_e_data,
@@ -83,7 +84,11 @@ module lockstep_dut_bup (
 	logic [31:0] asset_q;
 	wire         inj = cpu.rt_w_we && nloads + 1 == inject;	// flip this load's bit 0
 
+`ifdef BUP_MODES
+	bup_cpu #(.MODES(1'b1)) cpu (
+`else
 	bup_cpu cpu (
+`endif
 		.clk, .rst, .freeze, .w_wait(pr_wait || (asset_wait && w_asset)),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata,
@@ -92,7 +97,7 @@ module lockstep_dut_bup (
 		.w_asset, .w_addr, .w_size,
 		.reg_sel, .reg_addr, .reg_write, .reg_wdata, .reg_rdata(pr_data ^ {31'd0, inj}),
 		.halted, .halt_code, .halt_pc,
-		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv,
+		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv, .rt_mode,
 		.rt_e_we, .rt_e_idx, .rt_e_data, .rt_w_we, .rt_w_idx, .rt_w_data);
 
 	cache_ram_dp #(.ADDR_WIDTH(12), .DATA_WIDTH(32), .SIM_INIT_FILE(`ROMHEX)) rom (

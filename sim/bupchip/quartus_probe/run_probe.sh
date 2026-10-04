@@ -3,6 +3,7 @@
 # bup_probe_top (bup_cpu.sv with its ROM and RAM) alone on 5CEBA4F23C8, once
 # per clock, and print the figures the step's gates need.
 #   ./run_probe.sh [MHZ ...]       default: 28.636364 21.477273
+# MODES=1 compiles bup_cpu with MODES 1 (SVC, SYS and FIQ; DARIA).
 # Each clock builds in $WORK/<MHZ>/ (default sim/work/bupchip/qprobe):
 # Analysis & Synthesis, Fitter and Timing Analyzer (no Assembler), a Timing
 # Analyzer script for the five worst setup paths at slow 85 C (paths.txt),
@@ -39,6 +40,7 @@ for mhz in "${CLOCKS[@]}"; do
 	sed "s#^set_global_assignment -name QIP_FILE bup_probe.qip\$#set_global_assignment -name QIP_FILE $qip#" \
 		"$HERE/bup_probe.qsf" > "$dir/bup_probe.qsf"
 	grep -q "QIP_FILE $qip\$" "$dir/bup_probe.qsf" || { echo "run_probe.sh: no QIP_FILE line in bup_probe.qsf" >&2; exit 1; }
+	[ "${MODES:-0}" = 0 ] || echo "set_parameter -name MODES 1" >> "$dir/bup_probe.qsf"
 	sed "s/^set period .*/set period $period/" "$HERE/bup_probe.sdc" > "$dir/bup_probe.sdc"
 	grep -q "^set period $period\$" "$dir/bup_probe.sdc" || { echo "run_probe.sh: no period line in bup_probe.sdc" >&2; exit 1; }
 

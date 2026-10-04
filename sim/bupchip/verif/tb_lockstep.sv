@@ -54,6 +54,7 @@ module tb_lockstep;
 	logic        rt_start, rt_valid, rt_e_we, rt_w_we;
 	logic [31:0] rt_pc, rt_insn, rt_e_data, rt_w_data;
 	logic  [3:0] rt_nzcv, rt_e_idx, rt_w_idx;
+	logic  [4:0] rt_mode;
 	logic        st_valid, pw_valid, pr_valid, pr_wait, halted;
 	logic [31:0] st_addr, st_data, pw_data, halt_pc;
 	logic  [3:0] st_strb;
@@ -67,7 +68,7 @@ module tb_lockstep;
 	lockstep_dut_ref dut (
 `endif
 		.clk(clk_arm), .rst(dut_rst),
-		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv,
+		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv, .rt_mode,
 		.rt_e_we, .rt_e_idx, .rt_e_data, .rt_w_we, .rt_w_idx, .rt_w_data,
 		.st_valid, .st_addr, .st_strb, .st_data,
 		.pw_valid, .pw_addr, .pw_data,
@@ -95,7 +96,7 @@ module tb_lockstep;
 	rec_t   refq [$], dutq [$];
 	st_t    rstq [$], dstq [$];
 	io_t    rpwq [$], dpwq [$], mmq [$];
-	logic [31:0] shadow [15];
+	logic [31:0] shadow [30];	// every bank, laid out as the reference's (ref_reg)
 	rec_t   pend_rec;
 	logic   in_flight = 0, pend = 0, halt_seen = 0;
 	longint fails = 0, ncmp = 0, nst = 0, npw = 0, npr = 0, rret = 0, dret = 0;
@@ -203,7 +204,7 @@ module tb_lockstep;
 			// 1. W writes belong to instructions older than any start this clock.
 			if (rt_w_we) begin
 				if (rt_w_idx == 4'd15) fail("retire port: W write to r15");
-				else shadow[rt_w_idx] = rt_w_data;
+				else shadow[bank(rt_w_idx, rt_mode)] = rt_w_data;
 			end
 			// 2. A start completes the previous instruction's record.
 			if (rt_start) begin
@@ -211,7 +212,7 @@ module tb_lockstep;
 				if (pend) begin
 					rec_t y;
 					y = pend_rec;
-					for (int k = 0; k < 15; k++) y.r[k] = shadow[k];
+					for (int k = 0; k < 15; k++) y.r[k] = shadow[bank(k, rt_mode)];
 					dutq.push_back(y);
 					pend = 0;
 				end
@@ -221,7 +222,7 @@ module tb_lockstep;
 			if (rt_e_we) begin
 				if (!in_flight) fail($sformatf("retire port: E write at DUT clock %0d outside an instruction", dcyc));
 				if (rt_e_idx == 4'd15) fail("retire port: E write to r15");
-				else shadow[rt_e_idx] = rt_e_data;
+				else shadow[bank(rt_e_idx, rt_mode)] = rt_e_data;
 			end
 			// 4. The retire: its record waits for the next start (load data).
 			if (rt_valid) begin
@@ -257,7 +258,7 @@ module tb_lockstep;
 		if (!$value$plusargs("stall=%d", stall)) stall = 2000000;
 		void'($value$plusargs("maxfail=%d", maxfail));
 		void'($value$plusargs("inject_mmio=%d", inject_mmio));
-		for (int k = 0; k < 15; k++) shadow[k] = 32'b0;
+		for (int k = 0; k < 30; k++) shadow[k] = 32'b0;
 `ifdef DUT_BUP
 		$display("lockstep: reference against lockstep_dut_bup (the new core)");
 `else

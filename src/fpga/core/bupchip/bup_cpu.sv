@@ -10,6 +10,14 @@
 // Rule: an encoding either does exactly what an ARM7TDMI does, or the core
 // halts (halt_code, halt_pc). Nothing is silently different.
 //
+// MODES (default 0) picks the processor modes. 0, ARIA's: the core stays in
+// SVC mode with IRQ and FIQ masked, and the control byte reads as 0xD3.
+// 1, DARIA's ARM-state additions (the 2600 cartridge drivers' music helpers
+// switch to FIQ mode for r8-r13): SVC, SYS and FIQ, switched by MSR, with
+// FIQ's r8-r14 and SVC's r13-r14 banked in the register file, and the I and
+// F bits kept and read back (the core takes no interrupts). The SPSRs are
+// not there: an access to one halts in either setting.
+//
 // Pipeline. The ROM's port A address register is the fetch register: the
 // next PC (rom_addr) is computed during execute and the ROM's unregistered
 // output (rom_q) is decoded straight away, so a taken branch costs nothing.
@@ -51,8 +59,9 @@
 //              SPSR access, MSR of the x or s field, multiplies with S, long
 //              multiplies other than UMULL, LDRD/STRD space, LDM/STM with S,
 //              with PC in the list or with an empty list; and (one clock
-//              later) MSR writing a control byte other than 0xD3 or CPSR
-//              bits 27:24, which this core does not have
+//              later) MSR writing CPSR bits 27:24, which this core does not
+//              have, or a control byte other than 0xD3 (MODES 0) or with the
+//              T bit or a mode other than SVC, SYS and FIQ (MODES 1)
 //   2  REG     r15 where the ARM7TDMI reads PC + 12 or the result is
 //              UNPREDICTABLE: a data-processing destination, the operands of
 //              a shift by register, a multiply, a write-back base, a store's
@@ -69,7 +78,10 @@
 // Interface notes:
 //   - rst is synchronous. After it falls the core spends 15 clocks writing 0
 //     to r0-r14 (the reference core resets its registers to 0, and CoreTone
-//     pushes registers it has never written), then fetches from 0.
+//     pushes registers it has never written), then fetches from 0. With
+//     MODES 1 it clears all 32 register-file entries, banked ones included,
+//     and starts in SVC mode with IRQ and FIQ masked (0xD3), as an ARM7TDMI
+//     leaves reset.
 //   - freeze (the debug throttle) holds off the start of an instruction.
 //     An instruction that has started always runs to its end, and W always
 //     completes, so every MMIO access happens exactly once.
@@ -91,6 +103,9 @@
 
 module bup_cpu
 	import arm7tdmi_pkg::*;
+#(
+	parameter bit MODES = 1'b0      // 0 SVC only (ARIA), 1 SVC, SYS and FIQ (DARIA)
+)
 (
 	input  wire         clk,            // clk_arm
 	input  wire         rst,            // held: reset, then clear r0-r14
@@ -138,6 +153,7 @@ module bup_cpu
 	output logic [31:0] rt_pc,
 	output logic [31:0] rt_insn,
 	output logic  [3:0] rt_nzcv,
+	output logic  [4:0] rt_mode,
 	output logic        rt_e_we,
 	output logic  [3:0] rt_e_idx,
 	output logic [31:0] rt_e_data,
@@ -201,10 +217,17 @@ module bup_cpu
 		S_HALT
 	} state_t;
 
+	localparam int RFA = MODES ? 5 : 4;	// register-file address bits
+
 	state_t      state;
 	logic [11:0] pc;                // word address of the instruction in rom_q
 	logic  [3:0] nzcv;
-	logic  [3:0] clr_idx;
+	logic [RFA-1:0] clr_idx;
+
+	// The CPSR's control byte (I, F, T, mode). With MODES 0 it is 0xD3 and
+	// these registers fold to constants. m_fiq and m_svc decode the mode.
+	logic  [7:0] ctl;
+	logic        m_fiq, m_svc;
 	wire         flag_c = nzcv[1];
 
 	wire  [31:0] insn = rom_q;
@@ -318,31 +341,49 @@ module bup_cpu
 	// ---- register file ----------------------------------------------------------
 	// r0-r14; r15 reads as the instruction's address + 8. Last clock's write is
 	// held and bypassed, so an MLAB is only read for data at least two clocks old.
+	// With MODES 1 the file has 32 entries: 0-14 the user and system registers,
+	// 16-22 FIQ's r8-r14 and 29-30 SVC's r13-r14 (phys below), and the bypass
+	// compares entries. (A mode changes only with an MSR, which writes no
+	// register, so the bypass never holds a write from another mode anyway.)
 	//
 	// The behavioural array shows a write on the next clock, so simulation
 	// alone would never need the bypass. Built with BUP_SIM_LATE_RF (simulation
 	// only), an entry holds garbage (the inverted data) for the clock after
 	// its write and the data from the clock after that: any read of the array
 	// that the bypass does not cover then goes wrong.
-	(* ramstyle = "MLAB, no_rw_check" *) logic [31:0] rf [0:15];
+	(* ramstyle = "MLAB, no_rw_check" *) logic [31:0] rf [0:(1 << RFA) - 1];
 	logic        rf_we;
 	logic  [3:0] rf_wa;
 	logic [31:0] rf_wd;
 	logic        rf_w_class;	// for the retire port: 1 = load data (port W)
 	logic        byp_we;
-	logic  [3:0] byp_idx;
+	logic [RFA-1:0] byp_idx;
 	logic [31:0] byp_data;
 	logic  [3:0] ia, ib;
+
+	// The entry that holds register r in the current mode.
+	function automatic logic [RFA-1:0] phys(input logic [3:0] r, input logic fiq, input logic svc);
+		logic [4:0] e;
+		e = {1'b0, r};
+		if (MODES && fiq && r[3] && r != 4'hF) e = {2'b10, r[2:0]};
+		else if (MODES && svc && (r == 4'd13 || r == 4'd14)) e = {1'b1, r};
+		phys = e[RFA-1:0];
+	endfunction
+
+	wire [RFA-1:0] pa = phys(ia, m_fiq, m_svc);
+	wire [RFA-1:0] pb = phys(ib, m_fiq, m_svc);
+	// The clear after rst writes every entry by number.
+	wire [RFA-1:0] rf_pa = MODES ? (state == S_CLEAR ? clr_idx : phys(rf_wa, m_fiq, m_svc)) : rf_wa;
 
 	always_ff @(posedge clk) begin
 `ifdef BUP_SIM_LATE_RF
 		if (byp_we) rf[byp_idx] <= byp_data;
-		if (rf_we) rf[rf_wa] <= ~rf_wd;		// wins when both hit one entry
+		if (rf_we) rf[rf_pa] <= ~rf_wd;		// wins when both hit one entry
 `else
-		if (rf_we) rf[rf_wa] <= rf_wd;
+		if (rf_we) rf[rf_pa] <= rf_wd;
 `endif
 		byp_we <= rf_we;
-		byp_idx <= rf_wa;
+		byp_idx <= rf_pa;
 		byp_data <= rf_wd;
 	end
 
@@ -353,8 +394,8 @@ module bup_cpu
 		else read_reg = arr;
 	endfunction
 
-	wire [31:0] ra = read_reg(ia, rf[ia], byp_we && byp_idx == ia, byp_data, r15_value);
-	wire [31:0] rb = read_reg(ib, rf[ib], byp_we && byp_idx == ib, byp_data, r15_value);
+	wire [31:0] ra = read_reg(ia, rf[pa], byp_we && byp_idx == pa, byp_data, r15_value);
+	wire [31:0] rb = read_reg(ib, rf[pb], byp_we && byp_idx == pb, byp_data, r15_value);
 
 	// ---- LDM/STM sequencer state --------------------------------------------------
 	logic [15:0] blk_rest;          // registers still to transfer
@@ -417,6 +458,13 @@ module bup_cpu
 	end
 
 	always_comb msr_value = insn[25] ? imm_rot : rb;
+
+	// A control byte MSR may write: 0xD3 (MODES 0); with MODES 1 any I and F,
+	// T clear, and the mode SVC, SYS or FIQ.
+	function automatic logic ctl_ok(input logic [7:0] v);
+		if (!MODES) ctl_ok = v == 8'hD3;
+		else ctl_ok = !v[5] && (v[4:0] == 5'h13 || v[4:0] == 5'h1F || v[4:0] == 5'h11);
+	endfunction
 
 	// ---- multiplier -----------------------------------------------------------------
 	logic [63:0] prod;              // Rm * Rs, registered in the first clock
@@ -572,6 +620,7 @@ module bup_cpu
 	logic        start, done;
 	logic        flags_we;
 	logic  [3:0] flags_d;
+	logic        ctl_we;            // MSR writes the control byte (MODES 1)
 	logic        acc_go;            // a single transfer or a beat accesses memory this clock
 	logic        late_go;
 	logic  [3:0] late_code_d;
@@ -589,6 +638,7 @@ module bup_cpu
 		rf_w_class = 1'b0;
 		flags_we = 1'b0;
 		flags_d = dp_flags;
+		ctl_we = 1'b0;
 		ram_we = 1'b0;
 		ram_be = st_bytes(t_size, addr_x[1:0]);
 		ram_wdata = st_lanes(rb, t_size);
@@ -601,10 +651,10 @@ module bup_cpu
 		case (state)
 			S_CLEAR: begin
 				rf_we = 1'b1;
-				rf_wa = clr_idx;
+				rf_wa = clr_idx[3:0];
 				rf_wd = 32'd0;
 				npc = 12'd0;
-				if (clr_idx == 4'd14) nstate = S_RUN;
+				if (clr_idx == (MODES ? 5'd31 : 5'd14)) nstate = S_RUN;
 			end
 
 			S_RUN: begin
@@ -626,14 +676,16 @@ module bup_cpu
 					end else if (k_mrs) begin
 						done = 1'b1;
 						rf_we = 1'b1;
-						rf_wd = {nzcv, 20'd0, 8'hD3};	// SVC mode, IRQ and FIQ masked: fixed
+						rf_wd = {nzcv, 20'd0, MODES ? ctl : 8'hD3};
 					end else if (k_msr) begin
 						done = 1'b1;
 						flags_we = insn[19];
 						flags_d = msr_value[31:28];
-						// The mode, T and I/F bits are fixed at 0xD3 and bits 27:24
-						// read as 0, so writing anything else halts (one clock later).
-						late_go = (insn[16] && msr_value[7:0] != 8'hD3) ||
+						// Bits 27:24 read as 0 and the control byte takes only
+						// what ctl_ok allows, so writing anything else halts (one
+						// clock later), without changing the mode.
+						ctl_we = MODES && insn[16] && ctl_ok(msr_value[7:0]);
+						late_go = (insn[16] && !ctl_ok(msr_value[7:0])) ||
 							(insn[19] && msr_value[27:24] != 4'd0);
 						late_code_d = HALT_UNDEF;
 					end else if (k_br) begin
@@ -778,6 +830,7 @@ module bup_cpu
 			done = 1'b0;
 			rf_we = 1'b0;
 			flags_we = 1'b0;
+			ctl_we = 1'b0;
 			ram_we = 1'b0;
 			reg_sel = 1'b0;
 			acc_go = 1'b0;
@@ -793,8 +846,11 @@ module bup_cpu
 		pc <= npc;
 		if (rst) begin
 			state <= S_CLEAR;
-			clr_idx <= 4'd0;
+			clr_idx <= '0;
 			nzcv <= 4'd0;
+			ctl <= 8'hD3;
+			m_fiq <= 1'b0;
+			m_svc <= 1'b1;
 			chk_v <= 1'b0;
 			late_v <= 1'b0;
 			ld_pend <= 1'b0;
@@ -804,7 +860,12 @@ module bup_cpu
 		end else begin
 			state <= nstate;
 			nzcv <= nzcv_next;
-			if (state == S_CLEAR) clr_idx <= clr_idx + 4'd1;
+			if (ctl_we) begin
+				ctl <= msr_value[7:0];
+				m_fiq <= msr_value[4:0] == 5'h11;
+				m_svc <= msr_value[4:0] == 5'h13;
+			end
+			if (state == S_CLEAR) clr_idx <= clr_idx + 1'b1;
 			if (halt_now && state != S_HALT) begin
 				halted <= 1'b1;
 				halt_code <= halt_code_now;
@@ -876,6 +937,7 @@ module bup_cpu
 	assign rt_pc     = {18'd0, pc, 2'b00};
 	assign rt_insn   = insn;
 	assign rt_nzcv   = nzcv_next;
+	assign rt_mode   = MODES ? ctl[4:0] : 5'h13;
 	assign rt_e_we   = rf_we && !rf_w_class && state != S_CLEAR;
 	assign rt_e_idx  = rf_wa;
 	assign rt_e_data = rf_wd;

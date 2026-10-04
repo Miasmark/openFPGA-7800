@@ -81,3 +81,17 @@ The worst path into each other kind of endpoint, at 28.636 MHz:
   The other 21 are the boundary flip-flops `halt_pc_o` bits 0, 1 and 14–31 and `halt_code_o[3]`, which follow those constants. The 32 × 32 multiplier is in 3 DSP blocks, and its product register is packed into them.
 
 **LogicLock is not available.** Quartus Prime Lite prints Warning 292013, "Feature LogicLock is only available with a valid subscription license", in every compile, both this probe's and the 2.0.21 build's (`src/fpga/output_files/ap_core.fit.rpt:8748`). To check whether it still honours a region, the 28.636 MHz probe was compiled once more with `bup_cpu:cpu` locked into a 15 × 24 region at X38_Y20 (X38–52, Y20–43), clear of where the unconstrained fit puts it (X7–36, Y9–38). The test used `LL_*` assignments, and its reports are in `sim/work/bupchip/qprobe_ll/`. The fitter printed Critical Warning 140003, "Current license file does not support LogicLock regions. The Quartus Prime software removes all the LogicLock regions in your design automatically". Every cell's placement matched the unconstrained fit, and none of the CPU's 2,751 cells was inside the region. The fit used the same 1,527 ALMs and reached the same slack, +6.323 / +5.916 ns. A LogicLock region is therefore no mitigation for this project.
+
+## MODES 1 (DARIA's processor modes, 2026-10-04)
+
+`MODES=1 run_probe.sh 28.636364` compiles `bup_cpu` with `MODES` 1: SVC, SYS and FIQ switched by MSR, FIQ's r8–r14 and SVC's r13–r14 banked (`../daria/modes/`). The same flow with `MODES` 0 gave the figures above again to the decimal (1,297.3 ALMs, 2,058 ALUTs, 607 registers), so the default build is unchanged.
+
+| `bup_cpu` | MODES 0 | MODES 1 | Change |
+|---|---|---|---|
+| After synthesis: ALUTs / registers | 1,866 / 308 | 1,897 / 320 | +31 / +12 |
+| After fitting: ALMs needed | 1,297.3 | 1,258.8 | −38.5 (placement; see below) |
+| After fitting: ALUTs / registers | 2,058 / 607 | 1,978 / 480 | |
+| Register file | 4 MLABs, 16 × 32 used | 4 MLABs, 32 × 32 used | none |
+| Worst setup slack, slow 85 °C / 0 °C | +6.323 / +5.916 ns | +6.835 / +6.699 ns | |
+
+The register file was already two 32-deep MLAB pairs with half the words unused, so the banks cost no memory. The logic is the mode register, the bank remap in front of each read port and the write port, the wider bypass compare and the MSR check: +31 ALUTs and +12 registers after synthesis, roughly 20–30 ALMs. After fitting the MODES 1 build came out smaller, because physical synthesis duplicated fewer registers (480 against 607). That swing is placement noise, larger than the change itself, so the synthesis figures are the ones to quote.

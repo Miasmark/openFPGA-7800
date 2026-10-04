@@ -27,7 +27,7 @@ sim/bupchip/verif/directed/run_vrand.sh          # the new core: dense random pr
 | `run_lockstep.sh IMAGE.a78 [+args]` | One lockstep run (below). |
 | `run_songs.sh GAME.a78 [SONG ...]` | Not in `run_all.sh`: lockstep through each song (default all 32) for `SECS` seconds (default 4), odd songs with random asset waits and throttle clocks; `DUT` defaults to `bup` here. About an hour on 4 cores. |
 
-Environment: `WORK` (build products, default `sim/work/bupchip/verif`), `VERILATOR` (default `/opt/verilator-5.040/bin/verilator` if present), `VENV` or `PYTHON` (for Unicorn), `DUT` (`ref` or `bup`), `LATE_RF=1` with `DUT=bup` (the core built with `BUP_SIM_LATE_RF`: register-file writes land a clock late, with garbage in between, so only its bypass keeps results right), `JOBS` and `OPS` for the ISA suite, `MAXRET` for `run_all.sh`'s game run.
+Environment: `WORK` (build products, default `sim/work/bupchip/verif`), `VERILATOR` (default `/opt/verilator-5.040/bin/verilator` if present), `VENV` or `PYTHON` (for Unicorn), `DUT` (`ref` or `bup`), `LATE_RF=1` with `DUT=bup` (the core built with `BUP_SIM_LATE_RF`: register-file writes land a clock late, with garbage in between, so only its bypass keeps results right), `MODES=1` with `DUT=bup` (the core built with `MODES` 1: SVC, SYS and FIQ with their banked registers, for DARIA; `../daria/modes/run_modes.sh` runs its tests), `JOBS` and `OPS` for the ISA suite, `MAXRET` for `run_all.sh`'s game run.
 
 Other files: `build.sh` (Verilator builds), `ref_system.svh` (the reference BupChip, shared by both testbenches), `tb_ref_trace.sv` (runs a program on the reference; trace, signature dump), `make_kernel.py` (the harness image), `isa/iss_run.py`, `isa/bin2hex.py`, `isa/link.ld`.
 
@@ -60,6 +60,7 @@ Other files: `build.sh` (Verilator builds), `ref_system.svh` (the reference BupC
 | `rt_valid` | 1 | The instruction's last execute clock: it commits, or fails its condition, and leaves execute. The same clock as `rt_start` for a one-clock instruction. |
 | `rt_pc`, `rt_insn` | 32, 32 | Its address and encoding, with `rt_valid`. |
 | `rt_nzcv` | 4 | NZCV after it, with `rt_valid`. |
+| `rt_mode` | 5 | The CPSR mode this clock: the bank that this edge's E and W writes go to, and the bank a record closed on this edge is read from. A mode change (MSR) shows from the clock after it. |
 | `rt_e_we`, `rt_e_idx`, `rt_e_data` | 1, 4, 32 | Port E writes register `rt_e_idx` (r0–r14) on this edge. |
 | `rt_w_we`, `rt_w_idx`, `rt_w_data` | 1, 4, 32 | Port W writes register `rt_w_idx` on this edge. |
 
@@ -71,7 +72,7 @@ Rules:
 4. Only instructions' writes are reported: not the r0–r14 clear after a hold. The shadow starts at zero, as the reference does.
 5. r15 is never written through either port. A branch, `BX` or `LDR pc` shows up as the next record's `rt_pc`.
 
-The testbench applies each sample to a shadow register file in this order: the W write; then, on `rt_start`, it closes the previous instruction's record (its PC, encoding and NZCV, with the shadow's r0–r14); then the E write; then, on `rt_valid`, it opens this instruction's record. Load data that arrives with the next instruction's first clock is thus counted with the load, and if E and W write the same register in one clock, E (the younger instruction) wins, as in the register file. The testbench reports breaches of rules 1, 2 and 5.
+The shadow keeps every bank, in the reference's own layout (`bank` in `ref_system.svh`): a write goes to register `rt_*_idx` of mode `rt_mode`, and a record holds r0–r14 of `rt_mode`. The testbench applies each sample to the shadow in this order: the W write; then, on `rt_start`, it closes the previous instruction's record (its PC, encoding and NZCV, with the shadow's r0–r14); then the E write; then, on `rt_valid`, it opens this instruction's record. Load data that arrives with the next instruction's first clock is thus counted with the load, and if E and W write the same register in one clock, E (the younger instruction) wins, as in the register file. The testbench reports breaches of rules 1, 2 and 5.
 
 Examples in the S3 pipeline (`BUPCHIP_CORE.md`, "Pipeline and cycle counts"):
 

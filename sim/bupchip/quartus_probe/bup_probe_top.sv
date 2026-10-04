@@ -27,7 +27,9 @@
 
 `default_nettype none
 
-module bup_probe_top (
+module bup_probe_top #(
+	parameter bit MODES = 1'b0      // bup_cpu's MODES (run_probe.sh: MODES=1)
+) (
 	input  wire         clk,
 
 	// Virtual pins.
@@ -79,7 +81,7 @@ module bup_probe_top (
 	wire   [7:0] reg_addr;
 	wire         ram_we, w_asset, reg_sel, reg_write, halted;
 
-	bup_cpu cpu (
+	bup_cpu #(.MODES(MODES)) cpu (
 		.clk, .rst, .freeze, .w_wait,
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata, .rom_dq, .ram_q,
