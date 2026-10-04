@@ -1,0 +1,60 @@
+# BupChip CPU Quartus probe (docs/BUPCHIP_CORE.md, implementation step 3).
+# Compile with run_probe.sh, which copies this file and a per-clock
+# bup_probe.sdc into sim/work/bupchip/qprobe/<clock>/ and builds there.
+
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY bup_probe_top
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+set_global_assignment -name QIP_FILE bup_probe.qip
+set_global_assignment -name SDC_FILE bup_probe.sdc
+# The probe is small; leave CPUs to whatever else is running.
+set_global_assignment -name NUM_PARALLEL_PROCESSORS 2
+
+# The settings of src/fpga/ap_core.qsf that apply to a core-only compile.
+# The full build sets no SEED and no SYNTHESIS_EFFORT, so it runs with the
+# defaults: seed 1 and synthesis effort AUTO. Both are written out here.
+set_global_assignment -name MIN_CORE_JUNCTION_TEMP 0
+set_global_assignment -name MAX_CORE_JUNCTION_TEMP 85
+set_global_assignment -name TIMING_ANALYZER_MULTICORNER_ANALYSIS ON
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+set_global_assignment -name SEED 1
+set_global_assignment -name SYNTHESIS_EFFORT AUTO
+set_global_assignment -name SAFE_STATE_MACHINE ON
+set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON
+set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
+set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON
+set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+set_global_assignment -name MUX_RESTRUCTURE OFF
+set_global_assignment -name ROUTER_CLOCKING_TOPOLOGY_ANALYSIS ON
+set_global_assignment -name ECO_OPTIMIZE_TIMING ON
+set_global_assignment -name PERIPHERY_TO_CORE_PLACEMENT_AND_ROUTING_OPTIMIZATION ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
+set_global_assignment -name FITTER_EFFORT "AUTO FIT"
+set_global_assignment -name ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION ON
+
+# Every port but the clock is a virtual pin: no I/O cells, no pin limit, and
+# no I/O timing. bup_probe_top registers each of them next to the CPU.
+set_instance_assignment -name VIRTUAL_PIN ON -to rst_i
+set_instance_assignment -name VIRTUAL_PIN ON -to freeze_i
+set_instance_assignment -name VIRTUAL_PIN ON -to w_wait_i
+set_instance_assignment -name VIRTUAL_PIN ON -to asset_size_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to asset_q_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to reg_rdata_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to fw_we_i
+set_instance_assignment -name VIRTUAL_PIN ON -to fw_addr_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to fw_data_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to d_addr_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to w_asset_o
+set_instance_assignment -name VIRTUAL_PIN ON -to w_addr_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to w_size_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to reg_sel_o
+set_instance_assignment -name VIRTUAL_PIN ON -to reg_addr_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to reg_write_o
+set_instance_assignment -name VIRTUAL_PIN ON -to reg_wdata_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to halted_o
+set_instance_assignment -name VIRTUAL_PIN ON -to halt_code_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to halt_pc_o[*]

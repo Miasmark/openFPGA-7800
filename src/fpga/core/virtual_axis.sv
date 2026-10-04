@@ -45,8 +45,11 @@ module virtual_axis #(
 	input  wire        fast,
 	input  wire  [7:0] analog,       // unsigned, 128 = centre
 	output wire  [7:0] position,
-	output reg  [15:0] phase = 16'd0
+	output reg  [15:0] phase
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial phase = 16'd0;
 	// Position is 8.8 fixed point; speeds are in 1/256 position steps per ms,
 	// with 4 more fraction bits so the ramp can be gentle.
 	reg  [15:0] pos16 = 16'h8000;

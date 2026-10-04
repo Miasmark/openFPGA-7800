@@ -50,6 +50,16 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   cart whose header asks for both (such as Triple Punch) gets both.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
+- **The BupChip** (from 2.1.1), the Souper cartridge's music co-processor:
+  Rikki & Vikki plays its whole soundtrack. On MiSTer it is firmware running
+  on a soft ARM7TDMI; this port runs the same, unmodified firmware on
+  **ARIA**, its own small ARM-compatible CPU, with the music in the Pocket's
+  PSRAM ([docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md)). It needs two files
+  the core can't ship: the BupChip firmware, `bupchip.bin` (see *Firmware
+  files*), and the game's `.a78` with its music block appended
+  ([docs/BUPCHIP.md](docs/BUPCHIP.md), "Files the user supplies on the
+  Pocket", has the tool and the layout). Without either, Souper games run
+  without the extra music channel.
 - 2600 Starpath Supercharger games, given the Supercharger BIOS as a file.
   Untested on hardware.
 - Settings (the Pocket shows at most 16, so related ones share an entry):
@@ -95,12 +105,11 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 
 | Feature | Why |
 |---|---|
-| **BupChip** (Souper music co-processor) | **Doesn't fit on the Pocket.** See below. Souper games run, but without the extra music channel. |
-| 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on the same soft ARM CPU as the BupChip, so they don't fit either. |
+| 2600 ARM cartridges (DPC+, CDF, CDFJ) | These run on MiSTer's soft ARM CPU, which doesn't fit. ARIA may run them later, with a Thumb front end (DARIA); the measurements so far are in [docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md), "Later: 2600 ARM cartridges". |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
-#### Why the BupChip doesn't fit
+#### Why MiSTer's BupChip doesn't fit, and ARIA
 
 On MiSTer the BupChip isn't a separate chip. It's a firmware program running
 on a soft **ARM7TDMI CPU** (`arm_host`), the same one that runs 2600 ARM
@@ -121,11 +130,15 @@ measured with Quartus on the Pocket's FPGA (Cyclone V 5CEBA4F23C8):
   timing path on MiSTer's faster FPGA, and the Pocket's FPGA is a slower
   speed grade.
 
-Running the BupChip on the Pocket would need a much smaller ARM
-implementation. That would be a project of its own.
+Running the BupChip on the Pocket needed a much smaller ARM implementation:
+**ARIA** ([docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md)), a clean-room,
+MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
+else halts it rather than running wrongly. It runs the firmware in about
+1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
+the whole core uses 79% of the FPGA. In simulation its output matches
+MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
-[docs/BUPCHIP.md](docs/BUPCHIP.md) has the details such a project would start
-from:
+[docs/BUPCHIP.md](docs/BUPCHIP.md) has the details it started from:
 - the firmware's memory map, registers and commands, and the ARSC resource format;
 - which ARM features the firmware uses: ARM state only, no Thumb, interrupts,
   SWP or coprocessor, but multiply, yes;
@@ -134,7 +147,8 @@ from:
   - an average of 4 clocks per instruction, most of it spent waiting on memory.
 
 `sim/bupchip/` holds the tools that build the resource block from a game
-install and measure any song.
+install, measure any song, and build a jukebox cartridge that plays any song
+on demand (for testing; it carries the game's music, so it stays private).
 
 ## Verification
 
@@ -164,14 +178,20 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Virtual controller axis | a 16 ms tap moves 1 step of 256; holding crosses the range in 0.5 s (0.26 s with Y); the driving code steps at most every 25 ms (D-pad) or 32 ms (stick) |
 | Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
+| BupChip, end to end (2.1.1) | The firmware slot after the cartridge, as the Pocket loads them, then a game-free Souper cartridge with a synthetic music block: the ROM equals the firmware file, the block's 5,192 bytes are in the PSRAM model with no timing violation, and the song's PCM equals the Python model's frame for frame, as pushed and as returned to the core clock. Without the firmware the same cartridge leaves the BupChip held and silent. `sim/bupchip/` checks the CPU in lockstep with MiSTer's ARM7TDMI and the wrapper with Rikki & Vikki's songs (`s1/check.sh`, `s4/check.sh`) |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.0.21) meets timing on all four corners: worst setup
-slack +1.32 ns (on clk_sdram, from the bus into the SRAM controller's slot
-choice), worst hold slack +0.06 ns (setup slack moves by a nanosecond or so
-between builds with placement).
+The Quartus build (2.1.1) meets timing on all four corners: worst setup
+slack +0.44 ns (on clk_sdram, from MARIA's DMA and the 6502's halt through
+the SRAM controller's arbiter into the SRAM's byte-lane pins), worst hold
+slack +0.12 ns. It uses 14,596 of 18,480 ALMs (79%; the BupChip about
+1,810 of them), 86 of 308 M10K blocks and 12 DSP blocks. Setup slack on
+that path moves by a nanosecond or so between builds with placement, and
+the fuller device leaves it less room: 2.0.21 had +1.32 ns. A structural
+fix in the SRAM controller is planned. The 2.0.21 build: worst setup
+slack +1.32 ns, worst hold +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
 loader into the 14.3 MHz core; 2.0.14 registers the loader's output on the
 core clock, which gives those paths 10 ns or more (from 2.0.14). 2.0.21
@@ -203,6 +223,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Dual Stick (Robotron: 2084) | Works from 2.0.18. In 2.0.17, three face buttons at once (an opposite pair) stopped the fire stick and corrupted the screen |
 | Booster Grip | Works (2.0.14+) |
 | Rikki & Vikki (Souper) | Runs, without the BupChip music (2.0.21-test). Needs an A78 header: Jamie Blanks's patch for the Steam ROM |
+| Rikki & Vikki with the BupChip (2.1.1 test builds) | All 32 songs, through a jukebox test cartridge, sound as on MiSTer; in PAL they stay on key and at the same pace; the music plays on through a console reset, as on MiSTer; without `bupchip.bin` the game runs silent and unaffected. The debug build's status cells showed the firmware loaded whole (CRC-32 `95b8b4f8`), no capture error, and the music FIFO never below 639 of 1,024 |
+| Cartridge RAM with a double frame buffer (2.1.1 test build) | No corruption, after the SRAM controller's power-up values changed |
 | Summer Games, Winter Games | Work (2.0.21-test), with a correctly headered dump |
 | Crystal Castles (2600) | Works (2.0.21-test) |
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
@@ -317,6 +339,7 @@ files go in `/Assets/7800/common/`:
 | `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. Only one can be installed: to boot PAL carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
 | `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games do not load |
+| `bupchip.bin` | BupChip firmware (CoreTone), from MiSTer's `bupchip.hex`: `python3 tools/hex2bin.py bupchip.hex > bupchip.bin` ([docs/BUPCHIP.md](docs/BUPCHIP.md)) | 7,824 bytes (CRC32 `95b8b4f8`); up to 16 KiB | Souper games run without the BupChip's music |
 
 The core loads these when it starts. From 2.0.16 they are no longer listed
 as "Load" items in the core settings menu: the Pocket shows at most 20
@@ -409,9 +432,13 @@ tools/                 Packaging
 **Pocket side**
 
 - **Analogue**: the openFPGA APF framework and core template.
-- **Adam Gastineau (agg23)**: `data_loader`, `sound_i2s` and `sync_fifo`
-  from [analogue-pocket-utils](https://github.com/agg23/analogue-pocket-utils)
+- **Adam Gastineau (agg23)**: `data_loader`, `sound_i2s`, `sync_fifo` and
+  the PSRAM controller `psram` from
+  [analogue-pocket-utils](https://github.com/agg23/analogue-pocket-utils)
   (MIT).
+- **The BupChip**: **Jamie Blanks**'s design and CoreTone firmware
+  (user-supplied); his `bupchip_peripheral.sv` (MIT) runs unmodified beside
+  ARIA, this port's own CPU.
 - **Spiritualized**: the original 2022 Pocket 7800 core, and the platform
   image and slot layout this port stays compatible with.
 
@@ -427,6 +454,10 @@ tools/                 Packaging
 - **A7800**, whose `highscor.rom` file name this core accepts.
 - **Verilator**, **GHDL** and **Intel Quartus Prime Lite**, for simulation
   and builds.
+- MiSTer's **ARM7TDMI core** (**Robert Peip**, the GBA_MiSTer contributors
+  and **Jamie Blanks**, GPL-2.0): the simulation reference ARIA is checked
+  against in lockstep. None of it is in the bitstream.
+- **Unicorn**, for the fast firmware model used to measure every song.
 
 ## License
 
@@ -447,7 +478,8 @@ bitstream.
 - `src/fpga/apf/`, `core_top.v` and `core_bridge_cmd.v` are Analogue's
   framework and template, under Analogue's terms.
 - No console or peripheral firmware is included: the 7800 BIOS, the high
-  score cart firmware and the Supercharger BIOS are all user-supplied.
+  score cart firmware, the Supercharger BIOS and the BupChip firmware are all
+  user-supplied.
 - Any remainder should be considered MIT licensed.
 Releases up to 2.0.20 contain Mark Watson's POKEY, under his terms above:
 those may not be used or sold commercially without his permission.

@@ -91,6 +91,18 @@
         ],
         "size_maximum": "0x4080",
         "address": "0x08000000"
+      },
+      {
+        "name": "BupChip firmware",
+        "id": "0x109",
+        "required": false,
+        "filename": "bupchip.bin",
+        "parameters": "0x88",
+        "extensions": [
+          "bin"
+        ],
+        "size_maximum": "0x4000",
+        "address": "0x0A000000"
       }
     ]
   }

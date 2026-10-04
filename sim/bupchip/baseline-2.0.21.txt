@@ -1,0 +1,135 @@
+# 2.0.21 baseline (NO_BUPCHIP), Quartus Prime Lite 21.1.1 (raetro/quartus:21.1), build of 2026-10-03
+# Copied from src/fpga/output_files/ (gitignored). Line numbers refer to that build's reports.
+
+## ap_core.fit.summary
+Fitter Status : Successful - Sat Oct  3 01:45:09 2026
+Quartus Prime Version : 21.1.1 Build 850 06/23/2022 SJ Lite Edition
+Revision Name : ap_core
+Top-level Entity Name : apf_top
+Family : Cyclone V
+Device : 5CEBA4F23C8
+Timing Models : Final
+Logic utilization (in ALMs) : 12,834 / 18,480 ( 69 % )
+Total registers : 12723
+Total pins : 224 / 224 ( 100 % )
+Total virtual pins : 0
+Total block memory bits : 211,558 / 3,153,920 ( 7 % )
+Total RAM Blocks : 46 / 308 ( 15 % )
+Total DSP Blocks : 9 / 66 ( 14 % )
+Total HSSI RX PCSs : 0
+Total HSSI PMA RX Deserializers : 0
+Total HSSI TX PCSs : 0
+Total HSSI PMA TX Serializers : 0
+Total PLLs : 1 / 4 ( 25 % )
+Total DLLs : 0 / 4 ( 0 % )
+
+## ap_core.fit.rpt, Fitter Resource Usage Summary (lines 4975-5040)
+
+
++---------------------------------------------------------------------------------------------+
+; Fitter Resource Usage Summary
++-------------------------------------------------------------+-----------------------+-------+
+; Resource                                                    ; Usage                 ; %
++-------------------------------------------------------------+-----------------------+-------+
+; Logic utilization (ALMs needed / total ALMs on device)      ; 12,834 / 18,480       ; 69 %
+; ALMs needed [=A-B+C]                                        ; 12,834                ;
+;     [A] ALMs used in final placement [=a+b+c+d]             ; 14,101 / 18,480       ; 76 %
+;         [a] ALMs used for LUT logic and registers           ; 3,876                 ;
+;         [b] ALMs used for LUT logic                         ; 8,297                 ;
+;         [c] ALMs used for registers                         ; 1,928                 ;
+;         [d] ALMs used for memory (up to half of total ALMs) ; 0                     ;
+;     [B] Estimate of ALMs recoverable by dense packing       ; 1,328 / 18,480        ; 7 %
+;     [C] Estimate of ALMs unavailable [=a+b+c+d]             ; 61 / 18,480           ; < 1 %
+;         [a] Due to location constrained logic               ; 0                     ;
+;         [b] Due to LAB-wide signal conflicts                ; 4                     ;
+;         [c] Due to LAB input limits                         ; 57                    ;
+;         [d] Due to virtual I/Os                             ; 0                     ;
+;                                                             ;                       ;
+; Difficulty packing design                                   ; Low                   ;
+;                                                             ;                       ;
+; Total LABs:  partially or completely used                   ; 1,649 / 1,848         ; 89 %
+;     -- Logic LABs                                           ; 1,649                 ;
+;     -- Memory LABs (up to half of total LABs)               ; 0                     ;
+;                                                             ;                       ;
+; Combinational ALUT usage for logic                          ; 20,647                ;
+;     -- 7 input functions                                    ; 527                   ;
+;     -- 6 input functions                                    ; 4,450                 ;
+;     -- 5 input functions                                    ; 3,351                 ;
+;     -- 4 input functions                                    ; 3,811                 ;
+;     -- <=3 input functions                                  ; 8,508                 ;
+; Combinational ALUT usage for route-throughs                 ; 1,913                 ;
+;                                                             ;                       ;
+; Dedicated logic registers                                   ; 12,618                ;
+;     -- By type:                                             ;                       ;
+;         -- Primary logic registers                          ; 11,607 / 36,960       ; 31 %
+;         -- Secondary logic registers                        ; 1,011 / 36,960        ; 3 %
+;     -- By function:                                         ;                       ;
+;         -- Design implementation registers                  ; 11,744                ;
+;         -- Routing optimization registers                   ; 874                   ;
+;                                                             ;                       ;
+; Virtual pins                                                ; 0                     ;
+; I/O pins                                                    ; 224 / 224             ; 100 %
+;     -- Clock pins                                           ; 9 / 9                 ; 100 %
+;     -- Dedicated input pins                                 ; 0 / 11                ; 0 %
+; I/O registers                                               ; 105                   ;
+;                                                             ;                       ;
+; M10K blocks                                                 ; 46 / 308              ; 15 %
+; Total MLAB memory bits                                      ; 0                     ;
+; Total block memory bits                                     ; 211,558 / 3,153,920   ; 7 %
+; Total block memory implementation bits                      ; 471,040 / 3,153,920   ; 15 %
+;                                                             ;                       ;
+; Total DSP Blocks                                            ; 9 / 66                ; 14 %
+;                                                             ;                       ;
+; Fractional PLLs                                             ; 1 / 4                 ; 25 %
+; Global signals                                              ; 5                     ;
+;     -- Global clocks                                        ; 5 / 16                ; 31 %
+;     -- Quadrant clocks                                      ; 0 / 88                ; 0 %
+; SERDES Transmitters                                         ; 0 / 68                ; 0 %
+; SERDES Receivers                                            ; 0 / 68                ; 0 %
+; JTAGs                                                       ; 0 / 1                 ; 0 %
+; ASMI blocks                                                 ; 0 / 1                 ; 0 %
+; CRC blocks                                                  ; 0 / 1                 ; 0 %
+; Remote update blocks                                        ; 0 / 1                 ; 0 %
+
+## ap_core.sta.summary (setup and hold, slow 85C)
+Type  : Slow 1100mV 85C Model Setup 'ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk'
+Slack : 1.320
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Setup 'clk_74a'
+Slack : 2.868
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Setup 'ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk'
+Slack : 8.906
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Setup 'bridge_spiclk'
+Slack : 11.107
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Hold 'ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk'
+Slack : 0.286
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Hold 'clk_74a'
+Slack : 0.367
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Hold 'ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk'
+Slack : 0.406
+TNS   : 0.000
+
+Type  : Slow 1100mV 85C Model Hold 'bridge_spiclk'
+Slack : 0.531
+TNS   : 0.000
+
+## Clocks
+ bridge_spiclk ; 13.468 ; 74.25 MHz 
+ clk_74a ; 13.468 ; 74.25 MHz 
+ clk_74b ; 13.468 ; 74.25 MHz 
+ ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ; 69.843 ; 14.32 MHz 
+ ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk ; 17.460 ; 57.27 MHz 
+ ic|pll|altera_pll_i|cyclonev_pll|counter[2].output_counter|divclk ; 69.843 ; 14.32 MHz 
+ ic|pll|altera_pll_i|cyclonev_pll|fpll_0|fpll|vcoph[0] ; 1.455 ; 687.29 MHz 
+ ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk ; 0.000 ;

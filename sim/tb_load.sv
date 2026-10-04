@@ -19,13 +19,19 @@ module tb_load;
 	always #(T_HALF_SDRAM) clk_sdram = ~clk_sdram;
 	always #(4 * T_HALF_SDRAM) clk_sys = ~clk_sys;
 	always #6.734 clk_74a = ~clk_74a;
+`ifdef POCKET_BUPCHIP
+	// clk_arm, the BupChip's: exactly 2 x clk_sys, edge aligned, as the PLL
+	// makes it (counter[3]).
+	logic clk_arm = 1'b1;
+	always #(2 * T_HALF_SDRAM) clk_arm = ~clk_arm;
+`endif
 
 	logic reset_in = 1'b1;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
 	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
-	logic hscfw_download = 1'b0, arfw_download = 1'b0;
+	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
 	logic pokey_irq_on = 1'b0;
 	logic overscan_on = 1'b0;
 	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
@@ -67,8 +73,10 @@ module tb_load;
 
 	// core_top registers the loader's output on clk_sys
 	logic ioctl_wr_r = 0; logic [24:0] ioctl_addr_r = 0; logic [7:0] ioctl_dout_r = 0;
+	logic [2:0] ioctl_hi_r = 0;	// POCKET_BUPCHIP: bits 27:25, which slot's address
 	always @(posedge clk_sys) begin
 		ioctl_wr_r <= ioctl_wr; ioctl_addr_r <= ioctl_addr[24:0]; ioctl_dout_r <= ioctl_dout;
+		ioctl_hi_r <= ioctl_addr[27:25];
 	end
 
 	// ---------------- system ----------------
@@ -82,11 +90,30 @@ module tb_load;
 	sram_model sram_chip (.a(SRAM_A), .dq(SRAM_DQ), .oe_n(SRAM_OE_N), .we_n(SRAM_WE_N),
 		.ub_n(SRAM_UB_N), .lb_n(SRAM_LB_N));
 
+`ifdef POCKET_BUPCHIP
+	// PSRAM cram0 (the BupChip's assets): bupchip/s4/psram_model.sv, which
+	// checks every access against the datasheet's timing.
+	wire [21:16] cram0_a; wire [15:0] cram0_dq;
+	wire cram0_wait, cram0_clk, cram0_adv_n, cram0_cre, cram0_ce0_n, cram0_ce1_n;
+	wire cram0_oe_n, cram0_we_n, cram0_ub_n, cram0_lb_n;
+	psram_model cram0_chip (.cram_a(cram0_a), .cram_dq(cram0_dq), .cram_wait(cram0_wait),
+		.cram_clk(cram0_clk), .cram_adv_n(cram0_adv_n), .cram_cre(cram0_cre),
+		.cram_ce0_n(cram0_ce0_n), .cram_ce1_n(cram0_ce1_n), .cram_oe_n(cram0_oe_n),
+		.cram_we_n(cram0_we_n), .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n));
+`endif
+
 	atari7800_pocket dut (
+`ifdef POCKET_BUPCHIP
+		.clk_arm(clk_arm), .bupfw_download(bupfw_download), .ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
+		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
+		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
+		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
+		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
+`endif
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(cart_download), .bios_download(1'b0),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
@@ -398,7 +425,91 @@ module tb_load;
 			rises <= rises + 1;
 	end
 
+	// ---------------- joystick script (+joyscript=FILE) ----------------
+	// Drives joy0 from reset on. Each line "MS HEX" sets joy0 to HEX from MS
+	// ms after reset (atari7800_pocket.sv's bits: 0 right, 1 left, 2 down,
+	// 3 up, 9 A, 10 B); "MS dump" writes the next whole frame as
+	// frame_NNN.ppm (numbered from 0 in script order). # starts a comment.
+	longint t_run = 0;
+	initial begin
+		automatic string jpath, line, word;
+		automatic int jf, ms, at = 0;
+		wait (reset_in == 1'b0);
+		t_run = $time;
+		if ($value$plusargs("joyscript=%s", jpath)) begin
+			jf = $fopen(jpath, "r");
+			if (jf == 0) begin $display("cannot open %s", jpath); $finish; end
+			capture = 1;                     // fb always holds the last whole frame
+			while ($fgets(line, jf) > 0) begin
+				if ($sscanf(line, "%d %s", ms, word) != 2 || word.substr(0, 0) == "#") continue;
+				for (; at < ms; at++) repeat (14318) @(posedge clk_sys);
+				if (word == "dump") dump_frames = dumped + 1;
+				else joy0 = 16'(word.atohex());
+			end
+			$fclose(jf);
+		end
+	end
+
+`ifdef POCKET_BUPCHIP
+	// ---------------- BupChip (POCKET_BUPCHIP; +bupfw, +bupms) ----------------
+	// Every frame the firmware pushes, and every frame returned to clk_sys, go
+	// to +bupout=PREFIX (PREFIX.pcm, PREFIX.out.pcm: 48 kHz stereo s16le, as
+	// sim/bupchip/s4 writes them), with the song's start in each (the frames
+	// pushed when the firmware takes the command) for pcm_check.py. Underflows
+	// (a pop with no frame), overflows (a push into a full FIFO) and the lowest
+	// FIFO level once the song has started are counted here, from the
+	// peripheral's own signals.
+	string  bup_out;
+	int     bup_fd = 0, bup_ofd = 0, bup_minlev = 1 << 30, bup_ms = 0, bup_dump_at = 0;
+	longint bup_pushes = 0, bup_pops = 0, bup_song = -1, bup_outs = 0, bup_out_song = -1;
+	longint bup_under = 0, bup_over = 0, bup_out_nz = 0, bup_mix_nz = 0;
+	bit     bup_mark = 0;
+	always @(posedge clk_arm) begin
+		if (dut.bupchip.reg_sel && dut.bupchip.reg_write && dut.bupchip.reg_addr == 8'h10) begin
+			bup_pushes++;
+			if (bup_fd != 0) $fwrite(bup_fd, "%c%c%c%c", dut.bupchip.reg_wdata[7:0], dut.bupchip.reg_wdata[15:8],
+				dut.bupchip.reg_wdata[23:16], dut.bupchip.reg_wdata[31:24]);
+		end
+		if (dut.bupchip.per.cmd_pop && bup_song < 0) bup_song = bup_pushes;
+		if (dut.bupchip.per.pcm_push && dut.bupchip.per.pcm_full) bup_over++;
+		if (dut.bupchip.pcm_pop) begin
+			if (!dut.bupchip.pcm_available) bup_under++;
+			if (bup_pops == bup_song) bup_mark = 1;    // this tick plays the song's first frame
+			bup_pops++;
+		end
+		if (bup_song >= 0 && dut.bupchip.pcm_enabled && int'(dut.bupchip.per.pcm_level) < bup_minlev)
+			bup_minlev = int'(dut.bupchip.per.pcm_level);
+	end
+	always @(posedge clk_sys) begin
+		if (dut.bupchip.frame_cap) begin
+			if (bup_mark && bup_out_song < 0) bup_out_song = bup_outs;
+			bup_mark = 0;
+			bup_outs++;
+			if (dut.bupchip.frame_arm != 32'd0) bup_out_nz++;
+			if (bup_ofd != 0) $fwrite(bup_ofd, "%c%c%c%c", dut.bupchip.frame_arm[7:0], dut.bupchip.frame_arm[15:8],
+				dut.bupchip.frame_arm[23:16], dut.bupchip.frame_arm[31:24]);
+		end
+		// What reaches top.sv's mixer (0 is $8000 there)
+		if (dut.main.bupchip_mix_l != 16'h8000 && dut.main.bupchip_mix_l != 16'h0000) bup_mix_nz++;
+	end
+	initial if ($value$plusargs("bupout=%s", bup_out)) begin
+		bup_fd = $fopen({bup_out, ".pcm"}, "wb");
+		bup_ofd = $fopen({bup_out, ".out.pcm"}, "wb");
+	end
+	// +bupcmdlog: each command as the cartridge sends it ($8007 pair, at
+	// clk_sys) and as the firmware takes it (a read of 0x04), with the frames
+	// pushed so far, in ms since reset.
+	bit bup_cmdlog = 0;
+	initial bup_cmdlog = $test$plusargs("bupcmdlog");
+	always @(posedge clk_sys) if (bup_cmdlog && dut.bup_cmd_valid)
+		$display("BUPCMD sent  $%02x at %0.1f ms", dut.bup_cmd_data, real'($time - t_run) / 1.0e6);
+	always @(posedge clk_arm) if (bup_cmdlog && dut.bupchip.per.cmd_pop)
+		$display("BUPCMD taken $%02x at %0.1f ms, pushed %0d", dut.bupchip.per.reg_rdata[7:0],
+			real'($time - t_run) / 1.0e6, bup_pushes);
+`endif
+
 	logic [7:0] image [$];
+	int image_n = 0;
 	int fd, c, audf, mismatches;
 	real measured, ideal;
 	string path, save_path, sk_path, fw_path, image2_path;
@@ -421,6 +532,49 @@ module tb_load;
 	bit have_save = 0;
 	int save_diffs;
 
+`ifdef POCKET_BUPCHIP
+	// +bupfw=FILE: the BupChip firmware (bupchip.bin) through its data slot
+	// (0x109, bridge address 0x0A000000), before the cartridge, or after it
+	// with +bupfwlast, which is the Pocket's order (data.json's). Its ROM
+	// must then hold the file, word w = bytes 4w..4w+3 little-endian,
+	// zero-padded.
+	task automatic load_bupfw();
+		int n;
+		if ($value$plusargs("bupfw=%s", fw_path)) begin
+			fw_img.delete();
+			fd = $fopen(fw_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fw_path); $finish; end
+			c = $fgetc(fd);
+			while (c != -1) begin fw_img.push_back(c[7:0]); c = $fgetc(fd); end
+			$fclose(fd);
+			n = fw_img.size();
+			while (fw_img.size() % 4) fw_img.push_back(8'h00);
+			bupfw_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			for (int i = 0; i < fw_img.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = 32'h0A000000 + i;
+				bridge_wr_data = {fw_img[i], fw_img[i+1], fw_img[i+2], fw_img[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			bupfw_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
+			mismatches = 0;
+			for (int w = 0; w < 4096; w++) begin
+				automatic logic [31:0] e = 4 * w < fw_img.size() ?
+					{fw_img[4*w+3], fw_img[4*w+2], fw_img[4*w+1], fw_img[4*w]} : 32'd0;
+				if (dut.bupchip.rom.mem_q[w] !== e) mismatches++;
+			end
+			$display("BUPCHIP firmware slot: %0d byte file, %0d of 4096 ROM words differ from it, fw_loaded=%0d",
+				n, mismatches, dut.bupchip.fw_loaded);
+		end
+	endtask
+`endif
+
 	initial begin
 		if (!$value$plusargs("image=%s", path)) path = "load_test.a78";
 		if (!$value$plusargs("audf=%d", audf)) audf = 7;
@@ -428,6 +582,7 @@ module tb_load;
 		if (fd == 0) begin $display("cannot open %s", path); $finish; end
 		while ((c = $fgetc(fd)) != -1) image.push_back(c[7:0]);
 		$fclose(fd);
+		image_n = image.size();
 		while (image.size() % 4) image.push_back(8'hFF);
 
 		if ($test$plusargs("hsc_on")) hsc_setting = 2'd1;
@@ -501,6 +656,9 @@ module tb_load;
 				$display("FIRMWARE %0s: %0d byte file, %0d ROM bytes differ from it, hscfw_loaded=%0d",
 					slot == 0 ? "HSC" : "Supercharger", fw_img.size(), mismatches, dut.hscfw_loaded);
 			end
+`ifdef POCKET_BUPCHIP
+		if (!$test$plusargs("bupfwlast")) load_bupfw();
+`endif
 		repeat (100) @(posedge clk_74a);
 		cart_download = 1'b1;
 		repeat (100) @(posedge clk_74a);
@@ -517,6 +675,12 @@ module tb_load;
 		repeat (2000) @(posedge clk_74a);
 		cart_download = 1'b0;
 		repeat (100) @(posedge clk_sys);
+`ifdef POCKET_BUPCHIP
+		if ($test$plusargs("bupfwlast")) begin
+			repeat (100) @(posedge clk_74a);
+			load_bupfw();
+		end
+`endif
 
 		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
 		begin
@@ -555,6 +719,43 @@ module tb_load;
 
 		end
 		reset_in = 1'b0;
+`ifdef POCKET_BUPCHIP
+		// +bupms=MS: run MS ms with the BupChip watched, then report. The
+		// ARSC block (from 128 + the header's ROM size) must be in the PSRAM
+		// model. +bupdumpat=MS +dump=N: N frames from MS into the run.
+		if ($value$plusargs("bupms=%d", bup_ms)) begin
+			automatic longint decl = {image[49], image[50], image[51], image[52]};
+			automatic int arsc_bad = 0, arsc_n = 0;
+			if ($value$plusargs("bupdumpat=%d", bup_dump_at)) fork
+				begin
+					repeat (longint'(14318) * bup_dump_at) @(posedge clk_sys);
+					void'($value$plusargs("dump=%d", dump_frames));
+					capture = 1;
+				end
+			join_none
+			if (dut.cart_is_7800 && decl > 0)
+				for (longint b = 128 + decl; b < image_n; b++) begin
+					automatic logic [15:0] h = cram0_chip.bd_read(0, int'((b - 128 - decl) >> 1));
+					arsc_n++;
+					if (((b - 128 - decl) & 1 ? h[15:8] : h[7:0]) !== image[b]) arsc_bad++;
+				end
+			for (int ms_i = 0; ms_i < bup_ms; ms_i++) repeat (14318) @(posedge clk_sys);
+			if (bup_fd != 0) begin $fclose(bup_fd); $fclose(bup_ofd); end
+			$display("BUPCHIP ARSC: %0d bytes in the PSRAM, %0d differ from the file; asset_size %0d, asset_ready %0d",
+				arsc_n, arsc_bad, dut.bupchip.asset_size, dut.bupchip.asset_ready);
+			$display("BUPCHIP song start: pushed %0d, output %0d", bup_song, bup_out_song);
+			$display("BUPCHIP result: fw_loaded=%0d asset_ready=%0d cpu_run=%0d halted=%0d halt_code=%0d halt_pc=%08x fault=%02x muted=%0d pushed=%0d pops=%0d under=%0d over=%0d minlev=%0d out=%0d out_nz=%0d mix_nz=%0d arsc_bad=%0d psram_viol=%0d",
+				dut.bupchip.fw_loaded, dut.bupchip.asset_ready, dut.bupchip.cpu_run, dut.bupchip.halted,
+				dut.bupchip.halt_code, dut.bupchip.halt_pc, dut.bupchip.fault_code, dut.bupchip.muted,
+				bup_pushes, bup_pops, bup_under, bup_over, bup_minlev == (1 << 30) ? -1 : bup_minlev,
+				bup_outs, bup_out_nz, bup_mix_nz, arsc_bad, cram0_chip.n_viol);
+`ifdef BUP_DEBUG
+			$display("BUPCHIP status word %08x (cpu_run fw asset halted / code / cmd_ovf pcm_ovf pcm_unf muted / fault / cap_err / lowest %0d)",
+				dut.bup_dbg_status, dut.bup_dbg_status[10:0]);
+`endif
+			$finish;
+		end
+`endif
 		if ($test$plusargs("inputtest")) begin
 			// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X (slow), 12 Y (fast)
 			$display("INPUT port types: A %0d, B %0d, gun on port %0d", dut.porta_type, dut.portb_type, dut.gun_port + 1);

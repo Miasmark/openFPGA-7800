@@ -1,5 +1,8 @@
 // Whole-core simulation of the Pocket wrapper (atari7800_pocket) at the
-// Pocket's clock plan: clk_sys 14.318181 MHz and clk_sdram at exactly 4x.
+// Pocket's clock plan: clk_sys 14.318181 MHz, clk_sdram at exactly 4x and,
+// with POCKET_BUPCHIP, clk_arm at exactly 2x, with a model of the PSRAM
+// (cram0) the BupChip keeps its assets in. Nothing loads a BupChip firmware
+// here, so the BupChip stays held and silent.
 //
 // No cartridge is loaded, so the core runs its built-in cartridge image from
 // rtl/mem0.hex. run_sim.sh replaces that image with tone_test.hex, a few
@@ -24,6 +27,10 @@ module tb_system;
 	localparam real T_HALF_SDRAM = 8.730;
 	always #(T_HALF_SDRAM) clk_sdram = ~clk_sdram;
 	always #(4 * T_HALF_SDRAM) clk_sys = ~clk_sys;
+`ifdef POCKET_BUPCHIP
+	logic clk_arm = 1'b1;
+	always #(2 * T_HALF_SDRAM) clk_arm = ~clk_arm;
+`endif
 
 	logic reset_in = 1'b1;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
@@ -46,7 +53,25 @@ module tb_system;
 	sram_model sram_chip (.a(SRAM_A), .dq(SRAM_DQ), .oe_n(SRAM_OE_N), .we_n(SRAM_WE_N),
 		.ub_n(SRAM_UB_N), .lb_n(SRAM_LB_N));
 
+`ifdef POCKET_BUPCHIP
+	// PSRAM cram0 (the BupChip's assets): bupchip/s4/psram_model.sv
+	wire [21:16] cram0_a; wire [15:0] cram0_dq;
+	wire cram0_wait, cram0_clk, cram0_adv_n, cram0_cre, cram0_ce0_n, cram0_ce1_n;
+	wire cram0_oe_n, cram0_we_n, cram0_ub_n, cram0_lb_n;
+	psram_model cram0_chip (.cram_a(cram0_a), .cram_dq(cram0_dq), .cram_wait(cram0_wait),
+		.cram_clk(cram0_clk), .cram_adv_n(cram0_adv_n), .cram_cre(cram0_cre),
+		.cram_ce0_n(cram0_ce0_n), .cram_ce1_n(cram0_ce1_n), .cram_oe_n(cram0_oe_n),
+		.cram_we_n(cram0_we_n), .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n));
+`endif
+
 	atari7800_pocket dut (
+`ifdef POCKET_BUPCHIP
+		.clk_arm(clk_arm), .bupfw_download(1'b0), .ioctl_wr_any(1'b0), .ioctl_hi(3'd0),
+		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
+		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
+		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
+		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
+`endif
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
 		.cart_download(1'b0), .bios_download(1'b0), .hscfw_download(1'b0), .arfw_download(1'b0), .ioctl_wr(1'b0), .ioctl_addr(25'd0), .ioctl_dout(8'd0),
 		.region_setting(region), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(overscan),

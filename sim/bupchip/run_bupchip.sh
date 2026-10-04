@@ -8,7 +8,7 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RTL="$HERE/../../src/fpga/mister/rtl"
 WORK="${WORK:-$HERE/../work/bupchip}"
-VERILATOR="${VERILATOR:-verilator}"
+VERILATOR="${VERILATOR:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
 GAME="$(realpath "${1:?usage: run_bupchip.sh GAME.a78 [SONG] [SECONDS]}")"
 SONG="${2:-0}"
 SECS="${3:-4}"

@@ -33,6 +33,16 @@ module Atari7800 #(
 	output logic        fb_active,
 	input  logic  [7:0] fb_q,
 `endif
+`ifdef POCKET_BUPCHIP
+	// Pocket: the BupChip runs outside this module (core/bupchip/, with
+	// NO_BUPCHIP defined). This exports its $8007 command and the Souper
+	// profile and takes its audio back into the mix. See POCKET_CHANGES.md.
+	output logic        bup_cmd_valid_o,
+	output logic  [7:0] bup_cmd_data_o,
+	output logic        souper_profile_o,
+	input  logic [15:0] bup_audio_l_i,
+	input  logic [15:0] bup_audio_r_i,
+`endif
 `ifdef EXTERNAL_FIRMWARE
 	// Pocket: the HSC and Supercharger firmware are loaded at run time from
 	// user-supplied files instead of being built in (see POCKET_CHANGES.md).
@@ -1029,8 +1039,17 @@ module Atari7800 #(
 	assign bup_ddr_len = 8'd1;
 	assign bup_ddr_req = 1'b0;
 	assign bup_ddr_rnw = 1'b1;
+`ifdef POCKET_BUPCHIP
+	// Pocket BupChip: the command goes out, the audio comes back.
+	assign bup_cmd_valid_o = bup_cmd_valid_eff;
+	assign bup_cmd_data_o = bup_cmd_data_eff;
+	assign souper_profile_o = souper_profile;
+	assign bupchip_audio_l = bup_audio_l_i;
+	assign bupchip_audio_r = bup_audio_r_i;
+`else
 	assign bupchip_audio_l = 16'd0;
 	assign bupchip_audio_r = 16'd0;
+`endif
 `endif
 
 	cart cart

@@ -22,11 +22,11 @@ https://github.com/Miasmark/openFPGA-7800
 | Paddle timing, light gun | `src/fpga/mister/rtl/paddles.sv`, `lightgun.sv` | Jamie Blanks (`paddles.sv`); `lightgun.sv` has no header and matches the light-gun module in Sorgelig's MiSTer cores | MIT with the rest of the MiSTer 7800 repository; `lightgun.sv` may also be under those cores' GPL (`LICENSES/GPL-3.0.txt`) | Built (from 2.0.13) |
 | Souper mapper | `src/fpga/mister/rtl/souper.v` | Osman Celimli | zlib-style (file header) | Built |
 | SN76489 | `src/fpga/mister/rtl/SN76489/` | Jamie Blanks | MIT | Built |
-| `data_loader`, `sound_i2s`, `sync_fifo` | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built |
+| `data_loader`, `sound_i2s`, `sync_fifo`; `psram` (asynchronous PSRAM controller, vendored unmodified from https://github.com/agg23/analogue-pocket-utils `ip/mem/psram.sv`: last changed upstream in `56391c11` of 2022-09-09, identical at `78482d1b` of 2023-08-10, git blob `2f7797f3`) | `src/fpga/pocket_utils/` | Adam Gastineau (agg23) | MIT (`src/fpga/pocket_utils/LICENSE`) | Built (`psram` since the Pocket BupChip, `POCKET_BUPCHIP`: it drives PSRAM `cram0`) |
 | APF framework | `src/fpga/apf/` | Analogue | Analogue's APF Software License Agreement (file headers); `mf_*.v` also carry the Intel Program License | Built |
 | PLL and PLL reconfiguration IP (generated) | `src/fpga/core/pll/` | Intel | Intel Program License (file headers): for use with Intel devices | Built |
 | Core template glue (`core_top.v`, `core_bridge_cmd.v`) | `src/fpga/core/` | Analogue, modified for this port | Analogue's APF terms | Built |
-| Pocket wrapper, audio filter, POKEY adapter, PLL setup, sim, tools | `src/fpga/core/`, `sim/`, `tools/` | this project | MIT (`LICENSE`) | Built (HDL) |
+| Pocket wrapper, audio filter, POKEY adapter, PLL setup, the BupChip (ARIA, `src/fpga/core/bupchip/`), sim, tools | `src/fpga/core/`, `sim/`, `tools/` | this project | MIT (`LICENSE`) | Built (HDL) |
 | Video mixer | `src/fpga/mister/rtl/video_mixer_plus.sv` | Alexey Melnikov (Sorgelig) | GPL | Repo only |
 | ARM7TDMI core | `src/fpga/mister/rtl/arm7tdmi/arm7tdmi_core.sv` | Robert Peip / Jamie Blanks | GPL-2.0-only | Repo only |
 | T65 | `src/fpga/mister/rtl/t65/` | Daniel Wallner, Mike Johnson, Wolfgang Scherr, Morten Leikvoll | BSD-style (file headers) | Repo only |
@@ -51,7 +51,12 @@ High Score Cartridge firmware (`mem4`) and the Starpath Supercharger BIOS
 (`ar`), which are the original makers' code with no license given. This port
 removes both from the repository and builds with `EXTERNAL_FIRMWARE`, which
 loads them at run time from the user's own `highscor.rom` (or `hsc.a78`)
-and `supercharger.bin`, as it already did for the 7800 BIOS.
+and `supercharger.bin`, as it already did for the 7800 BIOS. The same goes
+for the BupChip's CoreTone firmware (`bupchip.hex`/`.mif`), whose source is
+not published: it was removed from the repository after 2.0.21 (older
+commits still hold the vendored copy), and the Pocket BupChip loads it at
+core start from the user's `bupchip.bin` (docs/BUPCHIP.md); its ROM has no
+built-in contents.
 
 ## Platform files
 

@@ -5,9 +5,11 @@
 #   counter[0]  clk_sys     14.318 MHz (14.188 MHz for PAL, see pll_region.v)
 #   counter[1]  clk_sdram   4 x clk_sys (same VCO)
 #   counter[2]  clk_sys_90  clk_sys at 90 degrees, video sample clock
+#   counter[3]  clk_arm     2 x clk_sys (same VCO): the BupChip (ARIA,
+#               POCKET_BUPCHIP; docs/BUPCHIP_CORE.md, "Clocking")
 # The PLL is reconfigurable, which names its outputs by counter. Timing is
 # checked at the NTSC (faster) setting; PAL only slows every clock by 0.9%.
-# All three share edges, so they are one synchronous group and every crossing
+# All four share edges, so they are one synchronous group and every crossing
 # between them is timed. Everything else is asynchronous to them.
 
 set core_clks {ic|pll|altera_pll_i|cyclonev_pll|counter[*].output_counter|divclk}
@@ -40,3 +42,18 @@ set_multicycle_path -hold 1 \
 # (Flicker Blend, SaveKey) keep the default check.
 set_multicycle_path -setup 2 -from [get_registers -nowarn {*|sram_ctrl:sram|c_rdata[*]}] -to [get_clocks $clk_sys]
 set_multicycle_path -hold  1 -from [get_registers -nowarn {*|sram_ctrl:sram|c_rdata[*]}] -to [get_clocks $clk_sys]
+
+# Fitter only: more margin than the real constraints, which the Timing
+# Analyzer (quartus_sta) still checks unchanged. The fitter stops improving a
+# path once it meets its constraint. With the BupChip (POCKET_BUPCHIP) the
+# device is 79% full, and the first build left clk_sdram's worst setup path
+# (MARIA / 2600 mapper address and strobes into sram_ctrl's pad registers;
+# no BupChip logic) at +0.15 ns, under the +1.0 ns the build wants
+# (docs/BUPCHIP_CORE.md, step 5), and a clk_sys hold path into a JT51 shift
+# register's M10K at -0.04 ns (fast 0 C). Asking the fitter for 1 ns more
+# setup into clk_sdram and 0.1 ns more hold into clk_sys keeps both margins.
+if {$::TimeQuestInfo(nameofexecutable) eq "quartus_fit"} {
+	set clk_sdram {ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk}
+	set_clock_uncertainty -add -setup -from [get_clocks $core_clks] -to [get_clocks $clk_sdram] 1.0
+	set_clock_uncertainty -add -hold -from [get_clocks $core_clks] -to [get_clocks $clk_sys] 0.1
+}

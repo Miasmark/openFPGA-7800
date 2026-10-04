@@ -27,13 +27,21 @@ module pll_region
 	input  wire        is_pal,           // asynchronous (clk_sys)
 	input  wire        loading,
 	input  wire        pll_locked,       // synchronised to clk
-	output reg         busy = 1'b0,
+	output reg         busy,
 
 	input  wire        cfg_waitrequest,
-	output reg         cfg_write = 1'b0,
-	output reg  [5:0]  cfg_address = 6'd0,
-	output reg  [31:0] cfg_writedata = 32'd0
+	output reg         cfg_write,
+	output reg  [5:0]  cfg_address,
+	output reg  [31:0] cfg_writedata
 );
+	// Power-up values (an initializer on an output port declaration is
+	// ignored by Quartus; DEVELOPING.md, "Power-up values"). cfg_address and
+	// cfg_writedata have none on purpose: they are read only while cfg_write
+	// is high, and left free Quartus sees that only registers 2 and 7 are
+	// ever addressed and prunes the rest of altera_pll_reconfig (about 550
+	// ALMs).
+	initial busy = 1'b0;
+	initial cfg_write = 1'b0;
 	// clk_sys = 74.25 * (9 + K/2^32) / 48 MHz
 	localparam [31:0] FRAC_NTSC = 32'd1100363522;   // 14.3181818 MHz
 	localparam [31:0] FRAC_PAL  = 32'd737741760;    // 14.1875800 MHz

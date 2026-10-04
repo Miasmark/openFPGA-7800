@@ -744,6 +744,22 @@ set_global_assignment -name VERILOG_MACRO "EEPROM_NACK_ENDS_READ=1"
 set_global_assignment -name VERILOG_MACRO "POCKET_SRAM=1"
 set_global_assignment -name VERILOG_MACRO "EXTERNAL_CARTRAM=1"
 set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
+# The Pocket's BupChip, ARIA (core/bupchip/, docs/BUPCHIP_CORE.md): the Souper
+# cartridge's music co-processor, on clk_arm, its assets in PSRAM cram0. It
+# replaces upstream's, which NO_BUPCHIP keeps out.
+set_global_assignment -name VERILOG_MACRO "POCKET_BUPCHIP=1"
+# Hardware test builds add VERILOG_MACRO "BUP_DEBUG=1" here: the BupChip's
+# status word, shadow FIFO counters, load probe and its status cells on
+# screen (core/bupchip/bup_status_osd.sv). Releases leave it out
+# (docs/DEVELOPING.md, "Before a release"); sim/run_sim.sh follows this file.
+# Fitter seed. With the BupChip the device is 79% full and clk_sdram's worst
+# path (MARIA's DMA / the 6502's halt through sram_ctrl's arbiter into the
+# SRAM's byte-lane pad registers) is placement-sensitive. The 2.1.1 release
+# build: seeds 1, 2 and 3 gave +0.26, +0.44 and +0.28 ns (the BUP_DEBUG test
+# builds had +0.65 to +1.26). A structural fix belongs in sram_ctrl
+# (docs/BUPCHIP_CORE.md, step 5). Check it again whenever the design
+# changes; another seed may then do better.
+set_global_assignment -name SEED 2
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister
@@ -763,3 +779,20 @@ set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_lb_n
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_dq[*]
 set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to sram_dq[*]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to sram_dq[*]
+
+# PSRAM cram0 (POCKET_BUPCHIP: psram.sv, asynchronous mode): likewise every
+# pin from or into an I/O register. The pins are 1.8 V with 4 mA drive, set
+# above with the board's other pins. cram0_clk and cram0_cre stay 0, and
+# cram0_ce1_n stays high (only die 0 is used), so the fitter ignores its
+# assignment (warning 176250); it stays, as the seed above was chosen with it.
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_adv_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_ce0_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_ce1_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_oe_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_ub_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_lb_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_dq[*]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to cram0_dq[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[*]

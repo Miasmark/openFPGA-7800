@@ -22,9 +22,13 @@ module audio_filter
 	input  wire        clk,
 	input  wire [15:0] in_l,
 	input  wire [15:0] in_r,
-	output reg  [15:0] out_l = 16'd0,
-	output reg  [15:0] out_r = 16'd0
+	output reg  [15:0] out_l,
+	output reg  [15:0] out_r
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial out_l = 16'd0;
+	initial out_r = 16'd0;
 
 	reg  [7:0]  count = 8'd0;
 	reg  [23:0] acc_l = 24'd0, acc_r = 24'd0;

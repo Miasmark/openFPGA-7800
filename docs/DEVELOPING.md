@@ -20,11 +20,12 @@ Related documents:
 | `src/fpga/apf/` | Analogue's APF framework (`apf_top.v` is the real top level) | Analogue; don't edit |
 | `src/fpga/core/core_top.v` | APF glue: PLL, bridge address map, settings, data slots, video/audio out, controllers | This project (from Analogue's template) |
 | `src/fpga/core/atari7800_pocket.sv` | Pocket counterpart of MiSTer's `Atari7800.sv`: header parsing, reset, SDRAM, BIOS/save RAMs, SaveKey, firmware loading | This project |
+| `src/fpga/core/bupchip/` | The BupChip, ARIA: the Souper cartridge's music co-processor, its memories, asset cache and PSRAM path ([BUPCHIP_CORE.md](BUPCHIP_CORE.md)) | This project |
 | `src/fpga/core/pll/` | Generated PLL and PLL-reconfiguration IP | Quartus `ip-generate` (see below) |
 | `src/fpga/core/pll_region.v` | PAL/NTSC PLL retune sequence | This project |
 | `src/fpga/core/audio_filter.sv`, `pokey_adapter_watson.sv` | Audio conditioning; Watson POKEY wrapper (simulation only since 2.0.21) | This project |
 | `src/fpga/mister/rtl/` | The MiSTer Atari7800 core, vendored | Upstream; change only as POCKET_CHANGES.md records |
-| `src/fpga/pocket_utils/` | agg23's data loader, I2S, FIFO | agg23 (MIT) |
+| `src/fpga/pocket_utils/` | agg23's data loader, I2S, FIFO, PSRAM controller | agg23 (MIT) |
 | `dist/` | SD card layout: `Cores/Miasmark.7800/*.json`, platform files | This project |
 | `sim/` | Verilator/GHDL simulation and test carts | This project |
 | `tools/` | Packaging and file utilities | This project |
@@ -35,7 +36,9 @@ Related documents:
 | Macro | Effect |
 |---|---|
 | `NO_ARM_MAPPER` | Upstream's: leaves out the ARM7TDMI (2600 DPC+/CDF). Doesn't fit. |
-| `NO_BUPCHIP` | Leaves out the BupChip player. Doesn't fit; see [BUPCHIP.md](BUPCHIP.md). |
+| `NO_BUPCHIP` | Leaves out upstream's BupChip player (an ARM7TDMI with its assets in DDR3). Doesn't fit; see [BUPCHIP.md](BUPCHIP.md). |
+| `POCKET_BUPCHIP` | The Pocket's own BupChip, ARIA (`core/bupchip/`, [BUPCHIP_CORE.md](BUPCHIP_CORE.md)), in its place: `top.sv` exports the `$8007` command and takes the audio back; the firmware comes from the `bupchip.bin` data slot, the music from the cartridge file's ARSC block, kept in PSRAM `cram0`. Needs `NO_BUPCHIP`. |
+| `BUP_DEBUG` | Hardware test builds only: the BupChip's status word, shadow FIFO counters, and its status cells over the picture's top-left corner while a Souper cartridge runs (`core/bupchip/bup_status_osd.sv`). Off in releases. |
 | `NO_DDRAM` | Leaves out the DDR3 bridge. The Pocket has no DDR3. |
 | `EXTERNAL_FIRMWARE` | HSC firmware and Supercharger BIOS loaded from files, not built in. |
 | `EEPROM_NACK_ENDS_READ` | SaveKey EEPROM fix: a NACK ends a sequential read. |
@@ -92,7 +95,25 @@ sim/extra_tests.sh      # game-style tests with 7800basic carts; needs run_sim.s
 sim/bupchip/run_bupchip.sh GAME.a78 SONG   # BupChip CPU load; see BUPCHIP.md
 SRAM=0 WORK=sim/work_bram sim/run_sim.sh   # the block RAM build, as up to 2.0.20
 POKEY=watson sim/run_sim.sh               # Watson's POKEY instead of upstream's
+BUP_DEBUG=0 sim/run_sim.sh                # the BupChip without its debug status (a release build)
+BUPCHIP=0 WORK=sim/work_nobup sim/run_sim.sh   # without the Pocket BupChip, as up to 2.0.21
 ```
+
+`run_sim.sh` builds the same macros as the qsf, the BupChip
+(`POCKET_BUPCHIP`, `BUP_DEBUG`) included: the testbenches run `clk_arm` at
+2 x `clk_sys` and put a PSRAM model (`sim/bupchip/s4/psram_model.sv`) on
+`cram0`. With the user's firmware at `src/fpga/mister/rtl/bupchip.hex`
+(gitignored; [BUPCHIP.md](BUPCHIP.md)) it also runs the BupChip end to end in
+the whole core: the firmware through its data slot after the cartridge, as
+the Pocket loads them, a Souper test cartridge
+(`sim/souper_test.py`, the synthetic ARSC block appended) whose 6502 program
+sends a command through `$8007`, and the song's PCM compared with the Python
+model's. Without the firmware that part is skipped. The BupChip's own
+benches are in `sim/bupchip/` (its `s4/check.sh` runs the wrapper's).
+`sim/bupchip/run_jukebox.sh` plays the hardware-test jukebox
+(`sim/bupchip/jukebox.py`) the same way, pressing joystick 1 from a script
+(`tb_load.sv`'s `+joyscript`) and checking each command, the PCM and the
+screen.
 
 `run_sim.sh` converts the POKEY with GHDL, copies the few upstream files
 Verilator can't parse into `sim/work/patched/` (initialised `wire` arrays
@@ -100,7 +121,7 @@ become `logic`), builds two testbenches, and runs them:
 
 - `tb_system`: built-in test image. TIA pitch, frame geometry, 2600 mode.
 - `tb_load`: loads files through the real APF data loader. This is the
-  testbench to use for anything cart-related.
+  testbench to use for anything cart-related (and the BupChip's slot).
 - `tb_pll_region`, `tb_audio_filter`, `tb_virtual_axis`: unit tests.
 
 What the sim does **not** model:
@@ -124,6 +145,8 @@ Something that fails only on hardware is most likely in one of those.
 | `dump=N`, `dumpat=MS` | Write N frames as `frame_NNN.ppm` (at MS into a `wav` run) |
 | `hsc_on`, `hsc_off` | High Score Cart setting |
 | `hscfw=FILE`, `arfw=FILE` | Load HSC firmware / Supercharger BIOS through their slots |
+| `bupfw=FILE`, `bupfwlast` | Load the BupChip firmware (`bupchip.bin`) through its slot (`0x109`) and check its ROM; before the cartridge, or after it with `bupfwlast` (the Pocket's order) |
+| `bupms=MS`, `bupout=PREFIX`, `bupdumpat=MS` | Run MS ms after the load with the BupChip watched and print `BUPCHIP` lines (status, FIFO health, the ARSC block in the PSRAM model); write its PCM as `PREFIX.pcm` / `PREFIX.out.pcm`; with `+dump=N`, dump frames MS into the run |
 | `save=FILE` | Preload a 2 KiB `hsc.sav`, check it survives |
 | `sk_on`, `sk_auto` | SaveKey setting (default Off) |
 | `sksave=FILE`, `skcheck` | Preload/check the SaveKey image |
@@ -208,7 +231,7 @@ setting.
 1. `data.json`: append the slot. **Never reorder existing slots.** The core
    refers to slots by their position in the list (the data slot table index)
    and by ID. Give it a bridge address with a top nibble of 0 (the data
-   loader only passes `0x0xxxxxxx`), e.g. the next free `0x0A000000`.
+   loader only passes `0x0xxxxxxx`), e.g. the next free `0x0C000000`.
 2. `core_top.v`: a `SLOT_*` ID, a synchronised `*_download` flag in the
    clk_sys block next to `bios_download`, and include it in the loader's
    `ioctl_wr` gate.
@@ -255,13 +278,15 @@ docker run --rm -v "$PWD/src/fpga/core/pll:/out" raetro/quartus:21.1 bash -c 'cd
   --component-parameter=gui_device_speed_grade=8 --component-parameter=gui_pll_mode="Fractional-N PLL" \
   --component-parameter=gui_reference_clock_frequency=74.25 --component-parameter=gui_operation_mode=direct \
   --component-parameter=gui_fractional_cout=32 --component-parameter=gui_dsm_out_sel=1st_order \
-  --component-parameter=gui_en_reconf=true --component-parameter=gui_number_of_clocks=3 \
+  --component-parameter=gui_en_reconf=true --component-parameter=gui_number_of_clocks=4 \
   --component-parameter=gui_output_clock_frequency0=14.318181 --component-parameter=gui_output_clock_frequency1=57.272727 \
   --component-parameter=gui_output_clock_frequency2=14.318181 --component-parameter=gui_ps_units2=degrees \
-  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_en_adv_params=true \
+  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=28.636363 \
+  --component-parameter=gui_en_adv_params=true \
   --component-parameter=gui_multiply_factor=9 --component-parameter=gui_frac_multiply_factor=1100363522 \
   --component-parameter=gui_divide_factor_n=1 --component-parameter=gui_divide_factor_c0=48 \
   --component-parameter=gui_divide_factor_c1=12 --component-parameter=gui_divide_factor_c2=48 \
+  --component-parameter=gui_divide_factor_c3=24 \
   --component-parameter=gui_pll_auto_reset=Off &&
  cp /tmp/pll_core/pll_core.v /out/'
 ```
@@ -270,7 +295,10 @@ Then put back the explanatory header comment at the top of `pll_core.v`.
 The reconfiguration controller (`pll/pll_cfg/`) comes from
 `--component-name=altera_pll_reconfig --output-name=pll_cfg`.
 
-The clock plan has three rules:
+The PLL has four outputs: `clk_sys` (C0 = 48), `clk_sdram` (C1 = 12),
+`clk_sys_90` (C2 = 48, 90 degrees) and `clk_arm` (C3 = 24, 2 x `clk_sys`,
+28.636 MHz: the BupChip's CPU, ARIA; [BUPCHIP_CORE.md](BUPCHIP_CORE.md),
+"Clocking"). The clock plan has four rules:
 
 - `clk_sdram` must be exactly 4 × `clk_sys`, from the same VCO and
   edge-aligned. The data loader holds each byte for four `clk_sdram` cycles
@@ -283,6 +311,12 @@ The clock plan has three rules:
   K/2³²) / 48` MHz. NTSC `K = 1100363522` (14.3181818 MHz), PAL
   `K = 737741760` (14.1875800 MHz). If you change M, N or the dividers,
   recompute both values (`pll_region.v`) so they share the integer M.
+  Adding or changing a C counter alone (as C3 was added) leaves M, N and
+  both values as they are.
+- `clk_arm` comes from the same VCO, so every BupChip crossing to and from
+  `clk_sys` is timed. Its 48 kHz pop runs from `clk_74a`, and `psram.sv`
+  keeps `CLOCK_SPEED = 28.636364` whatever the divider; a retune scales
+  `clk_arm` with the rest (28.375 MHz in PAL) and holds the BupChip.
 
 ### Change the PAL/NTSC switch
 
@@ -336,7 +370,7 @@ any change to the video path.
 `src/fpga/core/core_constraints.sdc` refers to the PLL outputs by name. The
 reconfigurable PLL names them
 `ic|pll|altera_pll_i|cyclonev_pll|counter[N].output_counter|divclk`
-(0 = `clk_sys`, 1 = `clk_sdram`, 2 = `clk_sys_90`). The earlier fixed PLL
+(0 = `clk_sys`, 1 = `clk_sdram`, 2 = `clk_sys_90`, 3 = `clk_arm`). The earlier fixed PLL
 used `general[N].gpll~PLL_OUTPUT_COUNTER|divclk`. If the names stop
 matching, the clock groups and multicycle paths silently stop applying and
 timing fails by several nanoseconds. Check the "Clocks" table in
@@ -344,11 +378,16 @@ timing fails by several nanoseconds. Check the "Clocks" table in
 
 Other constraints already in the file:
 
-- The three PLL outputs are one synchronous group. `clk_74a`, `clk_74b` and
+- The four PLL outputs are one synchronous group. `clk_74a`, `clk_74b` and
   `bridge_spiclk` are asynchronous to it.
 - SDRAM read data to `clk_sys` is a 2-cycle path (as in MiSTer's SDC).
 - The data loader's address and data into `clk_sys` have a hold multicycle
   (they are held for ten `clk_sdram` cycles around the strobe).
+
+The tightest path is on `clk_sdram`: the cartridge-RAM request from MARIA
+or the 6502, through the mappers and `sram_ctrl`'s arbiter, into the SRAM's
+pad registers. Its margin moves with placement (+0.44 ns in 2.1.1, +1.32 in
+2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes.
 
 ## Resource budget
 
@@ -365,7 +404,14 @@ not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 
 Current use (2.0.21) is 69% ALMs and 46 of 308 M10K blocks: the cartridge
 RAM, Flicker Blend frame, SaveKey and BIOS live in the SRAM
-(`core/sram_ctrl.sv`, whose header has the memory map). Up to 2.0.20 all
+(`core/sram_ctrl.sv`, whose header has the memory map). With the BupChip
+(`POCKET_BUPCHIP` and `BUP_DEBUG`, the first test build) it is 79% ALMs
+(14,595), 86 M10K blocks and 95% of the LABs. At that fill the worst
+`clk_sdram` path (MARIA and 2600 mapper address into `sram_ctrl`'s pad
+registers) depends on placement: `core_constraints.sdc` asks the fitter alone
+for 1 ns of extra setup margin there, and `ap_core.qsf` sets the fitter seed
+that gave the best result (3, +1.26 ns). After any change, check the
+`clk_sdram` slack again and try other seeds if it drops below +1.0 ns. Up to 2.0.20 all
 308 blocks were in use (75% ALMs), and a 16 KiB diagnostic RAM did not fit.
 The SRAM's last 16 KiB (words 0x1E000-0x1FFFF) is free.
 Before adding memory, check the M10K count in `ap_core.fit.summary`.
@@ -389,6 +435,19 @@ constant drivers") but only a warning in the sim.
 - **Debug log.** Turning on the Pocket's developer debug logging writes
   `APF Debug Log` text files showing which files each slot loaded and their
   sizes. Ask testers for one whenever loading or saving misbehaves.
+- **Power-up values.** Give a register its power-up value in an `initial`
+  block or on an internal declaration (`logic x = 1'b0;`), never on an
+  output port (`output logic x = 1'b0`, `output reg x = 0`). Quartus 21.1
+  ignores the latter without a warning, and with Power-Up Don't Care (on by
+  default) picks the level itself. A flag that is only ever set then becomes
+  a constant 1: the BupChip's three capture flags did, and lit test1's and
+  test2's red boxes on every load. Simulation honours the initializer, so
+  only the map report's "Registers Removed During Synthesis" shows it.
+  `run_sim.sh` refuses such declarations in `src/fpga/core`. Leaving a
+  register with no power-up value at all is sometimes right: `pll_region.v`'s
+  `cfg_address` and `cfg_writedata` are read only with `cfg_write`, and
+  free power-up lets Quartus prune the PLL reconfiguration core to the two
+  registers it writes; giving them one costs about 550 ALMs.
 - **A78 headers.** The core maps POKEY, RAM and save devices only as the
   header declares, as MiSTer does. Many dumps have wrong headers. Check the
   header before debugging the core. Commando's "missing music" was a bad
@@ -397,11 +456,14 @@ constant drivers") but only a warning in the sim.
 ## Before a release
 
 1. `sim/run_sim.sh` and `sim/extra_tests.sh` pass.
-2. The build meets timing on every corner. Note the ALM and M10K numbers.
-3. Bump `core.json`'s version. Update README (features, verification table,
+2. `BUP_DEBUG` is out of `ap_core.qsf` (it is for hardware test builds), and
+   `BUP_DEBUG=0 sim/run_sim.sh` passes.
+3. The build meets timing on every corner. Note the ALM and M10K numbers.
+4. Bump `core.json`'s version. Update README (features, verification table,
    hardware results) and POCKET_CHANGES.md for any upstream change.
-4. New third-party files: add them to THIRD_PARTY_NOTICES.md, keep their
+   Hardware test builds keep the version they were built from.
+5. New third-party files: add them to THIRD_PARTY_NOTICES.md, keep their
    headers, and check that `tools/package.sh` ships their license text.
-5. No ROMs, BIOS or firmware images committed.
-6. Hardware-test anything the sim can't model (SDRAM, PLL, video, saves)
+6. No ROMs, BIOS or firmware images committed.
+7. Hardware-test anything the sim can't model (SDRAM, PLL, video, saves)
    and record the result in the README's hardware table.
