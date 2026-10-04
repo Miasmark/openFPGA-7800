@@ -2,7 +2,7 @@
 
 **DARIA** (Dual-use Atari RISC Interface Accelerator) is ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`), extended to run the 2600's ARM cartridge schemes: DPC+, CDF, CDFJ and CDFJ+ (Harmony and Melody cartridges). Upstream MiSTer runs them on its ARM7TDMI core, which the Pocket build leaves out (`NO_ARM_MAPPER`). The first release with DARIA will be 2.2.1.
 
-This document is at **step 0, scope**: what DARIA must do, taken from upstream's RTL and checked against traces of real games. Step 1 turns it into the design. The plan the steps come from is `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
+**Step 0 (scope) is done:** what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. Step 1 turns this document into the design ("Steps", at the end). The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
 
 Tags, as in `BUPCHIP_CORE.md`:
 
@@ -29,6 +29,8 @@ These carry over from ARIA:
 1. **One bitstream.** DARIA joins the existing 7800 build. ARIA and DARIA are one CPU instance: a Souper game and a 2600 ARM game never run at once. The per-file bitstream findings (K1–K3) stay as the fallback if the single build cannot close.
 2. **Fix B ships with DARIA** (`SRAM_TIMING.md`): the 2600 cartridge-RAM request gets its own registered path in the same release. With the device back at 80% or more, `clk_sdram`'s margin must not depend on placement again.
 3. **Images up to 256 KB**, with no such game to test yet: a block-RAM window for the start of the image and a cache over SDRAM for the rest ("Where step 0 leaves the budget").
+4. **32 KB of cart RAM** in block RAM (32 M10K), as upstream gives CDFJ+; the other schemes keep their 8 KB window inside it.
+5. **`bupchip.bin` stays resident.** The CPU's ROM gets 16 KB beside the image window, and the profile picks the firmware or the image with one address bit set at load. A 2600 ARM game then never overwrites the firmware, and a Souper game loaded after one does not depend on the Pocket reloading `bupchip.bin` (16 M10K).
 
 ## Requirements
 
@@ -57,7 +59,7 @@ These carry over from ARIA:
 | # | Requirement | Source |
 |---|---|---|
 | M1 | **ROM** at 0 up to the image size (capped at 1 MB), read-only. A write aborts. Images in the test set: 32 KB (12), 64 KB (2), 128 KB (Turbo). **DARIA supports images up to 256 KB**, though none that large is available to test (larger ARM games are sold, not distributed). The cartridge slot takes files up to 4 MB, and the loader keeps the whole file in SDRAM. | [C] `arm_mapper_memory.sv:375, 566-567, 624-626`; [trace]; `data.json` |
-| M2 | **RAM** at 0x4000_0000, `mapper_ram_size` bytes: 32 KB for CDFJ+, 8 KB for every other scheme. The demos stay inside 8 KB, except three CDFJ+ ones (Elevator Agent, Turbo, Zaxxon) that reach the 16th KB. DARIA needs 32 KB (32 M10K) to be exact for CDFJ+, or must halt above what it has. | [C] `:568-569`, `top.sv:779-783`; [trace] |
+| M2 | **RAM** at 0x4000_0000, `mapper_ram_size` bytes: 32 KB for CDFJ+, 8 KB for every other scheme. The demos stay inside 8 KB, except three CDFJ+ ones (Elevator Agent, Turbo, Zaxxon) that reach the 16th KB. DARIA has the full 32 KB (Decisions, 4). | [C] `:568-569`, `top.sv:779-783`; [trace] |
 | M3 | **MMIO window** 0xE000_0000–0xE01F_FFFF (`addr[31:21] == 0x700`): MAMCR (0xE01F_C000) and timer 1's TCR (0xE000_8004) and TC (0xE000_8008) read back. Everything else in the window reads 0 and drops writes, and never aborts, because the drivers program the PLL, MEMMAP, MAM timing, PINSEL and TIMER0. The traces write MAMCR (Scramble, 4,172 times) and nothing else, and read nothing. | [C] `:570-575, 606-609`; [trace] |
 | M4 | **Timer 1** counts at 70 MHz while enabled (TCR bit 0). Upstream divides its 5 × `clk_sys` ARM clock: it skips 1 tick in 45 for NTSC (exactly 70 MHz) and 1 in 76 for PAL (70.0045 MHz). DARIA's clock will differ, so it counts on `clk_sys` instead: per 9 clocks 8 × 5 + 4 (NTSC), per 76 clocks 71 × 5 + 5 × 4 (PAL), the same rates. No demo reads it; Draconian does (not in the set). | [C] `:474-489, 729-737`; [E] |
 | M5 | **Anything else** (outside ROM, RAM, the MMIO window and the sentinel) aborts on upstream. DARIA halts. | [C] `:603-604, 626` |
@@ -71,7 +73,7 @@ The front ends are the cartridge logic the 6507 sees: bank switching, the data f
 | F1 | **Bus timing.** A 6507 cycle is 12 `clk_sys`. The address is valid from the phase-1 edge (E0). The CPU latches read data at E0+6, and the front end commits its state on that edge, only when `access` is high. So a read has 6 `clk_sys`. During a call or a copy, RDY holds the read and the front end sees only its first phase 2. | [C] `top.sv`, `6502/mos6502_dp.sv:299`, `TIA.sv:505-557` |
 | F2 | **DPC+:** 8 fetchers (12-bit counter, top, bottom, 20-bit fraction, increment), the 32-bit random number, 3 waveforms and notes, PUSH and WRITE, 6 banks, fast fetch on any `$A9` read, the copy/fill service (the 6507 held meanwhile), and the call (`$FE`/`$FF` to CALLFUNCTION). | [C] `mapper_dpcplus.sv` |
 | F3 | **CDF, CDFJ, CDFJ+:** 32-bit stream pointers and increments in cart RAM (34 or 35 streams; table addresses per version), DSWRITE/DSPTR, SETMODE, fast fetch at the address after `$A9` (CDFJ+ also `$A2`/`$A0` and a fetch offset), fast jump on `$4C` with a two-byte lookahead in the image, 7 banks. | [C] `mapper_cdf.sv`, `cdf_fastjump_table.sv` |
-| F4 | **BUS (1–3):** streams and a map in cart RAM, STY stuffing into TIA/RIOT writes, BUS3's fast jump. BUS0 shows the bad-game screen. No BUS image is in the test set. | [C] `mapper_bus.sv` |
+| F4 | **BUS (1–3):** streams and a map in cart RAM, STY stuffing into TIA/RIOT writes, BUS3's fast jump. BUS0 shows the bad-game screen. No released game uses BUS: Stella calls the scheme experimental and lists only development builds and demos from 2016–2017 (an early Draconian, `128bus`, `128chronocolour`, `parrot`, `rpg`; `CartBUS.hxx`). None is in the test set. | [C] `mapper_bus.sv`; Stella |
 | F5 | **AMPLITUDE.** A 20 kHz tick on `clk_sys` adds each voice's frequency to its counter. DPC+ sums three waveform samples from RAM; CDF and BUS sum three samples through each voice's pointer and size words, or in digital mode return a nibble of a ROM or RAM byte. | [C] `arm_mapper_audio.sv` |
 | F6 | **The RAM image.** At load end and on every console reset, with the console held: DPC+ zeroes RAM and copies the image's display data; CDF and BUS copy the 2 KB driver and zero the rest. | [C] `arm_mapper_ram_init.sv` |
 | F7 | **Upstream's quirks**, kept where a game could see them: DPC+ fast fetch arms on data bytes too; hotspots are ignored on substituted reads; the jump lookahead crosses bank ends; the BUS map aliases `$20–$24`. Two are open: BUS stuffing reaches the RIOT but not the TIA (an upstream bug?), and upstream's data bus changes after the latch edge, which only `open_bus` keeps. | [C], study §2.7 |
@@ -160,22 +162,52 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 | DARIA's additions (the table above) | +1,625 to +2,725 | +1,625 to +2,725 |
 | **ALMs** | **14,500–15,600 (79–85%)** | **8,700–9,800 (47–53%)** |
 | M10K: start | 78 | 50 |
-| M10K: image to 128 KB, beyond ARIA's 16 KB ROM | +112 | +112 |
+| M10K: image window of 128 KB (one bitstream: ARIA's 16 KB ROM keeps the firmware, Decisions 5) | +128 | +112 |
 | M10K: cart RAM to 32 KB, beyond ARIA's 16 KB RAM | +16 | +16 |
 | M10K: front-end state RAM | +2 | +2 |
-| **M10K, of 308** | **208** | **180** |
+| **M10K, of 308** | **224** | **180** |
 
 - The single bitstream lands where 2.1.1 shipped (79%) at best, and at 85% at worst. So area decides the CPU: step 3's probe measures the Thumb expander and S3 before anything is integrated, and S1 with Thumb (fewer ALMs, a slower CPI) is the fallback if S3 does not fit.
-- **256 KB images do not fit in block RAM alone:** one bitstream would need 336 M10K of 308, a 2600-only one all 308. So DARIA keeps the start of the image in a block-RAM window and serves the rest through a 4–8 KB 2-way cache over SDRAM, where the loader already puts the image. The window holds the 6507 banks, the driver and the code (all within the first 32 KB in every demo, and the 6507 banks by each scheme's layout), and as many of the tables as fit: 128 KB, which holds every image in the test set. In the traces, sending every data read outside the code span through a 4 KB cache over SDRAM cost a median 2% more clock; with a 128 KB window no demo touches the cache at all. The cache adds about 5–9 M10K (about 215 of 308 in all) and 150–250 ALMs [E].
+- **256 KB images do not fit in block RAM alone:** one bitstream would need 336 M10K of 308, a 2600-only one all 308. So DARIA keeps the start of the image in a block-RAM window and serves the rest through a 4–8 KB 2-way cache over SDRAM, where the loader already puts the image. The window holds the 6507 banks, the driver and the code (all within the first 32 KB in every demo, and the 6507 banks by each scheme's layout), and as many of the tables as fit: 128 KB, which holds every image in the test set. In the traces, sending every data read outside the code span through a 4 KB cache over SDRAM cost a median 2% more clock; with a 128 KB window no demo touches the cache at all. The cache adds about 5–9 M10K (about 231 of 308 in all) and 150–250 ALMs [E].
 - **Testing it without a 256 KB game:** build DARIA with a small window (16–32 KB) so that Turbo, Zaxxon and Elevator Agent run through the cache on their real traffic, and check them against upstream as for any other build; then a synthetic 256 KB image whose code reads tables across the whole range.
 
 **Step 0's open items**, for step 1 to settle:
 
 1. The single bitstream's area (Decisions, 1): the total must stay near the low end of 79–85%; the step 3 probe decides between S3 and S1 with Thumb.
-2. BUS stuffing into TIA writes (F7): check a BUS title against Stella or hardware, and find a BUS image for the bench.
-3. 32 KB of cart RAM for CDFJ+ (M2), or halt above 16 KB.
-4. DARIA's clock: S3's CPI wants about 32 MHz for Spiders (C6). In a device at 80% or more, closure at that clock is the question.
-5. Port sharing. The CPU reads ROM data through the image ROM's port B, which the front ends use too. The 6507 is held during a call, but the audio engine keeps ticking and, in digital mode, reads ROM samples. So step 1 needs an arbiter on that port, or the samples from another port.
-6. The cache's size and line length, and its SDRAM port (the 6507's cartridge reads stop during a call; the audio engine's ROM samples do not).
-7. The shared CPU: a 2600 ARM image overwrites the BupChip firmware in ARIA's ROM. The cartridge slot's full reload has to load `bupchip.bin` again when a Souper game follows (a hardware check).
-8. Fix B's design: the registered 2600 request, its added latency against each RAM mapper's read timing, in simulation first (`SRAM_TIMING.md`, Fix B).
+2. BUS (F4): keep it, as upstream does, verified only against upstream in simulation (directed tests, the random differential bench), or leave it out with the bad-game screen as BUS0 is. The stuffing quirk (F7) can't be settled without one of the demo images.
+3. The clock (below).
+4. Port sharing. The CPU reads ROM data through the image ROM's port B, which the front ends use too. The 6507 is held during a call, but the audio engine keeps ticking and, in digital mode, reads ROM samples. So step 1 needs an arbiter on that port, or the samples from another port.
+5. The cache's size and line length, and its SDRAM port (the 6507's cartridge reads stop during a call; the audio engine's ROM samples do not).
+6. Fix B's design: the registered 2600 request, its added latency against each RAM mapper's read timing, in simulation first (`SRAM_TIMING.md`, Fix B).
+
+## Clock
+
+The BupChip and DARIA share one CPU and one clock. CoreTone does not depend on the CPU clock: it paces itself on a 48 kHz tick taken from the Pocket's 74.25 MHz reference (`bup_tick48k.sv`) and on its PCM FIFO, so a faster CPU only idles more.
+
+| `clk_arm` (687.27 MHz VCO ÷ C) | What it gives |
+|---|---|
+| ÷24, 28.64 MHz (today) | S3 misses Spiders' 16 late calls, as upstream does |
+| ÷21, 32.73 MHz | **The baseline:** every measured call on time with S3's CPI [trace] |
+| ÷20, 34.36 MHz | A little margin |
+| ÷17, 40.43 MHz | **The stretch goal:** 20% margin with S3, or every call on time with S1's CPI [trace] |
+
+- **What fits today.** In the 2.1.1 build ARIA had +8.08 ns of setup slack at 28.64 MHz: a critical path of about 26.8 ns, so a ceiling near 37 MHz. 32.73 and 34.36 MHz fit; 40.43 MHz needs the path shortened first, and the Thumb expander and S3's forwarding each add to it. The first fix is known: decide a one-clock store from the base register's region, not after the adder (`BUPCHIP_CORE.md`, risk 2).
+- **What changes with the divider.** The PLL's counter 3; `psram.sv`'s `CLOCK_SPEED` (28.636364 today); and `core_constraints.sdc`, which times `clk_arm` with `clk_sys` as one synchronous group only because it is exactly 2 × `clk_sys`. At any other ratio the crossings are declared asynchronous. The BupChip's crossings are synchronisers, stress-tested asynchronously at 16–29 MHz; they are re-run at the new rate, and DARIA's own crossings are built the same way.
+- Step 3's probe measures 32.73 and 40.43 MHz, with the path fix, inside the full build. If 40.43 MHz does not close, S3 at 32.73 MHz does the work S1 would need 40 MHz for.
+
+## Steps
+
+Each step has a done-when, as ARIA's had.
+
+0. **Scope.** *Done:* this document's requirements, checked against the traces; `MODES` 1.
+1. **Design** (this document): the Thumb expander, the call port (launch and return through the register file), the memory map with the image window, the cache and the resident firmware, the lean front ends, Fix B, the clock, the profile mux, verification and budgets. *Done when* every open item above is decided or given to a step.
+2. **Thumb in simulation**, on the S1 core: the expander, the T bit, `BX` both ways. *Done when:*
+   - Thumb ISA tests (`arm-none-eabi-gcc -mthumb`, every format) and random Thumb streams pass in lockstep with `arm7tdmi_core.sv`;
+   - ARIA's checks still pass, and the BupChip's songs are still bit-identical.
+3. **Probe build:** DARIA alone in an empty device and inside the full build. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, and S3 or S1 with Thumb is chosen.
+4. **S3**, if chosen (ARIA's steps 6–7). *Done when* CPI is within ±2% of the model on the demos' traces and the BupChip.
+5. **2600 memory system:** image capture into the window, the SDRAM cache, 32 KB of cart RAM, MMIO and timer, the return sentinel, the call controller. *Done when* `tb_daria` runs every demo on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
+6. **Front ends:** the lean front end for DPC+, CDF/CDFJ/CDFJ+ (and BUS, item 2). *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo, and passes directed tests per scheme and the random differential bench.
+7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, and the 15 demos render the same frames as upstream in whole-core simulation.
+8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
+9. **2.2.1.**
