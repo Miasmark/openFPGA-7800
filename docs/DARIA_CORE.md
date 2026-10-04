@@ -24,6 +24,12 @@ These carry over from ARIA:
 - **Clean room.** `arm7tdmi_core.sv` (GPL-2.0-only) is a simulation oracle, never a source. lroby74's MiSTer Thumb core (CC BY-NC 4.0) is a behavioural reference only. Upstream's MIT front ends may be read and reused.
 - **No game data in the repository**, nor anything derived from it: ROMs, traces, listings, signatures.
 
+## Decisions (2026-10-04)
+
+1. **One bitstream.** DARIA joins the existing 7800 build. ARIA and DARIA are one CPU instance: a Souper game and a 2600 ARM game never run at once. The per-file bitstream findings (K1–K3) stay as the fallback if the single build cannot close.
+2. **Fix B ships with DARIA** (`SRAM_TIMING.md`): the 2600 cartridge-RAM request gets its own registered path in the same release. With the device back at 80% or more, `clk_sdram`'s margin must not depend on placement again.
+3. **Images up to 256 KB**, with no such game to test yet: a block-RAM window for the start of the image and a cache over SDRAM for the rest ("Where step 0 leaves the budget").
+
 ## Requirements
 
 ### The CPU
@@ -107,7 +113,7 @@ Coding style matters under the project's `MUX_RESTRUCTURE OFF`: the same sketch 
 | K2 | **No menu choice, no switch from a running core.** `variants.json` is "an upcoming feature"; no target command reloads a bitstream. Reloading the cartridge slot (`0x109`, bit 8: "the bitstream is also reloaded") restarts the core and runs the loader again, so going from a 7800 game to a 2600 ARM game should change bitstream. Not yet seen on hardware. | [doc] |
 | K3 | **Alternatives:** a second core entry (`Miasmark.2600`) from this repository, with its own folders and settings; or both, sharing one 2600 bitstream. | [doc], example cores |
 
-So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers and BupChip (about 7,100 ALMs), can ship inside the existing core: the loader sends `.a78` files to today's bitstream and 2600 files (or only ARM-scheme ones) to the other. The cost is a loader that must load every data slot itself, a shared `interact.json`, and a 2600 bitstream that answers the save slots exactly as today's does.
+So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers and BupChip (about 7,100 ALMs) could ship inside the existing core. It is the fallback, not the plan (Decisions, 1): the loader sends `.a78` files to today's bitstream and 2600 files (or only ARM-scheme ones) to the other. The cost is a loader that must load every data slot itself, a shared `interact.json`, and a 2600 bitstream that answers the save slots exactly as today's does.
 
 ## Step 0 work: the processor modes (C3)
 
@@ -144,9 +150,9 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 
 - The Mappy-specific part of the CPU work, the FIQ mode with its banked registers, turned out to be the cheapest item: the register file already had the room.
 - Since 2.1.2 the ARM schemes' front ends are out of the build (Fix A), so DARIA's lean ones are an addition, not a saving against the shipped core. Against bringing upstream's back live (about 3,000 ALMs with glue and controller), the lean front ends and controller save 1,700–2,000.
-- They use block RAM, not the SRAM, so they stay off the `clk_sdram` path that Fix A cleared. DARIA no longer depends on Fix B (`SRAM_TIMING.md`), which remains worth doing for the other 2600 RAM mappers.
+- They use block RAM, not the SRAM, so they stay off the `clk_sdram` path that Fix A cleared. Fix B still comes with DARIA (Decisions, 2): it takes the other 2600 RAM mappers off that path too, which a fuller device needs.
 
-**Totals [E]**, from 2.1.2's build (12,899 ALMs, 70%; 78 M10K):
+**Totals [E]**, from 2.1.2's build (12,899 ALMs, 70%; 78 M10K). One bitstream is the plan; the 2600-only column is the fallback's:
 
 | | One bitstream (7800 + DARIA) | 2600-only bitstream |
 |---|---|---|
@@ -159,15 +165,17 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 | M10K: front-end state RAM | +2 | +2 |
 | **M10K, of 308** | **208** | **180** |
 
-- One bitstream lands where 2.1.1 shipped (79%) at best, and well past it at worst. The 2600-only bitstream has room for a faster clock or a larger block-RAM window.
-- **256 KB images do not fit in block RAM alone:** one bitstream would need 336 M10K of 308, a 2600-only one all 308. So DARIA keeps the start of the image in a block-RAM window and serves the rest through a 4–8 KB 2-way cache over SDRAM, where the loader already puts the image. The window holds the 6507 banks, the driver and the code (all within the first 32 KB in every demo, and the 6507 banks by each scheme's layout), and as many of the tables as fit: 128 KB in the 2600-only build, 64–128 KB in one bitstream. In the traces, sending every data read outside the code span through a 4 KB cache over SDRAM cost a median 2% more clock; with a 128 KB window no demo touches the cache at all. The cache adds about 5–9 M10K and 150–250 ALMs [E], within the margins above.
+- The single bitstream lands where 2.1.1 shipped (79%) at best, and at 85% at worst. So area decides the CPU: step 3's probe measures the Thumb expander and S3 before anything is integrated, and S1 with Thumb (fewer ALMs, a slower CPI) is the fallback if S3 does not fit.
+- **256 KB images do not fit in block RAM alone:** one bitstream would need 336 M10K of 308, a 2600-only one all 308. So DARIA keeps the start of the image in a block-RAM window and serves the rest through a 4–8 KB 2-way cache over SDRAM, where the loader already puts the image. The window holds the 6507 banks, the driver and the code (all within the first 32 KB in every demo, and the 6507 banks by each scheme's layout), and as many of the tables as fit: 128 KB, which holds every image in the test set. In the traces, sending every data read outside the code span through a 4 KB cache over SDRAM cost a median 2% more clock; with a 128 KB window no demo touches the cache at all. The cache adds about 5–9 M10K (about 215 of 308 in all) and 150–250 ALMs [E].
 - **Testing it without a 256 KB game:** build DARIA with a small window (16–32 KB) so that Turbo, Zaxxon and Elevator Agent run through the cache on their real traffic, and check them against upstream as for any other build; then a synthetic 256 KB image whose code reads tables across the whole range.
 
 **Step 0's open items**, for step 1 to settle:
 
-1. One bitstream or two (K1–K3): a hardware test of the loader switching bitstreams on a cartridge reload.
+1. The single bitstream's area (Decisions, 1): the total must stay near the low end of 79–85%; the step 3 probe decides between S3 and S1 with Thumb.
 2. BUS stuffing into TIA writes (F7): check a BUS title against Stella or hardware, and find a BUS image for the bench.
 3. 32 KB of cart RAM for CDFJ+ (M2), or halt above 16 KB.
-4. DARIA's clock: S3's CPI wants about 32 MHz for Spiders (C6); with a 2600-only bitstream there is room for it.
+4. DARIA's clock: S3's CPI wants about 32 MHz for Spiders (C6). In a device at 80% or more, closure at that clock is the question.
 5. Port sharing. The CPU reads ROM data through the image ROM's port B, which the front ends use too. The 6507 is held during a call, but the audio engine keeps ticking and, in digital mode, reads ROM samples. So step 1 needs an arbiter on that port, or the samples from another port.
-6. The window size per build, the cache's size and line length, and its SDRAM port (the 6507's cartridge reads stop during a call; the audio engine's ROM samples do not).
+6. The cache's size and line length, and its SDRAM port (the 6507's cartridge reads stop during a call; the audio engine's ROM samples do not).
+7. The shared CPU: a 2600 ARM image overwrites the BupChip firmware in ARIA's ROM. The cartridge slot's full reload has to load `bupchip.bin` again when a Souper game follows (a hardware check).
+8. Fix B's design: the registered 2600 request, its added latency against each RAM mapper's read timing, in simulation first (`SRAM_TIMING.md`, Fix B).
