@@ -384,6 +384,11 @@ Other constraints already in the file:
 - The data loader's address and data into `clk_sys` have a hold multicycle
   (they are held for ten `clk_sdram` cycles around the strobe).
 
+The tightest path is on `clk_sdram`: the cartridge-RAM request from MARIA
+or the 6502, through the mappers and `sram_ctrl`'s arbiter, into the SRAM's
+pad registers. Its margin moves with placement (+0.44 ns in 2.1.1, +1.32 in
+2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes.
+
 ## Resource budget
 
 (Timing: read setup slack, not the smallest number in
