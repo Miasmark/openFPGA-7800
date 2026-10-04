@@ -94,8 +94,9 @@
 //                   against the formula
 //   +seed=S         loader jitter (default 1)
 //   +maxms=MS       stop waiting after MS ms of simulated time (default
-//                   6000); a run still going 1 s later ends with
-//                   "result: timeout"
+//                   6000, or SECS x 1000 + 2000 when that is more); a play
+//                   that reaches it before its pops are done, or a run still
+//                   going 1 s later, ends with "result: timeout"
 //
 // The last line, "result: ...", is for run_s4.sh.
 //
@@ -668,6 +669,12 @@ module tb_s4;
 			end
 		end
 		measuring = 0;
+		// Reaching +maxms before the pops are done is a failure, not a short run.
+		if (pops - p0 < npops && !dut.halted) begin
+			$display("play: stopped at +maxms=%0d after %0d of %0d pops", maxms, pops - p0, npops);
+			$display("result: timeout");
+			$finish;
+		end
 	endtask
 
 	// Run until the hold begins, return the clocks it took from t0.
@@ -742,7 +749,9 @@ module tb_s4;
 		void'($value$plusargs("retune=%d", retune_ms));
 		void'($value$plusargs("pause=%d", pause_ms));
 		void'($value$plusargs("pauselen=%d", pauselen_ms));
-		void'($value$plusargs("maxms=%d", maxms));
+		// The default leaves room for the requested playing time: 6 s, or
+		// SECS + 2 s for longer runs.
+		if (!$value$plusargs("maxms=%d", maxms) && 1000 * secs + 2000 > maxms) maxms = 1000 * secs + 2000;
 		void'($value$plusargs("pops=%d", pops_cfg));
 		if (reload_ms > 0) nreloads = 1;
 		void'($value$plusargs("reloads=%d", nreloads));
