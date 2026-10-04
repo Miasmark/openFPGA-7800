@@ -15,19 +15,25 @@ For each image it:
     descent: B, Bcc, BL pairs, BX/MOV pc through registers whose value is a
     literal-pool constant, GCC's __gnu_thumb1_case_* switch tables, the
     CDF-family driver helpers at 0x750 (Thumb stubs that BX into ARM state),
-    and, in a second pass, odd literal or table words that point at code;
+    and, in a second pass, odd literal or table words that point at code.
+    The walk repeats until it is stable: bytes found to be literal pools or
+    switch tables stop the fall-through after a BL that GCC used as a far
+    jump (or a call that does not return);
   - classifies every reached Thumb halfword into the 19 ARM7TDMI Thumb
     formats (plus the encodings ARMv4T leaves undefined), and every reached
-    ARM word into its ARMv4 class;
+    ARM word into its ARMv4 class; reports the bytes of the code span that
+    are neither reached code nor known data (gaps), the return idioms, and
+    MULs whose (UNPREDICTABLE on ARMv4) C flag is read afterwards;
   - records the literal constants the code loads (ROM data, RAM, MMIO), the
     crt0 stub's .data/.bss ranges, the driver's peripheral set-up (PLL, MAM,
-    VPB) and the 6507's CALLFN sites.
+    VPB), the 6507's CALLFN sites and its RIOT timer loads (the VBLANK and
+    overscan windows an ARM call has to fit in).
 
 --check compares every reached Thumb instruction's class with objdump's
-mnemonic. --listdir writes one objdump listing per image of just the reached ranges
-(objdump -b binary -marmv4t, -Mforce-thumb for Thumb ranges). Listings and
-JSON hold game code: write them under sim/work/ only, never commit them.
-The script itself contains no game data.
+mnemonic. --listdir writes one objdump listing per image of just the
+reached ranges (objdump -b binary -marmv4t, -Mforce-thumb for Thumb
+ranges). Listings and JSON hold game code: write them under sim/work/ only,
+never commit them. The script itself contains no game data.
 
 SPDX-License-Identifier: MIT
 """
@@ -57,8 +63,6 @@ def detect(rom):
     words = [u32(rom, a) for a in range(0, min(size, 2048), 4)]
     cdf0 = sum(1 for w in words if w == 0x00464443)
     cdfj = sum(1 for w in words if w == 0x4A464443)
-    cdf1 = sum(1 for w in words if (w & 0xFFFFFF) == 0x464443 and
-               (w >> 24) not in (0x00, 0x4A))
     plus = any(words[i] == 0x53554C50 and words[i + 1] == 0x4A464443 and
                words[i + 2] == 0x00000001 for i in range(len(words) - 2))
     has_cdf = rom.count(b"CDF") >= 3 or b"PLUSCDFJ" in rom
@@ -71,7 +75,7 @@ def detect(rom):
             rev, name = 2, "CDFJ"
         elif cdf0 >= 3:
             rev, name = 0, "CDF0"
-        else:
+        else:                       # "CDF" + a version byte
             rev, name = 1, "CDF1"
         info.update(scheme=name, revision=rev, family="CDF")
         if rev == 3:
@@ -147,6 +151,8 @@ def tdecode(hw, a, nxt):
     elif hw >> 10 == 0b010000:
         op = (hw >> 6) & 15
         d.update(fmt=4, op=ALU[op], rd=hw & 7, rs=(hw >> 3) & 7)
+        if op == 13 and d["rd"] == d["rs"]:
+            d["op"] = "MUL Rd==Rm (UNPRED v4T)"
     elif hw >> 10 == 0b010001:
         op = (hw >> 8) & 3
         h1, h2 = (hw >> 7) & 1, (hw >> 6) & 1
@@ -732,6 +738,28 @@ def callfn_sites(rom, info):
     return sites
 
 
+RIOT_TIMERS = {0x94: ("TIM1T", 1), 0x95: ("TIM8T", 8), 0x96: ("TIM64T", 64),
+               0x97: ("T1024T", 1024)}
+
+
+def riot_timer_loads(rom, info):
+    """6507 stores of an immediate to a RIOT timer (any mirror with A12 = 0,
+    A9 = 1, A7 = 1), with the immediate found by walking back to the last
+    LDA/LDX/LDY # of the same register. The windows these set (VBLANK,
+    overscan) bound how long an ARM call made inside them may take."""
+    st = {0x8D: 0xA9, 0x8E: 0xA2, 0x8C: 0xA0}      # STA/STX/STY abs -> LDx #
+    out = []
+    for p in range(info["bank0"] + 2, len(rom) - 2):
+        op = rom[p]
+        if op in st and rom[p + 1] in RIOT_TIMERS and (rom[p + 2] & 0x12) == 0x02:
+            for q in range(p - 2, max(p - 16, 0), -1):
+                if rom[q] == st[op]:
+                    name, scale = RIOT_TIMERS[rom[p + 1]]
+                    out.append((p, name, rom[q + 1], rom[q + 1] * scale))
+                    break
+    return out
+
+
 def crt0(scan):
     """The entry stub's literal pool: a call counter in RAM, then .bss
     (end, start; not in DPC+), .data (ROM source, RAM end, RAM start), the
@@ -841,6 +869,62 @@ def check_objdump(path, scan):
     return good, bad
 
 
+# Thumb flag effects: (sets N/Z, sets C, sets V, reads C, reads V/N/Z)
+def flag_use(d):
+    f, op = d["fmt"], d["op"]
+    if f == 1:
+        return (True, not op.endswith("#0"), False, False, False)
+    if f == 2:
+        return (True, True, True, False, False)
+    if f == 3:
+        mov = op.startswith("MOV")
+        return (True, not mov, not mov, False, False)
+    if f == 4:
+        base = op.split()[0]
+        if base in ("ADC", "SBC"):
+            return (True, True, True, True, False)
+        if base in ("NEG", "CMP", "CMN"):
+            return (True, True, True, False, False)
+        if base in ("LSL", "LSR", "ASR", "ROR"):
+            # C passes through when Rs[7:0] == 0: neither a reader nor a
+            # certain writer, so the search goes on past it.
+            return (True, False, False, False, False)
+        if base == "MUL":
+            return (True, False, False, False, False)
+        return (True, False, False, False, False)      # logical: C, V kept
+    if f == 5 and op.startswith("CMP"):
+        return (True, True, True, False, False)
+    if f == 16:
+        c = op[1:]
+        return (False, False, False, c in ("CS", "CC", "HI", "LS"),
+                c in ("VS", "VC", "GE", "LT", "GT", "LE"))
+    return (False, False, False, False, False)
+
+
+def mul_flag_readers(scan):
+    """MULS leaves C UNPREDICTABLE on ARMv4 (the ARM7TDMI writes a meaningless
+    value) and V unchanged. Count MULs whose C is read on the fall-through
+    path before anything writes C again."""
+    readers = []
+    for a, d in scan.t.items():
+        if d["fmt"] != 4 or not d["op"].startswith("MUL"):
+            continue
+        p = a + 2
+        for _ in range(16):
+            e = scan.t.get(p)
+            if e is None:
+                break
+            nz, c, v, rc, rv = flag_use(e)
+            if rc:
+                readers.append(hex(p))
+                break
+            if c or e["fmt"] in (14, 18, 19) or e["op"].startswith("BX") or \
+                    e["fmt"] == 16:
+                break
+            p += e["len"]
+    return readers
+
+
 def gaps(scan, lo, hi):
     """Bytes of [lo, hi) neither reached code nor known data, grouped into
     runs; for each run, how many Thumb PUSH {.., lr} prologues it holds
@@ -912,6 +996,7 @@ def analyse(path, listdir=None, check=False):
         "arm_targets": {hex(k): v for k, v in s.arm_targets.items()},
         "unresolved_indirect": dict(s.unresolved),
         "unresolved_at": [hex(a) for a in sorted(s.unresolved_at)],
+        "mul_c_readers": mul_flag_readers(s),
         "returns": dict(s.returns),
         "lit_ram": (hex(min(lv["ram"])), hex(max(lv["ram"]))) if lv["ram"] else None,
         "lit_ram_count": len(lv["ram"]),
@@ -926,6 +1011,8 @@ def analyse(path, listdir=None, check=False):
                            None if v is None else hex(v))
                           for a, addr, v in driver_periph(rom, info["driver_size"])],
         "callfn_sites": len(callfn_sites(rom, info)),
+        "callfn_at": [hex(a) for a in callfn_sites(rom, info)],
+        "riot_timer_loads": [(hex(a), n, v, c) for a, n, v, c in riot_timer_loads(rom, info)],
         "gap_bytes": sum(b - a for a, b, _, z in gaps(s, lo, hi) if not z),
         "gap_runs": len(gaps(s, lo, hi)),
         "gap_prologues": sum(pp for _, _, pp, _ in gaps(s, lo, hi)),

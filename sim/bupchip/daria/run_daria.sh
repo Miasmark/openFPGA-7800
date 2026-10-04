@@ -4,6 +4,7 @@
 # with upstream's ARM7TDMI and ARM mapper compiled in (tb_daria.sv), and
 # summarise every ARM call (summarize.py).
 #   ./run_daria.sh ROM.bin [+plusargs...]       (see tb_daria.sv for plusargs)
+#   ./run_daria.sh --build-only
 # Writes $WORK/runs/<rom name>/ (WORK defaults to sim/work/bupchip/daria):
 # calls.csv.gz, slack.csv, frames.csv, summary.txt, pcs.txt.gz, snapshots as
 # PNG, run.log and report.txt. Everything there derives from the game: it
@@ -16,7 +17,10 @@ FPGA="$(cd "$HERE/../../../src/fpga" && pwd)"
 RTL="$FPGA/mister/rtl"
 WORK="${WORK:-$HERE/../../work/bupchip/daria}"
 VERILATOR="${VERILATOR:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
-ROM="$(realpath "${1:?usage: run_daria.sh ROM.bin [+plusargs...]}")"
+BUILD_ONLY=""
+if [ "$1" = --build-only ]; then BUILD_ONLY=1; else
+	ROM="$(realpath "${1:?usage: run_daria.sh ROM.bin|--build-only [+plusargs...]}")"
+fi
 shift
 mkdir -p "$WORK/rtl"
 WORK="$(cd "$WORK" && pwd)"
@@ -63,6 +67,7 @@ if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$RTL" -newer "$BIN" -nam
 		|| { grep -m20 "%Error" "$WORK/build.log"; exit 1; }
 fi
 
+[ -n "$BUILD_ONLY" ] && exit 0
 NAME="${NAME:-$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"

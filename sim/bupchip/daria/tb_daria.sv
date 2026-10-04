@@ -25,14 +25,18 @@
 //   +rom=FILE      2600 image (.bin)                         (required)
 //   +out=PREFIX    output path prefix, e.g. dir/              (default ./)
 //   +frames=N      frames to run after reset release          (default 1500)
-//   +fire_at=F     hold FIRE for 6 frames at frame F (0: off)  (default 300)
+//   +fire_at=F     hold FIRE for 6 frames at frame F (0: off)  (default 420)
 //   +reset_at=F    hold console RESET for 6 frames at F       (default 0)
 //   +select_at=F   hold console SELECT for 6 frames at F      (default 0)
 //   +play_at=F     from frame F, a pseudo-random joystick and FIRE
-//                  (0: off)                                    (default 420)
+//                  (0: off)                                    (default 480)
 //   +seed=N        joystick LFSR seed                          (default 1)
 //   +lat=N         DDR3 read latency in clk_arm                (default 20)
 //   +snap=N        write a snapshot every N frames (0: off)    (default 150)
+//   +arm_div=K     run the ARM and its memory system one clk_arm in K, by
+//                  forcing their clock enables (the core's pause inputs):
+//                  a reference K times slower, to check call budgets
+//                  against real overruns                       (default 1)
 //
 // Cache model: direct-mapped, 1/2/4/8/16 KiB, 16 and 32 byte lines, cold at
 // power-up and warm across calls. Stream I is the retired-PC stream in
@@ -209,6 +213,18 @@ module tb_daria;
 	wire        r_a4      = dut.riot_inst.addr[4];
 	wire        r_wrap    = dut.riot_inst.timer_wrap;
 	localparam logic [3:0] CTRL_RUNNING = 4'd5;
+
+	// +arm_div: arm_ce is the enable for the coming clk_arm edge. ce_last is
+	// the one the core used at the previous edge: a registered output such as
+	// retire holds through disabled edges and is new only after an enabled one.
+	int   arm_div = 1;
+	int   arm_ph = 0;
+	logic arm_ce = 1;
+	logic ce_last = 1;
+	always @(posedge clk_arm) begin
+		arm_ph <= (arm_ph + 1 >= arm_div) ? 0 : arm_ph + 1;
+		arm_ce <= (arm_ph + 1 >= arm_div);
+	end
 
 	// ---------------------------------------------------- Thumb formats
 	typedef enum int {
@@ -394,7 +410,7 @@ module tb_daria;
 		end
 		if (in_call) cs[S_ARMCYC]++;
 
-		if (a_retire && in_call) begin
+		if (a_retire && in_call && ce_last) begin
 			kind_t k;
 			int sz;
 			bit flow;
@@ -426,7 +442,7 @@ module tb_daria;
 			prev_kind = k;
 		end
 
-		if (m_req && m_rdy && in_call) begin
+		if (m_req && m_rdy && in_call && arm_ce) begin
 			bit is_rom, is_ram, is_mmio;
 			is_rom  = m_addr < rom_size;
 			is_ram  = m_addr[31:28] == 4'h4;
@@ -473,6 +489,7 @@ module tb_daria;
 			done_bl = first_bl;
 			done_id = call_id;
 		end
+		ce_last = arm_ce;
 	end
 
 	// ----------------------------------------- system side (clk_sys)
@@ -591,7 +608,7 @@ module tb_daria;
 	end
 
 	// ------------------------------------------------- input script
-	int fire_at = 300, reset_at = 0, select_at = 0, play_at = 420, seed = 1;
+	int fire_at = 420, reset_at = 0, select_at = 0, play_at = 480, seed = 1;
 	logic [15:0] lfsr = 16'hACE1;
 	int last_frame_seen = -1;
 	always @(posedge clk_sys) if (running && frame != last_frame_seen) begin
@@ -668,6 +685,11 @@ module tb_daria;
 		void'($value$plusargs("seed=%d", seed));
 		void'($value$plusargs("lat=%d", lat));
 		void'($value$plusargs("snap=%d", snap_every));
+		void'($value$plusargs("arm_div=%d", arm_div));
+		if (arm_div > 1) begin
+			force dut.arm_host.ce = arm_ce;
+			force dut.cart2600.mem_ce = arm_ce;
+		end
 		lfsr = 16'(seed * 40503 + 1);
 		foreach (rom[i]) rom[i] = 8'hFF;
 		foreach (ddr[i]) ddr[i] = 64'd0;
