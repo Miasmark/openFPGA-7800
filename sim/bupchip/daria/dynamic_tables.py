@@ -350,7 +350,7 @@ def sec_mix(runs, margin):
     det = []
     for R in runs:
         n = R.summ["total"]["thumb"] + R.summ["total"]["arm"]
-        det.append("%s: " % R.short + ", ".join("%s %.2f" % (k.split(" (")[0], 100.0 * c / n)
+        det.append("%s: " % R.short + ", ".join("%s %.2f" % (k if "half" in k else k.split(" (")[0], 100.0 * c / n)
                                                   for c, _, k in R.summ["kind"] if c))
     out.append("")
     out.append("Per format, % of instructions:")
@@ -552,7 +552,10 @@ def frame_runs(frames):
             out[-1][1] = f
         else:
             out.append([f, f])
-    return ", ".join("%d" % a if a == b else "%d-%d" % (a, b) for a, b in out)
+    txt = ["%d" % a if a == b else "%d-%d" % (a, b) for a, b in out]
+    if len(txt) > 6:
+        return "%s, ..., %s: %d stretches" % (", ".join(txt[:3]), txt[-1], len(txt))
+    return ", ".join(txt)
 
 
 def sec_late(runs, margin):

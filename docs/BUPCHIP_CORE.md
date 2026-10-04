@@ -1042,7 +1042,21 @@ Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/`
 | CDFJ | Galagon, Lady Bug, Mappy, RobotWar 2684, Wizard of Wor, Zoo Keeper |
 | CDFJ+ | Elevator Agent (64 KB), Gorf, Qyx, Spiders, Turbo (128 KB), Tutankham, Zaxxon (64 KB) |
 
-First measurement: trace each demo's worst ARM call (instructions and memory accesses per call, against the time the 2600 code allows) on the reference core, to get the clock the Thumb front end needs. Elevator Agent is known to overrun VBlank even on MiSTer's own Thumb core, so it is a timing-model question as much as a speed one.
+**First measurement (done).** `sim/bupchip/daria/` (`run_all.sh`, `tb_daria.sv`, `dynamic_tables.py`) runs each demo on upstream's core for 1,500 frames (FIRE at frame 420, play from 480) and records every ARM call: instructions by class, estimated S1 and S3 cycles, code and data footprint, and the budget, the time until the 6507's timer wait reads 0. The report stays in `sim/work/bupchip/daria/` with the traces. Summary [sim, upstream core]:
+
+| Scheme | Largest call (instructions) | Worst share of budget on upstream | MHz needed at CPI 1.0 / 1.2 / 1.4, with 20% margin | Late calls: S1 @ 28.636 / S3 @ 21.477 / S3-style @ 28.636 |
+|---|---|---|---|---|
+| DPC+ (Scramble) | 25.8k | 66% | 22.6 / 27.1 / 31.6 | 0 / 0 / 0 |
+| CDF1 (Super Cobra) | 24.9k | 55% | 17.6 / 21.2 / 24.7 | 0 / 0 / 0 |
+| CDFJ (6 demos) | 32.5k (Zoo Keeper) | 80% (Lady Bug) | 27.2 / 32.6 / 38.0 | 0 / 1 / 0 |
+| CDFJ+ (7 demos) | 55.5k (Spiders) | 110% (Spiders) | 38.3 / 45.9 / 53.6 | 189 / 297 / 16 |
+
+- Two calls a frame: 10k–29k instructions in VBlank (budget 1.28–2.18 ms), 0.3k–6.4k in overscan (0.50–1.00 ms). All Thumb except 0.16% ARM state in Mappy; no unaligned access.
+- **Spiders**, not Elevator Agent, overruns on upstream's core: 16 frames of 354 lines at the start of play. Elevator Agent's worst call uses 90% of its budget, and lroby74's "95,403 needed" matches this bench's ARM7TDMI-cycle estimate for it (95,453).
+- Estimated CPI: S1 1.26–1.36, S3 1.01–1.07. S1 at 28.636 MHz serves 11 demos and S3 at 21.477 MHz 10; Elevator Agent, Zaxxon, Spiders and Qyx would have late calls. An S3-style core at 28.636 MHz misses only Spiders' 16 (as upstream does). Every call on time needs about 32 MHz, a 20% margin about 40 MHz: a timing-closure question for the Thumb front end, which must not add a clock per branch.
+- Memory: code in block RAM (32 KB images: 32 M10K; 64 KB: 64; Turbo: 128), or code in block RAM plus a 2-way 4 KB data cache; a cache in front of SDRAM costs up to 42% more clock, and PSRAM is too slow for code. 16 KB of RAM covers all 15.
+- Exact Harmony timing is not needed for correctness: no demo reads the ARM's timer, and the first timer read after every call is the wait loop.
+- Open: longer runs and other input sequences on the four heavy demos, real Harmony timing, closure at 28.6 MHz or more, the block RAM budget.
 
 ## Open questions and risks
 
