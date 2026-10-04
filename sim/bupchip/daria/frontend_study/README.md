@@ -1,6 +1,6 @@
 # The ARM schemes' 6507-side front ends: why they cost ~1,750 ALMs, and a lean replacement for DARIA
 
-A design study for DARIA's step 0 (`docs/DARIA_CORE.md`, which takes its requirements from it). It reads upstream's MIT RTL; it uses no game data. `daria_fe3.sv` here is a **sizing sketch only**: it has never been simulated and is not for the core. `run_study.sh` repeats every compile below.
+A design study for DARIA's step 0 (`docs/DARIA_CORE.md`, which takes its requirements from it). It was measured on 2.1.1; since 2.1.2 these blocks are out of the build altogether (`docs/SRAM_TIMING.md`, Fix A), so its 2.1.1 figures say what they cost before that. It reads upstream's MIT RTL; it uses no game data. `daria_fe3.sv` here is a **sizing sketch only**: it has never been simulated and is not for the core. `run_study.sh` repeats every compile below.
 
 Scope: `mapper_dpcplus`, `mapper_cdf`, `mapper_bus`, `arm_mapper_audio`, `arm_mapper_ram_init`, `arm_mapper_tables`, `cdf_fastjump_table`. Also covered: `arm_mapper_writeback` and the audio half of `arm_mapper_controller`, which DARIA would bring back along with the ARM.
 

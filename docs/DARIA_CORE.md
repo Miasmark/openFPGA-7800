@@ -50,7 +50,7 @@ These carry over from ARIA:
 
 | # | Requirement | Source |
 |---|---|---|
-| M1 | **ROM** at 0 up to the image size (capped at 1 MB), read-only. A write aborts. Images in the test set: 32 KB (12), 64 KB (2), 128 KB (Turbo). | [C] `arm_mapper_memory.sv:375, 566-567, 624-626`; [trace] |
+| M1 | **ROM** at 0 up to the image size (capped at 1 MB), read-only. A write aborts. Images in the test set: 32 KB (12), 64 KB (2), 128 KB (Turbo). **DARIA supports images up to 256 KB**, though none that large is available to test (larger ARM games are sold, not distributed). The cartridge slot takes files up to 4 MB, and the loader keeps the whole file in SDRAM. | [C] `arm_mapper_memory.sv:375, 566-567, 624-626`; [trace]; `data.json` |
 | M2 | **RAM** at 0x4000_0000, `mapper_ram_size` bytes: 32 KB for CDFJ+, 8 KB for every other scheme. The demos stay inside 8 KB, except three CDFJ+ ones (Elevator Agent, Turbo, Zaxxon) that reach the 16th KB. DARIA needs 32 KB (32 M10K) to be exact for CDFJ+, or must halt above what it has. | [C] `:568-569`, `top.sv:779-783`; [trace] |
 | M3 | **MMIO window** 0xE000_0000–0xE01F_FFFF (`addr[31:21] == 0x700`): MAMCR (0xE01F_C000) and timer 1's TCR (0xE000_8004) and TC (0xE000_8008) read back. Everything else in the window reads 0 and drops writes, and never aborts, because the drivers program the PLL, MEMMAP, MAM timing, PINSEL and TIMER0. The traces write MAMCR (Scramble, 4,172 times) and nothing else, and read nothing. | [C] `:570-575, 606-609`; [trace] |
 | M4 | **Timer 1** counts at 70 MHz while enabled (TCR bit 0). Upstream divides its 5 × `clk_sys` ARM clock: it skips 1 tick in 45 for NTSC (exactly 70 MHz) and 1 in 76 for PAL (70.0045 MHz). DARIA's clock will differ, so it counts on `clk_sys` instead: per 9 clocks 8 × 5 + 4 (NTSC), per 76 clocks 71 × 5 + 5 × 4 (PAL), the same rates. No demo reads it; Draconian does (not in the set). | [C] `:474-489, 729-737`; [E] |
@@ -70,7 +70,7 @@ The front ends are the cartridge logic the 6507 sees: bank switching, the data f
 | F6 | **The RAM image.** At load end and on every console reset, with the console held: DPC+ zeroes RAM and copies the image's display data; CDF and BUS copy the 2 KB driver and zero the rest. | [C] `arm_mapper_ram_init.sv` |
 | F7 | **Upstream's quirks**, kept where a game could see them: DPC+ fast fetch arms on data bytes too; hotspots are ignored on substituted reads; the jump lookahead crosses bank ends; the BUS map aliases `$20–$24`. Two are open: BUS stuffing reaches the RIOT but not the TIA (an upstream bug?), and upstream's data bus changes after the latch edge, which only `open_bus` keeps. | [C], study §2.7 |
 
-**Why upstream's front ends are large.** 2.1.1 carries them at 1,752 ALMs, but with the ARM tied off synthesis has removed half of them. Compiled alone with every input live, the seven blocks take **2,192 ALMs**, and the call controller that DARIA would need with them another 716 (about 1,150 of its flip-flops carry the six audio values across clocks) [probe]. The causes:
+**Why upstream's front ends are large.** 2.1.1 carried them at 1,752 ALMs (2.1.2 leaves them out: `SRAM_TIMING.md`, Fix A), but with the ARM tied off synthesis had removed half of them. Compiled alone with every input live, the seven blocks take **2,192 ALMs**, and the call controller that DARIA would need with them another 716 (about 1,150 of its flip-flops carry the six audio values across clocks) [probe]. The causes:
 
 - DPC+ keeps its 8 fetchers in flip-flops with eight copies of every adder, comparator and load mux: about 690 of its 832 live ALMs.
 - CDF and BUS copy their pointer tables out of cart RAM into two M10Ks, snoop the ARM's writes into the copies and write updates back across clocks.
@@ -90,7 +90,7 @@ A sizing sketch of it (`frontend_study/daria_fe3.sv`, never simulated) compiles 
 
 | | Upstream, reused | Lean |
 |---|---|---|
-| Front ends | 2,192 live (1,752 as tied off in 2.1.1), plus 60–100 of `cart2600` glue [probe] | 850–1,100 [E; sketch 1,004] |
+| Front ends | 2,192 live (1,752 as tied off in 2.1.1, none since 2.1.2), plus 60–100 of `cart2600` glue [probe] | 850–1,100 [E; sketch 1,004] |
 | Call controller | 716 [probe] | 100–150 [E] |
 | M10K | 8 | 2 |
 | On the `clk_sdram` path | yes | no |
@@ -137,14 +137,31 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 | Part | Upstream | DARIA | Tag |
 |---|---|---|---|
 | Processor modes (C3) | in the core | +31 ALUTs, +12 registers (about 25 ALMs) | [probe] |
-| Front ends | 2,192 live; 1,752 tied off in 2.1.1 | 850–1,100 | [probe] / [E] |
+| Front ends | 2,192 live (left out since 2.1.2) | 850–1,100 | [probe] / [E] |
 | Call controller | 716 | 100–150 | [probe] / [E] |
 | Thumb expander, S3 over S1, image capture, MMIO and timer, profile mux | the core | 650–1,450 (the plan's 750–1,600 less its share for the controller) | [E] |
 | Cart RAM | 32 KB (`cart_ram_tdp`) | 32 KB: 32 M10K | [C] |
 
 - The Mappy-specific part of the CPU work, the FIQ mode with its banked registers, turned out to be the cheapest item: the register file already had the room.
-- Writing the front ends anew saves 650–900 ALMs against what 2.1.1 already spends on them. Against reusing upstream's front ends, glue and controller live (about 3,000), the front ends and controller together save 1,700–2,000.
-- The Chip32 loader (K1) makes a 2600-only bitstream practical inside the existing core, which leaves about 7,100 ALMs of 7800-only logic out of the DARIA build.
+- Since 2.1.2 the ARM schemes' front ends are out of the build (Fix A), so DARIA's lean ones are an addition, not a saving against the shipped core. Against bringing upstream's back live (about 3,000 ALMs with glue and controller), the lean front ends and controller save 1,700–2,000.
+- They use block RAM, not the SRAM, so they stay off the `clk_sdram` path that Fix A cleared. DARIA no longer depends on Fix B (`SRAM_TIMING.md`), which remains worth doing for the other 2600 RAM mappers.
+
+**Totals [E]**, from 2.1.2's build (12,899 ALMs, 70%; 78 M10K):
+
+| | One bitstream (7800 + DARIA) | 2600-only bitstream |
+|---|---|---|
+| Starting point | 12,899 ALMs | about 7,100: 2.1.2 less the 7800 mappers (2,567), MARIA (1,077), the YM2151 (1,051), the POKEYs (582) and the BupChip except its CPU (about 500) |
+| DARIA's additions (the table above) | +1,625 to +2,725 | +1,625 to +2,725 |
+| **ALMs** | **14,500–15,600 (79–85%)** | **8,700–9,800 (47–53%)** |
+| M10K: start | 78 | 50 |
+| M10K: image to 128 KB, beyond ARIA's 16 KB ROM | +112 | +112 |
+| M10K: cart RAM to 32 KB, beyond ARIA's 16 KB RAM | +16 | +16 |
+| M10K: front-end state RAM | +2 | +2 |
+| **M10K, of 308** | **208** | **180** |
+
+- One bitstream lands where 2.1.1 shipped (79%) at best, and well past it at worst. The 2600-only bitstream has room for a faster clock or a larger block-RAM window.
+- **256 KB images do not fit in block RAM alone:** one bitstream would need 336 M10K of 308, a 2600-only one all 308. So DARIA keeps the start of the image in a block-RAM window and serves the rest through a 4–8 KB 2-way cache over SDRAM, where the loader already puts the image. The window holds the 6507 banks, the driver and the code (all within the first 32 KB in every demo, and the 6507 banks by each scheme's layout), and as many of the tables as fit: 128 KB in the 2600-only build, 64–128 KB in one bitstream. In the traces, sending every data read outside the code span through a 4 KB cache over SDRAM cost a median 2% more clock; with a 128 KB window no demo touches the cache at all. The cache adds about 5–9 M10K and 150–250 ALMs [E], within the margins above.
+- **Testing it without a 256 KB game:** build DARIA with a small window (16–32 KB) so that Turbo, Zaxxon and Elevator Agent run through the cache on their real traffic, and check them against upstream as for any other build; then a synthetic 256 KB image whose code reads tables across the whole range.
 
 **Step 0's open items**, for step 1 to settle:
 
@@ -153,3 +170,4 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 3. 32 KB of cart RAM for CDFJ+ (M2), or halt above 16 KB.
 4. DARIA's clock: S3's CPI wants about 32 MHz for Spiders (C6); with a 2600-only bitstream there is room for it.
 5. Port sharing. The CPU reads ROM data through the image ROM's port B, which the front ends use too. The 6507 is held during a call, but the audio engine keeps ticking and, in digital mode, reads ROM samples. So step 1 needs an arbiter on that port, or the samples from another port.
+6. The window size per build, the cache's size and line length, and its SDRAM port (the 6507's cartridge reads stop during a call; the audio engine's ROM samples do not).
