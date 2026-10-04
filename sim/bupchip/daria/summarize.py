@@ -223,10 +223,17 @@ def report(run, split):
     return "\n".join(out)
 
 
+def need_mhz_miss(r, cpi, misses, miss_ns):
+    """Clock for one call when each cache miss stalls miss_ns on top of CPI."""
+    t = r["budget"] / SYS_HZ - misses * miss_ns * 1e-9
+    return float("inf") if t <= 0 else r["instr"] * cpi / t / 1e6
+
+
 def table(runs, split):
     hdr = ("demo", "scheme", "calls/fr", "max instr/call", "p99", "max instr/frame", "max ref us",
            "min budget us", "min slack us", "MHz@1.0", "MHz@1.4", "frames!=262", "Thumb%",
-           "footprint KiB", "I 4k/16 hit%", "U 8k/16 hit%")
+           "footprint KiB", "I 4k/16 hit%", "U 8k/16 hit%", "MHz@1.4 U8k +250ns",
+           "MHz@1.4 I4k+D2k +250ns", "MHz@1.4 U8k +1.4us")
     lines = ["| " + " | ".join(hdr) + " |", "|" + "---|" * len(hdr)]
     for run in runs:
         try:
@@ -258,7 +265,11 @@ def table(runs, split):
                 "%.1f" % (100.0 * t["thumb"] / max(1, t["thumb"] + t["arm"])),
                 "%.1f" % (summ["misc"]["dl16"] * 16 / 1024.0),
                 "%.2f" % (100.0 * (1 - ic[1]["4k/16"] / max(1, ic[0]))),
-                "%.2f" % (100.0 * (1 - uc[1]["8k/16"] / max(1, uc[0]))))) + " |")
+                "%.2f" % (100.0 * (1 - uc[1]["8k/16"] / max(1, uc[0]))),
+                "%.2f" % max(need_mhz_miss(r, 1.4, r["miss_U_8k_16"], 250) for r in bud) if bud else "-",
+                "%.2f" % max(need_mhz_miss(r, 1.4, r["miss_I_4k_16"] + r["miss_D_2k_16"], 250)
+                             for r in bud) if bud else "-",
+                "%.2f" % max(need_mhz_miss(r, 1.4, r["miss_U_8k_16"], 1400) for r in bud) if bud else "-")) + " |")
     return "\n".join(lines)
 
 

@@ -225,6 +225,9 @@ module tb_daria;
 		arm_ph <= (arm_ph + 1 >= arm_div) ? 0 : arm_ph + 1;
 		arm_ce <= (arm_ph + 1 >= arm_div);
 	end
+	// Only while the call runs: the call controller's state writes and its
+	// one-clock commit expect the CPU enabled on every edge.
+	wire   arm_ce_run = (ctl_state == CTRL_RUNNING) ? arm_ce : 1'b1;
 
 	// ---------------------------------------------------- Thumb formats
 	typedef enum int {
@@ -442,7 +445,7 @@ module tb_daria;
 			prev_kind = k;
 		end
 
-		if (m_req && m_rdy && in_call && arm_ce) begin
+		if (m_req && m_rdy && in_call && arm_ce_run) begin
 			bit is_rom, is_ram, is_mmio;
 			is_rom  = m_addr < rom_size;
 			is_ram  = m_addr[31:28] == 4'h4;
@@ -489,7 +492,7 @@ module tb_daria;
 			done_bl = first_bl;
 			done_id = call_id;
 		end
-		ce_last = arm_ce;
+		ce_last = arm_ce_run;
 	end
 
 	// ----------------------------------------- system side (clk_sys)
@@ -687,8 +690,8 @@ module tb_daria;
 		void'($value$plusargs("snap=%d", snap_every));
 		void'($value$plusargs("arm_div=%d", arm_div));
 		if (arm_div > 1) begin
-			force dut.arm_host.ce = arm_ce;
-			force dut.cart2600.mem_ce = arm_ce;
+			force dut.arm_host.ce = arm_ce_run;
+			force dut.cart2600.mem_ce = arm_ce_run;
 		end
 		lfsr = 16'(seed * 40503 + 1);
 		foreach (rom[i]) rom[i] = 8'hFF;
