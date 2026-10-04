@@ -14,7 +14,12 @@
 //   48 kHz tick      clk_74a -> clk_arm   bup_tick48k
 //   audio frame      clk_arm -> clk_sys   frame held, toggle, captured on the
 //                                         change between the second and third
-//                                         flops, with the mute applied
+//                                         flops
+//
+// Nothing else crosses, so the wrapper stays correct if clk_arm ever gets a
+// PLL of its own: the peripheral's mute (clk_arm) is applied to the frame as
+// it is ticked, not on clk_sys as upstream does, and BUP_DEBUG's capture
+// flags (clk_sys) reach the status word through two clk_arm flops.
 //
 // Hold (design, "Reset and hold"):
 //
@@ -40,10 +45,13 @@
 // clamp(W - (4096 - PCM_DEPTH), 0, PCM_DEPTH), so the firmware's 3,896 keeps
 // its assumption D - W = 200 (design, "PCM and command FIFOs").
 //
-// Pop: pop = tick & pcm_enabled & !pause (and cpu_run). An empty FIFO plays 0.
+// Pop: pop = tick & pcm_enabled & !pause (and cpu_run). An empty FIFO plays 0,
+// and so does a tick while muted (a FAULT write), held or paused. On clk_sys
+// the frame reads 0 while souper_profile is low.
 // The peripheral raises pcm_available in the clock after a push into an
-// empty FIFO, one clock before its M10K presents that frame; a tick landing
-// in that clock waits one clock, so the frame read is never stale.
+// empty FIFO, one clock before its M10K presents that frame. A tick landing
+// in a clock where pcm_available has just risen (that, or PCM being enabled)
+// waits one clock, so the frame read is never stale.
 //
 // PSRAM: the wrapper drives psram.sv's user ports (agg23, MIT, vendored in
 // pocket_utils/psram.sv, instantiated by the parent on clk_arm with
@@ -293,7 +301,7 @@ module bupchip_pocket #(
 		avail_q <= pcm_available;
 		tick_hold <= tick_now && !head_ok;
 		if (do_tick) begin
-			frame_arm <= cpu_run && pcm_available && !paused ? pcm_frame : 32'd0;
+			frame_arm <= cpu_run && pcm_available && !paused && !muted ? pcm_frame : 32'd0;
 			frame_tog <= ~frame_tog;
 		end
 	end
@@ -304,8 +312,8 @@ module bupchip_pocket #(
 	always_ff @(posedge clk_sys) begin
 		ftog_s <= {ftog_s[1:0], frame_tog};
 		if (frame_cap) begin
-			audio_l <= muted ? 16'd0 : frame_arm[15:0];
-			audio_r <= muted ? 16'd0 : frame_arm[31:16];
+			audio_l <= frame_arm[15:0];
+			audio_r <= frame_arm[31:16];
 		end
 		if (!souper_profile) begin
 			audio_l <= 16'd0;
@@ -349,9 +357,15 @@ module bupchip_pocket #(
 			if (sh_armed && pcm_enabled && sh_pcm < sh_min) sh_min <= sh_pcm;
 		end
 
+	// The capture's sticky flags, clk_sys, through two clk_arm flops.
+	logic       cap_err_sys = 1'b0;
+	logic [1:0] cap_err_a = 2'b00;
+	always_ff @(posedge clk_sys) cap_err_sys <= cap_seq_err | cap_lost;
+	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
+
 	assign dbg_status = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
 		sh_cmd_ovf, sh_pcm_ovf, sh_pcm_unf, muted, fault_code,
-		cap_seq_err | cap_lost | wr_overrun, 11'(sh_min)};
+		cap_err_a[1] | wr_overrun, 11'(sh_min)};
 	assign dbg_halt_pc = halt_pc;
 `endif
 endmodule

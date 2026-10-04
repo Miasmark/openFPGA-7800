@@ -43,7 +43,7 @@ Every number carries a tag that says where it comes from:
 |---|---|---|
 | ALMs needed | 12,834 / 18,480, 69% (`ap_core.fit.rpt:4982`). Placement uses 14,101 (`:4984`), of which 1,328 are recoverable by dense packing (`:4989`). MLABs count here, as "[d] ALMs used for memory" (`:4988`). | S3: +1,900–2,555, giving 79.7–83.3%; +1,940–2,625 with `BUP_DEBUG`, giving 79.9–83.7%. S1, with the probe's CPU of 1,297 [probe]: +1,807–2,042, giving 79.2–80.5%; +1,847–2,112 with `BUP_DEBUG`, giving 79.4–80.9%. Neither includes the firmware-load path (+20–30, "Totals"). |
 | LABs touched | 1,649 / 1,848, 89%. 199 are untouched (`fit.rpt:4998`). | S3: +194–263 LABs: 181–250 logic LABs at 10 ALMs each, plus 13 MLAB LABs. The high end exceeds the 199 untouched LABs, so the fit relies on the fitter packing existing logic more densely. |
-| M10K | 46 / 308 (`fit.rpt:5024`) | +38, giving 84 |
+| M10K | 46 / 308 (`fit.rpt:5024`) | +39, giving 85 |
 | MLAB bits | 0 (`fit.rpt:5025`) | Register file (12 MLABs), command FIFO (1 MLAB). S1's register file: 4 MLABs, 1,024 bits [probe]. |
 | DSP | 9 / 66 (`fit.rpt:5029`) | +3–4 (S1's CPU: 3 [probe]) |
 | Global clocks | 5 / 16 (`fit.rpt:5033`) | +1 |
@@ -192,9 +192,9 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
 | `bup_hold` (from `souper_profile`, `pll_locked_s`, `pll_busy_s`); `pause_core` (tied to 0 today) | `clk_sys` → `clk_arm` | Two flops. Timed. |
 | Capture messages: START, one WRITE per halfword, END | `clk_sys` → `clk_arm` | The message is held in a register, plus a toggle. The receiver copies it when it sees the change. Messages are at least 5 `clk_sys` clocks (349 ns) apart. Timed. |
 | 48 kHz tick | `clk_74a` → `clk_arm` | Toggle into three flops. Asynchronous; covered by the clock groups (`core_constraints.sdc:16-20`). |
-| Audio frame | `clk_arm` → `clk_sys` | Frame held, plus a toggle captured on `tog2 ^ tog3`, not upstream's `tog1 ^ tog2` (`bupchip_subsystem.sv:168-175`). The capture applies `muted ? 0 : frame`, and zero while `souper_profile` is low (`bupchip_subsystem.sv:173-179`). Timed. |
+| Audio frame | `clk_arm` → `clk_sys` | Frame held, plus a toggle captured on `tog2 ^ tog3`, not upstream's `tog1 ^ tog2` (`bupchip_subsystem.sv:168-175`). The mute is applied on `clk_arm`, to the frame register as each frame is ticked, so `muted` does not cross (upstream applies `muted ? 0 : frame` at its `clk_sys` capture, `bupchip_subsystem.sv:173-179`). The capture gives zero while `souper_profile` is low, as upstream does. Timed. |
 
-The toggles stay on the timed paths too. They cost about 20 ALMs [E] and keep the design correct if `clk_arm` ever moves to its own fPLL.
+The toggles stay on the timed paths too. They cost about 20 ALMs [E] and keep the design correct if `clk_arm` ever moves to its own fPLL. Nothing else crosses: under `BUP_DEBUG` the capture's sticky error flags (`clk_sys`) reach the `clk_arm` status word through two flops.
 
 ### 48 kHz
 
@@ -233,7 +233,7 @@ cpu_run  = ~bup_hold_arm & fw_loaded & asset_ready & sweep_done   (clk_arm)
 - `fw_loaded` and the ROM's write path;
 - the 48 kHz tick.
 
-The download happens exactly while the CPU is held, so the capture writes must keep flowing. Upstream likewise resets its write path only with `reset_arm` (`bupchip_asset_ddr.sv:228-293`). A PSRAM read still in flight when hold rises finishes on its own (≤ 5 clocks) and is discarded. The receiver starts a write only when the controller is idle.
+The download happens exactly while the CPU is held, so the capture writes must keep flowing. Upstream likewise resets its write path only with `reset_arm` (`bupchip_asset_ddr.sv:228-293`). The fill and prefetch machines start no PSRAM read while held, from the first held clock on. A read still in flight when hold rises finishes on its own and is discarded: the controller is busy for at most 5 clocks after `cpu_run` falls, and at most the read's halfword lands in the first held clock, in the line it was filling, whose tag is already invalid. The sweep then invalidates every tag. `sim/bupchip/s4/tb_cache.sv` and `tb_s4.sv` check all three, and `tb_cache.sv` changes the PSRAM behind every valid line during a hold (scenario G). The receiver starts a write only when the controller is idle.
 
 **What is not in the hold:**
 - **The console reset.** It is left out, as on MiSTer (`top.sv:802`), so the music engine survives a 7800 reset.
@@ -268,7 +268,7 @@ Latencies are for S3, with S1 in brackets:
 |---|---|---|---|---|
 | Fetch | 0x0000_0000–0x0000_3FFF | ROM 4,096 × 32, `cache_ram_dp` port A (`cache_ram.v:292`), no initial contents: filled from `bupchip.bin` at core start ("Firmware load"), 16 M10K | No added clocks: the next PC drives the M10K address | — |
 | ROM data | Same | Port B: literals, the jump table at 0x1f0, the note table, `.data`, the silent sample at 0x1e38 | 1 [2] | Halt |
-| Assets | 0x0200_0000 + [0, `asset_size`) | 64 × 16 B direct-mapped cache (data 1 M10K, tags 1 M10K) in front of PSRAM `cram0` die 0 | Hit 1 [2]. A miss adds T_hw + 3 = 8; an LDR, which needs two halfwords, adds 13. | Halt |
+| Assets | 0x0200_0000 + [0, `asset_size`) | 64 × 16 B direct-mapped cache (data 2 M10K, tags 1 M10K; see "Cache") in front of PSRAM `cram0` die 0 | Hit 1 [2]. A miss adds T_hw + 3 = 8; an LDR, which needs two halfwords, adds 13. | Halt |
 | RAM | 0x4000_0000–0x4000_3FFF | 4,096 × 32 with byte enables, `cache_ram_tdp_dc_be` port A (`cache_ram.v:190`), 16 M10K | 1 [2] | 1 [1; 2 with a register offset] |
 | MMIO | 0xE000_9000–0xE000_90FF | `bupchip_peripheral.sv`, unmodified | 1 [2] | 1 [2] |
 | Anything else | — | Halt, with code and PC in a sticky status word (`halted`, `halt_code`, `halt_pc`; see "Halt codes") | — | — |
@@ -290,7 +290,7 @@ Latencies are for S3, with S1 in brackets:
      - both halfwords of the aligned word for LDR. An unaligned LDR rotates within that word.
      
      The boot code depends on this. It reads the ARSC tag with word loads at `0x2000004` and `0x2000008` (fw `0xf8`, `0xfc`). It reads bytes 0–3 back to back (`0xac`, `0xc0`, `0xc8`, `0xec`), about 3 clocks apart while the next halfword is still 5 clocks away. Completing on the critical halfword alone returns stale data and ends in fault 2 at `0xd4`.
-  5. The replay read is presented one clock after the write of the last halfword it needs. The M10K therefore never sees a read and a write of the same address on the same edge, where its mixed-port read-during-write result would apply.
+  5. The replay read is presented one clock after the write of the last halfword it needs. The M10K therefore never sees a read and a write of the same address on the same edge, where its mixed-port read-during-write result would apply. The RTL (step 4) applies the rule more widely: no load completes on a port-A read registered on the same edge as a port-B write to the same data word or the same tag line. The data M10K is written a halfword at a time through byte enables, so a load may otherwise read a word whose *other* halfword is being written, and on the device the whole word is then undefined. That clock waits and the read is repeated (`bup_asset_cache.sv`, `dcol` and `tcol`).
   6. A load that hits the line under fill completes only once its halfwords have arrived. Until then it stalls like a miss, without starting a fill.
   7. The tag is written valid when the fill ends.
   8. A condition-failed asset load does no lookup and starts no fill.
@@ -582,17 +582,17 @@ The bypass means the array is only ever read for data written at least two clock
 | RAM, 4,096 × 32 with byte enables | ≈0 | 16 | — |
 | Peripheral, CMD 8 / PCM 1,024 (reused): 70–85 [syn] + 1 MLAB LAB | 80–95 | 4 | — |
 | Bus glue, watermark remap, halt status (in S1 the region decode and halt status are inside `bup_cpu.sv`, and in the probe's 1,297, so S1's total counts them twice) | 40–70 | — | — |
-| Asset cache, prefetch, fill state machine, per-halfword arrival bits | 140–210 | 2 | — |
+| Asset cache, prefetch, fill state machine, per-halfword arrival bits | 140–210 | 3 | — |
 | PSRAM controller | 60–100 | — | — |
 | ARSC capture, byte-pair packer, message stream, `clk_arm` receiver, `asset_ready` | 100–130 | — | — |
 | Crossings, 48 kHz tick, frame return with mute, hold, `pll_locked` sync | 60–80 | — | — |
 | `top.sv` mixer once the audio is live (difference) | 30–60 [syn] | — | — |
-| **Total** | **1,900–2,555** | **38** | 3–4 DSP |
+| **Total** | **1,900–2,555** | **39** | 3–4 DSP |
 | `BUP_DEBUG`: status word, shadow FIFO counters, throttle | +40–70 | — | — |
 | CPU, S1, measured in place of the S3 CPU row: logic 1,257.3 + 4 MLAB LABs (40), at 28.636 MHz [probe] | 1,297 | — | 3 DSP |
 
 - **Firmware load path** (packer, extra message types, ROM writes, `fw_loaded`; added after the study when the firmware became user-supplied): +20–30 ALMs [E], about 0.15% of the device. The totals and percentages in this document do not include it.
-- **Device total:** 14,734–15,389 ALMs (79.7–83.3%), or 14,774–15,459 (79.9–83.7%) with `BUP_DEBUG`, and 84 of 308 M10K.
+- **Device total:** 14,734–15,389 ALMs (79.7–83.3%), or 14,774–15,459 (79.9–83.7%) with `BUP_DEBUG`, and 85 of 308 M10K.
 - **S1 total:** 1,807–2,042 ALMs: the probe's CPU of 1,297, with its 4 MLAB LABs [probe], plus 510–745 [E] for the other rows. That is 79.2–80.5% of the device, or 79.4–80.9% (14,681–14,946 ALMs) with `BUP_DEBUG`.
   - Step 5's 81% gate is 14,968.8 ALMs, 22.8 above the high end. The firmware-load path (+20–30) takes the high end to 80.98–81.04%, so S1 is at the gate.
   - The bus-glue row counts the halt status a second time, so the high end is slightly pessimistic.
@@ -683,7 +683,7 @@ The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and ch
    - one WRITE per halfword;
    - END, carrying `asset_size`, after `load_end`.
    
-   Consecutive messages are at least 5 `clk_sys` clocks (349 ns) apart. Only the tail WRITE and END ever need delaying.
+   Consecutive messages are at least 5 `clk_sys` clocks (349 ns) apart. A WRITE leaves in the clock its last byte arrives: nothing else is waiting then, as the block's first byte comes at least 129 bytes after `load_start`. Every other message waits in a flag until the spacing allows it, FWWRITE included (its word in a one-entry register, at most 9 clocks): the firmware slot can start straight after a cartridge, while that cartridge's tail WRITE and END still wait. The order of priority is FWSTART, FWWRITE, START, the tails, FWEND, END. A firmware byte that arrives in the clock the slot's download flag rises starts the first word.
 5. The receiver copies each message into its own register when it sees the toggle change, and handles messages in order:
    - START clears `asset_ready`, which holds the CPU from that clock on.
    - WRITE goes to `psram.sv` as soon as the controller is idle.
@@ -707,16 +707,16 @@ The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and ch
 - 64 lines × 16 B, direct-mapped:
   - index: offset[9:4];
   - tag: offset[22:10] plus a valid bit.
-- **Data:** one M10K, written 16 bits at a time from PSRAM and read 32 bits at a time by the CPU.
+- **Data:** 256 × 32, written 16 bits at a time from PSRAM and read 32 bits at a time by the CPU. It is `cache_ram_tdp_dc_be`, a true dual-port `altsyncram` (`cache_ram.v:190`; the step 3 probe confirms Quartus keeps that mode for a port that never writes), and an M10K in true dual-port mode is at most 20 bits wide, so it takes 2 M10K. A simple dual-port wrapper (port A read, port B write) would hold it in one; that is not worth a new RAM wrapper while M10K is plentiful (85 of 308). Step 5's fit report confirms the count.
 - **Tags:** one M10K. Port A does the CPU lookup. Port B does the prefetch probe and the tag writes (invalid at fill start, valid at fill end).
 - **Fill state:** line index, tag, demand or prefetch, and 8 per-halfword arrival bits. Only one fill runs at a time.
 - Tags are invalidated by the 64-clock sweep after every hold.
 
 ### Miss and prefetch
 - **A miss** fills the critical halfword first, then wraps around the line. W completes as described under "Memory map": once the halfwords the load touches have arrived, with the replay read one clock after the last of them is written. A hit on the line under fill waits the same way.
-- **Prefetch:** after every asset access, the next line is probed. If it is absent and no fill is running, it is fetched from halfword 0.
+- **Prefetch:** after every asset access, the next line is probed. If it is absent and no fill is running, it is fetched from halfword 0. In the RTL the newest access's next line waits in one register until no fill is running, then is probed (newest wins); it is not dropped.
 - **Pre-emption.** A demand miss to a line other than the one being filled waits for the halfword in flight (≤ 5 clocks; `psram.sv` cannot abort a read). It then pre-empts the fill. The pre-empted line's tag stays invalid, as written when that fill started.
-- The cycle model does not pre-empt. There, a demand miss waits for the whole fill in flight, and those waits are part of its 0.13% stall clocks. It does not count them separately. It does count 692 late hits in 4 s: loads that hit a line still being filled. Step 4 compares the two on Misery_F and keeps pre-emption only if it stalls less.
+- The cycle model does not pre-empt. There, a demand miss waits for the whole fill in flight, and those waits are part of its 0.13% stall clocks. It does not count them separately. It does count 692 late hits in 4 s: loads that hit a line still being filled. Step 4 compares the two on Misery_F and keeps pre-emption only if it stalls less. In the RTL a demand miss pre-empts any running fill: a prefetch, or the rest of an earlier demand fill.
 
 ### Measured cost [model, Misery_F, 4 s, 2.62 M asset reads, S3]
 
@@ -748,13 +748,15 @@ The firmware reads samples sequentially, one `ldrsb` per voice per frame, which 
   - The lowest level under load is 664 frames (the study's S1 sketch at 28.636 MHz [RTL]; 660 on the S1 core with zero-wait assets [RTL]) and 657 frames (S3 at 21.477 MHz [model]).
 - **Pop.** `pop = tick48k & pcm_enabled & !pause`. `pause` is tied to 0 today.
   - An empty FIFO plays 0 (as in `bupchip_subsystem.sv:144-164`).
-  - A FAULT write sets the peripheral's `muted` output (`bupchip_peripheral.sv:175-180`), but the peripheral does not zero `pcm_frame`. The wrapper's `clk_sys` frame capture applies `muted ? 0 : frame`, and it zeroes the output while `souper_profile` is low. Both follow upstream (`bupchip_subsystem.sv:173-179`). `top.sv` also gates the mix on `souper_profile` (`:649-652`).
+  - The peripheral raises `pcm_available` in the clock after a push into an empty FIFO, a clock before its M10K presents that frame (upstream's subsystem has the same race). A tick that lands in a clock where `pcm_available` has just risen waits one clock (`tick_hold`), so a stale head is never played. CoreTone at speed never lets the FIFO run empty, so `sim/bupchip/s4/stress/run_pophead.sh` checks this with firmware of its own that pushes single frames into the empty FIFO at every tick phase, with a tick also forced onto that clock; a wrapper without `tick_hold` fails it.
+  - Ticks keep running while the BupChip is held, with the frame forced to 0, so the output reads 0 within one tick of any hold.
+  - A FAULT write sets the peripheral's `muted` output (`bupchip_peripheral.sv:175-180`), but the peripheral does not zero `pcm_frame`. The wrapper ticks 0 into its frame register while `muted` is set, on `clk_arm`, so `muted` never crosses to `clk_sys`. Upstream applies `muted ? 0 : frame` at its `clk_sys` capture instead (`bupchip_subsystem.sv:173-179`); the only difference is the one frame ticked just before a FAULT write and captured after it, which plays here. The `clk_sys` capture zeroes the output while `souper_profile` is low, as upstream's does. `top.sv` also gates the mix on `souper_profile` (`:649-652`). `sim/bupchip/s4/stress/run_pophead.sh` checks the mute end to end (a FAULT write after frame M: every later frame 0).
 - **Output path.** The frame register crosses to `clk_sys` with the mute applied, becomes `bupchip_audio_l/r`, and goes through the existing gain, saturation, midpoint and halving (`top.sv:641-668`, `ext_audio` at `:220`). The levels are therefore MiSTer's.
 - **Command FIFO.** The firmware never reads register 0x08 and pops once per main-loop pass, so it cannot see the depth.
 - **Debug counters.** The peripheral's sticky overflow and underflow bits and its FIFO levels are internal (`bupchip_peripheral.sv:60, 85, 89`). Its ports (`:24-51`) export only `reg_rdata`, `pcm_frame`, `pcm_available`, `pcm_enabled`, `muted` and `fault_code`. Under `BUP_DEBUG` the wrapper therefore keeps shadow counters:
   - **CMD level:** +1 on `cmd_valid`; −1 on a committed read of 0x04 while the level is non-zero; set to 0 by a write of 0x0C with bit 1 set. Command overflow = `cmd_valid` at level 8.
   - **PCM level:** +1 on a committed write of 0x10 below 1,024; −1 on a pop while not empty. PCM overflow = a push at 1,024. Underflow = a pop while `pcm_available` is low.
-  - **Lowest PCM level** while `pcm_enabled` is set.
+  - **Lowest PCM level** while `pcm_enabled` is set, from the first time the FIFO reaches its watermark (the boot's prefill), since every boot starts from an empty FIFO.
   - The flags are sticky until the next hold. Simulation checks every shadow counter against the peripheral's internal one through hierarchical references, which are allowed in simulation only. About 40–70 ALMs with the throttle [E].
 - **Fallback:** the `PCM_DEPTH = 4096` parameter without the remap (16 M10K).
 
@@ -815,7 +817,7 @@ Also:
 
 | File | Change |
 |---|---|
-| `core/atari7800_pocket.sv` | Add `ifdef POCKET_BUPCHIP` ports `clk_arm`, `clk_74a`, `bupfw_download` and `cram0_*`. Hand `ioctl_wr`/`ioctl_addr`/`ioctl_dout` to `bup_capture` while `bupfw_download` is high, and add `bupfw_download` to the core reset (`:137-138`), as for the other firmware slots. Instantiate `bupchip_pocket` next to the `mapper_load_*` expressions (`:946-950`). Connect `pause_core` (`:53`; tied to 0 at `core_top.v:850`), `pll_locked` (raw; the wrapper synchronises it), `pll_busy` and the new `top.sv` ports. |
+| `core/atari7800_pocket.sv` | Add `ifdef POCKET_BUPCHIP` ports `clk_arm`, `clk_74a`, `bupfw_download` and `cram0_*`. Hand `ioctl_wr`/`ioctl_addr`/`ioctl_dout` to `bup_capture` while `bupfw_download` is high, and add `bupfw_download` to the core reset (`:137-138`), as for the other firmware slots. Instantiate `bupchip_pocket` next to the `mapper_load_*` expressions (`:946-950`), and `psram.sv` (`CLOCK_SPEED = 28.636364`, on `clk_arm`) on `cram0`: `bupchip_pocket` drives its user ports, so the testbench can put a model behind it. Connect `pause_core` (`:53`; tied to 0 at `core_top.v:850`), `pll_locked` (raw; the wrapper synchronises it), `pll_busy` and the new `top.sv` ports. |
 | `core/core_top.v` | Connect `outclk_3` → `clk_arm` on `pll_core` (`:320-329`). Route `cram0_*` instead of the tie-offs (`:267-277`); `cram1` stays tied. Add `SLOT_BUPFW = 16'h0109` next to `:349-353` and a `bupfw_download` flag built like `arfw_download` (`:701-720`). |
 | `dist/Cores/Miasmark.7800/data.json` | Add the firmware slot: name "BupChip firmware", id `0x109`, filename `bupchip.bin`, parameters `0x88` (loaded at start, not reloadable, so no menu row), extensions `bin`, `size_maximum` `0x4000`, address `0x0A000000`. |
 | `core/pll/pll_core.v` | Regenerate with 4 clocks; C3 = 24, then 32 (`DEVELOPING.md:245-271`). |
@@ -849,8 +851,8 @@ The harnesses came from the study. Step 1 brought them into `sim/bupchip/` (`ver
 | Lockstep, against `arm7tdmi_core` (`tb_lockstep.sv`, peripheral reads replayed) | Boot + Misery_F, 1 M instructions; mixer harness, 1.74 M; all 32 songs × 4 s overnight (local data); synthetic ARSC with every command class; random-content ARSC seeds; an injected load bit-flip | 0 mismatches and 0 halts, with no register masking (both cores start from zeroed registers). The injected fault must be caught. | 0 mismatches on every run. The one halt, random-content seed 4, matches a reference abort after the same 88,940 retires (step 2, below). |
 | PCM | Misery_F, 4 s, against MiSTer's `sim/work/bupchip/ref/song13.pcm` from `run_bupchip.sh` (191,984 frames: the boot's 4,000 prefill frames, then 187,984 of the song); songs 14, 9 and 30 the same way. The Python model equals all six local references (songs 6, 9, 10, 13, 14, 30) over every frame. | Identical from the song's first frame. `sim/bupchip/s1/pcm_check.py` lines the two up on the frame pushed after the firmware took the command (MiSTer's frame 4,000), so a different run of leading silence fails, and so does a nonzero frame before the song starts. Without a song-start frame (`--song-start`), it lines them up on the first nonzero frame. | Songs 13, 14, 9 and 30: all 187,984 song frames identical |
 | Performance | Clocks per batch, from the retire of 0x190 to that batch's return to 0x178: the retire of 0x1dc after a render, or of 0x274 after a silent batch. Idle is defined by the *retired* PC. | S1 within ±1% of 1.383; S2 and S3 within ±2% of the model; per-batch worst case within ±3% | 1.3772, −0.4% (zero-wait assets) |
-| PSRAM | `psram.sv` against a PSRAM model (`psram.sv:36-53` timings), with `CLOCK_SPEED` = 28.636364 at clock periods of 28.636, 21.477 and 21.281 MHz | Every read and write completes in 5 clocks; the `$info` state numbers are distinct | Study, on agg23's file: 5 clocks at all three [sim]. Step 4 runs it on the vendored copy. |
-| System | Wrapper with the PSRAM model, the loader at 175–250 ns per byte, the `clk_74a` tick and the real clock ratio. Also: firmware load (missing file: CPU held and silent; a short file; firmware loaded before the cartridge, as the Pocket does), 2–3 cart reloads, a PAL retune, pause (driven in simulation; it is tied to 0 on hardware), a non-Souper cart, and a hold during a fill. | 0 underflow and 0 overflow from the shadow counters (the existing testbench checks only underruns, `tb_bupchip.sv:151`); lowest FIFO level ≥ 600; no capture message lost; misses within ±20% of the model | Step 4 |
+| PSRAM | `psram.sv` against a PSRAM model (`psram.sv:36-53` timings), with `CLOCK_SPEED` = 28.636364 at clock periods of 28.636, 21.477 and 21.281 MHz | Every read and write completes in 5 clocks; the `$info` state numbers are distinct | Study, on agg23's file: 5 clocks at all three [sim]. Step 4, on the vendored copy: 23 of 23 checks, every access 5 clocks at all three, states distinct (`sim/bupchip/s4/run_psram_ctl.sh`) |
+| System | Wrapper with the PSRAM model, the loader at 175–250 ns per byte, the `clk_74a` tick and the real clock ratio. Also: firmware load (missing file: CPU held and silent; a short file; firmware loaded before the cartridge, as the Pocket does), 2–3 cart reloads, a PAL retune, pause (driven in simulation; it is tied to 0 on hardware), a non-Souper cart, and a hold during a fill. | 0 underflow and 0 overflow from the shadow counters (the existing testbench checks only underruns, `tb_bupchip.sv:151`); lowest FIFO level ≥ 600; no capture message lost; misses within ±20% of the model | Step 4: songs 13, 14, 9 and 30 identical with 0 underflow, 0 overflow and lowest levels 659, 755, 721 and 801; no message lost, also with the firmware slot straight after a cartridge and asynchronous `clk_arm` (`stress/run_capstress.sh`); misses +4.9% against the model; reloads, retune, pause, holds during fills (with `psram.sv` mid-access and with the halfword arriving), the watermark remap, the mute, pushes into the empty FIFO and the held-and-silent cases pass (`sim/bupchip/s4/check.sh`, 27 jobs) |
 | Quartus | CPU alone, then the integrated build | The gates in steps 3, 5, 8 and 9. Every slack gate is the worst setup slack over the four corners in `sta.summary` (slow and fast, 0 and 85 °C). | Step 3, partly done: the S1 probe passes the MLAB, slack and ALM gates. The 12-MLAB check waits for the 2W/3R register file. |
 | Hardware | 32 songs, NTSC and PAL, with the `BUP_DEBUG` status visible; throttle sweep; A/B against a MiSTer capture | Shadow-counter flags clear; fault code 0 | Steps 5 and 9 |
 
@@ -876,7 +878,7 @@ The harnesses came from the study. Step 1 brought them into `sim/bupchip/` (`ver
 - a condition-failed MMIO read (must not pop);
 - one test per halt class.
 
-Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/directed/`, `sim/bupchip/s1/halt_tests.py` and `sim/bupchip/verif/directed/`. That includes the throttle with an MMIO access in W and the condition-failed MMIO read (`v_mmio`, and every lockstep run with `+throttle`), the register read after a hold (`regzero.S`; `tb_s1.sv`'s `+rehold`) and the wild store (`wild_store`). The asset-miss, fill and pre-emption items wait for the cache (step 4), and E and W writing one register in one clock waits for the second write port (step 6).
+Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/directed/`, `sim/bupchip/s1/halt_tests.py` and `sim/bupchip/verif/directed/`. That includes the throttle with an MMIO access in W and the condition-failed MMIO read (`v_mmio`, and every lockstep run with `+throttle`), the register read after a hold (`regzero.S`; `tb_s1.sv`'s `+rehold`) and the wild store (`wild_store`). Step 4 covers the asset-miss, fill and pre-emption items in `sim/bupchip/s4/tb_cache.sv` (directed scenarios A1–G, `sim/bupchip/s4/README.md`) and `sim/bupchip/s4/stress/tb_cstress.sv`, and the real firmware exercises every one of them in the system runs. "An asset miss with a dependent MLA or a store in execute" cannot arise in S1, whose next instruction starts only after W; it waits for S3's forwarding (step 7). E and W writing one register in one clock waits for the second write port (step 6).
 
 **Lockstep retire port.** The record is `{pc, insn, the register writes from ports E and W, NZCV}`, in program order.
 - The core marks the first clock of each instruction with `rt_start`, condition-failed ones included and never while frozen, and its last with `rt_valid`, which carries `rt_pc`, `rt_insn` and `rt_nzcv`. Register writes come as `rt_e_*` and `rt_w_*` on the clock they land (`bup_cpu.sv:133-147, 873-885`). S1 has one write port; it reports load data as W and every other write as E.
@@ -948,6 +950,17 @@ Every slack gate below is the worst setup slack over the four corners in `sta.su
    - The PSRAM and directed cache tests pass; no capture message is lost at 175 ns per byte.
    - Pre-emption is kept or dropped on measured stall clocks.
    - Reloads, retune and pause (in simulation) pass.
+
+   **Done** (2026-10-03, after an independent verification round). The RTL is in `src/fpga/core/bupchip/` (`bupchip_pocket.sv`, `bup_capture.sv`, `bup_asset_wr.sv`, `bup_asset_cache.sv`, `bup_tick48k.sv`; `bup_cpu.sv` unchanged since step 3), agg23's `psram.sv` is vendored unmodified to `src/fpga/pocket_utils/`, and the testbenches are in `sim/bupchip/s4/`, with the verifiers' stress benches in `sim/bupchip/s4/stress/` (the READMEs there have every number). `sim/bupchip/s4/check.sh sim/work/bupchip/game/rv.a78` passes 27 of 27 in 47 minutes with 3 jobs; without the game it runs the PSRAM, cache, stress and game-free checks (15 jobs). The firmware always arrives through the firmware slot's message path, never `$readmemh`.
+   - **Misery_F:** a download of `rv.a78` at 174.6 ns per byte (129.4 ms; all 216,928 ARSC bytes in the PSRAM model right), then 4 s: all 187,984 song frames identical to `song13.pcm`, as pushed and as returned to `clk_sys`, 0 underflow, 0 overflow, lowest level 659 [RTL]. CPI 1.3783, busy 72.89%. Songs 14, 9 and 30 likewise (lowest levels 755, 721, 801). The peripheral's watermark is 824 after the firmware's writes of 3,896, and every write value goes through the remap right (`+wmsweep`).
+   - **PSRAM:** `psram.sv` on a timing-checking model at 28.636, 21.477 and 21.281 MHz: every access 5 clocks, 0 violations, 23 of 23 checks [sim]. Song 14 with `clk_arm` at 21.281 MHz (1.5 × PAL `clk_sys`) plays identically, with a WRITE every 7.5 clocks and no message lost [RTL].
+   - **Cache:** directed scenarios (the boot's cold-line bytes, word-load misses at 13 clocks and byte misses at 8, a hit on the line under fill, a demand miss during a prefetch and during a demand fill, holds during fills, a tag write colliding with a lookup, the tag sweep with new contents behind every valid line) and 200,000 random loads in 8 configurations, 0 wrong bytes, no PSRAM read started while held; 11 of 11 mutations caught [sim]. The stress bench adds every load pair at every distance, holds at every clock of a fill, PSRAM latencies 1–20 and M10K models that poison a mixed-port read-during-write: 22.2 M loads, 0 wrong, 10 of 10 mutations [sim]. Misses +4.9%, prefetches −0.5% and stall clocks −2.4% against the cycle model's S1/cache [RTL].
+   - **No capture message lost** at 174.6 ns per byte, nor at 174.6–250 ns, nor at 21.281 MHz, nor with `clk_arm` asynchronous at 16–29 MHz, nor with the firmware slot starting in the clock after a cartridge's download ends (`stress/run_capstress.sh`, 16 of 16).
+   - **Pre-emption kept:** 70,127 stall clocks on Misery_F with it, 72,396 without (+3.2%) [RTL].
+   - **Reloads, retune, pause:** three reloads (the game, the game without its ARSC block, the game) with the holds during cache fills, one with `psram.sv` mid-access and one with the halfword arriving; a PAL retune with the hold mid-access during a fill, then 28.375 MHz; a 20 ms pause with 0 pops and silence; each then identical. Reloads of synthetic blocks with other contents give the model's PCM. A non-Souper cartridge, no firmware, a 4-byte firmware file and a cartridge without its block each leave the BupChip held and silent [RTL].
+   - **PCM FIFO head and mute:** firmware of the stress bench's own pushes 6,000 single frames into the empty FIFO at every tick phase, with a tick forced onto the clock after one push: every frame comes out once and in order; a FAULT write silences every later frame; wrappers without `tick_hold` or without the mute fail [RTL].
+   - **Fixed in the verification round:** FWWRITE now waits in the capture's queue (sent at once, it could follow a cartridge's END by 1–4 `clk_sys` and lose it); a firmware byte in the clock its download starts is kept; the cache starts no PSRAM read while held; the mute is applied on `clk_arm`; the cache's data RAM is counted at 2 M10K ("Cache").
+   - Open for step 5: the new timing paths (`w_wait` from the tag compare into the next-PC logic, the ROM port-B address mux, the fill request through the arbiter), whether `clk_arm` runs on for about 14 clocks after `pll_busy` while `psram.sv` finishes a read (`sim/bupchip/s4/README.md`, "Open points for step 5"), and the M10K count in the fit report.
 5. **Integrate S1 at 28.636 MHz** (C3 = 24).
    *Done when:*
    - Full compile with `BUP_DEBUG`: `clk_arm` slack ≥ +3 ns; `clk_sdram` ≥ +1.0 ns; `clk_74a` ≥ +2.0 ns; ALMs ≤ 81% (estimate 79.4–80.9% with `BUP_DEBUG`, from the probe's CPU, and 80.98–81.04% at the high end with the firmware-load path; "Totals"). LAB use is recorded.

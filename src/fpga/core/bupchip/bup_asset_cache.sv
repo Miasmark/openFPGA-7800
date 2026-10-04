@@ -5,13 +5,16 @@
 //
 //   asset offset [22:10] tag, [9:4] line, [3:1] halfword, [0] byte
 //
-// Data: one M10K, 256 x 32 (cache_ram_tdp_dc_be). Port A is read by the CPU
-// at d_addr; port B is written a halfword at a time from the PSRAM, through
-// its byte enables. Tags: one M10K, 64 x {valid, tag} (cache_ram_tdp_dc).
-// Port A is the CPU's lookup; port B does the prefetch probe and every tag
-// write. Both M10Ks take d_addr at the end of execute, as ROM port B and the
-// RAM do, so they answer in W; while w_wait holds W the CPU keeps d_addr on
-// the access and they read it again every clock.
+// Data: 256 x 32 (cache_ram_tdp_dc_be). Port A is read by the CPU at d_addr;
+// port B is written a halfword at a time from the PSRAM, through its byte
+// enables. cache_ram.v builds it as a true dual-port altsyncram, and an M10K
+// in that mode is at most 20 bits wide, so it takes 2 M10K (a simple
+// dual-port RAM would hold 256 x 32 in one, but needs its own wrapper). Tags:
+// one M10K, 64 x {valid, tag} (cache_ram_tdp_dc). Port A is the CPU's
+// lookup; port B does the prefetch probe and every tag write. Both RAMs take
+// d_addr at the end of execute, as ROM port B and the RAM do, so they answer
+// in W; while w_wait holds W the CPU keeps d_addr on the access and they read
+// it again every clock.
 //
 // W (bup_cpu S1: w_asset, w_addr, w_size). The load completes once every
 // halfword it touches is there: one for a byte or halfword load (odd LDRH
@@ -44,8 +47,10 @@
 // Sweep. Whenever pre_run (not held, firmware and assets ready) is low the
 // sweep restarts; once it is high, 64 clocks write every tag invalid, then
 // sweep_done lets the CPU run. The fill and prefetch machines are held while
-// run (cpu_run) is low; a read in flight then finishes in psram.sv and is
-// dropped.
+// run (cpu_run) is low and issue no read then; a read already in flight
+// finishes in psram.sv (at most 5 clocks into the hold) and is dropped: its
+// halfword can land only in the first held clock, in the line it was filling,
+// whose tag is invalid.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -164,7 +169,9 @@ module bup_asset_cache #(
 		end
 	end
 
-	assign rd_req  = f_act && f_rq_n != 4'd0 && !stop && (!f_fl || rx);
+	// Not while held: in the first held clock f_act is still set, and a read
+	// issued then would keep psram.sv busy into the hold for nothing.
+	assign rd_req  = run && f_act && f_rq_n != 4'd0 && !stop && (!f_fl || rx);
 	assign rd_addr = {f_tag, f_idx, f_rq_hw};
 
 	always_ff @(posedge clk) begin

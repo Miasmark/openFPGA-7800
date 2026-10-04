@@ -29,17 +29,27 @@
 // the receiver copies it when it sees the change. Consecutive messages are at
 // least 5 clk_sys clocks (349 ns) apart, which bup_asset_wr needs. The loader
 // delivers a byte at most every 2.5 clk_sys (10 clk_sdram, data_loader.sv), so
-// a pair or a word completes at most every 5 clocks, and its WRITE or FWWRITE
-// goes out in the clock its last byte arrives. START, the tails and the ENDs
-// wait in flags for the spacing. A load_start (or a new firmware download)
-// drops whatever the previous download still had waiting: the receiver's
-// START withdraws the old assets anyway.
+// a pair completes at most every 5 clocks and a word every 10.
+//
+// A WRITE goes out in the clock its last byte arrives. Nothing else is
+// waiting then: the block's first byte comes at least 129 bytes (320 clocks)
+// after load_start, long after START and anything a firmware download just
+// before had left waiting. Every other message waits in a flag for the
+// spacing, and they leave in this order of priority: FWSTART, FWWRITE, START,
+// the firmware's tail FWWRITE, the cartridge's tail WRITE, FWEND, END. An
+// FWWRITE's word waits in fwword_pl, at most 9 clocks: the firmware slot can
+// start straight after a cartridge, while that cartridge's tail WRITE and END
+// still wait, so sending FWWRITE at once could break the spacing. A load_start drops what
+// the previous cartridge download still had waiting, and a new firmware
+// download what the previous firmware download had: the receiver's START or
+// FWSTART withdraws the old contents anyway. A firmware byte may arrive in the
+// clock fw_download rises; it starts the new download's first word.
 //
 // The download is sequential, as data_loader.sv delivers it. seq_err
-// (sticky) flags a byte that breaks the pairing, and lost a WRITE or FWWRITE
-// that had to go out less than 5 clocks after the message before it (the
-// loader faster than its 2.5 clk_sys per byte); simulation checks both stay
-// low.
+// (sticky) flags a byte that breaks the pairing, and lost a WRITE that had to
+// go out less than 5 clocks after the message before it, or a firmware word
+// that completed while the one before still waited (either is the loader
+// faster than its 2.5 clk_sys per byte); simulation checks both stay low.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -67,7 +77,7 @@ module bup_capture (
 	output logic        msg_tog = 1'b0,
 
 	output logic        seq_err = 1'b0, // sticky: a byte out of order
-	output logic        lost = 1'b0     // sticky: a message too soon after the last
+	output logic        lost = 1'b0     // sticky: the loader outran the message stream
 );
 	// Message types (bup_asset_wr.sv has the same list).
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
@@ -112,9 +122,10 @@ module bup_capture (
 	wire         fw_fall = !fw_download && fw_q;
 	wire         f_byte = fw_valid && load_addr[24:14] == 11'd0;
 	wire         f_word = f_byte && load_addr[1:0] == 2'd3;	// a word completes
+	wire         f_have = fw_have && !fw_rise;	// a rise starts a new word
 	logic [23:0] fw_next;
 	always_comb begin
-		fw_next = fw_have ? fw_word : 24'd0;
+		fw_next = f_have ? fw_word : 24'd0;
 		case (load_addr[1:0])
 			2'd0: fw_next[7:0] = load_data;
 			2'd1: fw_next[15:8] = load_data;
@@ -125,15 +136,17 @@ module bup_capture (
 	wire  [13:0] fw_last = fw_count[13:0] - 14'd1;
 
 	// ---- messages ---------------------------------------------------------------------
-	// Flags for the ones that wait; WRITE and FWWRITE go out as they complete.
+	// Flags for the ones that wait; WRITE goes out as it completes.
 	logic p_start = 1'b0, p_tail = 1'b0, p_end = 1'b0;
-	logic p_fwstart = 1'b0, p_fwtail = 1'b0, p_fwend = 1'b0;
+	logic p_fwstart = 1'b0, p_fwword = 1'b0, p_fwtail = 1'b0, p_fwend = 1'b0;
+	logic [43:0] fwword_pl = 44'd0;	// the FWWRITE waiting in p_fwword
 	logic [2:0] gap = 3'd4;			// clocks since the last message, up to 4
 	wire  can_send = gap == 3'd4;
-	wire  direct = a_pair || f_word;
+	wire  direct = a_pair;
 	logic [2:0] s_type;
 	always_comb begin
 		if      (p_fwstart) s_type = M_FWSTART;
+		else if (p_fwword)  s_type = M_FWWRITE;
 		else if (p_start)   s_type = M_START;
 		else if (p_fwtail)  s_type = M_FWWRITE;
 		else if (p_tail)    s_type = M_WRITE;
@@ -142,6 +155,7 @@ module bup_capture (
 		else                s_type = 3'd0;
 	end
 	wire queued = can_send && !direct && s_type != 3'd0;
+	wire send_fwword = queued && !p_fwstart && p_fwword;
 
 	always_ff @(posedge clk) begin
 		fw_q <= fw_download;
@@ -150,19 +164,17 @@ module bup_capture (
 		if (direct) begin
 			if (!can_send) lost <= 1'b1;
 			msg_tog <= ~msg_tog;
-			if (a_pair) begin
-				msg_type <= M_WRITE;
-				msg_pl <= {4'd0, 1'b1, have_lo, off[22:1], load_data, have_lo ? lo : 8'd0};
-			end else begin
-				msg_type <= M_FWWRITE;
-				msg_pl <= {load_addr[13:2], load_data, fw_next};
-			end
+			msg_type <= M_WRITE;
+			msg_pl <= {4'd0, 1'b1, have_lo, off[22:1], load_data, have_lo ? lo : 8'd0};
 		end else if (queued) begin
 			msg_type <= s_type;
 			msg_tog <= ~msg_tog;
 			msg_pl <= 44'd0;
 			if (p_fwstart) p_fwstart <= 1'b0;
-			else if (p_start) p_start <= 1'b0;
+			else if (p_fwword) begin
+				p_fwword <= 1'b0;
+				msg_pl <= fwword_pl;
+			end else if (p_start) p_start <= 1'b0;
 			else if (p_fwtail) begin
 				p_fwtail <= 1'b0;
 				fw_have <= 1'b0;
@@ -201,24 +213,30 @@ module bup_capture (
 			end
 		end
 
-		// Firmware bytes.
+		// Firmware bytes (a byte in the clock fw_download rises belongs to the
+		// new download).
 		if (fw_rise) begin
 			p_fwstart <= 1'b1;
+			p_fwword <= 1'b0;
 			p_fwtail <= 1'b0;
 			p_fwend <= 1'b0;
 			fw_have <= 1'b0;
 			fw_count <= 15'd0;
-		end else begin
-			if (f_byte) begin
-				fw_count <= {1'b0, load_addr[13:0]} + 15'd1;
-				if (fw_have == (load_addr[1:0] == 2'd0)) seq_err <= 1'b1;
-				fw_have <= !f_word;
-				fw_word <= fw_next;
+		end
+		if (f_byte) begin
+			fw_count <= {1'b0, load_addr[13:0]} + 15'd1;
+			if (f_have == (load_addr[1:0] == 2'd0)) seq_err <= 1'b1;
+			fw_have <= !f_word;
+			fw_word <= fw_next;
+			if (f_word) begin
+				if (p_fwword && !send_fwword && !fw_rise) lost <= 1'b1;	// the last word still waits
+				p_fwword <= 1'b1;
+				fwword_pl <= {load_addr[13:2], load_data, fw_next};
 			end
-			if (fw_fall) begin
-				p_fwtail <= fw_have;
-				p_fwend <= 1'b1;
-			end
+		end
+		if (fw_fall) begin
+			p_fwtail <= fw_have;
+			p_fwend <= 1'b1;
 		end
 	end
 
@@ -232,11 +250,10 @@ module bup_capture (
 			if (off != exp_off) seq_sim <= 1'b1;
 			exp_off <= off + 25'd1;
 		end
-		if (fw_rise) exp_fw <= 25'd0;
-		else if (fw_valid) begin
-			if (load_addr != exp_fw) seq_sim <= 1'b1;
+		if (fw_valid) begin
+			if (load_addr != (fw_rise ? 25'd0 : exp_fw)) seq_sim <= 1'b1;
 			exp_fw <= load_addr + 25'd1;
-		end
+		end else if (fw_rise) exp_fw <= 25'd0;
 	end
 `endif
 endmodule

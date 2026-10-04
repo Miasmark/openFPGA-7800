@@ -1,6 +1,39 @@
 # ARIA (BupChip), step 4: the Pocket wrapper in simulation
 
-Step 4 of `docs/BUPCHIP_CORE.md`: the wrapper, memories, asset path and PSRAM around the S1 core, in simulation. This README has one section per layer; the PSRAM layer is below.
+Step 4 of `docs/BUPCHIP_CORE.md`: the wrapper, memories, asset path and PSRAM around the S1 core, in simulation. Nothing here is built into the core yet; step 5 integrates it. This README has one section per layer: the PSRAM layer, then the wrapper layer (with the cache).
+
+## Running everything
+
+```sh
+sim/bupchip/s4/check.sh sim/work/bupchip/game/rv.a78   # every check: 27 of 27, 47 minutes with JOBS=3
+sim/bupchip/s4/check.sh                                # without the game: 15 of 15 (PSRAM, cache, stress, game-free system runs), 27 minutes
+```
+
+`check.sh` runs up to `JOBS` (default 3) jobs at once, niced, with work files in `sim/work/bupchip/s4` (`WORK` overrides; the stress benches in `$WORK/stress`, the logs of the PSRAM, cache and stress jobs in `$WORK/logs`). Verilator is `/opt/verilator-5.040` if present (`VERILATOR` overrides); the PSRAM layer and `stress/run_tick.sh` also need iverilog, and `stress/run_bounds.sh` and `stress/run_pophead.sh` arm-none-eabi-gcc. The firmware comes from the user's `src/fpga/mister/rtl/bupchip.hex` (gitignored), turned into `$WORK/bupchip.bin` by `tools/hex2bin.py` and loaded through the firmware slot's path (FWSTART, FWWRITE, FWEND), never with `$readmemh`. Without it only the PSRAM layer, the cache and the firmware-free stress benches run, and a game argument is an error. With a game, `REFDIR` (default `sim/work/bupchip/ref`, whatever `WORK` is) must hold `song<N>.pcm` for songs 13, 14 and every song in `SONGS`; `check.sh` stops with exit 2 before starting anything if one is missing. Game data and everything made from it (PCM, logs) stay in `$WORK`, which git ignores.
+
+| `check.sh` job | Needs | Passes when |
+|---|---|---|
+| PSRAM layer (`run_psram_ctl.sh`) | iverilog | 23 of 23 (below) |
+| Asset cache (`run_cache.sh`) | — | 24 of 24 runs (8 configurations × 3 seeds) pass every directed check (scenario G, the tag sweep, included) and the random streams, and 11 of 11 mutations of the cache are caught |
+| Stress: the cache (`stress/run_cstress.sh`) | — | 26 of 26 runs and 10 of 10 mutations (`stress/README.md`) |
+| Stress: the download path (`stress/run_capstress.sh`) | — | 16 of 16: random downloads, the firmware slot straight after a cartridge, byte 0 in the clock the firmware download starts, synchronous and asynchronous `clk_arm`; the fast loader and a 12.2 MHz `clk_arm` must raise `lost` and `overrun` |
+| Stress: the 48 kHz tick (`stress/run_tick.sh`) | iverilog | 18 of 18 |
+| Stress: the asset window's bounds (`stress/run_bounds.sh`) | arm-none-eabi-gcc | 11 of 11 |
+| Stress: the PCM FIFO's head and the mute (`stress/run_pophead.sh`) | arm-none-eabi-gcc | 6,000 single pushes into the empty FIFO, every frame once and in order, with ticks held on real collisions, one forced; a FAULT write after frame 3,051 silences every later frame; wrappers without `tick_hold` or without the mute fail |
+| Synthetic ARSC: song 0 for 2 s, and every write value through the watermark remap (`+wmsweep`) | firmware | PCM identical to `../model/armemu.py`'s, as pushed and as returned to `clk_sys`; the remap equals the formula for all 8,192 values at 0x18 |
+| Synthetic ARSC with an odd-length block and a 7,827-byte firmware file | firmware | Both tails written; PCM identical |
+| Synthetic ARSC, three reloads: the Souper image, the image without its Souper bit (held and silent for 20 ms), then the Souper image (`+holdfill +holdstep=2`) | firmware | The first two holds come during fills with a read in flight, one with the halfword arriving and one with `psram.sv` mid-access; PCM identical after the third |
+| Stress: reloads of blocks with other contents (`stress/run_reload.sh`) | firmware | 5 of 5, PCM identical to the model's for the last block |
+| Synthetic ARSC: download and boot with `clk_arm` at 1.5 × `clk_sys` in PAL (21.281 MHz) | firmware | Every capture message arrives, the PSRAM equals the file, fault 00 |
+| Not a Souper cartridge; no firmware; a 4-byte firmware file | firmware | Held and silent: 0 retired, 0 pushed, every frame out 0 |
+| Songs 13, 14, 9, 30 for 4 s | game | PCM identical to MiSTer's `song<N>.pcm` (both streams), 0 underflow, 0 overflow, lowest level ≥ 600 |
+| Song 13: three reloads (the game; the game without its ARSC block, held and silent; the game), `+holdfill +holdstep=2` | game | Two holds during fills with a read in flight, one with the halfword arriving and one mid-access; PCM identical after the last |
+| Song 13 after a PAL retune (`+holdfill +holddelay=2`) | game | The hold during a fill, mid-access; PCM identical at 28.375 MHz |
+| Song 14 with `clk_arm` at 21.281 MHz (1.5 × `clk_sys`, PAL) | game | PCM identical; 0 underflow; lowest level ≥ 600 |
+| Song 13 with the loader at 174.6–250 ns per byte; without pre-emption; with the throttle at 13/16; across a 20 ms pause | game | PCM identical, levels as above; no pop and silence while paused |
+| The game without its ARSC block | game | Held and silent |
+
+`bup_cpu.sv` is not part of step 4 and did not change (`git diff 1bc151f -- src/fpga/core/bupchip/bup_cpu.sv` is empty), so `../s1/check.sh` was not re-run. Run it whenever `bup_cpu.sv` changes.
 
 ## PSRAM layer
 
@@ -124,7 +157,7 @@ The datasheet values are the ones `psram.sv`'s header lists (`:36-50`), includin
 
 ### Results (2026-10-03, iverilog 12.0, Verilator 5.040)
 
-`run_psram_ctl.sh`: **23 of 23**, 1 min 34 s.
+`run_psram_ctl.sh`: **23 of 23**, 1 min 34 s beside other runs (60 s on an idle core).
 
 | Check | Result |
 |---|---|
@@ -138,3 +171,130 @@ The datasheet values are the ones `psram.sv`'s header lists (`:36-50`), includin
 | Verilator | Self-test 34 of 34 (dump identical). `tb_psram_ctl` with 200,000 accesses at each clock: 109,840 reads, 90,160 writes, 131,589 back to back, all clean. |
 
 The verification plan's PSRAM row ("every read and write completes in 5 clocks; the `$info` state numbers are distinct") passes on the vendored copy.
+
+## Wrapper layer
+
+The Pocket BupChip around ARIA S1: `src/fpga/core/bupchip/bupchip_pocket.sv` and the blocks it is made of, run with the three real clocks and fed the way the Pocket feeds it: the firmware through its data slot, the cartridge at the loader's rate, the PSRAM behind `psram.sv` and the PSRAM model above.
+
+### Running
+
+```sh
+sim/bupchip/s4/run_s4.sh sim/work/bupchip/game/rv.a78 13 4                 # one song, about 6 minutes
+NAME=x sim/bupchip/s4/run_s4.sh GAME.a78 13 4 +reload=300 +reloads=3 +rom3=OTHER.a78 +holdfill
+NAME=y sim/bupchip/s4/run_s4.sh GAME.a78 14 4 +arm15 +pal                  # clk_arm at 21.281 MHz
+sim/bupchip/s4/run_cache.sh                               # the cache: directed, random and mutations, about 4 minutes
+PSRAM=standin sim/bupchip/s4/run_s4.sh GAME.a78 13 4      # the stand-in instead of psram.sv and the model
+```
+
+`run_s4.sh` passes `tb_s4.sv`'s plusargs through (its header lists them all) and takes `NAME`, `REF`, `FW` (`FW=none`: no firmware), `MINLEV`, `WM`, `HOLDFILL`, `HOLDMID`, `HOLDLAND`, `WMSWEEP` and `build_s4.sh`'s `PSRAM`, `PREEMPT`, `PREFETCH`, `PCM_DEPTH` and `THROTTLE` from the environment. It checks its inputs before building: no firmware is exit 2, and so is a `REF` that names a missing file. `REF=none` compares no PCM (the result says so); with `REF` unset it compares `sim/work/bupchip/ref/song<N>.pcm` if that exists and otherwise ends `SKIP`, never `PASS`. The default build is agg23's `psram.sv` on `psram_model.sv` with `BUP_DEBUG`.
+
+| File | What it is |
+|---|---|
+| `src/fpga/core/bupchip/bupchip_pocket.sv` | The wrapper: hold (`pll_locked` and `pll_busy` synchronised, `souper_profile`), `cpu_run`, the ROM (`cache_ram_dp`, no contents until the firmware slot fills it through port B) and RAM, `bupchip_peripheral` unmodified at CMD 8 / PCM 1,024 with the watermark remap, the `$8007` crossing, the 48 kHz pop, the frame back to `clk_sys` with the mute and `souper_profile`, and under `BUP_DEBUG` the status word, shadow FIFO counters and throttle. It drives `psram.sv`'s user ports; the parent instantiates `psram.sv` with `CLOCK_SPEED` = 28.636364 on `cram0` (step 5). |
+| `src/fpga/core/bupchip/bup_capture.sv` | `clk_sys`: the A78 header parse (copied from upstream's `bupchip_asset_ddr.sv`, MIT), the byte-pair packer with the odd tail on one lane, the firmware word packer, and the START/WRITE/END and FWSTART/FWWRITE/FWEND stream as one held 47-bit register and a toggle, messages at least 5 `clk_sys` apart |
+| `src/fpga/core/bupchip/bup_asset_wr.sv` | `clk_arm`, not held: the receiver (two flops, change detect, one-entry copy), `asset_ready`/`asset_size`, ROM writes and `fw_loaded`, PSRAM writes, and the arbitration between them and the cache's reads |
+| `src/fpga/core/bupchip/bup_asset_cache.sv` | `clk_arm`, held: 64 × 16 B direct-mapped, data and tags in two M10Ks, per-halfword arrival bits, critical halfword first, next-line prefetch, pre-emption (`PREEMPT`), the completion rule, the 64-clock tag sweep |
+| `src/fpga/core/bupchip/bup_tick48k.sv` | `clk_74a` accumulator (`+= 8` mod 12,375) and the toggle into three `clk_arm` flops |
+| `src/fpga/pocket_utils/psram.sv` | agg23's controller, vendored unmodified (PSRAM layer above) |
+| `check.sh` | Every step 4 check (above) |
+| `tb_s4.sv`, `build_s4.sh`, `run_s4.sh` | The system testbench (its header lists the plusargs and every check), its build, and one run with the PCM compared (`../s1/pcm_check.py`, from the song's first frame, leading silence included) |
+| `tb_cache.sv`, `run_cache.sh` | The cache alone behind `bup_asset_wr`'s arbiter and `psram.sv` on the model: directed scenarios, random streams, mutations |
+| `stress/` | An independent verifier's stress benches, all run by `check.sh` (`stress/README.md`) |
+| `psram_standin.sv` | `psram.sv`'s user ports and 5-clock timing on a plain array (`PSRAM=standin`), an option only. It was the stand-in until `psram.sv` and the model arrived; in `run_cache.sh` it gives the same counts as `psram.sv` on the model, clock for clock, which cross-checks the port contract. |
+
+### What `tb_s4.sv` checks
+
+On every run, besides the PCM:
+
+- the ROM's 4,096 words equal the firmware file (zero-padded) once `fw_loaded` is set, and every ARSC byte in the PSRAM model equals the file once `asset_ready` is set, after every download;
+- no capture message is lost: `bup_capture`'s `seq_err` and `lost`, the simulation-only byte-order check, and `bup_asset_wr`'s `overrun` stay low;
+- every frame the wrapper ticks reaches `clk_sys` once and in order, and 0 while `souper_profile` is low; a frame ticked while held, paused or muted is 0;
+- after every write to 0x18 the peripheral holds the watermark `clamp(W − (4096 − PCM_DEPTH), 0, PCM_DEPTH)`, worked out in the testbench from the CPU's own write data, and `run_s4.sh` requires CoreTone's last one to be `PCM_DEPTH` − 200 (824); `+wmsweep` puts every value through the remap at time 0;
+- the `BUP_DEBUG` shadow levels equal the peripheral's own `pcm_level` and `cmd_level` on every clock, and the shadow flags equal the underflows and overflows counted since the last hold;
+- no asset load completes on a cache M10K read registered on the same edge as a port-B write to that word or line, and no tick takes the PCM FIFO's head from such a read (checked from the RAM instances' ports, not from the cache's own logic);
+- the CPU never halts, makes no access while held, and reads r0–r14 as 0 at its first instruction after every release; the PSRAM model reports no timing or protocol violation (under Verilator the first `$error` ends the run);
+- after a reload of an image the BupChip cannot play (not a Souper cartridge, or no ARSC block), `cpu_run` stays low for 20 ms with nothing retired, nothing pushed and every frame 0;
+- while held, the cache starts no PSRAM read, and its data M10K is written only in the first held clock, into a line whose tag is invalid (a read in flight landing);
+- every hold (`cpu_run` falling) is logged with whether a cache fill was running and had a PSRAM read in flight, and if so whether `psram.sv` was mid-access (`busy`) or delivering the halfword (`read_avail`) in the first held clock. With `+holdfill` the reloads and the retune are started once a fill has a read in flight and 6 or more halfwords to go; the hold then reaches the cache 9 clocks later, always at the same point of the 5-clock read, and `+holddelay=N +holdstep=S` moves hold k by N + k·S clocks. At 2 × `clk_sys` a delay of 0 or 1 lands the hold on the halfword's arrival and 2–9 mid-access (the trigger is quantised to `clk_sys`). `HOLDFILL`, `HOLDMID` and `HOLDLAND` make `run_s4.sh` require that many of each.
+
+Busy, CPI and MIPS are counted by the retired PC as in `tb_s1.sv`; underflow, overflow and the lowest FIFO level from the command on (underflow also from power-up); the cache's demand misses, prefetches, pre-emptions, late hits and stall clocks while playing.
+
+**Clocks.** `clk_sys` 14.318 MHz and `clk_arm` 28.636 MHz, edge aligned, or with `+arm15` 21.477 MHz (1.5 ×, rising edges together every 2 `clk_sys`), both × 0.99088 with `+pal` or after `+retune`; `clk_74a` 74.25 MHz, asynchronous. The retune keeps `clk_arm` running while it changes the period (`pll_busy` high, `pll_locked` low for 5 µs), as the PSRAM layer requires (T_CEM, below). The loader sends one byte per 2.5 `clk_sys` (174.6 ns, 176.2 ns in PAL: 10 `clk_sdram`), sampled on `clk_sys` as `core_top.v` presents it, unless `+bytens` says otherwise.
+
+### What `tb_cache.sv` checks
+
+The driver behaves as S1 does at the asset port (execute with the address on `d_addr`, then W held by `w_wait`), behind `bup_asset_wr`'s arbiter and `psram.sv` on the model. Every completed load must return the pattern the PSRAM was loaded with; no load may complete on a collided M10K read; no load or fill may hang; the cache must start no PSRAM read while held; and the data M10K must not be written while the cache is held, except that a read in flight at the hold may land in the first held clock, in the line it was filling, whose tag is then invalid (the log counts them).
+
+**Directed scenarios** (before the random phase). Each first puts another tag's bytes, all different, in the index it tests, so a stale read is a wrong byte, and afterwards reads every line it filled word by word. Results with pre-emption and prefetch on (W clocks waited; 28.636 MHz, `psram.sv` on the model):
+
+| | Scenario | Result |
+|---|---|---|
+| A1 | The boot's byte reads of a cold line (fw `0xac`, `0xc0`, `0xc8`, `0xec`, with 4, 1 and 2 instructions between) and its word loads at +4 and +8 (fw `0xf8`, `0xfc`) | One demand miss, waiting 8 clocks; the other five complete as their halfwords arrive (the word at +8 waits 6, a late hit); every byte right |
+| A2 | The same six loads back to back | Byte 2 waits 1 clock: halfword 1 was written on the edge its first read was registered, the replay case; both word loads are late hits; every byte right |
+| B1–B3 | LDR miss; unaligned LDR miss (+14, the word at +12); odd LDRH miss (+7) on an idle cache | 13, 13 and 8 clocks, as the design's "T_hw + 3 = 8; 13 for LDR" |
+| C | A byte in the last halfword of the line under fill | No new fill; a late hit; waits 33 clocks for the halfword |
+| D1 | A demand miss while the next line's prefetch has 2–4 halfwords in and a read in flight | Pre-empts after 10 clocks (at most 14 allowed: the read in flight, one issued with its arrival, and 8); the pre-empted line misses again. Without `PREEMPT` it waits for the prefetch, and the line then hits |
+| D2 | A demand miss while the previous demand fill runs | The same: pre-empts after 10 clocks, the first line misses again |
+| E1–E3 | A hold while a fill has a read in flight: after its load completed; while W waits on the miss (the load is dropped, as the CPU is reset); during a prefetch | Each line misses again after the release, and is right; E2's reload waits 13 clocks |
+| F | A load whose tag read is registered on the edge a prefetch writes that line's tag invalid | It waits (14 clocks: one for the collision, then a miss that pre-empts the prefetch) instead of completing on the collided read |
+| G | The tag sweep: all 64 lines valid (filled from line 63 down, one at a time), a 100-clock hold, and every byte of the PSRAM changed behind them meanwhile, as a reload of another block would | 0 tags valid when the cache runs again, and all 256 word loads of the 64 lines return the new bytes. Without the sweep, or with it one tag short, G fails (before, every hold left the same bytes behind the stale tags, so nothing could see it) |
+
+109 checks with prefetch, 79 without (D1, E3 and F need it), counting the end-of-phase checks (no stray write, no read started while held, nothing stuck).
+
+**Random phase.** 200,000 loads per run: 16 voice streams of byte loads, the boot's cold-line pattern, same-index conflicts and anything else (bytes, halfwords and words, odd and unaligned ones too), 0–40 clocks apart, with a hold of 1–100 clocks about every 20,000 clocks. Each run must reach demand misses, word-load misses, late hits, holds during a fill and, where enabled, prefetches, pre-emptions and misses on pre-empted lines.
+
+**Mutations** of a copy of `bup_asset_cache.sv`, each of which must fail: a load completing once its critical halfword is in (LDR then reads a stale halfword); no data read-during-write wait; no tag read-during-write wait; no invalid tag at a fill's start; an LDR waiting for one halfword; a hold leaving the read in flight marked; pre-emption not waiting for the read in flight; the tag written valid a halfword early; no tag sweep; a sweep one tag short; reads issued while held (the RTL before `rd_req` was gated with `run`). All 11 are caught: 10 by the directed checks (1 to 29 failing), "the tag written valid a halfword early" only by the random loads (2 wrong).
+
+### Design notes
+
+Where the RTL settles something `docs/BUPCHIP_CORE.md` left open (the design text now says the same):
+
+- **M10K read-during-write.** The design has the replay read come one clock after the write of the last halfword a load needs. The data M10K is written a halfword at a time through byte enables, so a load can also read a word whose *other* halfword is being written on the same edge (halfword 0 arrived, halfword 1 arriving); on the device the whole word is then undefined. The cache therefore never uses a port-A read that was registered on an edge with a port-B write of the same data word or the same tag line: that clock waits and the read is repeated. The design's rule is the special case of this. Scenarios A2 and F exercise both halves.
+- **A read in flight at a hold.** `psram.sv` cannot abort it. The cache drops the fill at the edge after `cpu_run` falls, so the halfword may still be written in the first held clock, into the line it was filling, whose tag is invalid; the sweep then invalidates every tag before the CPU runs again. The fill machine starts no read once `cpu_run` is low (`rd_req` is gated with `run`; before, a hold landing on a read's arrival clock issued one more read in the first held clock, harmless but keeping `psram.sv` busy into the hold), so the controller is idle at most 5 clocks after `cpu_run` falls.
+- **Prefetch while a fill runs.** The next line of the latest asset access waits (one register, newest wins) until no fill is running, then is probed; the design's "if no fill is running" would drop it. The cycle model queues every prefetch.
+- **Pre-emption** stops any running fill, a prefetch or the rest of a demand fill, once its halfword in flight is back.
+- **The PCM FIFO's head.** `bupchip_peripheral` raises `pcm_available` in the clock after a push into an empty FIFO, a clock before its M10K presents that frame (the same race is in upstream's subsystem). A tick that lands in a clock where `pcm_available` has just risen waits one clock (`tick_hold`), so a stale frame is never played. CoreTone at speed never pushes into an empty FIFO, so `stress/run_pophead.sh` exercises it with firmware of its own, and `+forcetick` forces a tick onto that clock (before, `+forcetick` fired where the firmware enables PCM over a full FIFO, whose head is valid, so it tested nothing).
+- **The mute** is applied on `clk_arm`: a tick while `muted` puts 0 in the frame register, so `muted` no longer crosses to `clk_sys` unsynchronised (upstream applies it at its `clk_sys` capture). The only difference from upstream is the one frame ticked just before a FAULT write and captured after it. `BUP_DEBUG`'s capture flags reach the `clk_arm` status word through two flops. With these, nothing crosses between the clocks but the toggled registers, should `clk_arm` ever get its own PLL.
+- **Output while held.** Ticks keep toggling the frame register while the CPU is held, with the frame 0, so the output reads 0 within one tick of any hold (upstream's would hold its last value).
+- **Lowest level.** The shadow's lowest PCM level starts once the FIFO has first reached its watermark (the boot's prefill), since the boot always starts from an empty FIFO.
+- **Message format.** One 47-bit register (3-bit type, 44-bit payload) and a toggle. WRITE leaves in the clock its last byte arrives; everything else waits in a flag for the 5-clock spacing, FWWRITE too, in a one-word register (at most 9 clocks). FWWRITE used to leave at once: a firmware download starting straight after a cartridge's could then send it 1–4 clocks after the cartridge's END, and at 1–2 clocks the receiver lost the END (`stress/run_capstress.sh`'s `xstream` runs: 29–37 wrong checks of about 210). A firmware byte in the clock `fw_download` rises used to be dropped; it now starts the first word (`+fwrise`).
+- **M10K count.** The cache's data RAM is `cache_ram_tdp_dc_be`, a true dual-port `altsyncram`, and a true dual-port M10K is at most 20 bits wide, so its 256 × 32 takes 2 M10K, not 1: the BupChip needs 39 M10K (design, "Totals"). Step 5's fit report confirms it.
+
+### Results (2026-10-03, Verilator 5.040, `psram.sv` on `psram_model.sv`)
+
+`check.sh sim/work/bupchip/game/rv.a78`: **27 of 27**, 46 min 39 s with `JOBS=3` on 4 cores; without the game (a fresh `WORK`, builds included), **15 of 15** in 27 min 2 s. Every game row is a full download of the 741,344-byte image at 174.6 ns per byte (129.439 ms; all 216,928 ARSC bytes in the PSRAM model equal the file; `asset_ready` 0.384 µs after the download ended; no capture message lost, no overrun), the firmware booting 3.220 ms after the release with fault 00 and taking the command 7 clocks after it is sent, then 4 s of pops: PCM identical to MiSTer's `song<N>.pcm` over all 187,984 song frames, both as pushed and as returned to `clk_sys`; 0 underflow (from power-up), 0 overflow; every check above clean. The firmware slot takes 7,824 bytes (CRC32 `95b8b4f8`) in 1.366 ms and the ROM's 4,096 words equal the file.
+
+| Song | CPI | MIPS | Busy | Busiest 0.1 s / worst batch | Lowest level | Demand misses | Prefetches | Pre-emptions | Late hits | Stall clocks |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 13 (Misery_F) | 1.3783 | 15.14 | 72.89% | 21.50 / 24.10 MHz | 659 | 8,297 | 65,172 | 295 | 68 | 70,127 (0.061%) |
+| 14 | 1.3845 | 5.30 | 25.62% | 9.56 / 10.31 MHz | 755 | 2,898 | 39,623 | 248 | 149 | 26,178 |
+| 9 | 1.3808 | 9.47 | 45.64% | 13.80 / 15.23 MHz | 721 | 7,332 | 137,496 | 1,574 | 260 | 68,959 |
+| 30 | 1.3946 | 1.81 | 8.83% | 3.66 / 3.80 MHz | 801 | 675 | 43,969 | 109 | 35 | 6,132 |
+
+| Run | Result |
+|---|---|
+| Song 13 against the cycle model | `../model/cycles.py rv.a78 --song 13 --secs 4 --run S1/cache`: CPI 1.378, 7,910 misses (ours +4.9%), 65,471 prefetches (−0.5%), 445 late hits, 71,825 stall clocks (−2.4%); within the plan's ±20%. With `tb_s1.sv`'s zero-wait assets the S1 core takes CPI 1.3772 and keeps a lowest level of 660. |
+| Song 13, `PREEMPT=0` | 72,396 stall clocks against 70,127 with pre-emption (+3.2%), 8,292 misses, 64,959 prefetches, CPI 1.3784, lowest level 659. **Pre-emption is kept** (`PREEMPT=1`, the default). |
+| Song 13, loader at 174.6–250 ns per byte | Download 157.359 ms (firmware 1.661 ms); from the boot on, identical to the plain run |
+| Song 13, throttle 13/16 (`THROTTLE=13`, 23.27 MHz effective) | Lowest level 626; busy 87.38% of all clocks; CPI 1.6525 |
+| Song 13, three reloads 300 ms into each play | Reload 1 (the game) and reload 2 (the game without its ARSC block) each came during a cache fill with a PSRAM read in flight, the first with the halfword arriving in the first held clock (it was written there, into the invalid line), the second with `psram.sv` mid-access; the CPU was held 9 `clk_arm` clocks after `load_start`; no read started while held. After reload 2: `asset_size` 0, `asset_ready` 0, held and silent for 20 ms (960 frames, all 0). After reload 3 the PSRAM again equals the file, the firmware reboots in 3.220 ms and the song is identical, lowest level 659. The PSRAM model saw 325,392 writes and 680,540 reads, 0 violations. |
+| Song 13 after a PAL retune 500 ms in | The hold came during a fill with `psram.sv` mid-access, 9 clocks after `pll_busy`; firmware and assets kept; reboot at 28.375 MHz 3.250 ms after the release; busy 73.56%, lowest level 657 |
+| Song 13 across a 20 ms pause | 960 ticks paused, 0 pops and 0 nonzero frames meanwhile; the output file leaves the paused ticks out and still matches |
+| Song 14 at 21.281 MHz (`+arm15 +pal`) | Loader 176.2 ns per byte (2.5 PAL `clk_sys`), so a WRITE every 7.5 `clk_arm`: no message lost, no overrun, the PSRAM equals the file, `asset_ready` 0.446 µs after the download. Busy 34.47%, CPI 1.3845, lowest level 732; 2,897 misses, 26,170 stall clocks. The model's smallest PSRAM timings: 46.988 ns (OE# to sample, data setup), 187.952 ns (ADV# to sample, WE# low). |
+| Synthetic ARSC (game-free), song 0, 2 s | Identical to `armemu.py` over its 48,000 song frames, both streams; 17.71 MIPS, busy 84.95%, lowest level 636; 370 misses, 7,080 prefetches. The firmware's two writes to 0x18 leave 824 in the peripheral; `+wmsweep`: 29,867 values through the remap (all 8,192 at 0x18), 0 wrong. On a wrapper whose remap is one too high, both checks fail (825; 1,023 values wrong). |
+| The same, a 5,193-byte block and a 7,827-byte firmware file | Both tails written (the odd byte on its low lane; the last word zero-padded); PCM identical |
+| The same, three reloads (Souper, not Souper, Souper) | The first two holds came during fills with a read in flight, one with the halfword arriving and one mid-access; the image without the Souper bit held the BupChip for 20 ms (`souper_profile` 0, nothing retired, 960 frames all 0); after the last image, PCM identical. On the cache as it was before `rd_req` was gated, the landing hold starts a PSRAM read in the first held clock and the run fails. |
+| Synthetic ARSC at 21.281 MHz, download and boot | No message lost; the PSRAM equals the file; boot 1.486 ms after the release, fault 00 |
+| Not a Souper cartridge; no firmware; a 4-byte firmware file; the game without its ARSC block | Held and silent: the CPU never released (0 retired, 0 pushed), 960 frames out in 20 ms, all 0; `fw_loaded` / `asset_ready` 1/1, 0/1, 0/1, 1/0 |
+| `run_cache.sh` | 24 of 24 runs: 109 (79 without prefetch) directed checks each, then 200,000 random loads with 0 wrong bytes, 0 completed collided reads and 0 reads started while held. With pre-emption and prefetch, per seed: about 136,000 demand misses (20,000 of them word loads), 7,300 prefetches, 129,000 pre-emptions, 120,000 misses on pre-empted lines, 14,000 late hits, 138–159 holds, all but 1–4 of them during a fill. `psram.sv` on the model and the stand-in give the same counts. Mutations: 11 of 11 caught. |
+| `run_psram_ctl.sh` | 23 of 23 (PSRAM layer) |
+| Stress (`stress/`) | `run_cstress.sh` 26 of 26 runs and 10 of 10 mutations (22.2 M loads, 0 wrong); `run_capstress.sh` 16 of 16; `run_tick.sh` 18 of 18; `run_bounds.sh` 11 of 11; `run_pophead.sh` 8 of 8 (12 ticks held a clock on real collisions at 28.636 MHz, 7 at 21.281, one forced; the FAULT run silent from frame 3,051); `run_reload.sh` 5 of 5. Numbers in `stress/README.md`. |
+
+**Area [syn].** Yosys 0.69 (`synth_intel_alm`, as `../model/study/area/run_area.sh` runs it) on `bupchip_pocket` with the CPU, the peripheral and the RAMs as black boxes: 500 LUT + 236 arithmetic cells + 466 FF; 534 + 260 + 510 with `BUP_DEBUG`. By the design's rule that is 418–518 ALMs (+32–39 for `BUP_DEBUG`), against the design's 360–520 for the same rows ("Totals": bus glue, cache, capture and receiver with the firmware path, crossings); with the 0.55 LUT factor the S1 probe measured, about 393. `psram.sv` is not in it.
+
+### Open points for step 5
+
+- **Timing paths new with the wrapper.** `w_wait` is a tag compare plus the in-fill and read-during-write checks, and it feeds the CPU's next-PC logic in front of `rom_addr` (the step 3 probe drove it from a flip-flop). ROM port B's address goes through a 2:1 mux on `d_addr` (the firmware writes while `fw_loaded` is low). Cache fills drive `psram_read_en` through the arbiter.
+- **`clk_arm` across a PLL reconfiguration.** The retune here keeps `clk_arm` running. If the PLL stops it while `psram.sv` is mid-access, CE# stays low (T_CEM, unverified for this part). The cache starts no read once `cpu_run` is low, so `psram.sv` is idle at most 5 `clk_arm` clocks after `cpu_run` falls, which is 8–9 clocks after `pll_busy` rises (the retune runs here): `clk_arm` must run on for about 14 clocks (0.5 µs) after `pll_busy`. Whether the reconfiguration allows that is for step 5.
+- **M10K.** The cache's data RAM takes 2 M10K in true dual-port mode (design, "Cache"), so the BupChip needs 39; step 5's fit report confirms it.
+- **Not compared instruction by instruction on the real cache.** The CPU runs the firmware on this cache with bit-exact PCM on every run, and `tb_cache.sv` checks every load's data, but no lockstep run uses the cache's timing; step 2's lockstep runs with `+await` (random asset waits) cover the CPU's side of `w_wait`.
