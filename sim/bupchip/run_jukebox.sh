@@ -134,8 +134,10 @@ def read_screen(path):
     hdr = data.split(b"\n", 3)
     w, h = map(int, hdr[1].split())
     px = hdr[3]
-    lit = [[px[3 * (y * w + x):3 * (y * w + x) + 3] != b"\0\0\0" for x in range(w)] for y in range(h)]
-    rows = [y for y in range(32, h) if any(lit[y])]      # the status overlay owns the top 32 lines
+    # the BUP_DEBUG status overlay owns the top-left 96 x 104 pixels
+    lit = [[(x >= 96 or y >= 104) and px[3 * (y * w + x):3 * (y * w + x) + 3] != b"\0\0\0"
+            for x in range(w)] for y in range(h)]
+    rows = [y for y in range(h) if any(lit[y])]
     bands = []
     for y in rows:
         if bands and y == bands[-1][1] + 1:

@@ -235,7 +235,7 @@ under `/Assets/7800/`. Run it with *Skip BIOS* on (the default). Joystick 1:
 left and right pick the song (0–31; held, they repeat), fire plays it
 (command `$80 | n`), down stops (`$00`), up plays the next song. The screen
 shows the song number, its name and command, and the last command sent, and
-leaves the top-left corner to the `BUP_DEBUG` status cells.
+stays clear of the `BUP_DEBUG` status cells in the top-left corner.
 `sim/bupchip/run_jukebox.sh` checks it in the whole-core simulation.
 
 ## Measured load

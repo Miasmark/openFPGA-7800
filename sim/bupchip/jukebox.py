@@ -20,8 +20,8 @@ Controls, joystick 1:
 
 Run it with Skip BIOS on (the default): the cartridge carries no BIOS
 signature. The screen shows the song number in large digits, the song's name
-and command byte, and the last command sent. The top-left corner is left
-blank for the core's BupChip status overlay (BUP_DEBUG builds).
+and command byte, and the last command sent, clear of the top-left 96 x 104
+pixels where BUP_DEBUG builds show the BupChip's status.
 
 The image is laid out as souper_test.py's: an A78 header with cartridge type
 0x1000 (the Souper mapper), a 512 KiB ROM whose last 16 KiB bank is the one
@@ -491,15 +491,17 @@ def main():
 
     # The display list list and the lists, as they sit in RAM: (lines, text
     # or big digits or None for blank, palette, the list's name for the
-    # program). MARIA shows 243 lines (NTSC) or 292 (PAL); the 40 blank ones
-    # at the top keep the text below the BUP_DEBUG status overlay (the
-    # picture's top-left 96 x 32 pixels), with overscan on or off.
+    # program). MARIA shows 243 lines (NTSC) or 292 (PAL). The BUP_DEBUG
+    # status overlay covers the picture's top-left 96 x 104 pixels; the
+    # display window starts 26 pixels into the picture, so the lines beside
+    # it (to the big digits) are at most 22 characters wide, from pixel 98.
     def line(s, width=None):
         return txt(s, width), width or len(txt(s))
+    sub = f"{title}: {count} SONGS" if title else f"{count} SONGS IN THE BLOCK"
     zones = [(40, None),
              (8, line("BUPCHIP JUKEBOX"), "title"),
              (4, None),
-             (8, line(f"{title}: {count} SONGS" if title else f"{count} SONGS IN THE BLOCK"), "info"),
+             (8, line(sub if len(sub) <= 22 else title[:22]), "info"),
              (12, None)]
     zones += [(8, "big", "digits", "BIGDL" if r == 0 else None) for r in range(7)]
     zones += [(8, None),
