@@ -264,6 +264,9 @@ assign port_tran_sd = 1'bz;
 assign port_tran_sd_dir = 1'b0;     // SD is input and not used
 
 // tie off the rest of the pins we are not using
+`ifndef POCKET_BUPCHIP
+// (POCKET_BUPCHIP: cram0 holds the BupChip's assets, driven by
+// atari7800_pocket's psram.sv; cram1 stays unused.)
 assign cram0_a = 'h0;
 assign cram0_dq = {16{1'bZ}};
 assign cram0_clk = 0;
@@ -275,6 +278,7 @@ assign cram0_oe_n = 1;
 assign cram0_we_n = 1;
 assign cram0_ub_n = 1;
 assign cram0_lb_n = 1;
+`endif
 
 assign cram1_a = 'h0;
 assign cram1_dq = {16{1'bZ}};
@@ -305,12 +309,14 @@ assign vpll_feed = 1'bZ;
 // clk_sys is the 7800's 14.318181 MHz master crystal. MARIA divides it for
 // the CPU and hands the TIA a 7.16 MHz (2x colour clock) enable; that ratio
 // is what puts TIA audio at the right pitch, so nothing here may run the
-// system from any other clock.
+// system from any other clock. clk_arm (2 x clk_sys, from the same VCO)
+// runs only the BupChip (POCKET_BUPCHIP).
 ////////////////////////////////////////////////////////////////////////////////
 
     wire    clk_sys;
     wire    clk_sdram;
     wire    clk_sys_90;
+    wire    clk_arm;
     wire    pll_core_locked;
     wire    pll_core_locked_s;
 
@@ -323,6 +329,7 @@ pll_core pll (
     .outclk_0   ( clk_sys ),
     .outclk_1   ( clk_sdram ),
     .outclk_2   ( clk_sys_90 ),
+    .outclk_3   ( clk_arm ),
     .locked     ( pll_core_locked ),
     .reconfig_to_pll   ( reconfig_to_pll ),
     .reconfig_from_pll ( reconfig_from_pll )
@@ -341,6 +348,8 @@ synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
 //   0x04000000  HSC firmware    (data slot 4)       -> HSC ROM block RAM
 //   0x06000000  Supercharger BIOS (data slot 5)     -> AR ROM block RAM
 //   0x08000000  HSC firmware as hsc.a78 (data slot 6) -> HSC ROM block RAM
+//   0x0A000000  BupChip firmware (data slot 7)      -> BupChip ROM block RAM
+//                                                      (POCKET_BUPCHIP)
 //   0x10000000  settings (interact.json)
 //   0x20000000  high score cartridge RAM (save slot 2, 2 KiB)
 //   0x30000000  SaveKey EEPROM RAM (save slot 3, 32 KiB)
@@ -351,6 +360,7 @@ localparam [15:0] SLOT_BIOS = 16'h0103;
 localparam [15:0] SLOT_HSCFW = 16'h0106;
 localparam [15:0] SLOT_ARFW = 16'h0107;
 localparam [15:0] SLOT_HSCA78 = 16'h0108;
+localparam [15:0] SLOT_BUPFW = 16'h0109;
 
 // Settings. Written by the host from interact.json, clk_74a.
     reg             set_swap      = 1'b0;
@@ -698,11 +708,12 @@ always @(posedge clk_sys) begin
 end
 
 // Into clk_sys
-    reg     [2:0]   dl_s, cart_s, bios_s, hscfw_s, arfw_s, rst_s, mrst_s;
+    reg     [2:0]   dl_s, cart_s, bios_s, hscfw_s, arfw_s, bupfw_s, rst_s, mrst_s;
     reg             cart_download = 1'b0;
     reg             bios_download = 1'b0;
     reg             hscfw_download = 1'b0;
     reg             arfw_download = 1'b0;
+    reg             bupfw_download = 1'b0;
     reg             core_reset = 1'b1;
 
 always @(posedge clk_sys) begin
@@ -711,6 +722,7 @@ always @(posedge clk_sys) begin
     bios_s <= {bios_s[1:0], download_slot == SLOT_BIOS};
     hscfw_s <= {hscfw_s[1:0], download_slot == SLOT_HSCFW || download_slot == SLOT_HSCA78};
     arfw_s <= {arfw_s[1:0], download_slot == SLOT_ARFW};
+    bupfw_s <= {bupfw_s[1:0], download_slot == SLOT_BUPFW};
     rst_s  <= {rst_s[1:0],  reset_n};
     mrst_s <= {mrst_s[1:0], menu_reset_cnt != 0};
 
@@ -718,6 +730,9 @@ always @(posedge clk_sys) begin
     bios_download <= dl_s[2] & bios_s[2];
     hscfw_download <= dl_s[2] & hscfw_s[2];
     arfw_download <= dl_s[2] & arfw_s[2];
+`ifdef POCKET_BUPCHIP
+    bupfw_download <= dl_s[2] & bupfw_s[2];
+`endif
     core_reset    <= ~rst_s[2] | mrst_s[2];
 end
 
@@ -816,6 +831,9 @@ end
 atari7800_pocket atari (
     .clk_sys        ( clk_sys ),
     .clk_sdram      ( clk_sdram ),
+`ifdef POCKET_BUPCHIP
+    .clk_arm        ( clk_arm ),
+`endif
     .pll_locked     ( pll_core_locked ),
     .pll_busy       ( pll_busy ),
     .reset_in       ( core_reset ),
@@ -824,7 +842,10 @@ atari7800_pocket atari (
     .bios_download  ( bios_download ),
     .hscfw_download ( hscfw_download ),
     .arfw_download  ( arfw_download ),
-    .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download) ),
+`ifdef POCKET_BUPCHIP
+    .bupfw_download ( bupfw_download ),
+`endif
+    .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
     .ioctl_addr     ( ioctl_addr_r ),
     .ioctl_dout     ( ioctl_dout_r ),
 
@@ -898,6 +919,21 @@ atari7800_pocket atari (
     .SDRAM_nCAS     ( dram_cas_n ),
     .SDRAM_CLK      ( dram_clk ),
     .SDRAM_CKE      ( dram_cke ),
+
+`ifdef POCKET_BUPCHIP
+    .cram0_a        ( cram0_a ),
+    .cram0_dq       ( cram0_dq ),
+    .cram0_wait     ( cram0_wait ),
+    .cram0_clk      ( cram0_clk ),
+    .cram0_adv_n    ( cram0_adv_n ),
+    .cram0_cre      ( cram0_cre ),
+    .cram0_ce0_n    ( cram0_ce0_n ),
+    .cram0_ce1_n    ( cram0_ce1_n ),
+    .cram0_oe_n     ( cram0_oe_n ),
+    .cram0_we_n     ( cram0_we_n ),
+    .cram0_ub_n     ( cram0_ub_n ),
+    .cram0_lb_n     ( cram0_lb_n ),
+`endif
 
     .SRAM_A         ( sram_a ),
     .SRAM_DQ        ( sram_dq ),

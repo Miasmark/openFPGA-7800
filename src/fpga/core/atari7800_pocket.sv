@@ -8,7 +8,9 @@
 // wiring) it is carried over as-is so behaviour matches MiSTer.
 //
 // Everything here runs on clk_sys (14.318181 MHz) except the SDRAM
-// controller, which runs on clk_sdram (exactly 4 x clk_sys, phase aligned).
+// controller, which runs on clk_sdram (exactly 4 x clk_sys, phase aligned),
+// and with POCKET_BUPCHIP the BupChip and its PSRAM controller, on clk_arm
+// (exactly 2 x clk_sys, phase aligned).
 //
 // SPDX-License-Identifier: MIT
 // Portions derived from the MiSTer Atari7800 core,
@@ -21,6 +23,9 @@ module atari7800_pocket
 (
 	input  wire        clk_sys,
 	input  wire        clk_sdram,
+`ifdef POCKET_BUPCHIP
+	input  wire        clk_arm,         // 2 x clk_sys, edge aligned: the BupChip (ARIA)
+`endif
 	input  wire        pll_locked,
 	input  wire        pll_busy,        // clk_74a: PLL retune (PAL/NTSC) in progress
 	input  wire        reset_in,        // host reset / menu reset, clk_sys
@@ -30,6 +35,9 @@ module atari7800_pocket
 	input  wire        bios_download,
 	input  wire        hscfw_download,  // high score cart firmware (4 KiB, optional A78 header)
 	input  wire        arfw_download,   // Supercharger BIOS (2 KiB)
+`ifdef POCKET_BUPCHIP
+	input  wire        bupfw_download,  // BupChip firmware, bupchip.bin (up to 16 KiB)
+`endif
 	input  wire        ioctl_wr,
 	input  wire [24:0] ioctl_addr,
 	input  wire  [7:0] ioctl_dout,
@@ -114,6 +122,23 @@ module atari7800_pocket
 	output wire        SDRAM_CLK,
 	output wire        SDRAM_CKE,
 
+`ifdef POCKET_BUPCHIP
+	// PSRAM cram0 (AS1C8M16PL-70): the BupChip's music assets on die 0,
+	// through agg23's psram.sv
+	output wire [21:16] cram0_a,
+	inout  wire [15:0] cram0_dq,
+	input  wire        cram0_wait,
+	output wire        cram0_clk,
+	output wire        cram0_adv_n,
+	output wire        cram0_cre,
+	output wire        cram0_ce0_n,
+	output wire        cram0_ce1_n,
+	output wire        cram0_oe_n,
+	output wire        cram0_we_n,
+	output wire        cram0_ub_n,
+	output wire        cram0_lb_n,
+
+`endif
 	// SRAM (AS6C2016-55, 128K x 16): cartridge RAM, Flicker Blend frame,
 	// SaveKey and BIOS in POCKET_SRAM builds, idle otherwise
 	output wire [16:0] SRAM_A,
@@ -130,12 +155,17 @@ reg old_cart_download = 1'b0;
 wire mapper_init_busy;
 reg reset;
 reg [1:0] pll_busy_s = 2'b00;
+`ifdef POCKET_BUPCHIP
+wire bupfw_dl = bupfw_download;
+`else
+wire bupfw_dl = 1'b0;
+`endif
 
 always @(posedge clk_sys) begin
 	old_cart_download <= cart_download;
 	pll_busy_s <= {pll_busy_s[0], pll_busy};
 	reset <= reset_in | cart_download | bios_download | hscfw_download |
-		arfw_download | old_cart_download | mapper_init_busy | ~pll_locked |
+		arfw_download | bupfw_dl | old_cart_download | mapper_init_busy | ~pll_locked |
 		pll_busy_s[1];
 end
 
@@ -757,10 +787,11 @@ lightgun lightgun (
 	.TRIGGER      (gun_trigger)
 );
 
-// The crosshair, drawn over the picture in red, as on MiSTer.
-assign R = (gun_en & gun_target) ? 8'd255 : core_r;
-assign G = (gun_en & gun_target) ? 8'd0   : core_g;
-assign B = (gun_en & gun_target) ? 8'd0   : core_b;
+// The crosshair, drawn over the picture in red, as on MiSTer. (BUP_DEBUG
+// builds draw the BupChip's status over that; see the end of the module.)
+wire [7:0] pic_r = (gun_en & gun_target) ? 8'd255 : core_r;
+wire [7:0] pic_g = (gun_en & gun_target) ? 8'd0   : core_g;
+wire [7:0] pic_b = (gun_en & gun_target) ? 8'd0   : core_b;
 
 always @(*) begin
 	// P2 F1, P2 F2, P1 F1, P1 F2
@@ -850,6 +881,13 @@ wire [15:0] fb_addr;
 wire        fb_we, fb_active;
 wire  [7:0] fb_wdata, fb_q;
 
+`ifdef POCKET_BUPCHIP
+// The BupChip's side of the system module (POCKET_BUPCHIP; see BUPCHIP below)
+wire        bup_cmd_valid, souper_profile;
+wire  [7:0] bup_cmd_data;
+wire [15:0] bup_audio_l, bup_audio_r;
+`endif
+
 Atari7800 main
 (
 	// HSC firmware and Supercharger BIOS: built without them
@@ -938,6 +976,15 @@ Atari7800 main
 	.cartram_rd     (),
 	.cartram_wrdata (),
 	.cartram_data   (8'hFF),
+`endif
+
+`ifdef POCKET_BUPCHIP
+	// The Pocket's BupChip (below) in place of upstream's
+	.bup_cmd_valid_o  (bup_cmd_valid),
+	.bup_cmd_data_o   (bup_cmd_data),
+	.souper_profile_o (souper_profile),
+	.bup_audio_l_i    (bup_audio_l),
+	.bup_audio_r_i    (bup_audio_r),
 `endif
 
 	// ARM mapper / BupChip / DDR3 - compiled out for the Pocket
@@ -1081,6 +1128,122 @@ assign SRAM_OE_N = 1'b1;
 assign SRAM_WE_N = 1'b1;
 assign SRAM_UB_N = 1'b1;
 assign SRAM_LB_N = 1'b1;
+`endif
+
+`ifdef POCKET_BUPCHIP
+//////////////////////////////  BUPCHIP  //////////////////////////////////
+// The Souper cartridge's music co-processor: ARIA (core/bupchip/,
+// docs/BUPCHIP_CORE.md) on clk_arm, its firmware from the bupchip.bin slot,
+// its assets (the cartridge file's ARSC block) in PSRAM cram0 die 0. Inputs
+// come from clk_sys registers, except pll_locked and pll_busy, which the
+// wrapper synchronises. The console reset is not one of them, as on MiSTer:
+// the music survives a 7800 reset.
+wire        psr_bank, psr_we, psr_hi, psr_lo, psr_re, psr_avail, psr_busy;
+wire [21:0] psr_addr;
+wire [15:0] psr_din, psr_dout;
+`ifdef BUP_DEBUG
+wire [31:0] bup_dbg_status, bup_dbg_halt_pc;
+`endif
+
+bupchip_pocket bupchip
+(
+	.clk_sys       (clk_sys),
+	.clk_arm       (clk_arm),
+	.clk_74a       (clk_74a),
+	.pll_locked    (pll_locked),
+	.pll_busy      (pll_busy),
+	.souper_profile(souper_profile),
+	.pause         (pause_core),
+
+	.load_start    (~old_cart_download && cart_download),
+	.load_addr     (ioctl_addr),
+	.load_valid    (ioctl_wr && cart_download),
+	.load_data     (ioctl_dout),
+	.load_end      (old_cart_download && ~cart_download),
+	.fw_download   (bupfw_download),
+	.fw_valid      (ioctl_wr && bupfw_download),
+
+	.cmd_valid     (bup_cmd_valid),
+	.cmd_data      (bup_cmd_data),
+	.audio_l       (bup_audio_l),
+	.audio_r       (bup_audio_r),
+
+	.psram_bank_sel        (psr_bank),
+	.psram_addr            (psr_addr),
+	.psram_write_en        (psr_we),
+	.psram_data_in         (psr_din),
+	.psram_write_high_byte (psr_hi),
+	.psram_write_low_byte  (psr_lo),
+	.psram_read_en         (psr_re),
+	.psram_read_avail      (psr_avail),
+	.psram_data_out        (psr_dout),
+	.psram_busy            (psr_busy)
+`ifdef BUP_DEBUG
+	,
+	.dbg_status    (bup_dbg_status),
+	.dbg_halt_pc   (bup_dbg_halt_pc)
+`endif
+);
+
+// agg23's controller (pocket_utils/psram.sv, unmodified). CLOCK_SPEED stays
+// 28.636364 whatever clk_arm is: every count in it is a minimum time, and
+// slower settings break its state machine (docs/BUPCHIP_CORE.md,
+// "Controller"). 5 clk_arm per halfword.
+psram #(.CLOCK_SPEED(28.636364)) bup_psram
+(
+	.clk             (clk_arm),
+	.bank_sel        (psr_bank),
+	.addr            (psr_addr),
+	.write_en        (psr_we),
+	.data_in         (psr_din),
+	.write_high_byte (psr_hi),
+	.write_low_byte  (psr_lo),
+	.read_en         (psr_re),
+	.read_avail      (psr_avail),
+	.data_out        (psr_dout),
+	.busy            (psr_busy),
+	.cram_a          (cram0_a),
+	.cram_dq         (cram0_dq),
+	.cram_wait       (cram0_wait),
+	.cram_clk        (cram0_clk),
+	.cram_adv_n      (cram0_adv_n),
+	.cram_cre        (cram0_cre),
+	.cram_ce0_n      (cram0_ce0_n),
+	.cram_ce1_n      (cram0_ce1_n),
+	.cram_oe_n       (cram0_oe_n),
+	.cram_we_n       (cram0_we_n),
+	.cram_ub_n       (cram0_ub_n),
+	.cram_lb_n       (cram0_lb_n)
+);
+
+`ifdef BUP_DEBUG
+// Hardware test builds: the BupChip's status word over the picture's
+// top-left corner while a Souper cartridge is loaded (bup_status_osd.sv).
+bup_status_osd bup_osd
+(
+	.clk     (clk_sys),
+	.en      (souper_profile),
+	.status  (bup_dbg_status),
+	.halt_pc (bup_dbg_halt_pc),
+	.ce_pix  (ce_pix),
+	.hblank  (HBlank),
+	.vblank  (VBlank),
+	.r_in    (pic_r),
+	.g_in    (pic_g),
+	.b_in    (pic_b),
+	.r_out   (R),
+	.g_out   (G),
+	.b_out   (B)
+);
+`else
+assign R = pic_r;
+assign G = pic_g;
+assign B = pic_b;
+`endif
+`else
+assign R = pic_r;
+assign G = pic_g;
+assign B = pic_b;
 `endif
 
 assign tia_mode_o = tia_en;

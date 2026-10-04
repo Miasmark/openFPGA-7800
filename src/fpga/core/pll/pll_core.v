@@ -11,11 +11,16 @@
 //                         so the SDRAM <-> core crossing is synchronous.
 //   outclk_2  clk_sys_90  clk_sys shifted 90 degrees, for the APF video
 //                         interface's sample clock.
+//   outclk_3  clk_arm     28.636363 MHz  - exactly 2 x clk_sys, edge aligned:
+//                         the BupChip's CPU, ARIA (core/bupchip/,
+//                         docs/BUPCHIP_CORE.md, "Clocking"). Nothing uses
+//                         it without POCKET_BUPCHIP.
 //
-// VCO = 74.25 * (9 + K/2^32); C0 = C2 = 48, C1 = 12. PAL retunes K alone
-// (core_top.v, pll_cfg), so every output and the 90 degree shift scale
+// VCO = 74.25 * (9 + K/2^32); C0 = C2 = 48, C1 = 12, C3 = 24. PAL retunes K
+// alone (core_top.v, pll_cfg), so every output and the 90 degree shift scale
 // together: NTSC K = 1100363522 (14.3181818 MHz), PAL K = 737741760
-// (14.1875800 MHz), both exact to the 32 bit fraction.
+// (14.1875800 MHz), both exact to the 32 bit fraction; clk_arm is then
+// 28.375160 MHz.
 module  pll_core(
 
 	// interface 'refclk'
@@ -33,6 +38,9 @@ module  pll_core(
 	// interface 'outclk2'
 	output wire outclk_2,
 
+	// interface 'outclk3'
+	output wire outclk_3,
+
 	// interface 'locked'
 	output wire locked,
 
@@ -49,7 +57,7 @@ module  pll_core(
 		.pll_fractional_cout(32),
 		.pll_dsm_out_sel("1st_order"),
 		.operation_mode("direct"),
-		.number_of_clocks(3),
+		.number_of_clocks(4),
 		.output_clock_frequency0("14.318181 MHz"),
 		.phase_shift0("0 ps"),
 		.duty_cycle0(50),
@@ -59,7 +67,7 @@ module  pll_core(
 		.output_clock_frequency2("14.318181 MHz"),
 		.phase_shift2("17460 ps"),
 		.duty_cycle2(50),
-		.output_clock_frequency3("0 MHz"),
+		.output_clock_frequency3("28.636362 MHz"),
 		.phase_shift3("0 ps"),
 		.duty_cycle3(50),
 		.output_clock_frequency4("0 MHz"),
@@ -135,12 +143,12 @@ module  pll_core(
 		.c_cnt_in_src2("ph_mux_clk"),
 		.c_cnt_bypass_en2("false"),
 		.c_cnt_odd_div_duty_en2("false"),
-		.c_cnt_hi_div3(1),
-		.c_cnt_lo_div3(1),
+		.c_cnt_hi_div3(12),
+		.c_cnt_lo_div3(12),
 		.c_cnt_prst3(1),
 		.c_cnt_ph_mux_prst3(0),
 		.c_cnt_in_src3("ph_mux_clk"),
-		.c_cnt_bypass_en3("true"),
+		.c_cnt_bypass_en3("false"),
 		.c_cnt_odd_div_duty_en3("false"),
 		.c_cnt_hi_div4(1),
 		.c_cnt_lo_div4(1),
@@ -252,7 +260,7 @@ module  pll_core(
 		.pll_slf_rst("false")
 	) altera_pll_i (
 		.rst	(rst),
-		.outclk	({outclk_2, outclk_1, outclk_0}),
+		.outclk	({outclk_3, outclk_2, outclk_1, outclk_0}),
 		.locked	(locked),
 		.reconfig_to_pll	(reconfig_to_pll),
 		.fboutclk	( ),

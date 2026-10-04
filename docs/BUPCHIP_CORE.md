@@ -913,6 +913,8 @@ Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/dir
 
 Every slack gate below is the worst setup slack over the four corners in `sta.summary`. For the S1 CPU, slow 0 °C is the worst corner, not slow 85 °C (step 3).
 
+**Versions.** The first core release with ARIA will be **2.1.1**, set in `core.json` at release, after the hardware test passes; hardware test builds keep the version they were built from. The first release with DARIA, if it comes ("Later: 2600 ARM cartridges"), will be **2.2.1**.
+
 1. **Tools into the repository** (`sim/bupchip/`): lockstep and ISA harnesses, mixer harness, Python model, cycle models, synthetic ARSC generator.
    *Done when:* reference against reference runs 1 M instructions with 0 mismatches; ISA passes 200/200 on the reference against Unicorn; the Python model's Misery_F PCM equals MiSTer's `sim/work/bupchip/ref/song13.pcm` (with local data); the synthetic ARSC renders non-zero PCM.
    
@@ -999,6 +1001,8 @@ Every slack gate below is the worst setup slack over the four corners in `sta.su
 ## Later: 2600 ARM cartridges (bonus goal)
 
 Once the BupChip is complete and proven on hardware, the same CPU may also run the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+), which upstream runs on the shared ARM7TDMI and the Pocket build leaves out (`NO_ARM_MAPPER`). The two never run at once, so they can share the CPU, its block RAM and the PSRAM path. The main new work is a clean-room Thumb front end: these drivers are game code, so all of Thumb has to be exact, with the same exact-or-halt rule. lroby74's MiSTer Thumb core is CC BY-NC 4.0 and may be used only as a behavioural reference. With Thumb added and the 2600 cartridges running, ARIA becomes **DARIA**: the Dual-use Atari RISC Interface Accelerator.
+
+**Version:** the first release with DARIA will be 2.2.1 (2.1.1 is the first with ARIA; "Implementation steps", "Versions").
 
 Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/` (never committed):
 

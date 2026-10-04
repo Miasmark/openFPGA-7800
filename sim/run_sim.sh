@@ -67,6 +67,9 @@ SRCS=(
 	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
+	"$RTL/bupchip_peripheral.sv" "$FPGA/pocket_utils/psram.sv"
+	"$FPGA"/core/bupchip/{bup_cpu,bup_capture,bup_asset_wr,bup_asset_cache,bup_tick48k,bup_status_osd,bupchip_pocket}.sv
+	"$HERE/bupchip/s4/psram_model.sv"
 )
 
 # The POCKET_SRAM build (cartridge RAM, Flicker Blend frame, SaveKey and BIOS
@@ -75,11 +78,20 @@ SRCS=(
 SRAM_DEFS=""
 # KEEP_NOCART_ROM keeps the built-in cartridge image tb_system runs from.
 [ "${SRAM:-1}" = 1 ] && SRAM_DEFS="-DPOCKET_SRAM -DEXTERNAL_CARTRAM -DNO_MEM_EDITOR -DKEEP_NOCART_ROM"
+# The Pocket's BupChip (ARIA, docs/BUPCHIP_CORE.md) with BUP_DEBUG, as the qsf
+# defines them; the testbenches put the PSRAM model on cram0. BUP_DEBUG=0
+# leaves out the debug status (a release build); BUPCHIP=0 the whole BupChip.
+BUP_DEFS=""
+if [ "${BUPCHIP:-1}" = 1 ]; then
+	BUP_DEFS="-DPOCKET_BUPCHIP"
+	[ "${BUP_DEBUG:-1}" = 1 ] && BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"
+fi
 
 build() {   # build <top> <objdir>
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
+		-Wno-TIMESCALEMOD \
 		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
-		$SRAM_DEFS \
+		$SRAM_DEFS $BUP_DEFS \
 		--top-module "$1" -Mdir "$WORK/$2" -o vtb "${SRCS[@]}" "$HERE/$1.sv" > "$WORK/$2.log" 2>&1 \
 		|| { grep -m20 "%Error" "$WORK/$2.log"; exit 1; }
 }
@@ -121,6 +133,51 @@ python3 "$HERE/make_a78.py" 7 > load_test.a78
 echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
 ./obj_load/vtb +image=load_test.a26 +audf=14 | grep -E "LOAD|TONE"
+
+# The BupChip end to end in the whole core: its firmware through the
+# bupchip.bin data slot, a Souper cartridge (souper_test.py: a 6502 program
+# that sends command $80 through $8007 after 30 ms) with the synthetic ARSC
+# block appended, the PSRAM model on cram0. The song's PCM, as the firmware
+# pushes it and as it returns to clk_sys, must equal the Python model's
+# (sim/bupchip/model/armemu.py), and its audio must reach top.sv's mixer.
+# Without the firmware, the same cartridge must leave the BupChip held and
+# silent. Needs the user's firmware at src/fpga/mister/rtl/bupchip.hex
+# (docs/BUPCHIP.md); skipped without it. BUPMS sets the run (ms after reset).
+if [ "${BUPCHIP:-1}" = 1 ]; then
+	if [ -f "$RTL/bupchip.hex" ]; then
+		echo "-- BupChip end to end: firmware slot, Souper cartridge with an ARSC block, \$8007 command, PSRAM:"
+		B="$WORK/bupchip_e2e"
+		mkdir -p "$B"; ln -sfn "$WORK/rtl" "$B/rtl"
+		python3 "$HERE/../tools/hex2bin.py" "$RTL/bupchip.hex" > "$B/bupchip.bin"
+		python3 "$HERE/bupchip/verif/make_synth_arsc.py" "$B/synth.a78" --arsc "$B/synth.arsc" > /dev/null
+		python3 "$HERE/souper_test.py" "$B/souper.a78" --arsc "$B/synth.arsc" > /dev/null
+		[ -s "$B/song0_model.pcm" ] && [ "$B/song0_model.pcm" -nt "$B/synth.arsc" ] || \
+			(cd "$HERE/bupchip/model" && python3 armemu.py "$B/synth.arsc" --song 0 --secs 1 --pcm "$B/song0_model.pcm" > "$B/armemu.log")
+		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupms="${BUPMS:-250}" +bupout=e2e > e2e.log)
+		grep -E "^(LOAD|BUPCHIP)" "$B/e2e.log"
+		PS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\1/p' "$B/e2e.log")"
+		OS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\2/p' "$B/e2e.log")"
+		e2e_ok=1
+		grep -Eq "^BUPCHIP firmware slot: [0-9]+ byte file, 0 of 4096 ROM words differ from it, fw_loaded=1$" "$B/e2e.log" || e2e_ok=0
+		grep -Eq "^BUPCHIP ARSC: [0-9]+ bytes in the PSRAM, 0 differ from the file; asset_size [0-9]+, asset_ready 1$" "$B/e2e.log" || e2e_ok=0
+		grep -Eq "^BUPCHIP result: fw_loaded=1 asset_ready=1 cpu_run=1 halted=0 halt_code=0 halt_pc=[0-9a-f]+ fault=00 muted=0 pushed=[0-9]+ pops=[0-9]+ under=0 over=0 minlev=[0-9]+ out=[0-9]+ out_nz=[1-9][0-9]* mix_nz=[1-9][0-9]* arsc_bad=0 psram_viol=0$" "$B/e2e.log" || e2e_ok=0
+		for k in pcm out.pcm; do
+			[ "$k" = pcm ] && { st="$PS"; echo "  pushed frames against the model:"; } \
+				|| { st="$OS"; echo "  frames returned to clk_sys against the model:"; }
+			python3 "$HERE/bupchip/s1/pcm_check.py" "$B/e2e.$k" "$B/song0_model.pcm" --song-start "${st:--1}" \
+				> "$B/check_$k.log" 2>&1 || e2e_ok=0
+			sed 's/^/    /' "$B/check_$k.log"
+			grep -q "^PCM IDENTICAL" "$B/check_$k.log" || e2e_ok=0
+		done
+		echo "  the same cartridge without the firmware (expect fw_loaded=0 cpu_run=0 pushed=0 out_nz=0 mix_nz=0):"
+		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupms=40 > nofw.log)
+		grep "^BUPCHIP result" "$B/nofw.log" | sed 's/^/    /'
+		grep -Eq "^BUPCHIP result: fw_loaded=0 asset_ready=1 cpu_run=0 halted=0 .* pushed=0 pops=0 under=0 over=0 .* out_nz=0 mix_nz=0 arsc_bad=0 psram_viol=0$" "$B/nofw.log" || e2e_ok=0
+		[ "$e2e_ok" = 1 ] && echo "BUPCHIP_E2E pass" || echo "BUPCHIP_E2E FAIL"
+	else
+		echo "-- BupChip end to end: skipped (no firmware at src/fpga/mister/rtl/bupchip.hex; see docs/BUPCHIP.md)"
+	fi
+fi
 
 echo "-- PAL/NTSC PLL retune sequence:"
 "${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_pll_region \

@@ -1,9 +1,10 @@
 # Pocket core file list.
 #
-# The MiSTer Atari7800 sources under ../mister/rtl are vendored unmodified
-# except rtl/top.sv, which gains NO_DDRAM / NO_BUPCHIP switches beside
-# upstream's own NO_ARM_MAPPER. See ../mister/POCKET_CHANGES.md. The macros
-# and memory-file search paths are set in ap_core.qsf.
+# The MiSTer Atari7800 sources under ../mister/rtl are vendored; the few
+# Pocket changes (build switches such as NO_DDRAM, NO_BUPCHIP and
+# POCKET_BUPCHIP in rtl/top.sv, and the fixes) are listed in
+# ../mister/POCKET_CHANGES.md. The macros and memory-file search paths are set
+# in ap_core.qsf.
 
 # Pocket glue
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) core_top.v]
@@ -65,3 +66,17 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/a78_cart_extent.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/RIOT/M6532.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/top.sv]
+
+# The Pocket's BupChip, ARIA (POCKET_BUPCHIP; docs/BUPCHIP_CORE.md), after
+# arm7tdmi_pkg.sv, which bup_cpu.sv imports. psram.sv (agg23, unmodified) and
+# data_loader.sv both define `MAX the same way, so Quartus warns that it is
+# redefined.
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../pocket_utils/psram.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_cpu.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_capture.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_wr.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_cache.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_tick48k.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_status_osd.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bupchip_pocket.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/bupchip_peripheral.sv]

@@ -79,17 +79,18 @@ and waits for STOP or START. `sim/tb_load.sv +i2ctrace` decodes the bus.
 
 ### `rtl/top.sv`: build switches
 
-Three build switches were added next to upstream's own `NO_ARM_MAPPER`:
+Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
 
 | Macro        | Effect |
 |--------------|--------|
 | `NO_DDRAM`   | Leaves out the DDR3 bridge (`ddram`). Both of its client channels read back idle. The Pocket has no DDR3. |
-| `NO_BUPCHIP` | Leaves out the BupChip player (`bupchip_subsystem`): an ARM program with DDR-resident assets. Souper carts still run; their music channel is silent. |
+| `NO_BUPCHIP` | Leaves out the BupChip player (`bupchip_subsystem`): an ARM program with DDR-resident assets. Souper carts still run; their music channel is silent unless `POCKET_BUPCHIP` brings in the Pocket's own player. |
+| `POCKET_BUPCHIP` | With `NO_BUPCHIP`: `top.sv` hands the BupChip's inputs out and takes its audio back, so that the Pocket's own BupChip (`../core/bupchip/`, ARIA; `../../../docs/BUPCHIP_CORE.md`) can play the music outside it. New ports `bup_cmd_valid_o` / `bup_cmd_data_o` (the `$8007` command, `bup_cmd_*_eff`), `souper_profile_o` (`souper_profile`), and `bup_audio_l_i` / `bup_audio_r_i`, which drive `bupchip_audio_l/r` in place of the zeros, so the audio goes through upstream's gain, saturation and mix unchanged. Both blocks are `ifdef`s: a port group next to `POCKET_SRAM`'s, and the assignments inside the `NO_BUPCHIP` branch. |
 | `EXTERNAL_FIRMWARE` | Builds the HSC and Supercharger firmware ROMs empty, with a load port (see below). |
 
-The Pocket build defines all four (`NO_ARM_MAPPER`, `NO_DDRAM`,
-`NO_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`. Without the macros
-the changed files are identical to upstream in behaviour.
+The Pocket build defines all five (`NO_ARM_MAPPER`, `NO_DDRAM`,
+`NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`.
+Without the macros the changed files are identical to upstream in behaviour.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
 
@@ -102,11 +103,12 @@ rewrite").
 
 The BupChip's CoreTone firmware (`rtl/bupchip.hex`/`.mif`, used by
 `bupchip_memory.sv`) is left out for the same reason: its source is not
-published. The Pocket build has no BupChip yet (`NO_BUPCHIP`), so nothing
-reads it; the planned Pocket BupChip loads it from the user's `bupchip.bin`
-(`../../../docs/BUPCHIP_CORE.md`, "Firmware load"). Simulation scripts read a
-local copy at `rtl/bupchip.hex`, which `.gitignore` keeps out of git. The
-files were removed by a commit after 2.0.21; unlike `mem4` and `ar`, they
+published. The Pocket build leaves upstream's BupChip out (`NO_BUPCHIP`), so
+nothing reads it; the Pocket's own BupChip (`POCKET_BUPCHIP`) loads the
+firmware at core start from the user's `bupchip.bin`, through data slot
+`0x109` (`../../../docs/BUPCHIP_CORE.md`, "Firmware load"). Simulation scripts
+read a local copy at `rtl/bupchip.hex`, which `.gitignore` keeps out of git.
+The files were removed by a commit after 2.0.21; unlike `mem4` and `ar`, they
 were not removed from the history, which would have rewritten `main` and
 the release tags.
 
