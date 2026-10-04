@@ -558,7 +558,9 @@ def frame_runs(frames):
 def sec_late(runs, margin):
     """Frames whose calls would end after the INTIM-zero deadline (block RAM, zero-wait)."""
     hdr = ["Demo", "S3 @21.477: late calls (frames)", "S1 @28.636: late calls (frames)",
-           "Steady play (frames >= 600): max S3 / S1 share of safe budget"]
+           "S3 CPI @28.636: late calls (frames)",
+           "Max share of safe budget, all calls: S3 @21.477 / S1 / S3 CPI @28.636",
+           "Steady play (frames >= 600): max S3 / S1 share"]
     rows = []
     for R in runs:
         if not R.has_s:
@@ -566,11 +568,16 @@ def sec_late(runs, margin):
         bud = R.budgeted
         l3 = [r["frame"] for r in bud if r["s3_cyc"] / (S3_MHZ * 1e6) > r["safe"] / SYS_HZ]
         l1 = [r["frame"] for r in bud if r["s1_cyc"] / (S1_MHZ * 1e6) > r["safe"] / SYS_HZ]
+        l33 = [r["frame"] for r in bud if r["s3_cyc"] / (S1_MHZ * 1e6) > r["safe"] / SYS_HZ]
+        share = lambda col, mhz: max(((r[col] / (mhz * 1e6)) / (r["safe"] / SYS_HZ) for r in bud), default=0)
         steady = [r for r in bud if r["frame"] >= 600]
         sh3 = max((r["s3_cyc"] / (S3_MHZ * 1e6)) / (r["safe"] / SYS_HZ) for r in steady) if steady else 0
         sh1 = max((r["s1_cyc"] / (S1_MHZ * 1e6)) / (r["safe"] / SYS_HZ) for r in steady) if steady else 0
         rows.append([R.short, "%d (%s)" % (len(l3), frame_runs(l3) or "-"),
-                     "%d (%s)" % (len(l1), frame_runs(l1) or "-"), "%.0f%% / %.0f%%" % (100 * sh3, 100 * sh1)])
+                     "%d (%s)" % (len(l1), frame_runs(l1) or "-"), "%d (%s)" % (len(l33), frame_runs(l33) or "-"),
+                     "%.0f%% / %.0f%% / %.0f%%" % (100 * share("s3_cyc", S3_MHZ), 100 * share("s1_cyc", S1_MHZ),
+                                                   100 * share("s3_cyc", S1_MHZ)),
+                     "%.0f%% / %.0f%%" % (100 * sh3, 100 * sh1)])
     return table(hdr, rows)
 
 
@@ -684,7 +691,9 @@ def main():
     margin = float(opts["--margin"])
     runs = []
     for d in dirs:
-        if os.path.exists(os.path.join(d, "calls.csv.gz")) and os.path.exists(os.path.join(d, "summary.txt")):
+        # A run in progress (or being redone) has a plain calls.csv: leave it out.
+        if (os.path.exists(os.path.join(d, "calls.csv.gz")) and os.path.exists(os.path.join(d, "report.txt"))
+                and not os.path.exists(os.path.join(d, "calls.csv"))):
             runs.append(Run(d, scan))
     runs.sort(key=lambda R: (SCHEME_ORDER.get(R.scheme, 9), R.short))
     for sec in opts["--only"].split(","):

@@ -425,6 +425,31 @@ module tb_load;
 			rises <= rises + 1;
 	end
 
+	// ---------------- joystick script (+joyscript=FILE) ----------------
+	// Drives joy0 from reset on. Each line "MS HEX" sets joy0 to HEX from MS
+	// ms after reset (atari7800_pocket.sv's bits: 0 right, 1 left, 2 down,
+	// 3 up, 9 A, 10 B); "MS dump" writes the next whole frame as
+	// frame_NNN.ppm (numbered from 0 in script order). # starts a comment.
+	longint t_run = 0;
+	initial begin
+		automatic string jpath, line, word;
+		automatic int jf, ms, at = 0;
+		wait (reset_in == 1'b0);
+		t_run = $time;
+		if ($value$plusargs("joyscript=%s", jpath)) begin
+			jf = $fopen(jpath, "r");
+			if (jf == 0) begin $display("cannot open %s", jpath); $finish; end
+			capture = 1;                     // fb always holds the last whole frame
+			while ($fgets(line, jf) > 0) begin
+				if ($sscanf(line, "%d %s", ms, word) != 2 || word.substr(0, 0) == "#") continue;
+				for (; at < ms; at++) repeat (14318) @(posedge clk_sys);
+				if (word == "dump") dump_frames = dumped + 1;
+				else joy0 = 16'(word.atohex());
+			end
+			$fclose(jf);
+		end
+	end
+
 `ifdef POCKET_BUPCHIP
 	// ---------------- BupChip (POCKET_BUPCHIP; +bupfw, +bupms) ----------------
 	// Every frame the firmware pushes, and every frame returned to clk_sys, go
@@ -471,6 +496,16 @@ module tb_load;
 		bup_fd = $fopen({bup_out, ".pcm"}, "wb");
 		bup_ofd = $fopen({bup_out, ".out.pcm"}, "wb");
 	end
+	// +bupcmdlog: each command as the cartridge sends it ($8007 pair, at
+	// clk_sys) and as the firmware takes it (a read of 0x04), with the frames
+	// pushed so far, in ms since reset.
+	bit bup_cmdlog = 0;
+	initial bup_cmdlog = $test$plusargs("bupcmdlog");
+	always @(posedge clk_sys) if (bup_cmdlog && dut.bup_cmd_valid)
+		$display("BUPCMD sent  $%02x at %0.1f ms", dut.bup_cmd_data, real'($time - t_run) / 1.0e6);
+	always @(posedge clk_arm) if (bup_cmdlog && dut.bupchip.per.cmd_pop)
+		$display("BUPCMD taken $%02x at %0.1f ms, pushed %0d", dut.bupchip.per.reg_rdata[7:0],
+			real'($time - t_run) / 1.0e6, bup_pushes);
 `endif
 
 	logic [7:0] image [$];

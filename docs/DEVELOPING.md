@@ -110,6 +110,10 @@ the Pocket loads them, a Souper test cartridge
 sends a command through `$8007`, and the song's PCM compared with the Python
 model's. Without the firmware that part is skipped. The BupChip's own
 benches are in `sim/bupchip/` (its `s4/check.sh` runs the wrapper's).
+`sim/bupchip/run_jukebox.sh` plays the hardware-test jukebox
+(`sim/bupchip/jukebox.py`) the same way, pressing joystick 1 from a script
+(`tb_load.sv`'s `+joyscript`) and checking each command, the PCM and the
+screen.
 
 `run_sim.sh` converts the POKEY with GHDL, copies the few upstream files
 Verilator can't parse into `sim/work/patched/` (initialised `wire` arrays

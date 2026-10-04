@@ -218,6 +218,26 @@ tags and the header's declared size before it writes anything. Copy the
 output anywhere under `/Assets/7800/`. A block built this way for Rikki &
 Vikki is 211.8 KiB, matching the table above.
 
+### Testing the songs: the jukebox
+
+`sim/bupchip/jukebox.py` builds a game-free Souper cartridge that plays any
+song of an ARSC block on demand, so every song can be checked on a Pocket
+without playing through the game:
+
+```sh
+python3 sim/bupchip/jukebox.py "RV Jukebox.a78" --arsc "Rikki & Vikki.a78" --cdf "<install>/Data/FoxBox.cdf"
+```
+
+It copies the block out of the game's `.a78` (or takes a bare block) and
+names the songs from the `.cdf`, if given. The output carries the game's
+music, so like the game it stays out of the repository; copy it anywhere
+under `/Assets/7800/`. Run it with *Skip BIOS* on (the default). Joystick 1:
+left and right pick the song (0–31; held, they repeat), fire plays it
+(command `$80 | n`), down stops (`$00`), up plays the next song. The screen
+shows the song number, its name and command, and the last command sent, and
+leaves the top-left corner to the `BUP_DEBUG` status cells.
+`sim/bupchip/run_jukebox.sh` checks it in the whole-core simulation.
+
 ## Measured load
 
 These figures come from `sim/bupchip/run_bupchip.sh`, measuring 4 s of each
