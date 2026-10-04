@@ -25,6 +25,7 @@ fi
 for f in palettes Minnie ooo.hex; do
 	ln -sfn "$RTL/$f" "$WORK/rtl/$f"
 done
+ln -sfn "$FPGA/core/ar_stub.hex" "$WORK/rtl/ar_stub.hex"
 
 # Verilator (5.040) rejects initialised unpacked `wire` arrays, which
 # upstream uses for constant tables and Quartus accepts. Simulate copies with
@@ -104,7 +105,7 @@ fi
 build() {   # build <top> <objdir>
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
 		-Wno-TIMESCALEMOD \
-		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
+		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ -DPOCKET_SUPERCHARGER \
 		$SRAM_DEFS $BUP_DEFS \
 		--top-module "$1" -Mdir "$WORK/$2" -o vtb "${SRCS[@]}" "$HERE/$1.sv" > "$WORK/$2.log" 2>&1 \
 		|| { grep -m20 "%Error" "$WORK/$2.log"; exit 1; }

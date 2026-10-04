@@ -927,6 +927,9 @@ module mapper_AR
 	input   [1:0]   tape_in,
 	input           fix_sc_cs,
 	output  logic   audio_data,
+`ifdef POCKET_SUPERCHARGER
+	input           tape_rewind,   // a cartridge load: the tape back to its first image
+`endif
 	input   [18:0]  rom_size
 );
 	// These numbers represent ONE HALF the cycles
@@ -1009,13 +1012,61 @@ module mapper_AR
 	assign ram_sel = a_in[12] && ~rom_bank;
 	assign ram_a = {5'd0, current_bank, a_in[10:0]};
 	assign ram_rw = ~(a_in[12] && ram_we && we_cycle[5] && ~a_change && ~is_control_reg && ~rom_bank);
+`ifdef POCKET_SUPERCHARGER
+	// Pocket: Supercharger games without supercharger.bin
+	// (docs/SUPERCHARGER_FASTLOAD.md). The BIOS ROM powers up holding our
+	// loader stub (core/ar_stub.asm); a BIOS file loaded into it switches
+	// the fast path off for good, and the tape path runs as upstream.
+	//
+	// The stub reads the .bin through a port in the ROM's own address space
+	// ($F900-$FCFF, pages the stub keeps clear of code), and writes the RAM
+	// itself with the write trick, as the BIOS does:
+	//   $F9xx  image xx >> 6, pointer bits 13:8 = xx & $3F
+	//   $FAxx  pointer bits 7:0 = xx
+	//   $FB00  the image byte at the pointer; the pointer steps on after it
+	//   $FB01  bits 5:4 the tape position, bits 1:0 the file's last image
+	//   $FC0x  the tape position becomes x
+	logic        real_bios = 1'b0;
+	logic  [1:0] fl_img;
+	logic [13:0] fl_ptr;
+	logic  [7:0] fl_data;
+	logic        fl_on_data;
+	always @(posedge clk) if (fw_load & fw_wr) real_bios <= 1'b1;
+	wire fast = ~real_bios;
+	wire fl_port = fast && a_in[12:11] == 2'b11 && rom_bank;
+	wire [1:0] last_img = rom_size >= 19'h8400 ? 2'd3 : rom_size >= 19'h6300 ? 2'd2 :
+		rom_size >= 19'h4200 ? 2'd1 : 2'd0;
+	wire [18:0] fl_rom_a = {fl_img, 13'd0} + {fl_img, 8'd0} + fl_ptr;   // image * $2100 + pointer
+	wire fl_read = fl_port && a_in[10:8] == 3'd3;
+	always @(posedge clk) begin
+		if (ce)
+			fl_data <= rom_do;
+		if (a_change) begin
+			fl_on_data <= fl_read && ~a_in[0];
+			if (fl_on_data)
+				fl_ptr <= fl_ptr + 1'd1;
+			if (fl_port && a_in[10:8] == 3'd1)
+				{fl_img, fl_ptr[13:8]} <= a_in[7:0];
+			if (fl_port && a_in[10:8] == 3'd2)
+				fl_ptr[7:0] <= a_in[7:0];
+		end
+	end
+	assign rom_a = fast ? fl_rom_a : preload_a + tape_offset;
+	assign d_out = ~ram_rw ? we_byte : (adata_select ? {7'd0, audio_data} :
+		(fl_read ? (a_in[0] ? {2'd0, tape_num, 2'd0, last_img} : fl_data) : bios_data));
+`else
 	assign rom_a = preload_a + tape_offset;
-	assign ar_read = ce;
 	assign d_out = ~ram_rw ? we_byte : (adata_select ? {7'd0, audio_data} : bios_data);
+`endif
+	assign ar_read = ce;
 
 	// Supercharger
 `ifdef EXTERNAL_FIRMWARE
 	spram #(
+`ifdef POCKET_SUPERCHARGER
+		.mem_init_file("core/ar_stub.mif"),
+		.sim_init_file("rtl/ar_stub.hex"),
+`endif
 		.addr_width(11)
 	) ar_rom
 	(
@@ -1214,7 +1265,13 @@ module mapper_AR
 		if (a_change) begin
 			we_cycle <= {we_cycle[4:0], 1'b0};
 			
+`ifdef POCKET_SUPERCHARGER
+			if (fl_port && a_in[10:8] == 3'd4)
+				tape_num <= a_in[1:0];
+			if (adata_select && ~playback && ~fast) begin
+`else
 			if (adata_select && ~playback) begin
+`endif
 				if (|cooldown)
 					cooldown <= cooldown - 1'd1;
 				else if (~adc_load)
@@ -1234,8 +1291,18 @@ module mapper_AR
 			end
 		end
 
-		if (reset) begin
+`ifdef POCKET_SUPERCHARGER
+		// The tape stays where it stopped through a reset, as a real one
+		// does through a power cycle: Party Mix and Sweat reach their next
+		// game that way. A reset during a load leaves tape_num on the image
+		// being played, so it plays again from its start.
+		if (tape_rewind)
 			tape_num <= 0;
+`endif
+		if (reset) begin
+`ifndef POCKET_SUPERCHARGER
+			tape_num <= 0;
+`endif
 			cooldown <= COOLDOWN_PERIOD;
 			audio_data <= 0;
 			state <= AR_END;

@@ -1,7 +1,8 @@
 # clk_sdram timing: the SRAM request path
 
 Notes on the core's tightest timing path, why 2.1.1 has less margin on it
-than 2.0.21, and two fixes. Neither fix is in 2.1.1. Figures come from
+than 2.0.21, and two fixes. Neither fix is in 2.1.1; Fix A is in 2.1.2
+(results in `SRAM_TIMING_REVIEW.md`). Figures come from
 Quartus 21.1.1 on the 5CEBA4F23C8, slow 1100 mV 85 °C model, unless stated
 otherwise.
 
