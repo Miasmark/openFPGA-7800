@@ -438,7 +438,11 @@ constant drivers") but only a warning in the sim.
   a constant 1: the BupChip's three capture flags did, and lit test1's and
   test2's red boxes on every load. Simulation honours the initializer, so
   only the map report's "Registers Removed During Synthesis" shows it.
-  `run_sim.sh` refuses such declarations in `src/fpga/core`.
+  `run_sim.sh` refuses such declarations in `src/fpga/core`. Leaving a
+  register with no power-up value at all is sometimes right: `pll_region.v`'s
+  `cfg_address` and `cfg_writedata` are read only with `cfg_write`, and
+  free power-up lets Quartus prune the PLL reconfiguration core to the two
+  registers it writes; giving them one costs about 550 ALMs.
 - **A78 headers.** The core maps POKEY, RAM and save devices only as the
   header declares, as MiSTer does. Many dumps have wrong headers. Check the
   header before debugging the core. Commando's "missing music" was a bad
