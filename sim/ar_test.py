@@ -3,7 +3,10 @@
 the core's Supercharger loading, with or without the real BIOS.
 
 Each load is one 256-byte page of code at $F100 (RAM bank 2, page 1), run
-with bank configuration 0 (bank 2 at $F000, the BIOS ROM at $F800). It
+with control byte $10, bank configuration 4 (bank 2 at $F000, the BIOS ROM
+at $F800, as configuration 0; non-zero so the check below means something).
+The BIOS leaves the control byte in $80, and released games read it there;
+a load that finds anything else in $80 shows a white screen instead. It
 sets a background colour and a TIA tone, and draws NTSC frames.
 
   ar_test.py multi > ar_multi.bin
@@ -26,7 +29,8 @@ import sys
 
 COLUBK, AUDC0, AUDF0, AUDV0, WSYNC, VSYNC, VBLANK = 0x09, 0x15, 0x17, 0x19, 0x02, 0x00, 0x01
 ORG = 0xF100
-PAGE_MAP = (1 << 2) | 2      # page 1 of RAM bank 2: $F100 in bank configuration 0
+PAGE_MAP = (1 << 2) | 2      # page 1 of RAM bank 2: $F100 in bank configuration 4
+CONTROL = 0x10               # bank configuration 4, writes off, ROM on
 
 
 def assemble(org, items):
@@ -58,7 +62,10 @@ def program(colour, audf, next_load=None):
         0xA9, 0x04, 0x85, AUDC0,
         0xA9, audf, 0x85, AUDF0,
         0xA9, 0x0F, 0x85, AUDV0,
-        0xA9, colour, 0x85, COLUBK,
+        0xA9, colour,
+        0xA6, 0x80, 0xE0, CONTROL, 0xF0, 0x02,         # LDX $80, CPX #CONTROL, BEQ +2
+        0xA9, 0x0E,                                    # LDA #$0E: white, $80 is wrong
+        0x85, COLUBK,
         0xA0, 60,                                      # LDY #60 (frames before a multiload)
         ("label", "frame"),
         0xA9, 0x02, 0x85, VBLANK, 0x85, VSYNC,
@@ -105,7 +112,7 @@ def load_image(load_number, code, full=False):
         pages[0:256] = page
     h = bytearray(256)
     h[0], h[1] = ORG & 0xFF, ORG >> 8                  # start address
-    h[2] = 0x00                                        # control byte: bank configuration 0, writes off, ROM on
+    h[2] = CONTROL                                     # control byte
     h[3] = len(maps)                                   # page count
     h[5] = load_number
     h[6], h[7] = 0x24, 0x02                            # as in released images

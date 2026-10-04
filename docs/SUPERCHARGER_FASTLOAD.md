@@ -101,13 +101,20 @@ contents (`core/ar_stub.mif`), and a BIOS file overwrites it.
 | Reset vector | Clear TIA and RAM (load number 0 in `$80`), then load |
 | `$F800` (multiload) | Copy `$FA` to `$80`, then load |
 | Load | Find the image: start at the tape position, take the first whose header load number matches, wrapping at the end of the file. Copy its pages into the RAM. Move the tape position on |
-| Start | Clear TIA `$04-$2C` and RAM `$81-$9D`; A from the RIOT timer, X = `$FF`, Y = 0, SP = `$FF`; set the header's control byte and jump to its start address |
+| Start | Clear TIA `$04-$2C` and RAM `$81-$9D`; put the control byte in `$80`; A from the RIOT timer, X = `$FF`, Y = 0, SP = `$FF`; set the control byte and jump to the start address |
 | Not found | A red screen |
 
 The control byte can switch the ROM out, so the last two instructions
 (`CMP $FFF8` / `JMP start`) run from RAM at `$FA-$FF`, which Stella's own
 BIOS replacement also uses. Until then the stub touches only `$80-$9D`,
 where it is cleared anyway: a multiload game keeps its state above that.
+
+**`$80` holds the control byte after a load**, not the load number the
+BIOS took from there. Every game in a 15-title set reads it, mostly as
+`LDX $80` / `CMP $F000,X` / `CMP $FFF8` to set the bank layout again
+(Frogger at its start); Fireball patches its own code with it. The first
+hardware build left the load number there, and those games crashed;
+`sim/ar_test.py`'s loads now check it (a white screen if wrong).
 
 ### Talking to the mapper
 

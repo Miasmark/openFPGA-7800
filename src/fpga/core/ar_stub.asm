@@ -8,7 +8,8 @@
 ; the Pocket's own sources.
 ;
 ; The game sees what the BIOS leaves:
-;   - the load number in $80;
+;   - the control byte in $80, where the load number was (Frogger sets the
+;     bank layout from it again, Fireball patches its code with it);
 ;   - the load's pages in the Supercharger RAM;
 ;   - TIA registers $04-$2C and RAM $81-$9D cleared;
 ;   - the header's control byte set (bank layout, write enable);
@@ -220,6 +221,7 @@ page:
 .tia	sta $04,x
 	dex
 	bpl .tia
+	sty LOADNUM		; $80 = control byte, as the BIOS leaves it
 	cmp RAMSEL,y		; data hold register = control byte
 	ldx #$FF
 	txs
