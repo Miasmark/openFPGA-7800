@@ -7,12 +7,15 @@ Sections: schemes, overview, types, clock, overruns, late, cache, mix, rom, ram,
 determinism
 (--ref DIR: compare each run with the run of the same name under DIR).
 
-Budget of a call: summarize.py's (the time the 6507 was held plus the slack it
-had left at its first timer poll), less one TIM64T interval (768 clk_sys,
-53.6 us). Every demo in the test set waits with LDx INTIM / BNE, which leaves
-its loop when INTIM reads 0, one interval before the wrap the bench times; a
-first poll later than that moves everything after it, and a poll after the
-wrap misses the zero altogether.
+Safe budget of a call: the time the 6507 was held plus the slack it had left
+at its first timer poll, measured to the clock INTIM first reads 0. Every demo
+in the test set waits with LDx INTIM / BNE, which leaves its loop then; a
+first poll later than that moves everything after it, and one after the wrap
+misses the zero altogether. Runs with zero.csv give that slack directly. For
+older runs it is summarize.py's slack to the wrap less one TIM64T interval
+(768 clk_sys, 53.6 us), which is exact for every call whose timer wraps
+before it is reloaded; calls whose timer is reloaded first have no budget
+there.
 
 Clock a call needs: f = C / (budget x (1 - margin) - M x t_miss), with C the
 call's cycles (instructions x CPI, or the bench's s1_cyc / s3_cyc estimates)
@@ -94,9 +97,24 @@ class Run:
         with open(os.path.join(self.path, "slack.csv")) as f:
             for r in csv.DictReader(f):
                 self.slack_rows[int(r["call"])] = r
+        # zero.csv (newer benches): slack to the clock INTIM first reads 0. It
+        # also covers calls whose timer is reloaded before it wraps.
+        self.zero = None
+        zp = os.path.join(self.path, "zero.csv")
+        if os.path.exists(zp):
+            with open(zp) as f:
+                self.zero = {int(r["call"]): int(r["slack_zero_sys"]) for r in csv.DictReader(f)}
         for r in self.rows:
             r["type"] = "%s %s" % (S.phase_of(r["line"]), r["first_bl"][-4:].upper())
-            r["safe"] = r["budget"] - TIM64T_SYS if r["budget"] is not None else None
+            if self.zero is not None:
+                z = self.zero.get(r["call"])
+                r["slack_zero"] = z
+                r["safe"] = r["stall_sys"] + z if z is not None else None
+                if r["budget"] is None and r["safe"] is not None:
+                    r["budget"] = r["safe"] + TIM64T_SYS
+            else:
+                r["safe"] = r["budget"] - TIM64T_SYS if r["budget"] is not None else None
+                r["slack_zero"] = r["slack"] - TIM64T_SYS if r["slack"] is not None else None
             sr = self.slack_rows.get(r["call"])
             r["poll_pc"] = sr.get("poll_pc") if sr else None
         self.unaligned = None
@@ -171,9 +189,9 @@ def sec_overview(runs, margin):
             fr[r["frame"]] += r["instr"]
         t = R.summ["total"]
         n = t["thumb"] + t["arm"]
-        bud = [r for r in rs if r["slack"] is not None]
-        late = sum(1 for r in bud if r["slack"] < 0)
-        zero = sum(1 for r in bud if 0 <= r["slack"] < TIM64T_SYS)
+        late = sum(1 for r in rs if r["slack"] is not None and r["slack"] < 0)
+        zero = sum(1 for r in rs if r["slack_zero"] is not None and r["slack_zero"] < 0 and
+                   not (r["slack"] is not None and r["slack"] < 0))
         rows.append([
             R.short, R.scheme, R.summ["misc"]["rom_size"] // 1024,
             "%.2f" % (len(rs) / max(1, len(fr))), pct(ins, 50), pct(ins, 99), max(ins), max(fr.values()),
@@ -187,7 +205,7 @@ def sec_overview(runs, margin):
 
 def sec_types(runs, margin):
     hdr = ["Demo", "Call type", "Calls", "Instr p50", "Instr max", "Held us max (ref)",
-           "Budget us", "Safe budget us", "Ref slack us min", "Ref uses % of safe", "Static window us"]
+           "Budget us min-max", "Safe budget us min", "Ref slack to wrap us min", "Ref uses % of safe", "Static window us"]
     rows = []
     for R in runs:
         g = defaultdict(list)
@@ -198,17 +216,17 @@ def sec_types(runs, margin):
             if len(rs) < 3:
                 continue
             ins = [r["instr"] for r in rs]
-            b = [r for r in rs if r["safe"] is not None]
+            b = [r for r in rs if r["safe"] is not None and r["budget"] is not None]
             win = "-"
             if b:
                 # The TIM64T load that fits: the shortest static window holding the budget.
-                fit = [w for w in wins if w >= us(min(r["budget"] for r in b)) - 1]
+                fit = [w for w in wins if w >= us(max(r["budget"] for r in b)) - 1]
                 win = "%.0f" % min(fit) if fit else "-"
             rows.append([
                 R.short, ty, len(rs), pct(ins, 50), max(ins), "%.0f" % us(max(r["stall_sys"] for r in rs)),
-                "%.0f" % us(min(r["budget"] for r in b)) if b else "-",
+                "%.0f-%.0f" % (us(min(r["budget"] for r in b)), us(max(r["budget"] for r in b))) if b else "-",
                 "%.0f" % us(min(r["safe"] for r in b)) if b else "-",
-                "%.0f" % us(min(r["slack"] for r in b)) if b else "-",
+                "%.0f" % us(min(r["slack_zero"] + TIM64T_SYS for r in b)) if b else "-",
                 "%.0f" % max(100.0 * r["stall_sys"] / r["safe"] for r in b) if b else "-", win])
     return table(hdr, rows)
 

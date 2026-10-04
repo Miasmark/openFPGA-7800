@@ -19,6 +19,10 @@
 //   slack.csv   per call, the RIOT-timer slack the 6507 had left when it
 //               first polled INTIM/TIMINT after the call (negative: overrun),
 //               and the 6507 PC of that poll
+//   zero.csv    the same slack measured to the clock INTIM first reads 0
+//               (where an LDx INTIM / BNE wait ends) instead of the wrap;
+//               it also resolves calls whose timer is reloaded before it
+//               wraps (negative: the wait would end late)
 //   frames.csv  per frame: length in clk_sys and scanlines, calls, work
 //   summary.txt totals: Thumb format mix, ARM-state classes, region traffic,
 //               RAM traffic by KiB, MMIO addresses, cache hit rates, data
@@ -221,6 +225,8 @@ module tb_daria;
 	wire        r_rw      = dut.riot_inst.RW_n;
 	wire        r_a4      = dut.riot_inst.addr[4];
 	wire        r_wrap    = dut.riot_inst.timer_wrap;
+	wire        r_tick    = dut.riot_inst.tick_inc;
+	wire  [7:0] r_timer   = dut.riot_inst.timer;
 	localparam logic [3:0] CTRL_RUNNING = 4'd5;
 
 	// +arm_div: arm_ce is the enable for the coming clk_arm edge. ce_last is
@@ -569,7 +575,7 @@ module tb_daria;
 	int     frame = 0;              // frames since reset release
 	logic   old_vs = 0;
 	logic   running = 0;
-	int     fd_calls, fd_slack, fd_frames;
+	int     fd_calls, fd_slack, fd_frames, fd_zero;
 	// call in progress (6507 side)
 	logic   sys_call = 0;
 	longint t_req = 0, stall = 0;
@@ -588,6 +594,11 @@ module tb_daria;
 	longint poll_req_t, poll_done_t, t_poll;
 	int     overruns = 0;
 	longint worst_slack = 64'sh7fffffffffffffff;
+	// INTIM reads 0 from the tick that takes the counter from 1 to 0 (the
+	// read is one ahead, M6532.sv:162-167) until the wrap one interval later.
+	longint t_zero = -1, zero_poll_t = 0;
+	logic   zeroed = 0, pending_zero = 0;
+	int     zero_call;
 	// 6507 PC of the instruction now running: the address of its opcode
 	// fetch (SYNC), held through the instruction's later cycles.
 	wire        c_sync    = dut.cpu_inst.cpu.sync;
@@ -603,6 +614,15 @@ module tb_daria;
 			if (r_ce && r_sel && !r_rw && r_a4) begin
 				t_timer_write = now;
 				expired = 0;
+				zeroed = 0;
+			end
+			if (r_ce && r_tick && r_timer == 8'd1 && !zeroed && t_timer_write >= 0 && t_timer_write != now) begin
+				zeroed = 1;
+				t_zero = now;
+				if (pending_zero) begin
+					$fwrite(fd_zero, "%0d,%0d\n", zero_call, t_zero - zero_poll_t);
+					pending_zero = 0;
+				end
 			end
 			if (r_ce && r_wrap && !expired && t_timer_write >= 0) begin
 				expired = 1;
@@ -618,6 +638,14 @@ module tb_daria;
 				t_poll = now;
 				poll_pc = op_pc;
 				poll_done_t = t_poll - poll_done_t;   // 6507 time from call end to poll
+				if (t_timer_write >= 0 && t_timer_write <= poll_req_t) begin
+					if (zeroed) $fwrite(fd_zero, "%0d,%0d\n", poll_call, t_zero - t_poll);
+					else begin
+						pending_zero = 1;
+						zero_call = poll_call;
+						zero_poll_t = t_poll;
+					end
+				end
 				if (t_timer_write < 0 || t_timer_write > poll_req_t) begin
 					$fwrite(fd_slack, "%0d,0,%0d,0,%04x\n", poll_call, poll_done_t, poll_pc);
 				end else if (expired) begin
@@ -641,6 +669,7 @@ module tb_daria;
 					pending_slack = 0;
 				end
 				await_poll = 0;
+				pending_zero = 0;
 			end
 			if (sys_call && call_stall) stall++;
 			if (sys_call && call_done) begin
@@ -807,6 +836,8 @@ module tb_daria;
 		$fwrite(fd_calls, "\n");
 		fd_slack = $fopen({out, "slack.csv"}, "w");
 		$fwrite(fd_slack, "call,kind,sys_end_to_poll,slack_sys,poll_pc\n");
+		fd_zero = $fopen({out, "zero.csv"}, "w");
+		$fwrite(fd_zero, "call,slack_zero_sys\n");
 		fd_frames = $fopen({out, "frames.csv"}, "w");
 		if (dtrace != 0) fd_dt = $fopen({out, "dtrace.txt"}, "w");
 		$fwrite(fd_frames, "frame,t_sys,len_sys,lines,calls,instr,arm_cyc,stall_sys,dma_sys,max_call_instr\n");
@@ -845,6 +876,7 @@ module tb_daria;
 		$fclose(fd_calls);
 		$fclose(fd_slack);
 		$fclose(fd_frames);
+		$fclose(fd_zero);
 		if (dtrace != 0) $fclose(fd_dt);
 		$finish;
 	end
