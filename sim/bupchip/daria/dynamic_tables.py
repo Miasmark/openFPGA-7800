@@ -252,7 +252,7 @@ def clock_rows(R, margin):
 
 def sec_clock(runs, margin):
     hdr = ["Demo", "Worst call (type, instr, safe budget us)", "CPI 1.0 exact", "CPI 1.0", "CPI 1.2",
-           "CPI 1.4", "S1 est.", "S3 est.", "S3 +1/flow change", "S1 fits 28.636?", "S3 fits 21.477?"]
+           "CPI 1.4", "S1 est.", "S3 est.", "S3 +1/flow change", "S1 @28.636 enough, with margin?", "S3 @21.477 enough, with margin?"]
     rows = []
     for R in runs:
         res = clock_rows(R, margin)
@@ -641,17 +641,17 @@ def sec_overruns(runs, margin):
 
 
 def sec_polls(runs, margin):
-    hdr = ["Demo", "Call type", "Poll PC", "Calls", "End to poll us", "Slack to wrap us min / p50"]
+    hdr = ["Demo", "Call type", "Poll PC", "Calls", "End to poll us", "Slack to INTIM=0 us min / p50"]
     rows = []
     for R in runs:
         g = defaultdict(list)
         for r in R.rows:
-            if r["slack"] is not None and r["poll_pc"]:
+            if r["slack_zero"] is not None and r["poll_pc"]:
                 g[(r["type"], r["poll_pc"])].append(r)
         for (ty, pc), rs in sorted(g.items()):
             if len(rs) < 3:
                 continue
-            sl = sorted(r["slack"] for r in rs)
+            sl = sorted(r["slack_zero"] for r in rs)
             rows.append([R.short, ty, pc, len(rs), "%.0f" % us(pct([r["to_poll"] for r in rs], 50)),
                          "%.0f / %.0f" % (us(sl[0]), us(pct(sl, 50)))])
     return table(hdr, rows)
