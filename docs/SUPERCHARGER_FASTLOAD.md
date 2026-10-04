@@ -98,9 +98,13 @@ mapped in, so a real BIOS never sees them.
 A small state machine in `mapper_AR`, beside the tape player:
 
 1. **Find the load image.** The `.bin` holds one or more 8,448-byte images
-   (8,192 bytes of pages, then a 256-byte header). Pick the one whose header
-   byte 5 (load number) matches. This is the same
-   `tape_offset` stride (`$2100`) the tape player uses.
+   (8,192 bytes of pages, then a 256-byte header), at the `tape_offset`
+   stride (`$2100`) the tape player uses. Search the way a tape does: start
+   at the image after the last one loaded (`tape_num`), wrap at the end of
+   the file, and take the first whose header byte 5 (load number) matches.
+   Taking the first match from the start of the file is not enough: Party
+   Mix (3 images) and Sweat (2) number every image 0, and on tape the next
+   one is reached by its position.
 2. **Copy the pages.** For each page `j` below header byte 3 (page count, at
    most 24):
    - the header's page map (byte `16 + j`) gives the RAM bank (bits 1:0)
@@ -172,6 +176,11 @@ sees ordinary 2600 RAM writes, one per cycle, well inside its budget.
 - **Load not found.** If a multiload asks for a load number that isn't in
   the file, the stub should do something visible: hold a coloured screen,
   as Stella reports an error.
+- **Images without checksums.** Some converted prototypes (Excalibur,
+  Meteroid) have every checksum byte 0. The fast path ignores checksums. The
+  tape path needs MiSTer's "Fix Supercharger Checksums" (`fix_sc_cs`), which
+  the Pocket wrapper ties to 0 today; it recomputes the same values for a
+  good image, so tying it to 1 costs nothing.
 - **Image size.** Some `.bin` dumps are 6,144 bytes (pages only) with no
   header. Stella supplies a default header for those (from z26). Decide
   whether to do the same; it is a fixed 256-byte table.
