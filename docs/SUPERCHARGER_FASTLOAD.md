@@ -1,7 +1,8 @@
 # Supercharger without the BIOS: plan
 
-Status: built (`POCKET_SUPERCHARGER`); hardware test pending. The real-BIOS
-path stays, apart from keeping the tape position through a reset.
+Status: built (`POCKET_SUPERCHARGER`), and working on hardware with and
+without `supercharger.bin`. The real-BIOS path stays, apart from keeping the
+tape position through a reset.
 
 ## Why
 
@@ -179,13 +180,10 @@ tone, which `tb_load +arprobe` logs):
 | With the BIOS (`AR_TAPE=1`): the full load from tape | Running at 16.8 s, after the BIOS's descending loading tone; 0 of 6,144 bytes differ |
 | With the BIOS: the multiload from tape | Load 0 running at 3.3 s; load 1 at 7.1 s, after its own pass of the tape |
 
-**Hardware:**
-
-- `ar_multi.bin` and `ar_tape.bin` from `sim/ar_test.py`: red then green;
-  blue, then yellow after a reset.
-- Games, with and without `supercharger.bin`: Fireball (single load),
-  Dragonstomper or Escape from the Mindmaster (multiload), Party Mix (its
-  second game after a reset), Excalibur or Meteroid (checksums all 0).
+**Hardware** (second test build, with and without `supercharger.bin`):
+Fireball, Frogger, Dragonstomper, Party Mix and Sweat (each reaching its
+next game after a reset) all work. The first build crashed most games
+without the BIOS: it left the load number in `$80` (see above).
 
 ## Open points
 
