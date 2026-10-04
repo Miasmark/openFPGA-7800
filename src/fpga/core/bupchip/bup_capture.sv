@@ -88,15 +88,22 @@ module bup_capture (
 	input  wire        fw_valid,
 
 	// To bup_asset_wr: held message plus toggle.
-	output logic  [2:0] msg_type = 3'd0,
-	output logic [43:0] msg_pl = 44'd0,
-	output logic        msg_tog = 1'b0,
+	output logic  [2:0] msg_type,
+	output logic [43:0] msg_pl,
+	output logic        msg_tog,
 
-	output logic        seq_err = 1'b0, // sticky: a byte out of order
-	output logic        lost = 1'b0,    // sticky: the loader outran the message stream
+	output logic        seq_err, // sticky: a byte out of order
+	output logic        lost,    // sticky: the loader outran the message stream
 	output wire         cart_win,       // the windows (BUP_DEBUG's probe)
 	output wire         fw_win
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial msg_type = 3'd0;
+	initial msg_pl = 44'd0;
+	initial msg_tog = 1'b0;
+	initial seq_err = 1'b0;
+	initial lost = 1'b0;
 	// Message types (bup_asset_wr.sv has the same list).
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
 	localparam logic [2:0] M_FWSTART = 3'd4, M_FWWRITE = 3'd5, M_FWEND = 3'd6;

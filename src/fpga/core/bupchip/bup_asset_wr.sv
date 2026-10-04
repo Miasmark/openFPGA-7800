@@ -43,9 +43,9 @@ module bup_asset_wr (
 	input  wire  [43:0] msg_pl,         // layout: bup_capture.sv
 	input  wire         msg_tog,
 
-	output logic        asset_ready = 1'b0,
-	output logic [23:0] asset_size = 24'd0,
-	output logic        fw_loaded = 1'b0,
+	output logic        asset_ready,
+	output logic [23:0] asset_size,
+	output logic        fw_loaded,
 
 	// ROM port B (cache_ram_dp), the firmware's words; used while fw_loaded
 	// is low.
@@ -68,9 +68,15 @@ module bup_asset_wr (
 	output logic        psram_read_en,
 	input  wire         psram_busy,
 
-	output logic        overrun = 1'b0, // sticky: a message arrived before the last was done
+	output logic        overrun, // sticky: a message arrived before the last was done
 	output wire         fw_start        // FWSTART handled (BUP_DEBUG's firmware check)
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial asset_ready = 1'b0;
+	initial asset_size = 24'd0;
+	initial fw_loaded = 1'b0;
+	initial overrun = 1'b0;
 	// Message types (bup_capture.sv has the same list).
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
 	localparam logic [2:0] M_FWSTART = 3'd4, M_FWWRITE = 3'd5, M_FWEND = 3'd6;

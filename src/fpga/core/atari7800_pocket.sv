@@ -1290,8 +1290,11 @@ module save_ram_dp #(
 	input  wire [31:0]                 din_b,
 	input  wire                        we_b,
 	input  wire                        rd_b,
-	output reg  [31:0]                 dout_b = 32'd0
+	output reg  [31:0]                 dout_b
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial dout_b = 32'd0;
 	localparam WORDS = 1 << WORD_ADDR_BITS;
 
 	wire [7:0]  lane_q [4];

@@ -118,8 +118,8 @@ module bupchip_pocket #(
 	input  wire  [7:0] cmd_data,
 
 	// Audio, clk_sys: signed 16-bit as plain bits (top.sv bupchip_audio_*).
-	output logic [15:0] audio_l = 16'd0,
-	output logic [15:0] audio_r = 16'd0,
+	output logic [15:0] audio_l,
+	output logic [15:0] audio_r,
 
 	// psram.sv's user side, clk_arm.
 	output wire        psram_bank_sel,
@@ -139,6 +139,10 @@ module bupchip_pocket #(
 	output logic [110:0] dbg_load     // bup_status_osd.sv, rows 4-12 and the capture's flags
 `endif
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial audio_l = 16'd0;
+	initial audio_r = 16'd0;
 	// ---- hold ---------------------------------------------------------------------
 	logic [1:0] locked_s = 2'b00, busy_s = 2'b00;
 	logic       hold_sys = 1'b1;

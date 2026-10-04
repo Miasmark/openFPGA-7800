@@ -64,7 +64,7 @@ module bup_asset_cache #(
 	input  wire         clk,            // clk_arm
 	input  wire         pre_run,        // ~hold & fw_loaded & asset_ready
 	input  wire         run,            // cpu_run = pre_run & sweep_done, registered
-	output logic        sweep_done = 1'b0,
+	output logic        sweep_done,
 
 	// bup_cpu (S1).
 	input  wire  [31:0] d_addr,         // this clock's access address
@@ -88,6 +88,9 @@ module bup_asset_cache #(
 	output logic        st_late,        // an access finds its line under fill and waits
 	output logic        st_stall        // W waits this clock
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial sweep_done = 1'b0;
 	// ---- fill state -------------------------------------------------------------
 	logic        f_act = 1'b0;          // a fill is running
 	logic        f_fl = 1'b0;           // one of its reads is in flight

@@ -39,16 +39,27 @@ module bup_load_probe (
 	input  wire        fw_win,
 	input  wire        seq_err,
 
-	output logic  [7:0] foreign = 8'd0,
-	output logic  [5:0] cart_late = 6'd0,
-	output logic  [5:0] fw_late = 6'd0,
-	output logic [11:0] dropped = 12'd0,
-	output logic [11:0] t_pre = 12'd0,
-	output logic [11:0] fw_tail = 12'd0,
-	output logic [11:0] cart_tail = 12'd0,
-	output logic [11:0] word_min = 12'hFFF,
-	output logic [11:0] err_at = 12'd0
+	output logic  [7:0] foreign,
+	output logic  [5:0] cart_late,
+	output logic  [5:0] fw_late,
+	output logic [11:0] dropped,
+	output logic [11:0] t_pre,
+	output logic [11:0] fw_tail,
+	output logic [11:0] cart_tail,
+	output logic [11:0] word_min,
+	output logic [11:0] err_at
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial foreign = 8'd0;
+	initial cart_late = 6'd0;
+	initial fw_late = 6'd0;
+	initial dropped = 12'd0;
+	initial t_pre = 12'd0;
+	initial fw_tail = 12'd0;
+	initial cart_tail = 12'd0;
+	initial word_min = 12'hFFF;
+	initial err_at = 12'd0;
 	logic        c_flag = 1'b0, fw_q = 1'b0, seq_q = 1'b0;
 	logic [11:0] since_byte = 12'hFFF, since_ffall = 12'd0, since_cend = 12'd0, since_word = 12'hFFF;
 	logic  [2:0] last_hi = 3'd0;

@@ -9,6 +9,17 @@ RTL="$FPGA/mister/rtl"
 WORK="${WORK:-$HERE/work}"
 mkdir -p "$WORK/rtl"
 
+# Quartus 21.1 ignores an initializer on an output port declaration
+# (`output logic x = 1'b0`, `output reg x = 0`) and, with Power-Up Don't
+# Care, picks the power-up level itself: a sticky flag became a constant 1
+# (docs/DEVELOPING.md, "Power-up values"). Simulation honours the
+# initializer, so it cannot see this; refuse such declarations in the
+# Pocket's own RTL.
+if grep -nE '^\s*output\s+(logic|reg)\b[^;/]*=' "$FPGA"/core/*.v "$FPGA"/core/*.sv "$FPGA"/core/bupchip/*.sv; then
+	echo "run_sim.sh: an output port above has an initializer, which Quartus ignores; use an initial block" >&2
+	exit 1
+fi
+
 # The MiSTer sources load their ROM/palette images from "rtl/..." relative
 # to the working directory.
 for f in palettes Minnie ooo.hex; do

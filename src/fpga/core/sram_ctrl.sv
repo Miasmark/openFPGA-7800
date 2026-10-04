@@ -64,7 +64,7 @@ module sram_ctrl (
 	input  wire        c_bios,         // this read is the BIOS, not cartridge RAM
 	input  wire [16:0] c_addr,         // cartridge RAM byte, or BIOS byte in [13:0]
 	input  wire  [7:0] c_wdata,
-	output reg   [7:0] c_rdata = 8'hFF,
+	output reg   [7:0] c_rdata,
 
 	// Flicker Blend frame (clk_sys), the spram it replaces: q follows address
 	input  wire        fb_en,          // 2600 mode with Flicker Blend on
@@ -78,8 +78,8 @@ module sram_ctrl (
 	input  wire        sk_we,
 	input  wire [14:0] sk_addr,
 	input  wire  [7:0] sk_wdata,
-	output reg         sk_ack = 1'b0,
-	output reg   [7:0] sk_rdata = 8'hFF,
+	output reg         sk_ack,
+	output reg   [7:0] sk_rdata,
 
 	// BIOS download (clk_sys, one pulse per byte, at least ten clk_sdram apart)
 	input  wire        dl_wr,
@@ -94,16 +94,27 @@ module sram_ctrl (
 	input  wire        br_rd,
 	input  wire [12:0] br_addr,
 	input  wire [31:0] br_wdata,
-	output reg  [31:0] br_rdata = 32'hFFFFFFFF,
+	output reg  [31:0] br_rdata,
 
 	// Pins
-	output reg  [16:0] sram_a = 17'd0,
+	output reg  [16:0] sram_a,
 	inout  wire [15:0] sram_dq,
-	output reg         sram_oe_n = 1'b1,
-	output reg         sram_we_n = 1'b1,
-	output reg         sram_ub_n = 1'b1,
-	output reg         sram_lb_n = 1'b1
+	output reg         sram_oe_n,
+	output reg         sram_we_n,
+	output reg         sram_ub_n,
+	output reg         sram_lb_n
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial c_rdata = 8'hFF;
+	initial sk_ack = 1'b0;
+	initial sk_rdata = 8'hFF;
+	initial br_rdata = 32'hFFFFFFFF;
+	initial sram_a = 17'd0;
+	initial sram_oe_n = 1'b1;
+	initial sram_we_n = 1'b1;
+	initial sram_ub_n = 1'b1;
+	initial sram_lb_n = 1'b1;
 
 localparam [16:0] FB_BASE   = 17'h10000;
 localparam [16:0] SK_BASE   = 17'h18000;

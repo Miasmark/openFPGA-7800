@@ -430,6 +430,15 @@ constant drivers") but only a warning in the sim.
 - **Debug log.** Turning on the Pocket's developer debug logging writes
   `APF Debug Log` text files showing which files each slot loaded and their
   sizes. Ask testers for one whenever loading or saving misbehaves.
+- **Power-up values.** Give a register its power-up value in an `initial`
+  block or on an internal declaration (`logic x = 1'b0;`), never on an
+  output port (`output logic x = 1'b0`, `output reg x = 0`). Quartus 21.1
+  ignores the latter without a warning, and with Power-Up Don't Care (on by
+  default) picks the level itself. A flag that is only ever set then becomes
+  a constant 1: the BupChip's three capture flags did, and lit test1's and
+  test2's red boxes on every load. Simulation honours the initializer, so
+  only the map report's "Registers Removed During Synthesis" shows it.
+  `run_sim.sh` refuses such declarations in `src/fpga/core`.
 - **A78 headers.** The core maps POKEY, RAM and save devices only as the
   header declares, as MiSTer does. Many dumps have wrong headers. Check the
   header before debugging the core. Commando's "missing music" was a bad

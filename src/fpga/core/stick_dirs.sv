@@ -18,8 +18,11 @@ module stick_dirs #(
 	input  wire        clk,
 	input  wire        reset,
 	input  wire [15:0] stick,        // {y, x}, unsigned
-	output reg   [3:0] dirs = 4'd0   // 0 R, 1 L, 2 D, 3 U (MiSTer joystick order)
+	output reg   [3:0] dirs   // 0 R, 1 L, 2 D, 3 U (MiSTer joystick order)
 );
+	// Power-up values. Quartus ignores an initializer on an output port
+	// declaration and, with Power-Up Don't Care, may pick either level.
+	initial dirs = 4'd0;
 	reg  [7:0] rest_x = 8'd128, rest_y = 8'd128;
 	reg        rest_valid = 1'b0;
 
