@@ -5,7 +5,8 @@ Stress benches for step 4 of `docs/BUPCHIP_CORE.md` (the Pocket wrapper around A
 ```sh
 sim/bupchip/s4/stress/run_all.sh        # everything below, one after another, about 25 minutes on one core
 sim/bupchip/s4/stress/run_cstress.sh    # the asset cache: 4 configurations x 6 latencies, psram.sv, 10 mutations (7 min)
-sim/bupchip/s4/stress/run_capstress.sh  # the download path and its crossing (3 min)
+sim/bupchip/s4/stress/run_capstress.sh  # the download path and its crossing (4 min)
+sim/bupchip/s4/stress/run_slotswitch.sh # the Pocket's slot sequence through the real loader (30 s)
 sim/bupchip/s4/stress/run_tick.sh       # the 48 kHz tick's crossing (iverilog, 2 min)
 sim/bupchip/s4/stress/run_bounds.sh     # the asset window's bounds through tb_s4.sv (1 min)
 sim/bupchip/s4/stress/run_pophead.sh    # the PCM FIFO's head race and the mute through tb_s4.sv (3 min)
@@ -23,6 +24,7 @@ Verilator is `/opt/verilator-5.040` if present (`VERILATOR` overrides); `run_tic
 | `cache_ram_poison.v` | Drop-in for `src/fpga/mister/rtl/cache_ram.v` (same modules and ports, simulation only): a read registered on the same edge as a write of the same address through the other port returns garbage, not the old word. The data and ROM/RAM models return the inverted word, so any use of it is wrong data; `cache_ram_tdp_dc` (tags, PCM FIFO) returns the inverted, old or new word at random (`+poison_tdp`, 0 for always inverted), so a valid bit can come back either way for a port-watching bench to catch |
 | `tb_cstress.sv`, `run_cstress.sh` | The asset cache behind `bup_asset_wr`'s arbiter, driven as S1 drives it, on the poisoning M10Ks (below) |
 | `tb_capstress.sv`, `run_capstress.sh` | `bup_capture` + message crossing + `bup_asset_wr` + `psram.sv` on `../psram_model.sv`, random downloads, synchronous and asynchronous `clk_arm` (below) |
+| `tb_slotswitch.sv`, `run_slotswitch.sh` | The real `data_loader` (with a `dcfifo` whose pointers cross through synchroniser stages), `core_top`'s slot flags and every `data.json` slot in order, into `bup_capture`, `bup_asset_wr`, `psram.sv` and `bup_load_probe` (below) |
 | `tb_tick.sv`, `run_tick.sh` | `bup_tick48k` against a drifting, jittered `clk_74a` |
 | `fw_bounds.S`, `run_bounds.sh` | A firmware image that reads an ARSC block back with every load form and then loads at a probe offset, through `../tb_s4.sv` |
 | `fw_pophead.S`, `run_pophead.sh` | A firmware image that pushes single frames into the empty PCM FIFO at every phase of the 48 kHz pop, and optionally (`FAULTAT`) writes FAULT after frame M, through `../tb_s4.sv`, on `cache_ram.v` and on the poisoning models, plus wrappers without `tick_hold` and without the mute that must fail |
@@ -43,6 +45,14 @@ Checked on every clock: each completed load's bytes against the contents in effe
 ## The download path (`tb_capstress.sv`)
 
 300 random downloads per run: cartridges with 0-70,000-byte blocks (every size up to 49, sizes around 16-byte lines, odd lengths, R = 0, odd R, a header declaring more ROM than the file has), firmware files of 0-17,000 bytes (16,383-16,385 included); the loader at 2.5 `clk_sys` per byte, with random extra, or slower; downloads back to back (the next one starting in the clock after the last ends: a cartridge then a cartridge, a firmware download then either; a cartridge then a firmware download only with `+b2bfw` / `+xstream`, finding 1); with `+fwrise`, half the firmware downloads present their first byte in the clock `fw_download` rises (finding 4). After each download that is not followed straight away by another, both states are checked: `asset_size`, `asset_ready`, every block byte in the PSRAM model and the exact number of PSRAM writes; `fw_loaded`, the ROM words as port B takes them and the exact number of ROM writes. A reader stands in for the cache from two `clk_arm` clocks after `asset_ready` and `fw_loaded` until two after either falls, reading the block's last and first halfwords first and then at random, and checks each read against the block published by the END it ran after (reads in flight at a hold are dropped).
+
+Messages too close together cannot happen any more (bup_capture queues every one, "Slot switches" below), and the bench counts them anyway from the toggle (`lost_x`, must be 0); `lost_s` counts a halfword or word completing while the one before still waits, which only `+fast` (a byte every 2 `clk_sys`) must cause. The checks wait 9-12 µs after a download, as END and FWEND now leave 64 `clk_sys` after its flag falls.
+
+## Slot switches (`tb_slotswitch.sv`)
+
+The first hardware test (`docs/BUPCHIP_CORE.md`, step 5) lit the capture-error box on every load, with or without the ARSC block. On the Pocket, `core_top`'s `is_downloading` stays high from the first requestwrite to allcomplete, and between slots only `download_slot` changes; the loader's 4-entry FIFO and 10-`clk_sdram` read machine can still hold the last bytes of the slot before. The bench sends the cartridge, BIOS, the two save slots, `highscor.rom`, `supercharger.bin`, `hsc.a78` and `bupchip.bin` as `data.json` orders them, with made-up contents, a bridge word every `+word` `clk_74a` (75), the next requestwrite (or allcomplete) `+gap` `clk_74a` after a slot's last bridge write and its first word `+pre` after that.
+
+Taking bytes by slot flag, as before the fix (`+flags`), at a gap of 30 `clk_74a` or less: `hsc.a78`'s last byte reaches the firmware download, which sees a word begin midway (`seq_err`, the box); at 20 or less the firmware also loses its own last word to allcomplete, and the cartridge its block's last bytes to the BIOS slot. Taking them by address with the windows (`bup_capture.sv`, "Which bytes are the BupChip's"), every gap from 400 down to 0 loads both exactly, and the probe counts what the windows sorted out (bytes of another slot under a flag, bytes taken after a flag fell, none dropped). `run_slotswitch.sh` runs gaps 400 to 0, with and without the block, the firmware first, no optional slots, the next slot's first word 20 `clk_74a` behind its request, words every 60 `clk_74a` and 5-stage synchronisers, then the two `+flags` runs that must raise `seq_err`.
 
 ## The PCM FIFO's head and the mute (`run_pophead.sh`)
 

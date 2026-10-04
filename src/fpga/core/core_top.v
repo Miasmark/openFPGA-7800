@@ -706,6 +706,16 @@ always @(posedge clk_sys) begin
     ioctl_addr_r <= ioctl_addr[24:0];
     ioctl_dout_r <= ioctl_dout;
 end
+`ifdef POCKET_BUPCHIP
+// The BupChip takes its bytes by their own bridge address, not by the slot
+// flags below: bits 27:25 tell the slots apart (data.json's addresses), and
+// a slot's last bytes can still be in the loader when the host's next
+// requestwrite or allcomplete moves the flags (bup_capture.sv, "Which bytes
+// are the BupChip's").
+    reg     [2:0]   ioctl_hi_r = 3'd0;
+always @(posedge clk_sys)
+    ioctl_hi_r   <= ioctl_addr[27:25];
+`endif
 
 // Into clk_sys
     reg     [2:0]   dl_s, cart_s, bios_s, hscfw_s, arfw_s, bupfw_s, rst_s, mrst_s;
@@ -844,6 +854,8 @@ atari7800_pocket atari (
     .arfw_download  ( arfw_download ),
 `ifdef POCKET_BUPCHIP
     .bupfw_download ( bupfw_download ),
+    .ioctl_wr_any   ( ioctl_wr_r ),
+    .ioctl_hi       ( ioctl_hi_r ),
 `endif
     .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
     .ioctl_addr     ( ioctl_addr_r ),

@@ -37,6 +37,8 @@ module atari7800_pocket
 	input  wire        arfw_download,   // Supercharger BIOS (2 KiB)
 `ifdef POCKET_BUPCHIP
 	input  wire        bupfw_download,  // BupChip firmware, bupchip.bin (up to 16 KiB)
+	input  wire        ioctl_wr_any,    // every loader byte, whatever slot flag is up (BupChip)
+	input  wire  [2:0] ioctl_hi,        // bits 27:25 of its bridge address (BupChip)
 `endif
 	input  wire        ioctl_wr,
 	input  wire [24:0] ioctl_addr,
@@ -1143,6 +1145,7 @@ wire [21:0] psr_addr;
 wire [15:0] psr_din, psr_dout;
 `ifdef BUP_DEBUG
 wire [31:0] bup_dbg_status, bup_dbg_halt_pc;
+wire [110:0] bup_dbg_load;
 `endif
 
 bupchip_pocket bupchip
@@ -1155,13 +1158,13 @@ bupchip_pocket bupchip
 	.souper_profile(souper_profile),
 	.pause         (pause_core),
 
-	.load_start    (~old_cart_download && cart_download),
+	.byte_valid    (ioctl_wr_any),
+	.byte_hi       (ioctl_hi),
 	.load_addr     (ioctl_addr),
-	.load_valid    (ioctl_wr && cart_download),
 	.load_data     (ioctl_dout),
+	.load_start    (~old_cart_download && cart_download),
 	.load_end      (old_cart_download && ~cart_download),
 	.fw_download   (bupfw_download),
-	.fw_valid      (ioctl_wr && bupfw_download),
 
 	.cmd_valid     (bup_cmd_valid),
 	.cmd_data      (bup_cmd_data),
@@ -1181,7 +1184,8 @@ bupchip_pocket bupchip
 `ifdef BUP_DEBUG
 	,
 	.dbg_status    (bup_dbg_status),
-	.dbg_halt_pc   (bup_dbg_halt_pc)
+	.dbg_halt_pc   (bup_dbg_halt_pc),
+	.dbg_load      (bup_dbg_load)
 `endif
 );
 
@@ -1225,6 +1229,7 @@ bup_status_osd bup_osd
 	.en      (souper_profile),
 	.status  (bup_dbg_status),
 	.halt_pc (bup_dbg_halt_pc),
+	.load    (bup_dbg_load),
 	.ce_pix  (ce_pix),
 	.hblank  (HBlank),
 	.vblank  (VBlank),

@@ -66,7 +66,7 @@ module tb_system;
 
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
-		.clk_arm(clk_arm), .bupfw_download(1'b0),
+		.clk_arm(clk_arm), .bupfw_download(1'b0), .ioctl_wr_any(1'b0), .ioctl_hi(3'd0),
 		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
 		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),

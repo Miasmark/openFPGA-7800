@@ -76,7 +76,7 @@ sed 's|cpu_run \&\& pcm_available \&\& !paused \&\& !muted ? pcm_frame|cpu_run \
 build() {       # build OBJ POCKET_SRC [RAM_MODEL]
 	local obj="$1" pocket="$2" ram="${3:-$HERE/cache_ram_poison.v}"
 	local srcs=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$ram" "$RTL/bupchip_peripheral.sv"
-		"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv"
+		"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv" "$CORE/bup_load_probe.sv"
 		"$CORE/bup_asset_cache.sv" "$pocket" "$PU/psram.sv" "$HERE/../psram_model.sv" "$HERE/../tb_s4.sv")
 	if [ -x "$obj/vtb" ] && [ -z "$(find "${srcs[@]}" "$0" -newer "$obj/vtb" 2>/dev/null)" ]; then return 0; fi
 	rm -rf "$obj"

@@ -38,13 +38,14 @@
 // ceil(min(N, 16,384) / 4) ROM writes. Always: seq_err, lost, the
 // simulation-only byte order check and overrun stay 0.
 //
-// Every message that leaves less than 5 clk_sys after the one before (what
-// bup_capture flags as lost) is counted as "same" (both from one download:
-// the loader too fast) or "cross" (a cartridge's tail WRITE or END still
-// queued when the next download's first FWWRITE leaves).
+// Every halfword or word that completes while the one before still waits
+// to leave (what bup_capture flags as lost: the loader too fast) is counted
+// as "same", and every message that leaves less than 5 clk_sys after the one
+// before as "cross" (the receiver's spacing; bup_capture queues every
+// message, so this must stay 0 whatever the downloads do).
 //
 //   +n=N downloads (default 300)  +seed=S  +maxblock=B (70,000)
-//   +fast   one byte every 2 clk_sys: a WRITE every 4 clocks, which must
+//   +fast   one byte every 2 clk_sys: a halfword every 4 clocks, which must
 //           raise lost (the check of the detector)
 //   +b2bfw  a cartridge followed straight by the next download may be
 //           followed by a firmware download (otherwise only by a cartridge):
@@ -250,24 +251,26 @@ module tb_capstress;
 		if (!run_d[2] && !rd_ack) rd_req <= 0;
 	end
 
-	// A message that has to leave too soon after the last (bup_capture's lost):
-	// "cross" when the two belong to different downloads (a cartridge's tail
-	// WRITE or END still queued when the firmware download's first FWWRITE
-	// leaves), "same" otherwise (the loader too fast).
-	function automatic bit is_fw(input logic [2:0] t);
-		return t >= 3'd4;
-	endfunction
+	// A halfword or word completing while the one before still waits (bup_
+	// capture's lost), and a message leaving less than 5 clk_sys after the
+	// last (the toggle seen changing too soon).
+	logic tog_q = 0;
+	int   since = 100;
 	always @(posedge clk_sys) begin
-		if (cap.direct || cap.queued) begin
-			logic [2:0] t;
-			t = cap.direct ? (cap.a_pair ? 3'd2 : 3'd5) : cap.s_type;
-			if (!cap.can_send) begin
-				if (is_fw(t) != is_fw(cap.msg_type)) n_lost_x++; else n_lost_s++;
-				if (n_lostmsg < 5)
-					$display("%0t: message type %0d (direct %0d) only %0d clk_sys after the last (type %0d)",
-						$time, t, cap.direct, cap.gap + 1, cap.msg_type);
-				n_lostmsg++;
-			end
+		if ((cap.a_pair && cap.p_write && !cap.send_write) ||
+		    (cap.f_word && cap.p_fwword && !cap.send_fwword && !cap.fw_rise)) begin
+			n_lost_s++;
+			if (n_lostmsg < 5)
+				$display("%0t: a %0s completed while the last still waited", $time, cap.a_pair ? "halfword" : "word");
+			n_lostmsg++;
+		end
+		tog_q <= cap.msg_tog;
+		since <= cap.msg_tog != tog_q ? 1 : since + 1;
+		if (cap.msg_tog != tog_q && since < 5) begin
+			n_lost_x++;
+			if (n_lostmsg < 5)
+				$display("%0t: message type %0d only %0d clk_sys after the last", $time, cap.msg_type, since);
+			n_lostmsg++;
 		end
 	end
 	longint n_lost_x = 0, n_lost_s = 0;
@@ -477,7 +480,9 @@ module tb_capstress;
 				if (!(xstream && (samefw || overlapfw))) @(posedge clk_sys);
 				continue;
 			end
-			gap = 3000000 + $urandom_range(3000000);    // 3-6 us for the messages to drain
+			// 9-12 us for the messages to drain: END and FWEND leave 64 clk_sys
+			// (4.5 us) after the flag falls (bup_capture.sv's windows)
+			gap = 9000000 + $urandom_range(3000000);
 			#(gap);
 			@(posedge clk_sys);
 			check();

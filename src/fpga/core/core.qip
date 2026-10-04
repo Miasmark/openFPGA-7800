@@ -77,6 +77,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) b
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_wr.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_cache.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_tick48k.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_load_probe.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_status_osd.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bupchip_pocket.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/bupchip_peripheral.sv]

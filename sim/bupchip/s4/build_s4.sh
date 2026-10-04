@@ -33,7 +33,7 @@ OBJ="$WORK/obj_s4_${PSRAM}_d${DEPTH}_pre${PRE}_pf${PF}"
 [ "$THR" = 16 ] || OBJ="${OBJ}_thr$THR"
 DEFS=(-DBUP_DEBUG -DPCM_DEPTH="$DEPTH" -DPREEMPT="$PRE" -DPREFETCH="$PF" -DBUP_THROTTLE="$THR")
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
-	"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv"
+	"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv" "$CORE/bup_load_probe.sv"
 	"$CORE/bup_asset_cache.sv" "$CORE/bupchip_pocket.sv")
 case "$PSRAM" in
 	real)    SRCS+=("$PU/psram.sv" "$HERE/psram_model.sv") ;;

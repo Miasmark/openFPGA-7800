@@ -178,15 +178,16 @@ module tb_s4;
 		.BUP_THROTTLE(`BUP_THROTTLE)) dut (
 		.clk_sys, .clk_arm, .clk_74a,
 		.pll_locked, .pll_busy, .souper_profile(souper), .pause,
-		.load_start(cart_dl && !cart_dl_q), .load_addr(ld_addr), .load_valid(ld_wr && cart_dl),
-		.load_data(ld_data), .load_end(!cart_dl && cart_dl_q),
-		.fw_download(fw_dl), .fw_valid(ld_wr && fw_dl),
+		.byte_valid(ld_wr && (cart_dl || fw_dl)), .byte_hi(fw_dl ? 3'd5 : 3'd0),	// slot address bits 27:25
+		.load_addr(ld_addr), .load_data(ld_data),
+		.load_start(cart_dl && !cart_dl_q), .load_end(!cart_dl && cart_dl_q),
+		.fw_download(fw_dl),
 		.cmd_valid, .cmd_data,
 		.audio_l, .audio_r,
 		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
 		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
 		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
-		.dbg_status, .dbg_halt_pc);
+		.dbg_status, .dbg_halt_pc, .dbg_load());
 
 `ifdef PSRAM_STANDIN
 	psram_standin ps (

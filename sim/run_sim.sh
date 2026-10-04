@@ -68,7 +68,7 @@ SRCS=(
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 	"$RTL/bupchip_peripheral.sv" "$FPGA/pocket_utils/psram.sv"
-	"$FPGA"/core/bupchip/{bup_cpu,bup_capture,bup_asset_wr,bup_asset_cache,bup_tick48k,bup_status_osd,bupchip_pocket}.sv
+	"$FPGA"/core/bupchip/{bup_cpu,bup_capture,bup_asset_wr,bup_asset_cache,bup_tick48k,bup_load_probe,bup_status_osd,bupchip_pocket}.sv
 	"$HERE/bupchip/s4/psram_model.sv"
 )
 

@@ -73,8 +73,10 @@ module tb_load;
 
 	// core_top registers the loader's output on clk_sys
 	logic ioctl_wr_r = 0; logic [24:0] ioctl_addr_r = 0; logic [7:0] ioctl_dout_r = 0;
+	logic [2:0] ioctl_hi_r = 0;	// POCKET_BUPCHIP: bits 27:25, which slot's address
 	always @(posedge clk_sys) begin
 		ioctl_wr_r <= ioctl_wr; ioctl_addr_r <= ioctl_addr[24:0]; ioctl_dout_r <= ioctl_dout;
+		ioctl_hi_r <= ioctl_addr[27:25];
 	end
 
 	// ---------------- system ----------------
@@ -102,7 +104,7 @@ module tb_load;
 
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
-		.clk_arm(clk_arm), .bupfw_download(bupfw_download),
+		.clk_arm(clk_arm), .bupfw_download(bupfw_download), .ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
 		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
 		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),

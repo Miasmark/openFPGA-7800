@@ -68,7 +68,8 @@ module bup_asset_wr (
 	output logic        psram_read_en,
 	input  wire         psram_busy,
 
-	output logic        overrun = 1'b0  // sticky: a message arrived before the last was done
+	output logic        overrun = 1'b0, // sticky: a message arrived before the last was done
+	output wire         fw_start        // FWSTART handled (BUP_DEBUG's firmware check)
 );
 	// Message types (bup_capture.sv has the same list).
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
@@ -109,6 +110,7 @@ module bup_asset_wr (
 		end
 	end
 
+	assign fw_start = done && m_type == M_FWSTART;
 	assign rom_we = m_v && m_type == M_FWWRITE;
 	assign rom_wa = m_pl[43:32];
 	assign rom_wd = m_pl[31:0];

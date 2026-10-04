@@ -57,8 +57,9 @@
 // pocket_utils/psram.sv, instantiated by the parent on clk_arm with
 // CLOCK_SPEED = 28.636364 and bank 0 of cram0).
 //
-// BUP_DEBUG adds dbg_status / dbg_halt_pc (clk_arm), shadow FIFO counters and
-// the throttle (BUP_THROTTLE of every 16 clocks may start an instruction):
+// BUP_DEBUG adds dbg_status / dbg_halt_pc (clk_arm), dbg_load, shadow FIFO
+// counters and the throttle (BUP_THROTTLE of every 16 clocks may start an
+// instruction):
 //
 //   dbg_status [31] cpu_run      [30] fw_loaded     [29] asset_ready
 //              [28] halted       [27:24] halt_code
@@ -67,8 +68,12 @@
 //              [10:0] lowest PCM level since the FIFO first reached its
 //                     watermark (the boot's prefill), saturating at 2,047
 //                     (only reachable with PCM_DEPTH above 1,024)
+//   dbg_load   the capture's seq_err and lost, the receiver's overrun, the
+//              load probe's counts (bup_load_probe.sv) and the firmware
+//              check below; bup_status_osd.sv has the layout
 //
-// The flags are sticky until the next hold. Shadow counters: command level
+// The shadow flags (overflows, underflow) are cleared by the hold; capture
+// error, seq_err, lost and overrun are sticky from power-up. Shadow counters: command level
 // +1 on cmd_valid, -1 on a read of 0x04 while not empty, 0 on a flush;
 // overflow is cmd_valid at 8. PCM level +1 on a push below PCM_DEPTH, -1 on a
 // pop while not empty; overflow is a push at PCM_DEPTH, underflow a pop while
@@ -94,16 +99,19 @@ module bupchip_pocket #(
 	input  wire        souper_profile,  // clk_sys (top.sv)
 	input  wire        pause,           // clk_sys (pause_core)
 
-	// Cartridge download, clk_sys (atari7800_pocket.sv's mapper_load_*).
-	input  wire        load_start,
+	// Downloads, clk_sys. Every byte the loader delivers (byte_valid, with
+	// load_addr / load_data) and bits 27:25 of its bridge address: the
+	// cartridge slot's bytes (0x00000000) have 0 there, bupchip.bin's
+	// (0x0A000000) 5, whatever slot flag is up (bup_capture.sv, "Which bytes
+	// are the BupChip's"). The cartridge's start and end
+	// (atari7800_pocket.sv's mapper_load_*), and the firmware slot's flag.
+	input  wire        byte_valid,
+	input  wire  [2:0] byte_hi,
 	input  wire [24:0] load_addr,
-	input  wire        load_valid,
 	input  wire  [7:0] load_data,
+	input  wire        load_start,
 	input  wire        load_end,
-	// Firmware slot (bupchip.bin), clk_sys: download flag and byte strobe;
-	// the bytes come on load_addr / load_data.
 	input  wire        fw_download,
-	input  wire        fw_valid,
 
 	// $8007 commands, clk_sys, one clock per command (bup_cmd_*_eff).
 	input  wire        cmd_valid,
@@ -127,7 +135,8 @@ module bupchip_pocket #(
 `ifdef BUP_DEBUG
 	,
 	output logic [31:0] dbg_status,
-	output logic [31:0] dbg_halt_pc
+	output logic [31:0] dbg_halt_pc,
+	output logic [110:0] dbg_load     // bup_status_osd.sv, rows 4-12 and the capture's flags
 `endif
 );
 	// ---- hold ---------------------------------------------------------------------
@@ -156,14 +165,16 @@ module bupchip_pocket #(
 	// ---- capture and write receiver ------------------------------------------------
 	wire  [2:0] msg_type;
 	wire [43:0] msg_pl;
-	wire        msg_tog, cap_seq_err, cap_lost, wr_overrun;
+	wire        msg_tog, cap_seq_err, cap_lost, cap_cart_win, cap_fw_win, wr_overrun, wr_fw_start;
+	wire        load_valid = byte_valid && byte_hi == 3'd0;
+	wire        fw_valid   = byte_valid && byte_hi == 3'd5;
 
 	bup_capture capture (
 		.clk(clk_sys),
 		.load_start, .load_addr, .load_valid, .load_data, .load_end,
 		.fw_download, .fw_valid,
 		.msg_type, .msg_pl, .msg_tog,
-		.seq_err(cap_seq_err), .lost(cap_lost));
+		.seq_err(cap_seq_err), .lost(cap_lost), .cart_win(cap_cart_win), .fw_win(cap_fw_win));
 
 	wire        rom_we;
 	wire [11:0] rom_wa;
@@ -179,7 +190,7 @@ module bupchip_pocket #(
 		.rd_req, .rd_addr, .rd_ack,
 		.psram_bank_sel, .psram_addr, .psram_write_en, .psram_data_in,
 		.psram_write_high_byte, .psram_write_low_byte, .psram_read_en, .psram_busy,
-		.overrun(wr_overrun));
+		.overrun(wr_overrun), .fw_start(wr_fw_start));
 
 	// ---- the CPU and its memories -------------------------------------------------------
 	wire  [11:0] rom_addr;
@@ -369,6 +380,51 @@ module bupchip_pocket #(
 		sh_cmd_ovf, sh_pcm_ovf, sh_pcm_unf, muted, fault_code,
 		cap_err_a[1] | wr_overrun, sh_min11};
 	assign dbg_halt_pc = halt_pc;
+
+	// The firmware as written into the ROM (clk_arm): words since FWSTART,
+	// whether each went to the word after the last, and their CRC-32 (zlib's,
+	// over the bytes in file order) against bupchip.bin's published one
+	// (docs/BUPCHIP.md, "Files the user supplies on the Pocket").
+	function automatic logic [31:0] crc32_word(input logic [31:0] c, input logic [31:0] w);
+		logic [31:0] x;
+		x = c ^ w;
+		for (int i = 0; i < 32; i++)
+			x = x[0] ? (x >> 1) ^ 32'hEDB88320 : x >> 1;
+		return x;
+	endfunction
+	logic [31:0] fc_crc = 32'hFFFFFFFF;
+	logic [11:0] fc_count = 12'd0, fc_next = 12'd0;
+	logic        fc_order = 1'b1;
+	always_ff @(posedge clk_arm)
+		if (wr_fw_start) begin
+			fc_crc <= 32'hFFFFFFFF;
+			fc_count <= 12'd0;
+			fc_next <= 12'd0;
+			fc_order <= 1'b1;
+		end else if (rom_we && !fw_loaded) begin
+			fc_crc <= crc32_word(fc_crc, rom_wd);
+			if (fc_count != 12'hFFF) fc_count <= fc_count + 12'd1;
+			if (rom_wa != fc_next) fc_order <= 1'b0;
+			fc_next <= rom_wa + 12'd1;
+		end
+	wire fc_crc_ok = fw_loaded && ~fc_crc == 32'h95B8B4F8;
+
+	// What the loader delivered around the slot switches (clk_sys).
+	wire  [7:0] pr_foreign;
+	wire  [5:0] pr_cart_late, pr_fw_late;
+	wire [11:0] pr_dropped, pr_t_pre, pr_fw_tail, pr_cart_tail, pr_word_min, pr_err_at;
+	bup_load_probe probe (
+		.clk(clk_sys), .byte_wr(byte_valid), .byte_hi, .byte_addr(load_addr),
+		.load_start, .load_end, .fw_download, .cart_win(cap_cart_win), .fw_win(cap_fw_win),
+		.seq_err(cap_seq_err),
+		.foreign(pr_foreign), .cart_late(pr_cart_late), .fw_late(pr_fw_late), .dropped(pr_dropped),
+		.t_pre(pr_t_pre), .fw_tail(pr_fw_tail), .cart_tail(pr_cart_tail), .word_min(pr_word_min),
+		.err_at(pr_err_at));
+
+	// Display only: bup_status_osd samples it on clk_sys.
+	assign dbg_load = {cap_seq_err, cap_lost, wr_overrun,
+		pr_err_at, pr_word_min, pr_cart_tail, pr_fw_tail, pr_t_pre, pr_dropped,
+		pr_cart_late, pr_fw_late, fc_crc_ok, fc_order, 2'b00, pr_foreign, fc_count};
 `endif
 endmodule
 
