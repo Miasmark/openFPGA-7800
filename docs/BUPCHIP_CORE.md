@@ -673,7 +673,7 @@ The bypass means the array is only ever read for data written at least two clock
   - That is 175 ns at 28.636 MHz, 233 ns at 21.477 MHz and 235 ns at 21.281 MHz.
   - The cycle model already assumes 5 clocks per halfword.
 - Fixing the file instead means making each total at least one clock longer than its phases, plus an elaboration check that the state numbers are distinct. That still takes 5 clocks at 21.477 MHz. A 4-clock controller would need a different state machine, and gains little: the model's 4-clock variant stalls 0.10% instead of 0.13%.
-- `psram.sv` defines `` `MAX`` (`:30`), which `data_loader.sv:61` also defines, and declares `rtoi` at compilation-unit scope (`:25-27`). Expect Quartus redefinition warnings once both files are in `core.qip`. The two `` `MAX`` definitions are identical.
+- `psram.sv` defines `` `MAX`` (`:30`), which `data_loader.sv:61` also defines, and declares `rtoi` at compilation-unit scope (`:25-27`). The two `` `MAX`` definitions are identical, and Quartus 21.1 builds both files without a redefinition warning (step 5's map report).
 
 ### Firmware load
 
@@ -838,7 +838,7 @@ Also:
 | `ap_core.qsf` | Add `VERILOG_MACRO "POCKET_BUPCHIP=1"` next to `:736-746`. Keep `NO_ARM_MAPPER`, `NO_BUPCHIP` and `NO_DDRAM`. Add `FAST_*_REGISTER` on `cram0_*`, as for the SRAM (`:758-765`). Step 5 also set `BUP_DEBUG=1` (test builds only) and the fitter seed (3). |
 | `sim/run_sim.sh` | Add `-DPOCKET_BUPCHIP` to the macro list (`:77-81`), the new files and `psram.sv` to `SRCS`. The testbenches load the firmware through the data-slot path from a file named at run time (a local `bupchip.bin`, never committed). `ap_core.qsf:741-743` promises that simulation builds the same set as the qsf. |
 | `sim/tb_system.sv`, `sim/tb_load.sv` | Drive `clk_arm`, `clk_74a` and a `cram0` PSRAM model on the `atari7800_pocket` instances (`tb_system.sv:49`, `tb_load.sv:85`). Step 5: `tb_load.sv` also loads the firmware slot (`+bupfw`, `+bupfwlast`) and watches the BupChip (`+bupms`, `+bupout`), and `sim/souper_test.py` builds the Souper test cartridge `run_sim.sh` plays. |
-| `core/core.qip` | Add the new files, `../mister/rtl/bupchip_peripheral.sv` and `../pocket_utils/psram.sv`. Fix the stale "unmodified except `top.sv`" comment (`:3-5`). Expect the `` `MAX`` redefinition warning described under "Controller". |
+| `core/core.qip` | Add the new files, `../mister/rtl/bupchip_peripheral.sv` and `../pocket_utils/psram.sv`. Fix the stale "unmodified except `top.sv`" comment (`:3-5`). The identical `` `MAX`` definitions raise no warning ("Controller"). |
 | `core/core_constraints.sdc` | Comment: add counter[3] (`:3-11`). Step 5 added a fitter-only over-constraint (1 ns more setup into `clk_sdram`, 0.1 ns more hold into `clk_sys`); see step 5. |
 | `mister/POCKET_CHANGES.md` | Add a `POCKET_BUPCHIP` row to the switch table (`:80-92`) and update "Three build switches" and "all four" |
 | `THIRD_PARTY_NOTICES.md` | Add `psram.sv` to the agg23 row (`:25`). Add the BupChip firmware to the user-supplied list in the paragraph at `:49-54`, which stays true: no console or peripheral firmware is built in. |

@@ -13,7 +13,9 @@
 # the 5-clock spacing; it now queues it). Last, +fwrise: the firmware's first
 # byte in the clock fw_download rises (finding 4: that byte was dropped),
 # and +fwfall: the last byte in the clock it falls (a tail FWWRITE used to
-# rewrite that word with a zero byte).
+# rewrite that word with a zero byte). Then +samefw / +overlapfw: the
+# firmware slot's flag rising in the clock the cartridge's falls, or one
+# clock before, as the Pocket switches download_slot from 0x100 to 0x109.
 #   ./run_capstress.sh
 # Environment: N (downloads per run, default 300), CAPTURE (another
 # bup_capture.sv to test, e.g. a fix), WORK (default
@@ -80,5 +82,9 @@ run fwrise_2x     pass +seed=15 +fwrise
 run fwrise_xstream pass +seed=16 +ratio=15 +xstream +fwrise
 run fwfall_2x     pass +seed=17 +fwfall
 run fwfall_15x_pal pass +seed=18 +ratio=15 +pal +fwfall
+run samefw_2x     pass +seed=21 +xstream +samefw
+run samefw_15x_pal pass +seed=22 +ratio=15 +pal +xstream +samefw
+run overlapfw_2x  pass +seed=23 +xstream +overlapfw
+run overlapfw_async pass +seed=24 +async +arm_ps=23529 +armjit=3000 +xstream +overlapfw
 [ "$ok" = 1 ] && echo "run_capstress.sh: all passed" || echo "run_capstress.sh: FAILED"
 [ "$ok" = 1 ]

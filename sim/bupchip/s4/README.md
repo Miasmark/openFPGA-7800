@@ -5,8 +5,8 @@ Step 4 of `docs/BUPCHIP_CORE.md`: the wrapper, memories, asset path and PSRAM ar
 ## Running everything
 
 ```sh
-sim/bupchip/s4/check.sh sim/work/bupchip/game/rv.a78   # every check: 27 of 27, 47 minutes with JOBS=3
-sim/bupchip/s4/check.sh                                # without the game: 15 of 15 (PSRAM, cache, stress, game-free system runs), 27 minutes
+sim/bupchip/s4/check.sh sim/work/bupchip/game/rv.a78   # every check: 28 of 28, 53 minutes with JOBS=3
+sim/bupchip/s4/check.sh                                # without the game: 16 of 16 (PSRAM, cache, stress, game-free system runs), about 30-40 minutes
 ```
 
 `check.sh` runs up to `JOBS` (default 3) jobs at once, niced, with work files in `sim/work/bupchip/s4` (`WORK` overrides; the stress benches in `$WORK/stress`, the logs of the PSRAM, cache and stress jobs in `$WORK/logs`). Verilator is `/opt/verilator-5.040` if present (`VERILATOR` overrides); the PSRAM layer and `stress/run_tick.sh` also need iverilog, and `stress/run_bounds.sh` and `stress/run_pophead.sh` arm-none-eabi-gcc. The firmware comes from the user's `src/fpga/mister/rtl/bupchip.hex` (gitignored), turned into `$WORK/bupchip.bin` by `tools/hex2bin.py` and loaded through the firmware slot's path (FWSTART, FWWRITE, FWEND), never with `$readmemh`. Without it only the PSRAM layer, the cache and the firmware-free stress benches run, and a game argument is an error. With a game, `REFDIR` (default `sim/work/bupchip/ref`, whatever `WORK` is) must hold `song<N>.pcm` for songs 13, 14 and every song in `SONGS`; `check.sh` stops with exit 2 before starting anything if one is missing. Game data and everything made from it (PCM, logs) stay in `$WORK`, which git ignores.
@@ -16,7 +16,7 @@ sim/bupchip/s4/check.sh                                # without the game: 15 of
 | PSRAM layer (`run_psram_ctl.sh`) | iverilog | 23 of 23 (below) |
 | Asset cache (`run_cache.sh`) | — | 24 of 24 runs (8 configurations × 3 seeds) pass every directed check (scenario G, the tag sweep, included) and the random streams, and 11 of 11 mutations of the cache are caught |
 | Stress: the cache (`stress/run_cstress.sh`) | — | 26 of 26 runs and 10 of 10 mutations (`stress/README.md`) |
-| Stress: the download path (`stress/run_capstress.sh`) | — | 16 of 16: random downloads, the firmware slot straight after a cartridge, byte 0 in the clock the firmware download starts, synchronous and asynchronous `clk_arm`; the fast loader and a 12.2 MHz `clk_arm` must raise `lost` and `overrun` |
+| Stress: the download path (`stress/run_capstress.sh`) | — | 22 of 22: random downloads, the firmware slot straight after a cartridge, byte 0 in the clock the firmware download starts, synchronous and asynchronous `clk_arm`; the fast loader and a 12.2 MHz `clk_arm` must raise `lost` and `overrun` |
 | Stress: the 48 kHz tick (`stress/run_tick.sh`) | iverilog | 18 of 18 |
 | Stress: the asset window's bounds (`stress/run_bounds.sh`) | arm-none-eabi-gcc | 11 of 11 |
 | Stress: the PCM FIFO's head and the mute (`stress/run_pophead.sh`) | arm-none-eabi-gcc | 6,000 single pushes into the empty FIFO, every frame once and in order, with ticks held on real collisions, one forced; a FAULT write after frame 3,051 silences every later frame; wrappers without `tick_hold` or without the mute fail |
@@ -68,7 +68,7 @@ Work files go to `sim/work/bupchip/s4/psram` (`WORK` overrides). Verilator is `/
 - **`` `MAX``, `` `CEIL`` and `rtoi`.**
   - `psram.sv` defines `` `CEIL`` and `` `MAX`` at file scope and never undefines them (`:29-30`).
   - It declares `function integer rtoi` in the compilation unit (`:25-27`).
-  - `data_loader.sv:61` defines the same `` `MAX``, inside its module. Neither iverilog 12 nor Verilator 5.040 (`-Wall`) warns about that, in either file order. Quartus is expected to warn once both files are in `core.qip` (docs/BUPCHIP_CORE.md, "Controller").
+  - `data_loader.sv:61` defines the same `` `MAX``, inside its module. Neither iverilog 12 nor Verilator 5.040 (`-Wall`) warns about that, in either file order. Quartus 21.1 does not warn either (step 5's map report; docs/BUPCHIP_CORE.md, "Controller").
   - Nothing else in `src/fpga` defines `rtoi` or `` `CEIL``. A future file that does will clash: Verilator shares one `$unit` across all files.
 - **Real-to-integer conversion.**
   - `` `CEIL`` passes a real to `rtoi`'s integer argument and relies on the real-to-integer conversion, which rounds. Verilator `-Wall` reports this as 30 REALCVT warnings.
@@ -262,7 +262,7 @@ Where the RTL settles something `docs/BUPCHIP_CORE.md` left open (the design tex
 
 ### Results (2026-10-03, Verilator 5.040, `psram.sv` on `psram_model.sv`)
 
-`check.sh sim/work/bupchip/game/rv.a78`: **27 of 27**, 46 min 39 s with `JOBS=3` on 4 cores; without the game (a fresh `WORK`, builds included), **15 of 15** in 27 min 2 s. Every game row is a full download of the 741,344-byte image at 174.6 ns per byte (129.439 ms; all 216,928 ARSC bytes in the PSRAM model equal the file; `asset_ready` 0.384 µs after the download ended; no capture message lost, no overrun), the firmware booting 3.220 ms after the release with fault 00 and taking the command 7 clocks after it is sent, then 4 s of pops: PCM identical to MiSTer's `song<N>.pcm` over all 187,984 song frames, both as pushed and as returned to `clk_sys`; 0 underflow (from power-up), 0 overflow; every check above clean. The firmware slot takes 7,824 bytes (CRC32 `95b8b4f8`) in 1.366 ms and the ROM's 4,096 words equal the file.
+`check.sh sim/work/bupchip/game/rv.a78`: **28 of 28**, 52 min 45 s with `JOBS=3` on 4 cores (after verification round 2); without the game, **16 of 16** in 41 min with `JOBS=2` (the step 5 review). Earlier: 27 of 27 and 15 of 15 after round 1. Every game row is a full download of the 741,344-byte image at 174.6 ns per byte (129.439 ms; all 216,928 ARSC bytes in the PSRAM model equal the file; `asset_ready` 0.384 µs after the download ended; no capture message lost, no overrun), the firmware booting 3.220 ms after the release with fault 00 and taking the command 7 clocks after it is sent, then 4 s of pops: PCM identical to MiSTer's `song<N>.pcm` over all 187,984 song frames, both as pushed and as returned to `clk_sys`; 0 underflow (from power-up), 0 overflow; every check above clean. The firmware slot takes 7,824 bytes (CRC32 `95b8b4f8`) in 1.366 ms and the ROM's 4,096 words equal the file.
 
 | Song | CPI | MIPS | Busy | Busiest 0.1 s / worst batch | Lowest level | Demand misses | Prefetches | Pre-emptions | Late hits | Stall clocks |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -288,7 +288,7 @@ Where the RTL settles something `docs/BUPCHIP_CORE.md` left open (the design tex
 | Not a Souper cartridge; no firmware; a 4-byte firmware file; the game without its ARSC block | Held and silent: the CPU never released (0 retired, 0 pushed), 960 frames out in 20 ms, all 0; `fw_loaded` / `asset_ready` 1/1, 0/1, 0/1, 1/0 |
 | `run_cache.sh` | 24 of 24 runs: 109 (79 without prefetch) directed checks each, then 200,000 random loads with 0 wrong bytes, 0 completed collided reads and 0 reads started while held. With pre-emption and prefetch, per seed: about 136,000 demand misses (20,000 of them word loads), 7,300 prefetches, 129,000 pre-emptions, 120,000 misses on pre-empted lines, 14,000 late hits, 138–159 holds, all but 1–4 of them during a fill. `psram.sv` on the model and the stand-in give the same counts. Mutations: 11 of 11 caught. |
 | `run_psram_ctl.sh` | 23 of 23 (PSRAM layer) |
-| Stress (`stress/`) | `run_cstress.sh` 26 of 26 runs and 10 of 10 mutations (22.2 M loads, 0 wrong); `run_capstress.sh` 16 of 16; `run_tick.sh` 18 of 18; `run_bounds.sh` 11 of 11; `run_pophead.sh` 8 of 8 (12 ticks held a clock on real collisions at 28.636 MHz, 7 at 21.281, one forced; the FAULT run silent from frame 3,051); `run_reload.sh` 5 of 5. Numbers in `stress/README.md`. |
+| Stress (`stress/`) | `run_cstress.sh` 26 of 26 runs and 10 of 10 mutations (22.2 M loads, 0 wrong); `run_capstress.sh` 22 of 22; `run_tick.sh` 18 of 18; `run_bounds.sh` 11 of 11; `run_pophead.sh` 8 of 8 (12 ticks held a clock on real collisions at 28.636 MHz, 7 at 21.281, one forced; the FAULT run silent from frame 3,051); `run_reload.sh` 5 of 5. Numbers in `stress/README.md`. |
 
 **Area [syn].** Yosys 0.69 (`synth_intel_alm`, as `../model/study/area/run_area.sh` runs it) on `bupchip_pocket` with the CPU, the peripheral and the RAMs as black boxes: 500 LUT + 236 arithmetic cells + 466 FF; 534 + 260 + 510 with `BUP_DEBUG`. By the design's rule that is 418–518 ALMs (+32–39 for `BUP_DEBUG`), against the design's 360–520 for the same rows ("Totals": bus glue, cache, capture and receiver with the firmware path, crossings); with the 0.55 LUT factor the S1 probe measured, about 393. `psram.sv` is not in it.
 

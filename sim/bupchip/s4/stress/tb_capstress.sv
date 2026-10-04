@@ -55,6 +55,11 @@
 //           clock fw_download rises
 //   +fwfall half the firmware downloads present their last byte in the
 //           clock fw_download falls (fw_valid high with fw_download low)
+//   +samefw with +xstream: the firmware download's flag rises in the same
+//           clock the cartridge's falls, as on the Pocket when
+//           download_slot switches from 0x100 to 0x109 (core_top.v)
+//   +overlapfw with +xstream: the firmware flag rises one clock before the
+//           cartridge's falls (the two synchronisers resolving differently)
 // The last line, "result: ...", is for run_capstress.sh.
 //
 // SPDX-License-Identifier: MIT
@@ -298,7 +303,7 @@ module tb_capstress;
 
 	// ---- the downloads ---------------------------------------------------------------------------------
 	int     ndl = 300, maxblock = 70000, seed = 1;
-	bit     b2bfw = 0, prev_b2b = 0, prev_fw = 0, xstream = 0, fwrise = 0, fwfall = 0;
+	bit     b2bfw = 0, prev_b2b = 0, prev_fw = 0, xstream = 0, fwrise = 0, fwfall = 0, samefw = 0, overlapfw = 0;
 	longint n_fwrise = 0, n_fwfall = 0;
 	longint n_checks = 0, n_bad = 0, n_cart = 0, n_fw = 0, n_b2b = 0, n_noblock = 0;
 	longint pwr0 = 0, romwr0 = 0;
@@ -370,6 +375,8 @@ module tb_capstress;
 		xstream = $test$plusargs("xstream");
 		fwrise = $test$plusargs("fwrise");
 		fwfall = $test$plusargs("fwfall");
+		samefw = $test$plusargs("samefw");
+		overlapfw = $test$plusargs("overlapfw");
 		if (xstream) b2bfw = 1;
 		void'($urandom(seed));
 		repeat (20) @(posedge clk_sys);
@@ -450,14 +457,24 @@ module tb_capstress;
 				repeat (2 + $urandom_range(20)) @(posedge clk_sys);
 				loader_send(0, img_n);
 				repeat (1 + $urandom_range(3)) @(posedge clk_sys);
+				// +samefw / +overlapfw: the firmware slot's flag rises in the
+				// same clk_sys edge the cartridge's falls (core_top's
+				// download_slot switching 0x100 -> 0x109 with is_downloading
+				// held), or one edge earlier (the two synchronisers resolving
+				// differently).
+				if (b2b && xstream && overlapfw && k + 1 < ndl) begin
+					fw_dl <= 1;
+					@(posedge clk_sys);
+				end
 				cart_dl <= 0;
+				if (b2b && xstream && (samefw || overlapfw) && k + 1 < ndl) fw_dl <= 1;
 			end
 			prev_b2b = b2b;
 			prev_fw = fw;
 			if (b2b && k + 1 < ndl) begin
 				// the next cartridge's load_start in the clock after load_end
 				n_b2b++;
-				@(posedge clk_sys);
+				if (!(xstream && (samefw || overlapfw))) @(posedge clk_sys);
 				continue;
 			end
 			gap = 3000000 + $urandom_range(3000000);    // 3-6 us for the messages to drain

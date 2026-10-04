@@ -69,8 +69,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 
 # The Pocket's BupChip, ARIA (POCKET_BUPCHIP; docs/BUPCHIP_CORE.md), after
 # arm7tdmi_pkg.sv, which bup_cpu.sv imports. psram.sv (agg23, unmodified) and
-# data_loader.sv both define `MAX the same way, so Quartus warns that it is
-# redefined.
+# data_loader.sv both define `MAX the same way; Quartus 21.1 accepts the
+# identical redefinition without a warning.
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../pocket_utils/psram.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_cpu.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_capture.sv]

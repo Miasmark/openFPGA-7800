@@ -593,6 +593,7 @@ def sec_overruns(runs, margin):
               ("S1 @28.636, I 4K + D 2K", "s1_cyc", S1_MHZ, ["miss_I_4k_16", "miss_D_2k_16"], T16),
               ("S3 CPI @28.636, block RAM", "s3_cyc", S1_MHZ, [], 0.0),
               ("S3 CPI @28.636, code in BRAM + D 8K/32", "s3_cyc", S1_MHZ, ["miss_D_8k_32"], T32),
+              ("S3 CPI +1/flow change @28.636, block RAM", "s3f", S1_MHZ, [], 0.0),
               ("S3 @42.955, block RAM", "s3_cyc", 42.955, [], 0.0)]
     hdr = ["Demo", "Budgeted calls"] + ["%s: late / over 80%%" % m[0] for m in models]
     rows = []
@@ -604,7 +605,8 @@ def sec_overruns(runs, margin):
         for _, col, mhz, cols, tm in models:
             late = over = 0
             for r in bud:
-                t = r[col] / (mhz * 1e6) + sum(r[k] for k in cols) * tm
+                cyc = r["s3_cyc"] + r["taken"] if col == "s3f" else r[col]
+                t = cyc / (mhz * 1e6) + sum(r[k] for k in cols) * tm
                 b = r["safe"] / SYS_HZ
                 late += t > b
                 over += t > 0.8 * b
