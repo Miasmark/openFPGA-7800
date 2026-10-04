@@ -188,6 +188,9 @@ left out with the rest. Recorded in `mister/POCKET_CHANGES.md`.
   switch, the audio filter and the virtual axes.
 - A 29,696-byte 2600 image (detected as DPC+, mapper 21) now shows the bad
   game screen ("out of order").
+- `sim/extra_tests.sh` passes: holey DMA, both POKEY placements, the DLI
+  test, the SaveKey (including the 32 KiB save round trip), the HSC and the
+  firmware slots.
 
 **Still to do on hardware:**
 
