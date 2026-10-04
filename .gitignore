@@ -4,6 +4,7 @@ src/fpga/incremental_db/
 src/fpga/output_files/
 src/fpga/*.log
 src/fpga/*.qws
+src/fpga/*_assignment_defaults.qdf
 # Packaging / simulation
 release/
 dist/Cores/Miasmark.7800/*.rbf_r
