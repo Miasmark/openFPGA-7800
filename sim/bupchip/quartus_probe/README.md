@@ -95,3 +95,26 @@ The worst path into each other kind of endpoint, at 28.636 MHz:
 | Worst setup slack, slow 85 °C / 0 °C | +6.323 / +5.916 ns | +6.835 / +6.699 ns | |
 
 The register file was already two 32-deep MLAB pairs with half the words unused, so the banks cost no memory. The logic is the mode register, the bank remap in front of each read port and the write port, the wider bypass compare and the MSR check: +31 ALUTs and +12 registers after synthesis, roughly 20–30 ALMs. After fitting the MODES 1 build came out smaller, because physical synthesis duplicated fewer registers (480 against 607). That swing is placement noise, larger than the change itself, so the synthesis figures are the ones to quote.
+
+## WINDOW 1 and THUMB 1 (DARIA's memories and Thumb, 2026-10-05)
+
+`WINDOW=1 run_probe.sh MHZ` gives the CPU DARIA's memories at full size (`bup_probe_top.sv`, `docs/DARIA_CORE.md`, "The memory system", 1). It has the 16 KB firmware ROM and the 128 KB image window, an `altsyncram` with `maximum_depth` 8192, so 8K × 1 slices and a 4:1 output mux, behind a registered profile mux. It adds the 32 KB cart RAM with port B on a second clock, `clk_sys`, and the asset cache's 4 KB of data read at `d_addr`. That is 180 M10K, and the core has `CODE_AW` 15 and `MODES` 1. `THUMB=1` compiles the core with `THUMB` 1, with `arm_only` from a pin so that Quartus keeps the Thumb logic. Builds go to `<MHz>_window[_thumb]`.
+
+One seed each, worst setup slack at slow 85 °C:
+
+| Build | CPU ALMs | 32.727273 MHz | 40.427807 MHz |
+|---|---|---|---|
+| `MODES=1` (ARIA's memories) | 1,268 | +4.707 ns (Fmax 38.69) | −0.569 ns (39.52) |
+| `WINDOW=1` | 1,375 | +2.746 ns (35.96) | −1.462 ns (38.17) |
+| `WINDOW=1 THUMB=1` | 1,720 | +0.025 ns (32.75) | −3.968 ns (34.84) |
+
+The worst path with `THUMB=1` at 32.73 MHz runs from window port A through:
+
+1. the slice mux and the profile mux;
+2. the read-index select;
+3. the MLAB read and the bypass;
+4. the shifter, the operand mux and the adder;
+5. the one-clock-store decision on the sum, then `done` and `rom_addr`;
+6. the window's address registers, 29.1 ns of data delay over 20 levels.
+
+`docs/DARIA_CORE.md`, "Clock", has what follows from it.
