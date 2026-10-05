@@ -46,7 +46,7 @@ These carry over from ARIA:
 | C3 | **Processor modes.** The first three helpers switch to FIQ mode (`mrs r4, cpsr; msr cpsr_c, #0xD1`) and move values into or out of r8–r13, then restore the mode with `msr cpsr_c, r4`. Calls start in SYS mode (P1). So DARIA needs SYS and FIQ, FIQ's banked r8–r14, the I and F bits kept and read back by MRS, and MSR of the control byte from an immediate or a register. No SPSR access, no exception entry. | [trace], [C] | **Done**: `bup_cpu.sv`'s `MODES` 1 (below) |
 | C4 | **Interworking.** BX both ways (Thumb `bx r4` to the ARM helper, ARM `bx r4` back with bit 0 set); `POP {pc}` and `LDR pc` do not change state on ARMv4T; BL as a prefix/suffix pair. | [trace], ARM ARM | Step 2 |
 | C5 | **What never happens.** No SWI, undefined or coprocessor instruction, no unaligned access and no SPSR access in any trace. DARIA halts on all of them, as ARIA does. MMIO reads are as rare: the only one in any trace is Draconian's T1TC read (M4). | [trace] | Holds by the halt rule |
-| C6 | **Speed.** Two calls a frame. Every call meets its budget at about 32 MHz with S3's CPI; S3 at 28.636 MHz misses only Spiders' 16 calls, as upstream does. The added images' worst calls need 17.7–21.3 (four of the six traced so far) MHz at CPI 1.4, against the demos' 11.8–41.6. | [trace] (`BUPCHIP_CORE.md`, "Later") | Step 3 measures |
+| C6 | **Speed.** Two calls a frame. Every call meets its budget at about 32 MHz with S3's CPI; S3 at 28.636 MHz misses only Spiders' 16 calls, as upstream does. The added images' worst calls need 17.7–21.3 MHz at CPI 1.4, against the demos' 11.8–41.6. | [trace] (`BUPCHIP_CORE.md`, "Later") | Step 3 measures |
 
 ### The call protocol
 
@@ -99,16 +99,16 @@ Six images joined the test library after step 1, all of them 32 KB. Each was tra
 | Draconian, Harmony-fix build | CDF1 | 3,000 | the helpers: 1,525 instructions in 147 calls | timer 1: 3 writes, 1 read | 8 KB | 18.41 |
 | Draconian, 2017-10-20 RC8 | CDF1 | the same trace, call for call | | | | |
 | Space Rocks, Harmony fix | DPC+ | 2,999 | none | MAMCR, 2 writes a call | 8 KB | 17.65 |
-| Robot War: 2684 demo, Harmony fix | CDFJ | trace running | | | | |
+| Robot War: 2684 demo, Harmony fix | CDFJ | 2,999 | none | none | 8 KB | 18.03 |
 | Stay Frosty 2 (`SF2fix`), NTSC | DPC+ | 2,577 | none | MAMCR, 2 writes a call | 8 KB | 21.29 |
-| Stay Frosty 2 (`SF2fix`), PAL | DPC+ | trace running | | | | |
+| Stay Frosty 2 (`SF2fix`), PAL | DPC+ | the NTSC build's trace, call for call | | | | |
 
-- **The Harmony fixes do not reach DARIA.** The two Draconian builds differ in 927 bytes, all inside the 2 KB driver. 925 lie below 0x750, in the Harmony's own start-up and bus code, which no trace executes. The other 2 lie at 0x7F8–0x7FC, past the helpers' literals: the only ROM reads in that kilobyte are the trampolines' 153 literal loads. So the two traces are identical. Robot War's Harmony-fix build keeps the demo's driver byte for byte and differs from the demo in 28,724 bytes after it, so it is a rebuilt game and is traced as one.
+- **The Harmony fixes do not reach DARIA.** The two Draconian builds differ in 927 bytes, all inside the 2 KB driver. 925 lie below 0x750, in the Harmony's own start-up and bus code, which no trace executes. The other 2 lie at 0x7F8–0x7FC, past the helpers' literals: the only ROM reads in that kilobyte are the trampolines' 153 literal loads. So the two traces are identical. Robot War's Harmony-fix build keeps the demo's driver byte for byte and differs from the demo in 28,724 bytes after it, so it is a rebuilt game and is traced as one. Its worst call needs 18.03 MHz at CPI 1.4, the demo's 17.84.
 - **Draconian's helpers (C2).** It is the only traced game that resets a voice's counter (the second helper, 4 calls) or reads one (the third, 144). That makes it the first real use of P1's counter load into FIQ r8–r10 and of P2's rule that a counter is taken back only if it changed.
 - **Draconian's timer (M4)** is a single frame measurement at power-on, in its second and fourth calls; "Precision" in the memory system (6) has the numbers and DARIA's error budget for it.
 - **Space Rocks' first call** is its start-up: 117,525 instructions, 3.5 ms on upstream with the 6507 held, and no timer deadline after it. At 32.73 MHz and CPI 1.4 it would take about 5.0 ms, once, at power-on.
-- **Stay Frosty 2** makes about one call a frame in its attract mode and two in play.
-- **Nothing new for the CPU.** No Thumb form the demos do not use, nothing that halts, no MUL site from which a path reads C (C1; "The CPU: Thumb"), and code ends below 0x4A00.
+- **Stay Frosty 2** makes about one call a frame in its attract mode and two in play. Its PAL build differs from the NTSC one in 281 bytes and also runs 262-line frames, so it is a PAL60 build; its trace matches the NTSC build's call for call. (The bench runs the console with NTSC clocks, as it does every image.)
+- **Nothing new for the CPU.** No Thumb form the demos do not use, nothing that halts, no MUL site from which a path reads C (C1; "The CPU: Thumb"), and code ends below 0x5700.
 - Every image reaches play in its trace (the snapshots at frame 1,350).
 
 ### Packaging
@@ -165,7 +165,7 @@ Four sections follow: the CPU's Thumb support, the memory system with the call p
 2. **The C flag after a Thumb MUL is unknown.** An instruction that reads it before anything rewrites it halts with a new code 8. The reference computes that C from the ARM7TDMI multiplier's internals [sim]; no executed path in the demos or the added images reads it [trace].
 3. **The front ends get their own 32 KB copy of the image's start** (32 M10K). A block-RAM port has one clock, and the CPU (`clk_arm`) needs both ports of the window.
 4. **Bytes beyond the 128 KB window come from the PSRAM** through ARIA's asset cache, not from the SDRAM. The SDRAM controller and its `clk_sdram` paths stay untouched, the CPU's misses cross no clock, and a miss takes 13 `clk_arm` instead of 24–30.
-5. **Code must lie in the window:** a fetch beyond 128 KB halts (code 4). Code ends below 0xB30A in every demo (below 0x4A00 in the added images), and the CDFJ+ template starts it at `C_START` ≤ $7800.
+5. **Code must lie in the window:** a fetch beyond 128 KB halts (code 4). Code ends below 0xB30A in every demo (below 0x5700 in the added images), and the CDFJ+ template starts it at `C_START` ≤ $7800.
 6. **`clk_arm` stays a related clock** in the SDC, with bounded delays on the held buses that cross.
 7. **Fix B's register sits inside `sram_ctrl`.**
 
@@ -332,7 +332,7 @@ The later clocks of multi-clock instructions (S_W, S_SHR2, S_MUL2, S_SEQ) read t
   - Thumb: Bcc with CS, CC, HI or LS; ADC; SBC;
   - ARM state: a CS, CC, HI or LS condition; ADC, SBC, RSC; RRX; MRS, whose result would expose C.
 
-A program can see C only through those readers, so nothing is silently different. The demos never trip it: they execute 4.33 M MULs at 693 sites [trace]. From 692 of the sites, every executed path writes C before any read. One site, run once in Turbo, returns from its function first, and the static walk stops at the return. No path reaches a read (`sim/work/daria_thumb/mulc_scan.py`). The added images' MUL sites (32 in Draconian, 18 in Space Rocks, 4 in Stay Frosty 2) all write C first on every executed path. ARM-state MULS and MLAS still halt with UNDEF, as in ARIA.
+A program can see C only through those readers, so nothing is silently different. The demos never trip it: they execute 4.33 M MULs at 693 sites [trace]. From 692 of the sites, every executed path writes C before any read. One site, run once in Turbo, returns from its function first, and the static walk stops at the return. No path reaches a read (`sim/work/daria_thumb/mulc_scan.py`). The added images' MUL sites (32 in Draconian, 18 in Space Rocks, 32 in Robot War, 4 in Stay Frosty 2) all write C first on every executed path. ARM-state MULS and MLAS still halt with UNDEF, as in ARIA.
 
 **MUL with Rd = Rm** runs. ARMv4T calls it UNPREDICTABLE, but the reference returns the product in 121 of 121 cases [sim]. ARIA's ARM MUL runs the same form (`:293-298`). GCC 13 used a spare register for a square; GAS accepts `muls r0, r0`.
 
@@ -622,7 +622,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 
 - **Fetches beyond the window halt** with code 4 (FETCH), checked one clock late as today (`bup_cpu.sv:694, 703, 742`).
   - A fetch through the cache would need a stall in front of `rom_q`, on the critical path.
-  - Code in the 15 demos ends at or below 0xB30A, and in the added images below 0x4A00 [trace]; the CDFJ+ template starts its C code at `C_START`, at most $7800.
+  - Code in the 15 demos ends at or below 0xB30A, and in the added images below 0x5700 [trace]; the CDFJ+ template starts its C code at `C_START`, at most $7800.
 - **LDM/STM beats into the cache region** halt with code 7 (BLOCK), as asset LDMs do today (`:552-554`). The traced LDMIAs read RAM.
 
 ##### 3.4 Miss latency
@@ -1244,5 +1244,5 @@ What step 1 leaves open, each with the step that settles it:
 | 13 | **Banked registers after a mapper reset:** DARIA clears them, upstream keeps them. No driver reads them first. | Accepted |
 | 14 | **Thumb hi-register forms with H1 = H2 = 0** halt; running them is free if a game needs it. | When needed |
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | Step 6 |
-| 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): nothing new for the CPU, the call protocol or the memory map in the four traced so far ("The added images"). | Robot War and Stay Frosty 2 PAL: traces running |
+| 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): traced: nothing new for the CPU, the call protocol or the memory map ("The added images"). | Done |
 | 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | Step 5 |
