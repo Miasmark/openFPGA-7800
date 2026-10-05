@@ -14,8 +14,8 @@ sim/bupchip/s4/check.sh                                # without the game: 16 of
 | `check.sh` job | Needs | Passes when |
 |---|---|---|
 | PSRAM layer (`run_psram_ctl.sh`) | iverilog | 23 of 23 (below) |
-| Asset cache (`run_cache.sh`) | — | 24 of 24 runs (8 configurations × 3 seeds) pass every directed check (scenario G, the tag sweep, included) and the random streams, and 11 of 11 mutations of the cache are caught |
-| Stress: the cache (`stress/run_cstress.sh`) | — | 26 of 26 runs and 10 of 10 mutations (`stress/README.md`) |
+| Asset cache (`run_cache.sh`) | — | 48 of 48 runs (`WAYS` 1 and 2 × 8 configurations × 3 seeds) pass every directed check (scenario G, the tag sweep, included; H1–H4 with two ways) and the random streams, the 24 with one way in lockstep with the step 4 cache; 35 of 35 mutations of the cache are caught (11 per `WAYS`, 13 more of the second way) |
+| Stress: the cache (`stress/run_cstress.sh`) | — | 52 of 52 runs (26 per `WAYS`) and 30 of 30 mutations (`stress/README.md`) |
 | Stress: the download path (`stress/run_capstress.sh`) | — | 22 of 22: random downloads, the firmware slot straight after a cartridge, byte 0 in the clock the firmware download starts, synchronous and asynchronous `clk_arm`; the fast loader and a 12.2 MHz `clk_arm` must raise `lost` and `overrun` |
 | Stress: the 48 kHz tick (`stress/run_tick.sh`) | iverilog | 18 of 18 |
 | Stress: the asset window's bounds (`stress/run_bounds.sh`) | arm-none-eabi-gcc | 11 of 11 |
@@ -259,6 +259,8 @@ With two ways, F first replaces the prefetched line beside the one it reads (a t
 
 **Mutations** of a copy of `bup_asset_cache.sv`, each of which must fail: a load completing once its critical halfword is in (LDR then reads a stale halfword); no data read-during-write wait; no tag read-during-write wait; no invalid tag at a fill's start; an LDR waiting for one halfword; a hold leaving the read in flight marked; pre-emption not waiting for the read in flight; the tag written valid a halfword early; no tag sweep; a sweep one tag short; reads issued while held (the RTL before `rd_req` was gated with `run`). All 11 are caught: 10 by the directed checks (1 to 29 failing), "the tag written valid a halfword early" only by the random loads (2 wrong).
 
+With two ways the same 11 are caught (by 1 to 68 directed checks; "the tag written valid a halfword early" again by the random loads alone, 25 wrong), and 13 of the second way: the FIFO bit never flipping (40 directed checks), or flipping when a fill starts instead of when it completes (2: H3a and H3b, where M then replaces V); demand fills always into way 0 (37); a fill's start invalidating the other way (40); the hit way's data not selected (90); the line under fill read from way 0 (43); way 1's tag compare ignoring the top bit (2: H4's bit 11) and way 0's ignoring the bottom bit (78); a fill writing both ways' data (2, and 228 wrong bytes); the prefetch probing way 0 only (no wrong byte, but 9,162 clocks with a line in both ways); the read-during-write waits seeing way 0's tag writes only (3, one completed collided read) or data writes only (42); the sweep clearing way 0 only (2).
+
 ### Design notes
 
 Where the RTL settles something `docs/BUPCHIP_CORE.md` left open (the design text now says the same):
@@ -306,6 +308,16 @@ Where the RTL settles something `docs/BUPCHIP_CORE.md` left open (the design tex
 | Stress (`stress/`) | `run_cstress.sh` 26 of 26 runs and 10 of 10 mutations (22.2 M loads, 0 wrong); `run_capstress.sh` 22 of 22; `run_tick.sh` 18 of 18; `run_bounds.sh` 11 of 11; `run_pophead.sh` 8 of 8 (12 ticks held a clock on real collisions at 28.636 MHz, 7 at 21.281, one forced; the FAULT run silent from frame 3,051); `run_reload.sh` 5 of 5. Numbers in `stress/README.md`. |
 
 **Area [syn].** Yosys 0.69 (`synth_intel_alm`, as `../model/study/area/run_area.sh` runs it) on `bupchip_pocket` with the CPU, the peripheral and the RAMs as black boxes: 500 LUT + 236 arithmetic cells + 466 FF; 534 + 260 + 510 with `BUP_DEBUG`. By the design's rule that is 418–518 ALMs (+32–39 for `BUP_DEBUG`), against the design's 360–520 for the same rows ("Totals": bus glue, cache, capture and receiver with the firmware path, crossings); with the 0.55 LUT factor the S1 probe measured, about 393. `psram.sv` is not in it.
+
+### DARIA's 2-way cache (2026-10-05, Verilator 5.040)
+
+`WAYS` and the benches above, run by `check.sh` with the game on the tree at c22e3cc plus the new cache and benches; then the same `check.sh` again with `bupchip_pocket.sv`'s cache set to `WAYS` = 2 (a scratch copy under `sim/work`, its `run_cache.sh` and `stress/run_cstress.sh` jobs left out since they do not depend on the wrapper).
+
+| Run | Result |
+|---|---|
+| `run_cache.sh` | 48 of 48. With one way all 24 result lines equal step 4's bench on step 4's cache, counter for counter, and the step 4 cache in lockstep differs on no clock. With two ways, 260 (210 without prefetch) directed checks each, then 200,000 random loads with 0 wrong bytes, 0 completed collided reads, 0 reads started while held and 0 clocks with a line in both ways; with pre-emption and prefetch, per seed, about 128,000 demand misses (20,000 word loads), 7,700 prefetches, 120,000 pre-emptions, 108,000 misses on pre-empted lines and 14,700 late hits. `psram.sv` on the model and the stand-in give the same counts. Mutations: 35 of 35 caught. |
+| `stress/run_cstress.sh` | 52 of 52 runs and 30 of 30 mutations; numbers in `stress/README.md` |
+| Songs 13, 14, 9 and 30 with `WAYS` = 2 | PCM identical to MiSTer's, both streams. Song 13: 1,269 demand misses, 30,760 prefetches, 86 pre-emptions, 63 late hits, 11,381 stall clocks (0.010%), against 8,297, 65,172, 295, 68 and 70,127 (0.061%) with one way; busy 72.84%, lowest level 659. Song 14: 900 misses, 9,169 stall clocks (26,178 with one way); song 9: 2,937 and 29,098 (68,959); song 30: 399 and 3,806 (6,132). |
 
 ### Open points for step 5
 
