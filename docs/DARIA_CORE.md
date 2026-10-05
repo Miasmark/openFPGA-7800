@@ -146,7 +146,7 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 
 ## Design (step 1)
 
-Four sections follow: the CPU's Thumb support, the memory system with the call port and the clock crossings, the front end, and Fix B. Each was drafted with experiments of its own: Yosys on models of the decode, black-box runs of the reference core, elaborations of `psram.sv`, and 57 whole-core simulations of Fix B. Those experiments are kept in `sim/work/` until their step moves them into `sim/bupchip/daria/`; none uses game data.
+Four sections follow: the CPU's Thumb support, the memory system with the call port and the clock crossings, the front end, and Fix B. Line references to `bup_cpu.sv` in this part are to its version before step 2 (806dcd4); "Step 2 work" points into the current one. Each was drafted with experiments of its own: Yosys on models of the decode, black-box runs of the reference core, elaborations of `psram.sv`, and 57 whole-core simulations of Fix B. Those experiments are kept in `sim/work/` until their step moves them into `sim/bupchip/daria/`; none uses game data.
 
 | Block | Where | Clock | Section |
 |---|---|---|---|
