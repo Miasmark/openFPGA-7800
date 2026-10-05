@@ -13,8 +13,9 @@
 # JOBS seeds run at a time (default 2), CELLS cells each (default 200).
 # BUP_SRCS as for run_lockstep.sh (a mutant, say). Work files go to $WORK
 # (default sim/work/bupchip/daria/thumb/fuzz), one directory per variant;
-# the lockstep binary is built there. About 20 seconds per seed and job.
+# the lockstep binary is built there. About 2 minutes for seeds 1-48 with JOBS=2.
 # Exits 0 when every seed passes.
+# SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"

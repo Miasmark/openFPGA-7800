@@ -12,6 +12,7 @@
 # BUP_CPU=FILE checks another bup_cpu.sv (a mutant, say). VERILATOR as for
 # ../../verif/build.sh. About 15 seconds. Exits 0 when there are no
 # differences.
+# SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
