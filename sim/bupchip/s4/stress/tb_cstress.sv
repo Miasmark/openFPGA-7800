@@ -674,8 +674,8 @@ module tb_cstress;
 		pre_run <= 1;
 		while (!gen_done && stuck == 0) @(posedge clk);
 		repeat (200) @(posedge clk);
-		$display("cache stress, %0d way%s, pre-emption %0d, prefetch %0d, PSRAM latency %0d..%0d, %0d bytes: %0d loads (%0d pairs, %0d hold items, %0d random) in %0d clocks",
-			WAYS, WAYS == 2 ? "s" : "", `PREEMPT, `PREFETCH,
+		$display("cache stress, %s, pre-emption %0d, prefetch %0d, PSRAM latency %0d..%0d, %0d bytes: %0d loads (%0d pairs, %0d hold items, %0d random) in %0d clocks",
+			WAYS == 2 ? "2 ways" : "1 way", `PREEMPT, `PREFETCH,
 `ifdef PSRAM_REAL
 			5, 5,
 `else

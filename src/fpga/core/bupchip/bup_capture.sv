@@ -85,11 +85,12 @@
 // (head and size take it; an A78 needs nothing from it).
 //
 // START leaves before the first WRITE of its download: the head waits behind
-// it, and the first other WRITE completes with byte 7, at least 17 clocks
-// after load_start. By then at most the previous cartridge's last WRITE, an
-// FWSTART and one or two FWWRITEs from the firmware bytes the loader still
-// held can have gone first (simulation flags a halfword that completes while
-// START waits, start_sim).
+// it, and the next WRITE completes with byte 7, at least 17 clocks after
+// load_start. Ahead of START there can only be the previous cartridge's last
+// WRITE (downloads back to back) or the FWWRITEs of firmware bytes the loader
+// still held, which it delivers before this cartridge's bytes, a word at most
+// every 10 clocks. Simulation flags a halfword that completes while START
+// waits (start_sim).
 //
 // The download is sequential, as data_loader.sv delivers it. seq_err
 // (sticky) flags a byte that breaks the pairing, and lost a halfword or word
@@ -224,12 +225,14 @@ module bup_capture (
 	wire        r_byte = in_block && off[24:23] == 2'd0;		// ARSC: within the 8 MiB die
 	wire        i_byte = c_valid && img_on && load_addr[24:19] == 6'd0;	// image: below 512 KiB
 
-	// A byte for the PSRAM in either mode, at offset a_off there.
-	wire [22:0] a_off = g_a78 ? off[22:0] : load_addr[22:0];
+	// The byte's offset: in the block (A78 mode) or in the file. A byte for
+	// the PSRAM goes to offset a_off there; c_size is the size up to it
+	// (saturating: an image's END carries the whole file's).
+	wire [24:0] c_off = g_a78 ? off : load_addr;
+	wire [22:0] a_off = c_off[22:0];
 	wire        a_byte = r_byte || i_byte;
 	wire        a_pair = a_byte && a_off[0];				// a halfword completes
-	// The file's size, for image mode's END (saturating).
-	wire [23:0] f_size = load_addr[24] || &load_addr[23:0] ? 24'hFFFFFF : load_addr[23:0] + 24'd1;
+	wire [23:0] c_size = c_off[24] || &c_off[23:0] ? 24'hFFFFFF : c_off[23:0] + 24'd1;
 
 	// Cartridge: the even byte waiting for its partner, and the size so far:
 	// the block's bytes in A78 mode, the file's otherwise (and until byte 5).
@@ -341,12 +344,12 @@ module bup_capture (
 			p_tail <= 1'b0;
 			p_end <= 1'b0;
 			have_lo <= 1'b0;
-			size <= c_valid ? f_size : 24'd0;	// a byte now is the new file's byte 0
+			size <= c_valid ? {23'd0, load_addr == 25'd0} : 24'd0;	// a byte now is the new file's byte 0
 		end else begin
-			if (r_byte)
-				size <= off[23:0] + 24'd1;
-			else if (c_valid && !g_a78)	// image mode, or the mode not yet known
-				size <= h_last && a78_now ? 24'd0 : f_size;
+			// the block's bytes, or (image mode, or the mode not yet known)
+			// the file's; nothing of the header counts for an A78
+			if (r_byte || (c_valid && !g_a78))
+				size <= h_last && a78_now ? 24'd0 : c_size;
 			if (a_byte) begin
 				if (have_lo != a_off[0]) seq_err <= 1'b1;	// two even or two odd bytes running
 				have_lo <= !a_off[0];

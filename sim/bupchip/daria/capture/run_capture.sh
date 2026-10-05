@@ -32,7 +32,10 @@
 # BupChip-only capture), JOBS (default 3), SEED (default 1), ONLY (an
 # extended regular expression: only the runs it matches), VERILATOR.
 # Prints PASS or FAIL per run and the checks per case; exits 0 when every
-# run passes.
+# run passes. About 4 minutes on 3 cores (mutants: about 6). The generated
+# files hold only random bytes and made-up headers; they and every build and
+# log stay in WORK.
+# SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
@@ -277,10 +280,10 @@ MUT = (
 	("no_head", C, "if (h_last && !a78_now) begin", "if (1'b0) begin"),
 	("head_high_lane_always", C, "wire         h_hi = {h_idx, 1'b1} < h_n;", "wire         h_hi = 1'b1;"),
 	("short_file_no_head", C, "if (!g_known && size != 24'd0) begin", "if (1'b0) begin"),
-	("byte0_with_load_start_dropped", C, "size <= c_valid ? f_size : 24'd0;", "size <= 24'd0;"),
+	("byte0_with_load_start_dropped", C, "size <= c_valid ? {23'd0, load_addr == 25'd0} : 24'd0;", "size <= 24'd0;"),
 	("tail_without_image_bit", C, "msg_pl <= {3'd0, img_on, 2'b01, size[22:1], 8'd0, lo};", "msg_pl <= {3'd0, 1'b0, 2'b01, size[22:1], 8'd0, lo};"),
 	("no_512k_drop", C, "load_addr[24:19] == 6'd0;", "load_addr[24:23] == 2'd0;"),
-	("header_bytes_in_a78_size", C, "size <= h_last && a78_now ? 24'd0 : f_size;", "size <= f_size;"),
+	("header_bytes_in_a78_size", C, "size <= h_last && a78_now ? 24'd0 : c_size;", "size <= c_size;"),
 	("end_without_image_bit", C, "msg_pl <= {19'd0, !g_a78, size};", "msg_pl <= {19'd0, 1'b0, size};"),
 	("window_lanes_swapped", W, "assign win_be = m_pl[16] ? {m_pl[39:38], 2'b00} : {2'b00, m_pl[39:38]};", "assign win_be = m_pl[16] ? {2'b00, m_pl[39:38]} : {m_pl[39:38], 2'b00};"),
 	("window_past_128k", W, "m_pl[37:32] == 6'd0 && !img_ready;", "!img_ready;"),

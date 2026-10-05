@@ -52,15 +52,17 @@
 //           PSRAM writes enabling M byte lanes and ceil(W / 2) window writes
 //           enabling W
 //   firmware fw_loaded = min(N, 16,384) >= 8, the ROM words equal the file
-//           zero-padded, exactly ceil(min(N, 16,384) / 4) ROM writes
+//           zero-padded, exactly ceil(min(N, 16,384) / 4) ROM writes since
+//           the last check (none without a firmware download)
 // Always: one clock after END is handled, every PSRAM write since START has
 // ended at the chip (img_ready and asset_ready rise only after the last
-// write); win_we never high while img_ready is, nor for a WRITE that is not
-// an image's or is at 128 KiB or above; seq_err, lost, overrun, the
-// capture's simulation-only seq_sim and start_sim stay 0; no halfword or
-// word completes while the one before still waits (lost_s), no message
-// leaves less than 5 clk_sys after the last (lost_x); no PSRAM timing
-// violation.
+// write); win_we high exactly with the PSRAM write of an image's WRITE
+// below 128 KiB while img_ready is low, with the halfword on both halves and
+// the WRITE's byte lanes in the half address bit 0 picks; seq_err, lost,
+// overrun and the capture's simulation-only seq_sim and start_sim stay 0;
+// no halfword or word completes while the one before still waits (lost_s),
+// no message leaves less than 5 clk_sys after the last (lost_x); no PSRAM
+// timing violation.
 //
 // +lockstep (A78 and firmware downloads only): bup_capture_ref and
 // bup_asset_wr_ref, the BupChip's versions before DARIA (run_capture.sh
@@ -533,8 +535,8 @@ module tb_capture;
 		end
 		$fclose(fd);
 		#2000000;
-		$display("capture bench: %0d checks, %0d bad; %0d messages, %0d PSRAM writes, %0d window writes, %0d ROM writes; toggle to win_we %0d-%0d ps; %0d ENDs, %0d before their writes ended",
-			n_checks, n_bad, n_msg, n_pwr, n_winwr, n_romwr, lat_min, lat_max, n_end, n_end_bad);
+		$display("capture bench: %0d checks, %0d bad; %0d messages, %0d PSRAM writes, %0d window writes, %0d ROM writes; toggle to win_we %s; %0d ENDs, %0d before their writes ended",
+			n_checks, n_bad, n_msg, n_pwr, n_winwr, n_romwr, n_winwr ? $sformatf("%0d-%0d ps", lat_min, lat_max) : "none", n_end, n_end_bad);
 		$display("  seq_err %0d, lost %0d, overrun %0d, seq_sim %0d, start_sim %0d, lost_s %0d, lost_x %0d, window write faults %0d; %0d cartridges with byte 0 in the clock of load_start",
 			seq_err, lost, overrun, cap.seq_sim, cap.start_sim, n_lost_s, n_lost_x, n_win_bad, n_rise);
 		if (lockstep) $display("  lockstep with the BupChip's capture and receiver: %0d clk_sys and %0d clk_arm clocks, %0d differences", ls_sys, ls_arm, ls_diff);

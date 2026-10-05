@@ -946,8 +946,8 @@ module tb_cache;
 		directed_tests();
 		directed = 0;
 		while (done_loads < n_loads && stuck == 0) @(posedge clk);
-		$display("cache, %0d way%s, pre-emption %0d, prefetch %0d, %0d bytes: %0d loads in %0d clocks, %0d wrong; %0d stall clocks, longest wait %0d",
-			WAYS, WAYS == 2 ? "s" : "", `PREEMPT, `PREFETCH, size, done_loads, cyc, bad, c_stall, max_wait);
+		$display("cache, %s, pre-emption %0d, prefetch %0d, %0d bytes: %0d loads in %0d clocks, %0d wrong; %0d stall clocks, longest wait %0d",
+			WAYS == 2 ? "2 ways" : "1 way", `PREEMPT, `PREFETCH, size, done_loads, cyc, bad, c_stall, max_wait);
 		$display("  %0d demand misses (%0d word loads), %0d prefetches, %0d pre-emptions, %0d misses on a pre-empted line, %0d late hits, %0d holds (%0d during a fill), %0d completed reads that collided with a write",
 			c_miss, c_wmiss, c_pf, c_pre, c_remiss, c_late, c_hold, c_hold_fill, rdw_bad);
 `ifndef PSRAM_STANDIN
