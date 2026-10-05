@@ -2,7 +2,7 @@
 
 **DARIA** (Dual-use Atari RISC Interface Accelerator) is ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`), extended to run the 2600's ARM cartridge schemes: DPC+, CDF, CDFJ and CDFJ+ (Harmony and Melody cartridges). Upstream MiSTer runs them on its ARM7TDMI core, which the Pocket build leaves out (`NO_ARM_MAPPER`). The first release with DARIA will be 2.2.1.
 
-**Steps 0 (scope), 1 (design) and 2 (Thumb in simulation) are done.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
+**Steps 0 (scope), 1 (design), 2 (Thumb in simulation) and 3 (the probe build) are done; step 5 (the memory system) is in progress.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
 
 Tags, as in `BUPCHIP_CORE.md`:
 
@@ -336,6 +336,81 @@ The setup slack and `clk_sdram` are at slow 85 °C; the hold slack is the worst 
   - step 4 (S3) is dropped;
   - `psram.sv` at 38.18 MHz becomes open item 10;
   - the BupChip runs at 38.18 MHz too. CoreTone paces itself on the 48 kHz tick, so it only idles more.
+
+## Step 5 work: the memory system (in progress)
+
+Paused by the owner on 2026-10-05 with the pieces built and tested on their own benches, and DARIA compared with upstream call by call on five images. What follows is the state at the pause, then what is left.
+
+### What is built
+
+| Part | File | State |
+|---|---|---|
+| The 2600 profile and the call port in the CPU | `bup_cpu.sv` (`WIN_KB`, `prof26`, `img_size`, `ram32`, `call_go`, `clr_*`, `parked`, `returned`, `ro_*`) | Done. The map of section 4 (window and image beyond it split at `WIN_KB`; 8 or 32 KB of cart RAM; MMIO 0xE000_0000–0xE01F_FFFF), code space per profile (open item 18: 16 KB in the BupChip profile), the parked state, the launch through S_CLEAR (22 entries, `clr_e`/`clr_wd`), the 0xF000_0000 return on every kind of jump, and the FIQ r8–r13 readout. Existing instances tie the new ports |
+| Memories | `daria_mem.sv` | Done: the window as four 8K × 32 RAMs with a registered 4:1 mux, cart RAM 8K × 32 with byte lanes (port B on `clk_sys`), the front-end ROM, the state RAM, all one `daria_ram` (TDP, byte lanes, `maximum_depth` 8,192) |
+| Call port, `clk_arm` side | `daria_call.sv` | Done: the call block in state RAM words 0xF0–0xFD, `call_tog`/`ret_tog` |
+| MMIO and timer 1 | `daria_mmio.sv` | Done (section 6, with the changes below) |
+| Image capture | `bup_capture.sv`, `bup_asset_wr.sv` | Done (section 2, with the changes below) |
+| Two-way cache | `bup_asset_cache.sv` (`WAYS`) | Done (section 3, with the changes below) |
+| Wrapper | `bupchip_pocket.sv` | **Not started.** Ties only. The connections are listed under "What is left" |
+
+### Results
+
+- **ARIA unchanged.** The formal check (`thumb/aria_equiv.sh`) shows `bup_cpu.sv` with `THUMB` 0 equivalent to 806dcd4 with `MODES` 0 and 1. The Thumb suites pass on the step 5 core: directed 12 of 12 (plain, waits and throttle, `LATE_RF`), halts 210 of 210, decode 0 of 65,536 halfwords differ, random 400 of 400 seeds, fuzz seeds 1–48 in all three variants. `run_modes.sh THUMB=1` passes, and so does `s1/check.sh` with `THUMB` 1; songs 9, 13, 14 and 30 are PCM-identical to MiSTer's.
+- **The call port** (`sim/bupchip/daria/call/`): the core alone in the 2600 profile, 26 tests in three variants (plain, asset waits and throttle, `LATE_RF`), 78 of 78 runs, and 20 of 20 planted faults caught.
+- **MMIO** (`sim/bupchip/daria/mmio/`): seven clock variants (NTSC and PAL, aligned and asynchronous, 28.5–44.6 MHz) and three controls pass; 22 of 22 mutations caught. The counter matches the model on every `clk_sys` edge. The Draconian-like reading lands 10.6–30.5 counts below the ideal (bound 55), leaving a margin of 3,826–3,841 counts to the game's limit.
+- **Capture** (`sim/bupchip/daria/capture/`): 81 of 81 checks in each of six clock variants (28.64–39.7 MHz, `CLOCK_SPEED` 28.636364 and 50.0), random mixes of images up to 594 KB, A78s and firmware, and 18 of 18 mutations. For an A78 and the firmware the message stream and every receiver output are bit-identical to before (lockstep, 0 differences over about 10 M clocks in each of three clock variants). `stress/run_slotswitch.sh` passes 31 of 31.
+- **Cache** (`s4/run_cache.sh`, `s4/stress/run_cstress.sh`): `WAYS` 1 is the step 4 cache clock for clock (0 differences beside a copy of it). Both settings pass 24 of 24 cache runs and 26 of 26 stress runs, with 22.2 M stress loads and 0 wrong. Mutations caught: 11 of 11 and 10 of 10 (`WAYS` 1), 24 of 24 and 20 of 20 (`WAYS` 2). With `WAYS` 2 in the wrapper, every song in `s4/check.sh` stays PCM-identical. Song 13 then has 1,269 demand misses and 11,381 stall clocks, against 8,297 and 70,127 with one way.
+- **DARIA beside upstream** (`tb_daria` with `daria_shadow.svh`, `run_daria.sh` with `SHADOW=1`). The 128 KB window. Every call is posted the way the front ends will post it (state RAM port B, `call_tog`), and compared once both have returned: FIQ r8–r13, every RAM write (address, lanes, data), and every MMIO access, T1TC reads within 200 counts (open item 17).
+
+  | Image | Frames | Calls | Differ | RAM writes compared | MMIO compared | Late (DARIA / model) | Highest share of a budget (DARIA / model) |
+  |---|---|---|---|---|---|---|---|
+  | Elevator Agent | 1,500 | 2,999 | 0 | 6,893,261 | 0 | 0 / 0 | 85% / 85% |
+  | Galagon | 1,500 | 2,999 | 0 | 3,969,599 | 0 | 0 / 0 | 53% / 52% |
+  | Mappy | 40 | 79 | 0 | 46,220 | 0 | | |
+  | Draconian (Harmony fix) | 60 | 119 | 0 | 15,371 | 4 | | |
+  | Stay Frosty 2 NTSC | 60 | 61 | 0 | 17,550 | 122 | | |
+
+  - DARIA's measured clocks per call equal the model's `s1_cyc` (median ratio 1.00, at most 1.01 and 1.12 on the two full runs), so the model's lateness table ("Step 3 work") stands.
+  - A DARIA call takes about as long as upstream's: Mappy's first, 283 µs at 38.18 MHz against 293 µs at 71.6 MHz.
+- **Cart RAM collisions** (open item 7, counted by the shadow): a console-side read within one `clk_sys` of a CPU write to the same word. Elevator Agent: 0 in 25.6 M reads. Galagon: 21 in 17.8 M, for upstream's ARM and DARIA alike. The equal counts suggest a console-side read repeating at one address while the CPU writes it. Step 6's front ends decide whether such a read needs ordering.
+
+### Changes against the design
+
+- **Capture (2.2, 7.1):**
+  - The END payload's bit 24 marks an image (1 when the file is not an A78), not an A78. With that polarity an A78's and the firmware's streams are bit-identical to before. The size field is 24 bits.
+  - WRITE gains bit 40 (image: also write the window); `msg_pl` stays 44 bits, not 48.
+  - Bytes 0–5 are held until byte 5 decides the mode. An image sends them afterwards as three WRITEs, in slots the stream leaves free.
+  - A cartridge byte in `load_start`'s clock is now taken as byte 0.
+  - About 76 more FF, as budgeted, but about 90–120 ALMs, above the 40–70 estimated.
+  - The s4 stress benches' generated A78 files now carry "ATARI" at bytes 1–5; without it they are images.
+- **Cache (3.2, 1.1, 1.5, 8):**
+  - Tags are offset[22:11] (12 bits) per way, so one instance serves the BupChip's 8 MiB of assets too.
+  - The tags take 2 M10K, not 1: one 27-bit word for both ways exceeds the 20-bit true-dual-port width. The cache is 6 M10K; the device total is 259 of 308.
+  - The FIFO bit is p0 XOR p1, one bit in each way's tag word, flipped when a fill completes.
+- **MMIO (6):**
+  - A TC read is at most 5 `clk_sys` old (about 24 counts), not 8.
+  - One TC write is in flight at a time. Later ones are kept in the mirror and sent together when it lands. A write lands about 3 `clk_sys` (about 15 counts) later than on upstream.
+  - 221 FF.
+  - The two resets come from one level, which must last at least 4 `clk_sys`; the held buses are deliberately not reset.
+  - Step 7 marks `en_s[0]`, `w_s[0]` and `sn_a[0]` as synchronisers.
+
+### What is left
+
+1. **The wrapper** (`bupchip_pocket.sv` under `POCKET_DARIA`):
+   - the profile and mapper reset through two flops;
+   - the run gate `prof26 ? img_ready : fw_loaded & asset_ready`;
+   - the CPU with `THUMB` 1 and `CODE_AW` 15, with `daria_mem`, `daria_call` and `daria_mmio`;
+   - the receiver's window port, and the cache at `WAYS` 2;
+   - `reg_rdata` as the peripheral's OR the MMIO's, with each block's `sel` gated by its profile;
+   - `rom_q`/`rom_dq` muxed by the profile;
+   - ports for the front ends.
+
+   `s4/check.sh` must still pass.
+2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
+3. **Small-window runs** with the real cache, `psram.sv` at 38.18 MHz and the PSRAM model (open items 6 and 10): Zaxxon with a 32 KB window (its code ends at 0x7B9C), Turbo and Elevator Agent with 48 KB (code to 0xB30A).
+4. **Open item 8** (CoreTone after a 2600 game) once the wrapper exists.
+5. **`s4/check.sh`'s tally.** Its `wait` can lose a job's exit status on runs of several hours. Each job's log ended in PASS while the tally said FAIL for 3 of 28 jobs. Each job should write its own exit code to a file.
+6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
 
 ## Design (step 1)
 
@@ -1450,7 +1525,7 @@ Each step has a done-when, as ARIA's had.
 2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done* (2026-10-05): "Step 2 work". *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
 3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done* (2026-10-05): "Step 3 work". The choices: S1 with Thumb, ÷18 (38.18 MHz), and the 128 KB window as four RAMs. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
 4. **S3** (ARIA's steps 6–7). *Not built* (step 3): S1 with Thumb at 38.18 MHz matches upstream's call timing, so S3 is left for a later revision (open item 3). *Its done-when, if it is ever built:* CPI within ±2% of the model on the demos' traces and the BupChip.
-5. **2600 memory system:** image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
+5. **2600 memory system** (*in progress*, "Step 5 work"): image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
 6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
 7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
 8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and the six added images play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
