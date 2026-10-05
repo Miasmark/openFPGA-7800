@@ -11,18 +11,28 @@ with verif/isa/link.ld, runs it on the reference (tb_ref_trace.sv) and on
 Unicorn (thumb_iss.py), compares the RAM, then runs DARIA in lockstep.
 
 Layout. An ARM start-up fills RAM from a ROM table, sets SP and random NZCV
-and BXes into the Thumb body; the body is OPS operations, weighted like the
-demos' traced mix: data processing ~40% (F1-F5, F12, F13, MUL with Rd = Rm
-among them), single loads ~22% and stores ~10% (F6-F11, every size and
-sign, from the ROM table, the code, RAM, the stack and the asset window),
-conditional branches ~15% (skips and flag captures), B ~7% (over dead code,
-literal pools and functions), BL ~2% (leaf functions placed before and after
-the call, returning with BX LR, MOV PC, POP {pc} or POP + BX), BX ~1% (to
-Thumb labels through low and high registers, BX PC into inline ARM code,
-calls into ARM functions through a BX veneer, which call Thumb back with
+and BXes into the Thumb body, which loads the registers from the table
+(LDMIA r0, {r0-r7}: the base in the list). The body is OPS operations,
+weighted like the demos' traced mix: data processing ~40% (F1-F5, F12, F13,
+MUL with Rd = Rm among them, and the flag corners of "What the reference
+does"), single loads ~22% and stores ~10% (F6-F11, every size and sign,
+from the ROM table, the code, RAM, the stack and the asset window, mostly
+near a pointer a register already holds), conditional branches ~15% (skips,
+if/else, flag captures), B ~7% (over dead code, literal pools and
+functions), BL ~2% (leaf functions placed before and after the call,
+returning with BX LR, MOV PC, POP {pc} or POP + BX), BX ~1% (to Thumb
+labels through low and high registers, BX PC into inline ARM code, calls
+into ARM functions through a BX veneer, which may call Thumb back with
 MOV LR, PC + BX), computed jumps (MOV pc, ADD pc, POP {pc}), PUSH/POP and
-LDMIA/STMIA. The end dumps every register, captures the flags, reads IDENT
-and writes the FAULT register (0xE000901C) with 0xAA, from Thumb or ARM.
+LDMIA/STMIA. thumb_iss.py --cover prints the mix that results.
+
+Signature. Every 10-20 operations the low registers written since the last
+dump go to the signature, mostly with STMIA rS!, else one STR each;
+sometimes r8-r12, SP and LR too (moved through the low registers, which
+LDMIA t, {..., t, ...} then reloads). A flag capture is a Bcc over a
+STR rS, [rS, #k] to a fresh word, so the word is rS or 0. The end dumps
+every register, captures every condition, reads IDENT and writes the
+FAULT register (0xE000901C) with 0xAA, from Thumb or from ARM.
 
 Memory: ROM 0-0x3FFF (the table at 0x20, then the code), RAM 0x40000000:
 the signature (8 KiB), the data area at 0x40002000 (1 KiB), the stack
@@ -219,8 +229,17 @@ class Gen:
     def data_lo(self):
         return [r for r in range(8) if r != self.rS]
 
+    def is_ptr(self, r):
+        v = self.c.known.get(r)
+        return v is not None and (RTAB <= v < 0x4000 or ASSET <= v < ASSET + ASSET_SIZE or
+                                  0x40000000 <= v < 0x40004000)
+
     def rd(self):
-        return self.R.choice(self.data_lo())
+        """A destination: mostly not a register that holds a pointer, so
+        bases live on, as compiled code keeps them."""
+        regs = self.data_lo()
+        free = [r for r in regs if not self.is_ptr(r)]
+        return self.R.choice(free if free and self.R.random() < 0.75 else regs)
 
     def rs(self):
         return self.R.randrange(8)
@@ -309,8 +328,10 @@ class Gen:
         k = self.R.random()
         if k < 0.15:
             return 0
-        if k < 0.3:
-            return self.R.choice([32, 33, 0xFF, 64])
+        if k < 0.35:
+            return 32
+        if k < 0.5:
+            return self.R.choice([31, 33, 0xFF, 64])
         return self.R.randrange(1, 32)
 
     def f4(self, op=None):
@@ -381,6 +402,71 @@ class Gen:
             self.ins(f"sub\tsp, #{-4 * n}")
         self.sp += 4 * n
 
+    def op_corner(self):
+        """A flag corner (docs/DARIA_CORE.md, "What the reference does"),
+        often captured straight away."""
+        R = self.R
+        d, s = R.sample(self.data_lo(), 2)
+        k = R.randrange(10)
+        keeps_c = False             # every recipe but the shift by 0 writes C
+        if k == 0:                  # NEG 0: C = 1
+            self.ins(f"movs\t{rn(s)}, #0")
+            self.ins(f"negs\t{rn(d)}, {rn(s)}")
+            self.wr(s, 0)
+            self.wr(d, 0)
+        elif k == 1:                # NEG 0x80000000: N and V
+            self.ldr_lit(s, 0x80000000)
+            self.ins(f"negs\t{rn(d)}, {rn(s)}")
+            self.wr(d, 0x80000000)
+        elif k == 2:                # ROR, LSL, LSR, ASR by 32 (C from bit 31 or 0)
+            self.ins(f"movs\t{rn(s)}, #32")
+            self.wr(s, 32)
+            self.ins(f"{R.choice(['rors', 'lsls', 'lsrs', 'asrs'])}\t{rn(d)}, {rn(s)}")
+            self.wr(d)
+        elif k == 3 and self.c_ok():    # a register shift by 0 keeps C
+            keeps_c = True
+            self.ins(f"movs\t{rn(s)}, #0")
+            self.wr(s, 0)
+            self.ins(f"{R.choice(['rors', 'lsls', 'lsrs', 'asrs'])}\t{rn(d)}, {rn(s)}")
+            self.wr(d)
+        elif k == 4:                # ADDS/SUBS overflow
+            v, op, imm = R.choice([(0x7FFFFFFF, "adds", 1), (0x80000000, "subs", 1),
+                                   (0xFFFFFFFF, "adds", 1), (0x7FFFFFF0, "adds", 0x7F)])
+            self.ldr_lit(d, v)
+            self.ins(f"{op}\t{rn(d)}, #{imm}")
+            self.wr(d)
+        elif k == 5:                # ADDS Rd, Rs, #0: C = V = 0
+            self.ins(f"adds\t{rn(d)}, {rn(s)}, #0")
+            self.wr(d)
+        elif k == 6:                # CMP equal, CMN to zero
+            if R.random() < 0.5:
+                self.ins(f"cmp\t{rn(d)}, {rn(d)}")
+            else:
+                self.ins(f"negs\t{rn(s)}, {rn(d)}")
+                self.ins(f"cmn\t{rn(d)}, {rn(s)}")
+                self.wr(s)
+        elif k == 7 and self.c_ok():    # ADC/SBC across the wrap
+            self.ldr_lit(d, R.choice([0xFFFFFFFF, 0x7FFFFFFF, 0x80000000, 0]))
+            self.ins(f"{R.choice(['adcs', 'sbcs'])}\t{rn(d)}, {rn(s)}")
+            self.wr(d)
+        elif k == 8:                # MOVS #imm keeps C and V after an overflow
+            self.ldr_lit(d, 0x7FFFFFFF)
+            self.ins(f"adds\t{rn(d)}, #1")
+            self.ins(f"movs\t{rn(s)}, #{R.choice([0, 0x80, 0xFF])}")
+            self.wr(d)
+            self.wr(s)
+        else:                       # CMP of corner values through high registers
+            self.ldr_lit(d, R.choice(SPECIAL))
+            h = R.choice(HI)
+            self.ins(f"mov\t{rn(h)}, {rn(d)}")
+            self.wr(h)
+            self.ldr_lit(d, R.choice(SPECIAL))
+            self.ins(f"cmp\t{rn(d)}, {rn(h)}")
+        if not keeps_c:
+            self.c_write()
+        if R.random() < 0.5:
+            self.op_capture()
+
     def op_const(self):
         """A constant through the literal pool (F6), often a corner value."""
         d = self.rd()
@@ -390,10 +476,12 @@ class Gen:
     def op_mul(self):
         d = self.rd()
         m = d if self.R.random() < 0.25 else self.rs()
-        if self.R.random() < 0.3:
+        if self.R.random() < 0.2:
             self.ldr_lit(d, self.R.choice(SPECIAL + [self.R.getrandbits(32)]))
-        if self.R.random() < 0.2 and m not in (d, self.rS):
-            self.ldr_lit(m, self.R.choice(SPECIAL))
+        if self.R.random() < 0.15 and m not in (d, self.rS):
+            v = self.R.choice([0, 1, 2, 0x7F, 0xFF])
+            self.ins(f"movs\t{rn(m)}, #{v}")
+            self.wr(m, v)
         self.ins(f"muls\t{rn(d)}, {rn(m)}")
         self.wr(d)
         self.c.cstate = "unk"
@@ -430,7 +518,9 @@ class Gen:
         if cands and R.random() < 0.7:
             b = R.choice(cands)
             return b, a - self.kv(b)
-        b = R.choice([r for r in self.data_lo() if r not in avoid])
+        regs = [r for r in self.data_lo() if r not in avoid]
+        free = [r for r in regs if not self.is_ptr(r)]
+        b = R.choice(free if free and R.random() < 0.75 else regs)
         starts = [s for s in (ASSET, SIG) if 0 <= a - s <= imm_max and (a - s) % align == 0]
         off = a - starts[0] if starts and R.random() < 0.5 else align * R.randrange(imm_max // align + 1)
         base = a - off
@@ -448,7 +538,7 @@ class Gen:
             self.ins(f"lsls\t{rn(b)}, {rn(b)}, #{25 if base == ASSET else 30}")
             self.wr(b, base)
             self.c_write()
-        elif near and k < 0.35:
+        elif near and k < 0.6:
             q = R.choice(near)
             d = base - self.kv(q)
             if q != b and 0 < abs(d) <= 7:
@@ -484,6 +574,13 @@ class Gen:
             else:
                 region = R.choices(["data", "rom", "code", "asset", "sig", "stack"],
                                    [36, 15, 6, 15, 8 if main_top else 0, 20 if main_top else 0])[0]
+            # Locality: mostly a region some register already points into.
+            ok = ["data", "stack"] if store else ["data", "rom", "asset", "sig", "stack"]
+            live = [g for g in ok if (main_top or g not in ("sig", "stack")) and
+                    any(self.bounds(g)[0] <= v < self.bounds(g)[1] - 4
+                        for r, v in self.c.known.items() if r < 8)]
+            if live and R.random() < 0.75:
+                region = R.choice(live)
         if size is None:
             if store:
                 size = R.choices(["w", "h", "b"], [50, 25, 25])[0]
@@ -518,7 +615,7 @@ class Gen:
         # compiled code does (a field of a structure, the next element).
         lo, hi = self.bounds(region)
         ptrs = [(r, v) for r, v in self.c.known.items() if r < 8 and lo <= v < hi - 4]
-        if ptrs and R.random() < 0.6:
+        if ptrs and R.random() < 0.8:
             b, p = R.choice(ptrs)
             if not regoff and p % align == 0:
                 off = align * R.randrange(min(32, (hi - p) // align))
@@ -528,11 +625,14 @@ class Gen:
                 return
             a = max(lo, min(hi - align, p + R.randrange(-64, 128))) & ~(align - 1)
             regoff = True
-            near = [b]
+            close = near = [b]
         elif regoff:
+            close = [r for r, v in self.c.known.items() if r < 8 and abs(a - v) <= 255]
             near = [r for r, v in self.c.known.items() if r < 8 and abs(a - v) <= 1024]
         if regoff:
-            if near and R.random() < 0.5:
+            if close and R.random() < 0.85:
+                b = R.choice(close)
+            elif near and R.random() < 0.5:
                 b = R.choice(near)
             elif R.random() < 0.6:  # a base near the address, unaligned as it comes
                 b, _ = self.set_base(a - R.randrange(-255, 256), 1, 0)
@@ -601,8 +701,10 @@ class Gen:
             self.stmia_sig(lows)
             if hi != "final":
                 t = R.choice(regs)
+                kt = self.c.known.get(t)
                 self.ldr_lit(t, at)
                 self.ins(f"ldmia\t{rn(t)}, {rlist(regs)}")
+                self.wr(t, kt)          # t has its own value back
             self.dirty = set()
             return
         if not hi and R.random() < 0.85:
@@ -627,7 +729,7 @@ class Gen:
         """STMIA rS!, {regs} at the next free signature word; returns its address."""
         if self.sig_used != self.sig_rbase:
             d = self.sig_used - self.sig_rbase
-            if self.R.random() < 0.5:
+            if self.R.random() < 0.8:
                 self.ins(f"adds\t{rn(self.rS)}, #{d}")
                 self.c_write()
             else:
@@ -1059,8 +1161,8 @@ class Gen:
         a = min(a, lim - 4 * n)
         b, _ = self.set_base(a, 4, 0, avoid=(self.rS,))
         if load:
-            regs = set(R.sample(self.data_lo(), n))
-            if b in regs or R.random() < 0.15:     # base in the list: the loaded value wins
+            regs = set(R.sample([r for r in self.data_lo() if r != b], n))
+            if R.random() < 0.2:    # base in the list: the loaded value wins
                 regs.add(b)
                 self.ins(f"ldmia\t{rn(b)}, {rlist(regs)}")
                 for r in regs:
@@ -1071,7 +1173,7 @@ class Gen:
                 self.wr(r)
         else:
             regs = set(R.sample([r for r in range(8) if r != b], n))
-            if R.random() < 0.2 and all(r > b for r in regs):     # base lowest: old base stored
+            if R.random() < 0.4 and all(r > b for r in regs):     # base lowest: old base stored
                 regs.add(b)
             self.ins(f"stmia\t{rn(b)}!, {rlist(regs)}")
         self.wr(b, a + 4 * len(regs))
@@ -1080,9 +1182,10 @@ class Gen:
     def op(self):
         R = self.R
         k = R.random() * 100
-        for w, f in ((28, self.op_dp), (3.5, self.op_mul), (18, self.op_load), (8, self.op_store),
-                     (13, self.op_bcc), (6, self.op_capture), (9, self.op_b), (3.5, self.op_bl),
-                     (1.4, self.op_bx), (1, self.op_jump), (1.6, self.op_stack), (1, self.f13)):
+        for w, f in ((21, self.op_dp), (3.5, self.op_mul), (21, self.op_load), (8, self.op_store),
+                     (17, self.op_bcc), (4, self.op_capture), (11, self.op_b), (4.5, self.op_bl),
+                     (1.4, self.op_bx), (1, self.op_jump), (1.6, self.op_stack), (1, self.f13),
+                     (2.5, self.op_corner)):
             if k < w:
                 return f()
             k -= w
@@ -1108,15 +1211,21 @@ class Gen:
         o.append(f"arm_end:\n\tldr\tr0, ={MMIO:#x}\n\tstr\tr2, [r0, #0x10]\n\tmov\tr1, #0xaa"
                  "\n\tstr\tr1, [r0, #0x1c]\n\tb\t.\n\t.ltorg")
         o.append("\t.thumb\n\t.balign 4\nthumb_main:")
-        # Registers: r8-r12 and LR through r0, then the low ones.
-        for h in HI + [14]:
-            self.ldr_lit(0, R.choice(SPECIAL) if R.random() < 0.2 else R.getrandbits(32))
-            self.ins(f"mov\t{rn(h)}, r0")
-        for r in range(8):
-            self.ldr_lit(r, SIG if r == self.rS else
-                         (R.choice(SPECIAL) if R.random() < 0.2 else R.getrandbits(32)))
+        # Registers from the ROM table: LDMIA r0, {r0-r7} (the base in the
+        # list), r8-r12 and LR from r0-r5, again r0-r7, then rS and a corner
+        # value or two through the literal pool.
+        for k in range(2):
+            self.ldr_lit(0, RTAB + 4 * R.randrange(RTAB_WORDS - 8))
+            self.ins("ldmia\tr0, {r0, r1, r2, r3, r4, r5, r6, r7}")
+            if k == 0:
+                for h, r in zip(HI + [14], R.sample(range(8), 6)):
+                    self.ins(f"mov\t{rn(h)}, {rn(r)}")
+        self.ldr_lit(self.rS, SIG)
+        for r in R.sample(self.data_lo(), 2):
+            self.ldr_lit(r, R.choice(SPECIAL))
+        self.c.known = {self.rS: SIG}
         self.c.written = set()
-        nd = R.randrange(8, 16)
+        nd = R.randrange(10, 20)
         for i in range(self.nops):
             if self.pool_due():
                 self.op_b()
@@ -1124,7 +1233,7 @@ class Gen:
             nd -= 1
             if nd == 0:
                 self.dump(hi=R.random() < 0.12)
-                nd = R.randrange(8, 16)
+                nd = R.randrange(10, 20)
         # The end: every register, the flags, IDENT, then FAULT = 0xAA.
         self.dump(hi="final")
         conds = [c for c in CONDS if self.c_ok() or c not in CREAD]

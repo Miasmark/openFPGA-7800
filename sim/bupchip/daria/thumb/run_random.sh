@@ -11,15 +11,17 @@
 #   ./run_random.sh 7 12-15       these seeds
 # OPS operations per test (default 300), JOBS parallel seeds (default nproc).
 # LOCKSTEP=0 skips DARIA. Work files go to $WORK (default
-# sim/work/bupchip/daria_thumb_rand): tN.S/.elf/.bin/.hex, tN.log (reference
-# and Unicorn), tN.lock{1,2,3}.log, results.txt and coverage.txt (the
-# executed formats summed over the seeds). Exits 0 when every seed passes.
+# sim/work/bupchip/thumb_rand): the builds, the image, results.txt and
+# coverage.txt (the executed formats summed over the seeds); per seed in
+# $WORK/seeds: tN.S/.elf/.bin/.hex, tN.log (reference, then Unicorn),
+# tN.sig/.iss.sig (RAM), tN.cov, tN.lock{1,2,3}.log (plain, +await +throttle,
+# LATE_RF). Exits 0 when every seed passes.
 # SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 VERIF="$(cd "$HERE/../../verif" && pwd)"
-WORK="${WORK:-$VERIF/../../work/bupchip/daria_thumb_rand}"
-mkdir -p "$WORK"
+WORK="${WORK:-$VERIF/../../work/bupchip/thumb_rand}"
+mkdir -p "$WORK/seeds"
 WORK="$(cd "$WORK" && pwd)"
 export WORK
 VENV="${VENV:-$VERIF/../../work/bupchip/venv}"
@@ -28,7 +30,7 @@ PYTHON="${PYTHON:-$VENV/bin/python}"
 if [ "$1" = "--one" ]; then
 	# One seed, from the parallel loop below.
 	set +e
-	S="$2"; B="$WORK/t$S"
+	S="$2"; B="$WORK/seeds/t$S"
 	rm -f "$B.sig" "$B.iss.sig" "$B.cov" "$B.lock1.log" "$B.lock2.log" "$B.lock3.log"
 	if ! { python3 "$HERE/gen_thumb.py" "$S" "${OPS:-300}" > "$B.S" &&
 		arm-none-eabi-gcc -mcpu=arm7tdmi -nostdlib -nostartfiles -Wl,-T,"$VERIF/isa/link.ld" \
@@ -84,7 +86,7 @@ start=$(date +%s)
 printf '%s\n' "${SEEDS[@]}" | xargs -P "${JOBS:-$(nproc)}" -I{} "$0" --one {} | tee "$WORK/results.txt"
 sort -t' ' -k2 -n -o "$WORK/results.txt" "$WORK/results.txt"
 covs=()
-for s in "${SEEDS[@]}"; do [ -f "$WORK/t$s.cov" ] && covs+=("$WORK/t$s.cov"); done
+for s in "${SEEDS[@]}"; do [ -f "$WORK/seeds/t$s.cov" ] && covs+=("$WORK/seeds/t$s.cov"); done
 [ ${#covs[@]} -eq 0 ] || python3 "$HERE/thumb_iss.py" --cover "${covs[@]}" > "$WORK/coverage.txt"
 pass=$(grep -c "^PASS" "$WORK/results.txt" || true)
 nref=$(grep -c "^FAIL.*reference ended" "$WORK/results.txt" || true)
