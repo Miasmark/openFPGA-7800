@@ -14,7 +14,8 @@
 # SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
 # daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
 # (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
-# runs/shadow<WIN_KB>/<rom name>/.
+# runs/shadow<WIN_KB>/<rom name>/. NOBUILD=1 runs the binary that is there
+# without checking its sources (run_all.sh builds once, then sets it).
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -71,7 +72,8 @@ if [ "${SHADOW:-0}" != 0 ]; then
 fi
 
 BIN="$OBJ/vtb"
-if [ ! -x "$BIN" ] || [ -n "$(find "${SRCS[@]}" "$HERE/daria_shadow.svh" -newer "$BIN" 2>/dev/null | head -1)" ]; then
+if [ ! -x "$BIN" ] || { [ "${NOBUILD:-0}" = 0 ] && \
+		[ -n "$(find "${SRCS[@]}" "$HERE/daria_shadow.svh" -newer "$BIN" 2>/dev/null | head -1)" ]; }; then
 	echo "building $BIN ..." >&2
 	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \

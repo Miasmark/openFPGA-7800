@@ -13,8 +13,10 @@ DIR="$(realpath "${1:?usage: run_all.sh DIR [+plusargs...]}")"
 shift
 PREFIX=""
 [ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
-# Build once, before the parallel runs race to do it.
-"$HERE/run_daria.sh" --build-only 2>/dev/null || true
+# Build once, before the parallel runs race to do it; they then use that
+# binary even if a source changes while they run.
+"$HERE/run_daria.sh" --build-only
+export NOBUILD=1
 for f in "$DIR"/*.bin; do
 	n="$(basename "$f" .bin)"
 	if [ -z "$FORCE" ] && [ -f "$WORK/runs/$PREFIX$n/report.txt" ]; then continue; fi
