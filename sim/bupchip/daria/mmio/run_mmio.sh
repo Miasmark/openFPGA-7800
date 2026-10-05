@@ -11,9 +11,16 @@
 #    and before the snapshot acknowledged it), with a write queued, during a
 #    snapshot's crossing, and with each side's reset first. The two Draconian
 #    readings must be within 55 counts of the ideal.
-# 2. Mutations of a copy of daria_mmio.sv: each must fail in at least one of
-#    NTSC sync, NTSC async and PAL sync (with a shorter random phase), JOBS
-#    (4) at a time.
+# 2. The control: the DUT unchanged must pass NTSC sync, NTSC async and PAL
+#    sync with a shorter random phase. Then 22 mutations of a copy of
+#    daria_mmio.sv, JOBS (4) at a time, each of which must fail in at least one
+#    of those runs: no token check, the increment winning over (or added to) a
+#    landing write, wrong NTSC and PAL patterns, a decode ignoring addr[1:0],
+#    the counter or its phase running through a pause, wrong byte and halfword
+#    strobes, a mirror waiting for the snapshot, a write dropped or launched
+#    during a flight, a snapshot every clock, the merge on the first
+#    synchroniser flop, a snapshot replacing queued lanes, a reset keeping the
+#    write toggle, the counter or MAMCR, and TCR read back as bit 0 alone.
 # Environment: VARIANTS (default "sync:0:1 async:0:1 async:0:2 async:0:3
 # sync:1:1 async:1:1 async:1:2", clock:pal:seed), LONG (clk_sys clocks of the
 # random phase, 400,000), MUTATIONS (1; 0 skips them), MLONG (60,000), WORK
