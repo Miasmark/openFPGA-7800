@@ -370,6 +370,9 @@ class Gen:
             target = aim(14, ["tl%d-%d" % (k, imm), "tl%d-%d" % (k, imm - 1)], [0x40000000, 0x3ff00, 0xfffff000])
         elif cls in ("BR", "BL"):
             target = "tl"
+        elif cls == "DP" and rec["sh"].endswith(":R"):     # the amount: 0, 32, past 32, Rs[7:0] only
+            want_reg(hx("B"), R.choice([0, 0, 1, 31, 32, 33, 64, 0xff, 0x100, 0x120, 0xffffff20, 0x80000000,
+                                        self.val()]))
         if cls == "BR":
             mb, mf = R.choice([0, 1, 2, 3, 5, 8]), R.choice([0, 1, 2, 3, 5, 8])
 
@@ -385,7 +388,9 @@ class Gen:
             deps.append("mov\tlr, r%d" % rt)
         plan = [R.choice(["lit", "lit", "movs", "cmp", "adds0", "lsl0", "tst", "movhi"])
                 for _ in range(R.choice([0, 0, 1, 1, 2, 3]))]
-        if R.random() < (0.5 if rec["rdc"] == "1" else 0.15):
+        # A MULS (C unknown) before the C readers, and before what passes C
+        # through or defines it only for a non-zero register amount.
+        if R.random() < (0.5 if rec["rdc"] == "1" else 0.35 if rec.get("cdef") in ("N", "R") else 0.15):
             plan.insert(R.randrange(len(plan) + 1), "mul")
             if R.random() < 0.25:
                 plan.append(R.choice(["cmp", "adds0", "movs", "lsl0", "tst"]))
