@@ -69,8 +69,8 @@ MUTANTS = {
     "f11_rd_low": [("wire [3:0] th_rd = (tf3 || tf6 || tf11 || tf12) ? {1'b0, hw[10:8]}",
                     "wire [3:0] th_rd = (tf3 || tf6 || tf12) ? {1'b0, hw[10:8]}")],
     # Thumb MUL clears V.
-    "mul_writes_v": [("flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1:0]};",
-                      "flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1], 1'b0};")],
+    "mul_writes_v": [("if (tm) flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1:0]};",
+                      "if (tm) flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1], 1'b0};")],
 }
 
 

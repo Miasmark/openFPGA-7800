@@ -1119,7 +1119,7 @@ module bup_cpu
 					// Thumb MUL sets N and Z, keeps V, and leaves C unknown:
 					// its bit stays as it was, with c_unk set.
 					flags_we = tm;
-					flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1:0]};
+					if (tm) flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1:0]};
 					cu_set = tm;
 				end
 			end
