@@ -8,7 +8,8 @@
 @   PUSH {r0-r7, lr} and POP {r0-r7, pc}; PUSH {lr} and POP {pc}; POP {pc}
 @   with bit 0 of the value set and clear: ARMv4T stays in Thumb either
 @   way (the target's address with bit 0 cleared).
-@   Values used straight after the last beat (the bypass; LATE_RF).
+@   Values used straight after the last beat, also at the first
+@   instruction of a POP {pc}'s target (the bypass; LATE_RF).
 @ GAS refuses LDMIA with the base in the list, so those are .hword.
 @ SPDX-License-Identifier: MIT
 #include "common.inc"
@@ -148,7 +149,21 @@ pp3:	movs	r1, #9
 	.hword	0xde00
 	POOL
 	.balign 4
-pp4:	END
+pp4:	adds	r4, r3, #1		@ r3 from the POP, at the target's first instruction
+	ldr	r5, =pp5 + 1
+	movs	r6, #0x66
+	push	{r5, r6}		@ r6 above r5
+	ldr	r7, =pp5
+	movs	r0, #0x70
+	push	{r0, r7}
+	pop	{r6, pc}		@ r6 = 0x70, PC = pp5 (bit 0 clear)
+	.hword	0xde00
+	.balign 4
+	.hword	0xde00
+pp5:	adds	r6, #1			@ straight after the last beat
+	pop	{r0, r1}		@ r0 = pp5 + 1, r1 = 0x66
+	adds	r1, r1, r0
+	END
 
 	.balign 4
 romtab:	.word	0x00000001, 0x80000002, 0xfffffffc, 0x7ffffff8, 0x12345678, 0x9abcdef0

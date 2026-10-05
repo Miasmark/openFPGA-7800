@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Halt tests of DARIA's Thumb (docs/DARIA_CORE.md, "What halts" and
 "Verification", the "Halts" row): every row of the halt table at a known
 address, with the expected halt code and halt_pc, and the neighbours that
 must not halt.
 
-  halt_thumb.py WORKDIR IMAGE.a78 TB TB_LATE REF_TRACE LOCKSTEP [NAME ...]
+  halt_thumb.py WORKDIR IMAGE.a78 TB TB_LATE REF_TRACE LOCKSTEP LOCK_ARMONLY [NAME ...]
 
 TB and TB_LATE are build_tb.sh's tb_thumb (plain and LATE_RF=1), REF_TRACE
-../../verif's tb_ref_trace and LOCKSTEP its tb_lockstep built with DUT=bup
-THUMB=1. IMAGE.a78 must hold 1 KiB of assets (run_halts.sh makes it), so
+../../verif's tb_ref_trace, LOCKSTEP its tb_lockstep built with DUT=bup
+THUMB=1 and LOCK_ARMONLY the same with ARM_ONLY=1. IMAGE.a78 must hold 1 KiB of assets (run_halts.sh makes it), so
 that 0x02000400 is the first byte past the asset window. NAMEs pick cases
 (substrings); JOBS (default 2) cases run at once.
 
@@ -36,10 +37,9 @@ THUMB halt must have retired it (halt one clock later). Then:
     which must pass (the core halts, everything before it matched).
 Code 0 cases must not halt: the core alone reaches the end marker in all
 three ways, the reference reaches it with no exception, and the lockstep
-passes.
+passes (the arm_only one: with LOCK_ARMONLY).
 Prints one line per case, then the pass counts per check; exit status 1
 if any case fails.
-SPDX-License-Identifier: MIT
 """
 import os
 import re
@@ -54,14 +54,11 @@ NAMES = {0: "none", 1: "UNDEF", 2: "REG", 3: "THUMB", 4: "FETCH", 5: "DATA", 6: 
 # (after each, a reader must not halt), and a MUL to start from.
 MUL = "muls r1, r2\n"
 TOARM = "ldr r4, =1f\nbx r4\n.balign 4\n.arm\n1:\n"
+TOTHUMB = "\nadr r4, 9f + 1\nbx r4\n.thumb\n9:"
 
 
 def hw(h):
     return ".hword 0x%04x" % h
-
-
-def undef(h, ref="exc"):
-    return (UNDEF, "expect_halt: " + hw(h) + "\n.hword 0xde00", {"ref": ref})
 
 
 CASES = []
@@ -85,8 +82,9 @@ for h in (0xb100, 0xb1ff, 0xb200, 0xb280, 0xb2c0, 0xb300, 0xb3ff,
 # so Rm holds the next instruction.
 for h, rm in ((0x4788, "r1"), (0x4780, "r0"), (0x47c0, "r8"), (0x47f0, "lr"),
               (0x4701, "r0"), (0x4704, "r0"), (0x4721, "r4"), (0x4747, "r8"), (0x4777, "lr")):
-    set_rm = ("ldr r4, =1f + 1\nmov %s, r4\n" % rm) if rm in ("r8", "lr") or rm != "r4" else "ldr r4, =1f + 1\n"
-    if rm in ("r0", "r1"):
+    if rm in ("r8", "lr"):
+        set_rm = "ldr r4, =1f + 1\nmov %s, r4\n" % rm
+    else:
         set_rm = "ldr %s, =1f + 1\n" % rm
     case("bx_%04x" % h, UNDEF, set_rm + ".balign 4\nexpect_halt: " + hw(h) + "\n.hword 0xde00\n.balign 4\n1:",
          ref="natural")
@@ -102,13 +100,13 @@ for h in (0xc000, 0xc300, 0xc700, 0xc800, 0xcb00, 0xcf00, 0xb400, 0xbc00):
     case("empty_%04x" % h, UNDEF, "expect_halt: " + hw(h))
 
 # ---- 4 FETCH: a target outside the code space, one clock later ------------------
-case("b_out_fwd", FETCH, "@at 0x3c00\nexpect_halt: b . + 0x7fe")            # imm11 0x3FF: 0x4402
+case("b_out_fwd", FETCH, "@at 0x3c00\nexpect_halt: .hword 0xe3ff")         # +2046: 0x4402
 case("b_out_back", FETCH, "expect_halt: .hword 0xe400")                      # -2048 from below 0x800
 case("bcc_out_fwd", FETCH, "@at 0x3f80\ncmp r6, #0\nexpect_halt: .hword 0xd07f")   # beq +254: 0x4084
 case("bcc_out_back", FETCH, "cmp r6, #0\nexpect_halt: .hword 0xd080")        # beq -256 from below 0x100
 case("bl_out_fwd", FETCH, ".hword 0xf004\nexpect_halt: .hword 0xf800")       # LR = A + 4 + 0x4000
 case("bl_out_back", FETCH, ".hword 0xf7f0\nexpect_halt: .hword 0xf800")      # LR = A + 4 - 0x10000
-case("bl_out_far", FETCH, "@at 0x3ff0\n.hword 0xf000\nexpect_halt: .hword 0xf7ff")  # 0x3FF6 + 0xFFE
+case("bl_out_far", FETCH, "@at 0x3ff0\n.hword 0xf000\nexpect_halt: .hword 0xffff")  # 0x3FF4 + 0xFFE
 case("bl_suffix_ram", FETCH, "ldr r4, =0x40000001\nmov lr, r4\nexpect_halt: .hword 0xf800")
 case("bx_out_thumb_ram", FETCH, "ldr r1, =0x40000001\nexpect_halt: bx r1")
 case("bx_out_arm_ram", FETCH, "ldr r1, =0x40000000\nexpect_halt: bx r1")
@@ -128,14 +126,16 @@ case("bx_pc_2mod4", FETCH, ".balign 4\nnop\nexpect_halt: bx pc\n.hword 0xde00\n.
 # Running on past the last halfword, 0x3FFE: an instruction of each kind
 # there; 0x3FFC (the low half) must not halt.
 for nm, ins in (("alu", "movs r1, #1"), ("bcc_fails", "bne . + 4"), ("b_lone_prefix", ".hword 0xf000"),
-                ("ldr", "ldr r1, [r0, #4]"), ("ldr_pc", "ldr r1, [pc, #0]"), ("str", "str r1, [r0, #4]"),
-                ("str_reg", "str r1, [r0, r2]"), ("str_mmio", "str r5, [r4, #0x10]"),
-                ("asset", "ldrsh r1, [r4, r2]"), ("shift_reg", "lsls r1, r2"), ("mul", "muls r1, r2"),
+                ("ldr", "ldr r1, [r0, #4]"), ("str", "str r1, [r0, #4]"),
+                ("str_reg", "str r1, [r0, r2]"), ("str_mmio", "str r1, [r5, #0x10]"),
+                ("asset", "ldrsh r1, [r5, r2]"), ("shift_reg", "lsls r1, r2"), ("mul", "muls r1, r2"),
                 ("push", "push {r1, r2}"), ("pop", "pop {r1}"), ("stmia", "stmia r0!, {r1, r2}"),
                 ("ldmia", "ldmia r0!, {r1, r2}"), ("add_sp", "add sp, #4"), ("mov_hi", "mov r8, r1")):
-    pre = {"str_mmio": "ldr r4, =0xe0009000\n", "asset": "ldr r4, =0x02000000\n",
+    pre = {"str_mmio": "ldr r5, =0xe0009000\n", "asset": "ldr r5, =0x02000000\n",
            "pop": "push {r1}\n"}.get(nm, "")
     case("romend_" + nm, FETCH, pre + "@at 0x3ffc\nmovs r6, #0\nexpect_halt: " + ins)
+# LDR [PC] in the last halfword reads 0x4000: the load's own fault (DATA).
+case("romend_ldr_pc", DATA, "@at 0x3ffc\nmovs r6, #0\nexpect_halt: ldr r1, [pc, #0]")
 
 # ---- 5, 6, 7: data outside every window, for every Thumb form ---------------------
 case("ldr_nowhere", DATA, "ldr r1, =0x10000000\nexpect_halt: ldr r2, [r1, #0]")
@@ -166,7 +166,7 @@ case("stmia_mmio", BLOCK, "ldr r1, =0xe0009010\nexpect_halt: stmia r1!, {r2}")
 case("push_below_ram", BLOCK, "ldr r1, =0x40000000\nmov sp, r1\nexpect_halt: push {r2}")
 case("pop_past_ram", BLOCK, "ldr r1, =0x40004000\nmov sp, r1\nexpect_halt: pop {r2}")
 case("pop_pc_mmio", BLOCK, "ldr r1, =0xe0009000\nmov sp, r1\nexpect_halt: pop {pc}")
-case("push_lr_mmio", BLOCK, "ldr r1, =0xe0009020\nmov sp, r1\nexpect_halt: push {lr}")
+case("push_lr_mmio", BLOCK, "ldr r1, =0xe0009018\nmov sp, r1\nexpect_halt: push {lr}")
 
 # ---- 8 FLAGS: a C reader after a Thumb MUL ------------------------------------------
 for nm, rd in (("bcs", "bcs . + 4"), ("bcc", "bcc . + 4"), ("bhi", "bhi . + 4"), ("bls", "bls . + 4"),
@@ -186,9 +186,9 @@ for nm, rd in (("cs", "addcs r3, r3, #1"), ("cc", "addcc r3, r3, #1"), ("hi", "a
                ("sbc", "sbc r3, r1, r2"), ("rsc", "rsc r3, r1, r2"), ("adcs", "adcs r3, r1, r2"),
                ("rrx", "mov r3, r1, rrx"), ("rrxs", "movs r3, r1, rrx"), ("rrx_operand", "add r3, r2, r1, rrx"),
                ("ldr_rrx", "ldr r3, [r0, r6, rrx]"), ("mrs", "mrs r3, cpsr")):
-    case("mul_arm_" + nm, FLAGS, MUL + TOARM + "expect_halt: " + rd)
+    case("mul_arm_" + nm, FLAGS, MUL + TOARM + "expect_halt: " + rd + TOTHUMB)
 case("mul_arm_pass_cs", FLAGS, MUL + TOARM + "movs r3, r1\nands r3, r3, r2\nmovs r3, #1\ntst r1, #3\nmov r3, r2, lsl #4\n"
-     "movs r3, r1, lsl r6\nmul r3, r1, r2\nexpect_halt: addcs r3, r3, #1")
+     "movs r3, r1, lsl r6\nmul r3, r1, r2\nexpect_halt: addcs r3, r3, #1" + TOTHUMB)
 
 # ---- 0: must not halt ---------------------------------------------------------------
 case("ok_b000", NONE, ".hword 0xb000")                                      # add sp, #0
@@ -221,8 +221,7 @@ for nm, w in (("adds", "adds r3, r1, r2"), ("movs_lsl", "movs r3, r1, lsl #1"), 
               ("msr", "msr cpsr_f, #0x20000000"), ("cmp", "cmp r1, r2"), ("tst_lsr", "tst r1, r2, lsr #1"),
               ("movs_reg", "movs r3, r1, lsl r2")):
     case("ok_mul_arm_" + nm, NONE, MUL + TOARM + w +
-         "\naddcs r3, r3, #1\naddls r3, r3, #1\nadc r3, r1, r2\nrsc r3, r1, r2\nmov r3, r1, rrx\nmrs r3, cpsr\n"
-         "adr r4, 2f + 1\nbx r4\n.thumb\n2:")
+         "\naddcs r3, r3, #1\naddls r3, r3, #1\nadc r3, r1, r2\nrsc r3, r1, r2\nmov r3, r1, rrx\nmrs r3, cpsr" + TOTHUMB)
 
 # ---- 3 THUMB: the BupChip profile (arm_only), ARM only ---------------------------------
 case("armonly_bx_odd", THUMB, "ldr r1, =0x101\nexpect_halt: bx r1", frame="arm", arm_only=True)
@@ -303,7 +302,7 @@ def result(out):
 
 def check(name, code, body, o, env):
     """Returns (ok, line, {check: ok})."""
-    work, image, tb, tb_late, ref, lock, here, verif = env
+    work, image, tb, tb_late, ref, lock, lock_ao, here, verif = env
     b = os.path.join(work, name)
     with open(b + ".S", "w") as f:
         f.write(source(code, body, o))
@@ -353,7 +352,7 @@ def check(name, code, body, o, env):
             why.append("%s: %s" % (var, what))
     note = ""
     refk = o.get("ref")
-    if code == NONE and not o.get("arm_only"):
+    if code == NONE:
         refk = "natural"
     if refk or code in (DATA, RO, BLOCK):
         out = run([ref, "+rom=" + image, "+romhex=" + b + ".hex", "+maxcyc=200000", "+trace=" + b + ".trace"]).stdout
@@ -395,8 +394,8 @@ def check(name, code, body, o, env):
             else:
                 note = "; reference: no data abort (fault %s, %s exceptions)" % (
                     "%02x" % rfault if rfault is not None else "none", rexc)
-    if code == NONE and not o.get("arm_only"):
-        lo = run([lock, "+rom=" + image, "+romhex=" + b + ".hex", "+maxret=100000"]).stdout
+    if code == NONE:
+        lo = run([lock_ao if o.get("arm_only") else lock, "+rom=" + image, "+romhex=" + b + ".hex", "+maxret=100000"]).stdout
         with open(b + ".lock.log", "w") as f:
             f.write(lo)
         ok = "LOCKSTEP PASS" in lo
@@ -417,12 +416,12 @@ def check(name, code, body, o, env):
 
 
 def main():
-    work, image, tb, tb_late, ref, lock = sys.argv[1:7]
-    pick = sys.argv[7:]
+    work, image, tb, tb_late, ref, lock, lock_ao = sys.argv[1:8]
+    pick = sys.argv[8:]
     here = os.path.dirname(os.path.abspath(__file__))
     verif = os.path.normpath(os.path.join(here, "..", "..", "verif"))
     os.makedirs(work, exist_ok=True)
-    env = (work, image, tb, tb_late, ref, lock, here, verif)
+    env = (work, image, tb, tb_late, ref, lock, lock_ao, here, verif)
     cases = [c for c in CASES if not pick or any(p in c[0] for p in pick)]
     with ThreadPoolExecutor(max_workers=int(os.environ.get("JOBS", "2"))) as ex:
         res = list(ex.map(lambda c: check(c[0], c[1], c[2], c[3], env), cases))

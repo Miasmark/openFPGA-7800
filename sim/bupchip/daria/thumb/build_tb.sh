@@ -2,7 +2,9 @@
 # Build tb_thumb.sv (DARIA's core alone, THUMB 1) with Verilator (5.040; set
 # VERILATOR to override) and print the binary's path: $WORK/obj_thumb/vtb, or
 # $WORK/obj_thumb_laterf/vtb with LATE_RF=1 (BUP_SIM_LATE_RF), rebuilt when a
-# source is newer. WORK defaults to sim/work/bupchip/daria/thumb.
+# source is newer or the sources change. WORK defaults to
+# sim/work/bupchip/daria/thumb. CORE_SV builds another copy of bup_cpu.sv
+# (a mutated one, for checking that the tests catch a fault).
 # SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,8 +18,10 @@ OBJ="$WORK/obj_thumb"
 DEFS=()
 [ "${LATE_RF:-0}" = 0 ] || { OBJ="${OBJ}_laterf"; DEFS+=(-DBUP_SIM_LATE_RF); }
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
-	"$CORE/bup_cpu.sv" "$HERE/tb_thumb.sv")
-if [ -x "$OBJ/vtb" ] && [ -z "$(find "${SRCS[@]}" -newer "$OBJ/vtb" 2>/dev/null)" ]; then
+	"${CORE_SV:-$CORE/bup_cpu.sv}" "$HERE/tb_thumb.sv")
+ARGS="${SRCS[*]} ${DEFS[*]}"
+if [ -x "$OBJ/vtb" ] && [ "$(cat "$OBJ/args" 2>/dev/null)" = "$ARGS" ] && \
+	[ -z "$(find "${SRCS[@]}" -newer "$OBJ/vtb" 2>/dev/null)" ]; then
 	echo "$OBJ/vtb"; exit 0
 fi
 mkdir -p "$OBJ"
@@ -25,5 +29,6 @@ mkdir -p "$OBJ"
 	--top-module tb_thumb -DROMHEX="\"$RTL/bupchip.hex\"" "${DEFS[@]}" \
 	-Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
 	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2; echo "build failed: $OBJ.log" >&2; exit 1; }
-find "$OBJ" -name '*.gch' -delete		# only vtb is used again
+find "$OBJ" -name '*.gch' -delete		# only vtb and args are used again
+echo "$ARGS" > "$OBJ/args"
 echo "$OBJ/vtb"

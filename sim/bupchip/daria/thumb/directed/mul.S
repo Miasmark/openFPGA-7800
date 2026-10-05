@@ -8,7 +8,7 @@
 @   product used at once and an operand written just before (the bypass).
 @   MULA (C = 0 before, the reference's C = 1 after) and MULB (C = 1
 @   before, 0 after), so the core's kept C differs from the reference's
-@   either way, each followed by every kind of C writer (ADDS, SUBS, CMP,
+@   either way (both with V = 1 before, which MUL keeps), each followed by every kind of C writer (ADDS, SUBS, CMP,
 @   CMN, NEG in F2-F5; shifts by non-zero amounts in F1, including LSR and
 @   ASR #32, and F4, including ROR by 32), then the readers (B CS, CC, HI,
 @   LS, ADC, SBC).
@@ -63,17 +63,17 @@ thumb_main:
 	POOL
 
 	@ ---- MUL, a C writer, the readers
-	.macro MULA			@ C = 0 before; the reference's C after is 1
+	.macro MULA			@ C = 0, V = 1 before; the reference's C after is 1
 	movs	r3, #1
 	lsls	r3, r3, #31
 	movs	r4, #0
-	SETF	0
+	SETF	1
 	muls	r3, r4
 	.endm
-	.macro MULB			@ C = 1 before; the reference's C after is 0
+	.macro MULB			@ C = 1, V = 1 before; the reference's C after is 0
 	movs	r3, #3
 	movs	r4, #5
-	SETF	2
+	SETF	3
 	muls	r3, r4
 	.endm
 	.macro INS ins:vararg

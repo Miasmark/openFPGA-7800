@@ -61,7 +61,7 @@ run_one() {
 	local t="$1" n b v why=""
 	n="$(basename "${t%.S}")"
 	b="$OUT/$n"
-	rm -f "$b.res" "$b.line"
+	: > "$b.res"
 	if ! { arm-none-eabi-gcc -mcpu=arm7tdmi -marm -nostdlib -nostartfiles -I "$HERE/directed" \
 			-Wl,-T,"$VERIF/isa/link.ld" -Wl,--no-warn-rwx-segments -o "$b.elf" "$t" &&
 		arm-none-eabi-objcopy -O binary -j .vectors -j .text "$b.elf" "$b.bin" &&
