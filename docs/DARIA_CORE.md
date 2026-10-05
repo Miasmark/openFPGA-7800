@@ -1170,6 +1170,19 @@ The BupChip and DARIA share one CPU and one clock. CoreTone does not depend on t
 - **What changes with the divider.** The PLL's counter 3; `psram.sv`'s `CLOCK_SPEED` (28.636364 today); and `core_constraints.sdc`, which times `clk_arm` with `clk_sys` as one synchronous group only because it is exactly 2 × `clk_sys`. At any other ratio the crossings are declared asynchronous. The BupChip's crossings are synchronisers, stress-tested asynchronously at 16–29 MHz; they are re-run at the new rate, and DARIA's own crossings are built the same way.
 - Step 3's probe measures 32.73 and 40.43 MHz, with the path fix, inside the full build. If 40.43 MHz does not close, S3 at 32.73 MHz does the work S1 would need 40 MHz for.
 
+**The early probe (2026-10-05, during step 2) [probe].** `sim/bupchip/quartus_probe/run_probe.sh` with `WINDOW=1` gives the CPU DARIA's memories at full size: the 16 KB firmware ROM and the 128 KB window (`altsyncram` with `maximum_depth` 8192, so 8K × 1 slices and a 4:1 output mux) behind a registered profile mux, the 32 KB cart RAM with its port B on `clk_sys`, and the asset cache's 4 KB of data read at `d_addr` (180 M10K). `THUMB=1` compiles the step 2 core. One seed each, in an empty device, worst setup slack at slow 85 °C:
+
+| CPU and memories | ALMs (CPU) | 32.73 MHz | 40.43 MHz |
+|---|---|---|---|
+| ARIA (`MODES` 1), ARIA's memories (16 KB ROM, 16 KB RAM; 32 M10K) | 1,268 | +4.71 ns (Fmax 38.7) | −0.57 ns (39.5) |
+| ARIA (`MODES` 1, `CODE_AW` 15), DARIA's memories | 1,375 | +2.75 ns (36.0) | −1.46 ns (38.2) |
+| DARIA (`THUMB` 1), DARIA's memories | 1,720 | **+0.03 ns (32.75)** | −3.97 ns (34.8) |
+
+- **The window costs 1–2 ns**: its 4:1 slice mux and the profile mux sit in front of the decode (2.3 ns of the path with their routing), and `rom_addr` fans out to 144 M10K through duplicated drivers.
+- **Thumb costs about 2.7 ns more**, not the 0–1.9 ns this design estimated: the levels stay at 20, but the merged decode, the wider operand mux and the busier placement add delay along the whole path.
+- **The path** at 32.73 MHz with Thumb: window → slice mux → profile mux → read-index select (4 levels) → MLAB read → bypass → shifter (4) → operand mux → `alu_b` (2) → adder → the region of the sum (the one-clock-store decision) → `done` → `rom_addr` → 144 M10K address registers: 29.1 ns of data delay. The tail from the adder on is `BUPCHIP_CORE.md`'s risk 2.
+- **So:** 32.73 MHz closes with no margin, before the full build and before S3; the one-clock-store fix (the store decided from the base register's region, about 2–3.8 ns [E]) becomes required for it, not only for 40.43 MHz. **40.43 MHz is out of reach** without restructuring well beyond that fix (−4 ns with the window and Thumb); it is dropped as a goal unless step 3 finds otherwise. The Thumb core's area, +345 ALMs over ARIA with the same memories, is inside the 300–500 estimate.
+
 ## Budget
 
 **ALMs [E]**, added to 2.1.2's 12,899 (70%):
@@ -1229,8 +1242,8 @@ What step 1 leaves open, each with the step that settles it:
 
 | # | Item | Settled in |
 |---|---|---|
-| 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. This, not the Thumb decoder, is the main threat to 40.43 MHz. Levers: duplicating the last address stage (60–120 ALMs), a 64 KB window. | Step 3 |
-| 2 | **40.43 MHz** needs the one-clock-store fix (`BUPCHIP_CORE.md`, risk 2) and item 1; 32.73 MHz holds with the Thumb decoder even without it [E]. | Step 3 |
+| 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. The early probe ("Clock") measured it at 1–2 ns, and Thumb at about 2.7 ns more: DARIA closes 32.73 MHz in an empty device with +0.03 ns. Levers: the one-clock-store fix (item 2), duplicating the last address stage (60–120 ALMs), a 64 KB window. | Step 3 |
+| 2 | **The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2) is now needed for 32.73 MHz itself: the worst path ends in the store decision taken from the adder's sum. **40.43 MHz** (−3.97 ns in the early probe) is out of reach without more than that fix. | Step 3 |
 | 3 | **S3 or S1 with Thumb**, by area. | Step 3 |
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above 128 KB** halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
