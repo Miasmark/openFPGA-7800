@@ -889,7 +889,13 @@ module bup_cpu
 
 	// ---- control ----------------------------------------------------------------------
 	wire [31:0] addr_x = bit_p ? sum : ra;		// single transfer address
-	wire  [1:0] rg_x = region(addr_x);
+	// The one-clock store's region, from Rn and the immediate offset on an
+	// adder of its own. Where the store may take one clock (an immediate
+	// offset) it equals region(addr_x); it keeps the shifter and the operand
+	// muxes off the path to done (BUPCHIP_CORE, risk 2).
+	wire [31:0] st_off = tm ? th_offv : a_sdt ? {20'b0, insn[11:0]} : {24'b0, insn[11:8], insn[3:0]};
+	wire [31:0] st_addr = bit_p ? ra + (st_off ^ {32{!bit_u}}) + 32'(!bit_u) : ra;
+	wire        st_ram = region(st_addr) == RG_RAM;
 	wire [29:0] br_target = 30'(pc) + 30'd2 + {{6{insn[23]}}, insn[23:0]};	// ARIA's, in words
 	// THUMB 1: branch targets in halfwords, from the instruction's address +
 	// 8 (ARM) or + 4 (Thumb, F16 and F18).
@@ -1043,7 +1049,7 @@ module bup_cpu
 							nstate = S_W;
 							rf_we = t_wb;			// base write-back now, data in W
 							rf_wa = f_rn;
-						end else if (!t_regoff && rg_x == RG_RAM) begin
+						end else if (!t_regoff && st_ram) begin
 							done = 1'b1;			// one-clock store
 							ram_we = 1'b1;
 							rf_we = t_wb;

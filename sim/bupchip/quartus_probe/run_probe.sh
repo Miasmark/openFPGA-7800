@@ -7,7 +7,8 @@
 # WINDOW=1 gives it DARIA's memories at full size and CODE_AW 15 (with
 # MODES 1; bup_probe_top.sv): the fetch path of docs/DARIA_CORE.md, open
 # item 1. Its build directory is <MHZ>_window. THUMB=1 compiles bup_cpu with
-# THUMB 1 (DARIA; arm_only from a pin), in <MHZ>[_window]_thumb.
+# THUMB 1 (DARIA; arm_only from a pin), in <MHZ>[_window]_thumb. SEED=N
+# fits with seed N instead of bup_probe.qsf's 1, in <MHZ>[...]_sN.
 # Each clock builds in $WORK/<MHZ>/ (default sim/work/bupchip/qprobe):
 # Analysis & Synthesis, Fitter and Timing Analyzer (no Assembler), a Timing
 # Analyzer script for the five worst setup paths at slow 85 C (paths.txt),
@@ -39,6 +40,7 @@ for mhz in "${CLOCKS[@]}"; do
 	dir="$WORK/$mhz"
 	[ "${WINDOW:-0}" = 0 ] || dir="$WORK/${mhz}_window"
 	[ "${THUMB:-0}" = 0 ] || dir="${dir}_thumb"
+	[ -z "$SEED" ] || dir="${dir}_s$SEED"
 	period=$(python3 -c "print('%.3f' % (1000.0 / float('$mhz')))")
 	rm -rf "$dir"
 	mkdir -p "$dir"
@@ -49,6 +51,10 @@ for mhz in "${CLOCKS[@]}"; do
 	[ "${MODES:-0}" = 0 ] && [ "${WINDOW:-0}" = 0 ] || echo "set_parameter -name MODES 1" >> "$dir/bup_probe.qsf"
 	[ "${WINDOW:-0}" = 0 ] || echo "set_parameter -name WINDOW 1" >> "$dir/bup_probe.qsf"
 	[ "${THUMB:-0}" = 0 ] || echo "set_parameter -name THUMB 1" >> "$dir/bup_probe.qsf"
+	if [ -n "$SEED" ]; then
+		sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED $SEED/" "$dir/bup_probe.qsf"
+		grep -q "^set_global_assignment -name SEED $SEED\$" "$dir/bup_probe.qsf" || { echo "run_probe.sh: no SEED line in bup_probe.qsf" >&2; exit 1; }
+	fi
 	sed "s/^set period .*/set period $period/" "$HERE/bup_probe.sdc" > "$dir/bup_probe.sdc"
 	grep -q "^set period $period\$" "$dir/bup_probe.sdc" || { echo "run_probe.sh: no period line in bup_probe.sdc" >&2; exit 1; }
 
