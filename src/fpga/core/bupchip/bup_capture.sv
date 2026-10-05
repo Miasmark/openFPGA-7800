@@ -22,7 +22,7 @@
 // byte lane only. The mode is known at byte 5, so bytes 0-5 wait in head: in
 // image mode they leave as three WRITEs (the head) once the mode is known; in
 // A78 mode they are not sent (the ARSC block starts at 128 or later). A file
-// that ends before byte 5 is in image mode, and its head leaves when the
+// of fewer than 6 bytes is in image mode, and its head leaves when the
 // window closes.
 //
 // Firmware slot (bupchip.bin). Bytes are packed four to a little-endian word,
@@ -80,7 +80,9 @@
 // previous cartridge download still had waiting, and a new firmware download
 // what the previous firmware download had: the receiver's START or FWSTART
 // withdraws the old contents anyway. A firmware byte may arrive in the clock
-// fw_download rises; it starts the new download's first word.
+// fw_download rises; it starts the new download's first word. A cartridge
+// byte may arrive in the clock of load_start; it is the new file's byte 0
+// (head and size take it; an A78 needs nothing from it).
 //
 // START leaves before the first WRITE of its download: the head waits behind
 // it, and the first other WRITE completes with byte 7, at least 17 clocks
@@ -183,18 +185,20 @@ module bup_capture (
 			g_a78 <= 1'b0;
 		end else if (h_byte) begin
 			case (load_addr[2:0])
-				3'd0: head[7:0] <= load_data;
 				3'd1: begin head[15:8] <= load_data; h_match <= load_data == "A"; end
 				3'd2: begin head[23:16] <= load_data; h_match <= h_match && load_data == "T"; end
 				3'd3: begin head[31:24] <= load_data; h_match <= h_match && load_data == "A"; end
 				3'd4: begin head[39:32] <= load_data; h_match <= h_match && load_data == "R"; end
-				default: begin
+				3'd5: begin
 					head[47:40] <= load_data;
 					g_known <= 1'b1;
 					g_a78 <= a78_now;
 				end
+				default: ;
 			endcase
 		end
+		if (h_byte && load_addr[2:0] == 3'd0)	// also in the clock of load_start
+			head[7:0] <= load_data;
 	end
 
 	// ---- the A78 header's declared ROM size (bupchip_asset_ddr.sv:82-104) ----
@@ -337,7 +341,7 @@ module bup_capture (
 			p_tail <= 1'b0;
 			p_end <= 1'b0;
 			have_lo <= 1'b0;
-			size <= 24'd0;
+			size <= c_valid ? f_size : 24'd0;	// a byte now is the new file's byte 0
 		end else begin
 			if (r_byte)
 				size <= off[23:0] + 24'd1;
@@ -404,7 +408,8 @@ module bup_capture (
 	always_ff @(posedge clk) begin
 		if (load_start) begin
 			exp_off <= 25'd0;
-			exp_img <= 25'd0;
+			exp_img <= c_valid ? load_addr + 25'd1 : 25'd0;
+			if (c_valid && load_addr != 25'd0) seq_sim <= 1'b1;
 		end else begin
 			if (r_byte) begin
 				if (off != exp_off) seq_sim <= 1'b1;

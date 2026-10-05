@@ -9,7 +9,7 @@
 // A plan file (run_capture.sh writes it, and the files it names) lists the
 // downloads, one per line:
 //
-//   KIND N IS_A78 BLK_OFF BLK_LEN NEXT LATE PACE LABEL PATH
+//   KIND N IS_A78 BLK_OFF BLK_LEN NEXT LATE PACE RISE LABEL PATH
 //
 //   KIND     0 the cartridge slot, 1 the firmware slot (bupchip.bin)
 //   N        the file's bytes
@@ -26,6 +26,7 @@
 //            (inside the capture's window)
 //   PACE     0 one byte every 2.5 clk_sys (data_loader.sv's fastest), 1 that
 //            plus a random 0-80 ns, 2 a random 3-20 clk_sys per byte
+//   RISE     1: the cartridge's byte 0 in the clock of load_start
 //
 // Bytes carry their slot (bridge address bits 27:25), as bupchip_pocket.sv
 // hands them over: a cartridge byte after its flag fell is still the
@@ -320,13 +321,28 @@ module tb_capture;
 		end
 	endtask
 
-	// One cartridge download. b2b_in: the previous one ended in the clock before.
-	task automatic do_cart(input int n, input int next, input int late, input bit b2b_in);
+	// One cartridge download. b2b_in: the previous one ended in the clock
+	// before. rise: byte 0 in the clock of load_start.
+	task automatic do_cart(input int n, input int next, input int late, input bit b2b_in, input bit rise);
+		// drive just after a clk_sys edge (a check ends on a clk_arm edge, which
+		// a38 shares with clk_sys every 3 clocks); b2b_in is there already
+		if (!b2b_in) @(posedge clk_sys);
 		cart_dl <= 1;
-		if (!b2b_in) repeat (2 + $urandom_range(20)) @(posedge clk_sys);
-		@(posedge clk_sys);
-		t_next = $realtime;
-		send_bytes(0, 0, n - late);
+		if (rise && n > 0) begin
+			ld_wr <= 1;
+			ld_fw <= 0;
+			ld_addr <= 25'd0;
+			ld_data <= img[0];
+			@(posedge clk_sys);
+			ld_wr <= 0;
+			t_next = $realtime;
+			send_bytes(0, 1, n - late);
+		end else begin
+			if (!b2b_in) repeat (2 + $urandom_range(20)) @(posedge clk_sys);
+			@(posedge clk_sys);
+			t_next = $realtime;
+			send_bytes(0, 0, n - late);
+		end
 		repeat (1 + $urandom_range(3)) @(posedge clk_sys);
 		if (next == 3) begin
 			fw_dl <= 1;
@@ -464,7 +480,8 @@ module tb_capture;
 	// ---- the plan ------------------------------------------------------------------------------------
 	initial begin
 		string  plan, label, path;
-		int     fd, r, kind, n, a78, boff, blen, next, late, pace, prev_next, ffd, got;
+		int     fd, r, kind, n, a78, boff, blen, next, late, pace, rise, prev_next, ffd, got;
+		longint n_rise = 0;
 		if ($value$plusargs("seed=%d", r)) void'($urandom(r));
 		lockstep = $test$plusargs("lockstep");
 		if (!$value$plusargs("plan=%s", plan)) $fatal(1, "+plan=FILE");
@@ -474,8 +491,8 @@ module tb_capture;
 		repeat (20) @(posedge clk_sys);
 		prev_next = 0;
 		forever begin
-			r = $fscanf(fd, "%d %d %d %d %d %d %d %d %s %s\n", kind, n, a78, boff, blen, next, late, pace, label, path);
-			if (r != 10) break;
+			r = $fscanf(fd, "%d %d %d %d %d %d %d %d %d %s %s\n", kind, n, a78, boff, blen, next, late, pace, rise, label, path);
+			if (r != 11) break;
 			// the loader's pace
 			bp = 2.5 * sys_per();
 			jit = 0.0;
@@ -493,7 +510,8 @@ module tb_capture;
 				c_boff = boff;
 				c_blen = blen;
 				if (!c_a78) win_n = 0;	// this image rewrites the window
-				do_cart(n, next, late, prev_next == 1);
+				if (rise && n > 0) n_rise++;
+				do_cart(n, next, late, prev_next == 1, rise != 0);
 			end else begin
 				got = n > 0 ? $fread(fwb, ffd) : 0;
 				$fclose(ffd);
@@ -517,8 +535,8 @@ module tb_capture;
 		#2000000;
 		$display("capture bench: %0d checks, %0d bad; %0d messages, %0d PSRAM writes, %0d window writes, %0d ROM writes; toggle to win_we %0d-%0d ps; %0d ENDs, %0d before their writes ended",
 			n_checks, n_bad, n_msg, n_pwr, n_winwr, n_romwr, lat_min, lat_max, n_end, n_end_bad);
-		$display("  seq_err %0d, lost %0d, overrun %0d, seq_sim %0d, start_sim %0d, lost_s %0d, lost_x %0d, window write faults %0d",
-			seq_err, lost, overrun, cap.seq_sim, cap.start_sim, n_lost_s, n_lost_x, n_win_bad);
+		$display("  seq_err %0d, lost %0d, overrun %0d, seq_sim %0d, start_sim %0d, lost_s %0d, lost_x %0d, window write faults %0d; %0d cartridges with byte 0 in the clock of load_start",
+			seq_err, lost, overrun, cap.seq_sim, cap.start_sim, n_lost_s, n_lost_x, n_win_bad, n_rise);
 		if (lockstep) $display("  lockstep with the BupChip's capture and receiver: %0d clk_sys and %0d clk_arm clocks, %0d differences", ls_sys, ls_arm, ls_diff);
 		chip.report();
 		$display("result: checks=%0d bad=%0d seq=%0d lost=%0d overrun=%0d order=%0d start=%0d lost_s=%0d lost_x=%0d win=%0d endw=%0d viol=%0d ls=%0d lsdiff=%0d",

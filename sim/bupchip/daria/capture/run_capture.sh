@@ -13,8 +13,8 @@
 #            an A78, its flag rising as the cartridge's falls or a clock
 #            before, with the cartridge's last bytes after its flag fell;
 #            cartridge downloads back to back (START dropping the head, tail
-#            and END of the one before); the loader at 2.5 clk_sys per byte,
-#            with jitter, and slow
+#            and END of the one before); byte 0 in the clock of load_start;
+#            the loader at 2.5 clk_sys per byte, with jitter, and slow
 #   a78lock  random A78 and firmware downloads (as ../../s4/stress/
 #            run_capstress.sh makes them, with "ATARI" headers), with the
 #            BupChip's capture and receiver from git ($REF_REV, before DARIA)
@@ -26,7 +26,7 @@
 # BupChip's today); main also with psram.sv's CLOCK_SPEED at 50.0 and
 # asynchronous at about 32.7 MHz.
 #   ./run_capture.sh
-#   ./run_capture.sh mutants    seventeen faults, each of which must fail
+#   ./run_capture.sh mutants    eighteen faults, each of which must fail
 # Environment: WORK (default sim/work/bupchip/daria/capture; the files, plans
 # and logs go there), REF_REV (default 633faf4, the last commit with the
 # BupChip-only capture), JOBS (default 3), SEED (default 1), ONLY (an
@@ -101,13 +101,13 @@ def model(d):
 
 plans = {}
 count = [0]
-def add(plan, kind, data, label, nxt=0, late=0, pace=0):
+def add(plan, kind, data, label, nxt=0, late=0, pace=0, rise=0):
     count[0] += 1
     path = os.path.join(out, "f%05d.bin" % count[0])
     with open(path, "wb") as f:
         f.write(bytes(data))
     a, bo, bl = model(data) if kind == 0 else (0, 0, 0)
-    plans.setdefault(plan, []).append(f"{kind} {len(data)} {a} {bo} {bl} {nxt} {late} {pace} {label} {path}")
+    plans.setdefault(plan, []).append(f"{kind} {len(data)} {a} {bo} {bl} {nxt} {late} {pace} {rise} {label} {path}")
 
 # ---- main: the directed cases
 P = "main"
@@ -172,6 +172,11 @@ add(P, 0, img(132097), "b2b:three_images")
 add(P, 0, img(20001), "pace:img_jitter", pace=1)
 add(P, 0, img(3001), "pace:img_slow", pace=2)
 add(P, 0, a78(4096, 3001), "pace:a78_jitter", pace=1)
+add(P, 0, img(4097), "rise:img_byte0_with_load_start", rise=1)
+add(P, 0, img(1), "rise:img1_byte0_with_load_start", rise=1)
+add(P, 0, a78(4096, 1001), "rise:a78_byte0_with_load_start", rise=1)
+add(P, 0, img(9001), "rise:b2b_img_byte0_with_load_start", nxt=1)
+add(P, 0, img(33333), "rise:b2b_img_byte0_with_load_start", rise=1)
 add(P, 1, rnd(16385), "fw:16385")
 
 # ---- a78lock: random A78s and firmware, as run_capstress.sh makes them
@@ -219,7 +224,8 @@ def random_plan(P, n, images):
             nxt = 0
         late = rng.randrange(5) if nxt != 1 and rng.randrange(100) < 30 else 0
         late = min(late, len(d))
-        add(P, 0, d, f"random:{kind}" + ("_b2b" if prev == 1 else ""), nxt=nxt, late=late, pace=pace)
+        rise = 1 if rng.randrange(100) < 20 else 0
+        add(P, 0, d, f"random:{kind}" + ("_b2b" if prev == 1 else ""), nxt=nxt, late=late, pace=pace, rise=rise)
         prev = nxt
     if prev in (2, 3):
         add(P, 1, rnd(fw_size()), "random:cart_then_fw")
@@ -271,6 +277,7 @@ MUT = (
 	("no_head", C, "if (h_last && !a78_now) begin", "if (1'b0) begin"),
 	("head_high_lane_always", C, "wire         h_hi = {h_idx, 1'b1} < h_n;", "wire         h_hi = 1'b1;"),
 	("short_file_no_head", C, "if (!g_known && size != 24'd0) begin", "if (1'b0) begin"),
+	("byte0_with_load_start_dropped", C, "size <= c_valid ? f_size : 24'd0;", "size <= 24'd0;"),
 	("tail_without_image_bit", C, "msg_pl <= {3'd0, img_on, 2'b01, size[22:1], 8'd0, lo};", "msg_pl <= {3'd0, 1'b0, 2'b01, size[22:1], 8'd0, lo};"),
 	("no_512k_drop", C, "load_addr[24:19] == 6'd0;", "load_addr[24:23] == 2'd0;"),
 	("header_bytes_in_a78_size", C, "size <= h_last && a78_now ? 24'd0 : f_size;", "size <= f_size;"),
