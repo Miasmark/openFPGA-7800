@@ -8,9 +8,13 @@
 #      throttle clocks, and built with BUP_SIM_LATE_RF;
 #   3. modes.S on tb_s1.sv, which builds the core with MODES 0 (ARIA): it
 #      must halt with code 1 (UNDEF) at its first MSR to SYS mode;
+#      with THUMB=1, tb_s1 has DARIA's core in the BupChip profile, which
+#      has MODES 1: it must run to the end marker instead;
 #   4. unless QUICK=1, ../../verif/directed/run.sh with MODES=1: the
 #      directed tests and fuzz seeds written for ARIA, in lockstep with the
 #      MODES 1 build.
+# THUMB=1 (with ARM_ONLY=1, the BupChip profile) runs all of it on DARIA's
+# core (THUMB 1); give it its own WORK, VWORK and S1WORK.
 # Work files go to $WORK (default sim/work/bupchip/daria/modes). Nothing here
 # needs game data or the firmware. Exits 0 when everything passes.
 #   ./run_modes.sh
@@ -66,8 +70,13 @@ check "lockstep, MODES 1, waits and throttle" "$b.lock2.log" "^LOCKSTEP PASS"
 "$LOCK_LRF" +rom="$IMG" +romhex="$b.hex" +maxret=1000000 > "$b.lock3.log" 2>&1 || true
 check "lockstep, MODES 1, BUP_SIM_LATE_RF" "$b.lock3.log" "^LOCKSTEP PASS"
 "$S1_BIN" +romhex="$b.hex" +rom="$IMG" +maxcyc=200000 > "$b.s1.log" 2>&1 || true
-check "MODES 0 halts with code 1 at the first MSR to SYS (0x$first_sys)" "$b.s1.log" \
-	"^result: halted=1 code=1 pc=0*${first_sys#"${first_sys%%[!0]*}"} "
+if [ "${THUMB:-0}" = 0 ]; then
+	check "MODES 0 halts with code 1 at the first MSR to SYS (0x$first_sys)" "$b.s1.log" \
+		"^result: halted=1 code=1 pc=0*${first_sys#"${first_sys%%[!0]*}"} "
+else
+	check "THUMB 1 with arm_only (MODES 1) runs it to the end marker on tb_s1" "$b.s1.log" \
+		"^result: halted=0 code=0 pc=00000000 fault=aa "
+fi
 
 if [ "${QUICK:-0}" = 0 ]; then
 	if MODES=1 WORK="$WORK/directed" VWORK="$VWORK" "$VERIF/directed/run.sh"; then echo "PASS ARIA's directed tests and fuzz with MODES 1"

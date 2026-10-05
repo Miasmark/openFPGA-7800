@@ -2,7 +2,7 @@
 
 **DARIA** (Dual-use Atari RISC Interface Accelerator) is ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`), extended to run the 2600's ARM cartridge schemes: DPC+, CDF, CDFJ and CDFJ+ (Harmony and Melody cartridges). Upstream MiSTer runs them on its ARM7TDMI core, which the Pocket build leaves out (`NO_ARM_MAPPER`). The first release with DARIA will be 2.2.1.
 
-**Steps 0 (scope) and 1 (design) are done.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
+**Steps 0 (scope), 1 (design) and 2 (Thumb in simulation) are done.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
 
 Tags, as in `BUPCHIP_CORE.md`:
 
@@ -143,6 +143,50 @@ So a 2600-only bitstream without the 7800's MARIA, YM2151, POKEYs, 7800 mappers 
 - ARIA's full check (`sim/bupchip/s1/check.sh` with Rikki & Vikki) still passes with `MODES` 0, including PCM identical to MiSTer's on songs 13, 14, 9 and 30.
 
 **The hand-off (P1, P2)**, as step 0 sized it (step 1 designs it: the memory system, 5). Upstream crosses six 32-bit values each way through a mailbox, two-flop synchronisers and result registers: about 1,150 flip-flops in its controller. DARIA can do without them. Its launch sequence writes the register file through the write port anyway (r0–r12, r13, r14, PC, CPSR), so FIQ's r8–r13 are six more writes, and the return reads them back through a read port while the CPU is halted. With the counters, frequencies and launch values in the front ends' state RAM, the controller is 100–150 ALMs [E] against upstream's 716.
+
+## Step 2 work: Thumb in simulation
+
+`bup_cpu.sv` has two more parameters and one more input:
+
+- **`THUMB`** (default 0). 1 is DARIA: Thumb as well as ARM, with `MODES` 1 implied. With 0 every Thumb path folds away.
+- **`CODE_AW`** (default 12, the 16 KB ROM): the code space in words. The window checks, branch targets, jump targets and the end-of-code check follow it. DARIA's 128 KB window is 15.
+- **`arm_only`**, a static input, the BupChip profile: T stays 0, and BX to an odd address halts with code 3, as in ARIA. The Pocket wrapper ties it high.
+
+The retire port gains `rt_t` (T after the instruction) and `rt_cunk` (C unknown after it).
+
+**How it is built** (current line numbers in `bup_cpu.sv`):
+
+- **The halfword PC.** `pc` stays the word address (`rom_addr`), and `pc_h` is the half of `rom_q` in execute, registered with it (`:274-295`). The next instruction in sequence is the same word with the other half after a low half (`seq_w`, `seq_h`). The end of the code space is checked on the step that leaves it. r15 reads address + 4 in Thumb, word-aligned for F6 and F12 (`pcrel`). The Thumb BL suffix links (address + 2) | 1.
+- **Decode beside ARM.** ARIA's decode keeps its logic under `a_` names (`:297-395`). The Thumb decode (`th_`, `:397-529`) fills the same controls from the pre-muxed halfword, and the controls the rest of the core uses are merged by T (`:531-590`). Each Thumb format maps onto an ARM class: data processing, a single transfer, LDM/STM, or a branch. Four cases have controls of their own: the BL suffix (`k_bl2`), MOV pc, ADD pc (two clocks, through `wb_value`, in the third state) and BX.
+- **The read indices.** The first clock's Thumb indices come from both halves of `rom_q` (`t_port_a`, `t_port_b`) and are picked by `pc_h` at the end. With `THUMB` 1, each candidate is bank-remapped before the select (`pa_x`, `pb_x`, `:636-660`).
+- **Registered role fields.** The register fields of the clocks after execute (W, a shift's second clock, MUL, LDM/STM) are registered at the end of execute (`x_rd`, `x_rn`, `x_rm`). They equal the re-decoded fields, because `rom_q` does not change meanwhile. Registered, they keep the Thumb decode off those clocks' index and write paths. The design document did not have this: the depth check below found that without it the later clocks' re-decode set the depth.
+- **Jumps.** Register targets (BX, MOV pc, ADD pc, POP {pc}, the BL suffix's sum) go through one function, `jump`. It drops bit 0, splits the address into word and half, and flags a target outside the code space (`:928-933`). BX writes T from bit 0 of Rm, unless `arm_only`. POP {pc} loads the jump from its last beat and leaves T as it is.
+- **C after a Thumb MUL.** The MUL's second clock writes N and Z, keeps C's bit and V, and sets `c_unk`. Anything that defines C clears it: an arithmetic flag-setting operation, a non-zero shift or rotation, or MSR with the f field. An instruction that reads C while it is set halts with code 8 (`flags_halt`, `:904-912`). A condition on C halts whether or not the condition would pass.
+
+**Results [sim]** (on the core at the commit that closes this step):
+
+| Check | Result |
+|---|---|
+| Directed (`thumb/run_directed.sh`): 12 programs, every format group, the flag corners, interworking in SYS and FIQ mode, code at the last halfword of the code space | 12 of 12 on the reference; in lockstep plainly, with `+await=40 +throttle=25` (two seeds) and with `LATE_RF=1`, 0 mismatches |
+| Halts (`run_halts.sh`): 210 cases | Every code (1, 3–8) at its expected address, plainly, with `LATE_RF=1` and with throttle and waits. Where the reference takes UND or SWI (36 cases) it does so at the same address. The 46 cases that must not halt also pass lockstep. |
+| Exhaustive decode (`run_decode.sh`): 65,536 halfwords × both halves × C known and unknown | 0 differences from `thumb_expand.py --table` |
+| Random streams (`run_random.sh`): seeds 1–400, 300 operations | 400 of 400: reference and Unicorn agree on all of RAM and the instruction count; lockstep plainly, with `+await=20 +throttle=10` and with `LATE_RF=1`, each 523,864 retires, 413,172 RAM stores and 800 peripheral writes compared, 0 mismatches (C skipped in 42,673 records after a Thumb MUL) |
+| Fuzz (`run_fuzz.sh`): seeds 1–48, 200 cells each | 48 of 48 plainly, with `LATE_RF=1` and with `+await=20 +throttle=10`. Per variant: 193,605 retires compared, and 2,191 halts, each at the predicted halfword with the predicted code. |
+| Mutations (`run_mutants.sh`): the 16 of "The CPU: Thumb", verification (F5's flags split in two, so 17) | 17 of 17 caught: 12 by the decode check, 5 by the directed tests (POP {pc} interworking, NEG of Rd, SBC's carry inverted, STMIA storing the old base, MUL writing V). The suites' own authors planted 31 to 45 more each while building them; every one was caught. |
+| ARIA unchanged, formally (`aria_equiv.sh`) | With `THUMB` 0 the core is sequentially equivalent to its step 0 version (806dcd4), register file included: `MODES` 0 (1,890 signals matched) and `MODES` 1 (2,430) |
+| ARIA's checks on the Thumb core (`THUMB=1 s1/check.sh rv.a78`: `THUMB` 1 with `arm_only`) | Every step passes: the directed and halt tests, the further directed tests and fuzz, the verifier's tests (also with `LATE_RF=1`), the ISA suite and the mixer harness in lockstep, the synthetic ARSC checks, Rikki & Vikki through boot and Misery_F, and songs 13, 14, 9 and 30 PCM-identical to MiSTer's (Misery_F at CPI 1.3772) |
+| ARIA's checks with `THUMB` 0 (`s1/check.sh rv.a78`) | The same, every step passing, with the same CPI |
+| Step 0's modes checks on the Thumb core (`THUMB=1 ARM_ONLY=1 daria/modes/run_modes.sh`) | `modes.S` in lockstep plainly, with waits and throttle and with `LATE_RF=1`; on `tb_s1` it runs to its end marker (MODES 1 takes its MSRs); ARIA's directed tests and fuzz seeds 1–8 in lockstep |
+| Index-path depth (`index_depth.sh`, LUT6 levels after `abc -lut 6`, from `rom_q` and the registered state to the physical read indices) | ARIA: port A 4, port B 5. DARIA: port A 5, port B 4. The worst of the two is unchanged. Port B, which feeds the shifter on the critical path, is a level shorter. Port A, which goes straight to the adder, is a level longer. |
+
+- **"ARIA unchanged" is a proof, not a cell count.** The plan asked for Yosys cell counts equal to today's. They cannot show it: ABC's result moves by about 1% with any change to the source text, even a renamed wire (`yosys_cells.sh`: 1,885 LUTs before the step, 1,862 after only re-expressing the same logic with `CODE_AW`). The equivalence proof is the stronger check.
+- **Area [syn, probe].** Yosys: 2,410 LUTs and 341 flip-flops with `THUMB` 1, against 1,867 and 323 with `THUMB` 0 (`MODES` 1). Quartus, with DARIA's memories: 1,720 ALMs, +345 over ARIA. That is inside the 300–500 estimate.
+- **Timing [probe]:** "Clock", the early probe. 32.73 MHz closes with +0.03 ns in an empty device, so the one-clock-store fix moves into step 3's must-haves.
+- **What the reference does that DARIA does not, both as ARIA in ARM state:**
+  - LDM/STM, PUSH and POP to the peripheral page or the assets do not abort on the reference. DARIA halts with code 7.
+  - An `ldr rX, [pc]` at 0x3FFE reads 0x4000. Its DATA halt (5) wins over the FETCH of running on.
+- **A bench limit.** When the DUT halts, the last instruction it retired before the halt is not compared, because a record closes only at the next start. For a FETCH halt that is the jump itself. Such jumps are compared in the lockstep runs where they reach valid targets.
+- **`verif/directed/vhalt.py`** expects MSR to SYS mode, and MSR with I or F clear, to run on when the core has `MODES` 1 (`THUMB=1` or `MODES=1` in the environment).
 
 ## Design (step 1)
 
@@ -442,7 +486,7 @@ This sits inside step 0's 650–1,450 for "Thumb expander, S3 over S1, image cap
 | Random streams | `gen_thumb.py`, 400 seeds × 300 instructions, formats weighted by the trace mix. Forward branches, BL/BX calls, PUSH/POP and LDM/STM to a RAM scratch area, flags captured with Bcc into the signature. No C read after a MUL before a C write. Odd values only for POP {pc}. Signatures equal on the reference and Unicorn, then lockstep with DARIA: plainly, with `+await` and `+throttle`, and with `LATE_RF=1`. |
 | Exhaustive decode | All 65,536 halfwords through the RTL decoder (in a Verilator harness) against the updated `thumb_expand.py --table` (`:270-276`): class, operation, indices, immediates, halt code. |
 | Fuzz | Random halfwords from random states in lockstep, as `verif/directed/fuzz.py` does for ARM. Every halt must match the table; every other encoding must match the reference. |
-| ARIA unchanged | `s1/check.sh` with Rikki & Vikki and `daria/modes/run_modes.sh`, built with `THUMB` 0 and with `THUMB` 1 + `arm_only`. Songs 13, 14, 9 and 30 identical to MiSTer's. With `THUMB` 0, Yosys cell counts equal to today's. |
+| ARIA unchanged | `s1/check.sh` with Rikki & Vikki and `daria/modes/run_modes.sh`, built with `THUMB` 0 and with `THUMB` 1 + `arm_only`. Songs 13, 14, 9 and 30 identical to MiSTer's. With `THUMB` 0, the core proven equivalent to today's (`thumb/aria_equiv.sh`; step 2 replaced the planned cell-count comparison, "Step 2 work"). |
 
 **Mutations**, each of which must fail a check above:
 - PC for F6/F12 not word-aligned;
@@ -1210,9 +1254,9 @@ So the single bitstream lands at about 14,600–15,700 ALMs, 79–85% of the dev
 
 | Layer | What | Step |
 |---|---|---|
-| CPU, Thumb | Directed tests per format, halt tests, random streams (400 seeds), the exhaustive 65,536-halfword decode check, fuzz and mutations, all in lockstep with the reference ("The CPU: Thumb", verification). The record gains T, and C is skipped only while the core reports it unknown. | 2 |
+| CPU, Thumb | Directed tests per format, halt tests, random streams (400 seeds), the exhaustive 65,536-halfword decode check, fuzz and mutations, all in lockstep with the reference ("The CPU: Thumb", verification). The record gains T, and C is skipped only while the core reports it unknown. | 2 (done) |
 | CPU, modes | `daria/modes/run_modes.sh` | 0 (done) |
-| CPU, ARIA unchanged | `s1/check.sh` with Rikki & Vikki, with `THUMB` 0 and with `THUMB` 1 + `arm_only`; the four songs bit-identical to MiSTer | 2 |
+| CPU, ARIA unchanged | `s1/check.sh` with Rikki & Vikki, with `THUMB` 0 and with `THUMB` 1 + `arm_only`; the four songs bit-identical to MiSTer; `thumb/aria_equiv.sh`, the formal proof that `THUMB` 0 is ARIA | 2 (done) |
 | Memory system and calls | `tb_daria` runs every demo and added image on DARIA beside upstream: registers at each return, every RAM write, the audio values. Again with a 16–32 KB window, so the asset cache serves real traffic; then a synthetic 512 KB image. | 5 |
 | Capture | 2600 images through the loader into the window, the front-end ROM and the PSRAM, each compared with the file; A78 files as today | 5 |
 | Front end | A cycle-by-cycle shadow of upstream's front ends in `tb_daria`, directed tests per scheme, the random differential bench | 6 |
@@ -1227,7 +1271,7 @@ Each step has a done-when, as ARIA's had.
 
 0. **Scope.** *Done:* this document's requirements, checked against the traces; `MODES` 1.
 1. **Design.** *Done:* "Design (step 1)", "Budget" and "Verification"; every open item is decided or given to a step ("Open items").
-2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
+2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done* (2026-10-05): "Step 2 work". *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
 3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
 4. **S3**, if chosen (ARIA's steps 6–7). *Done when* CPI is within ±2% of the model on the demos' traces and the BupChip.
 5. **2600 memory system:** image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
