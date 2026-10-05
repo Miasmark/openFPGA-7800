@@ -11,6 +11,9 @@
 # and report.txt. Everything there derives from the game: it stays in sim/work
 # (gitignored). Tested with Verilator 5.040; about 1 minute of wall time per
 # emulated second, on one CPU. Set NAME= to name the run directory.
+# SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
+# daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
+# (default 128). Those builds go to obj_shadow<WIN_KB>.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -57,15 +60,25 @@ SRCS=(
 	"$RTL/top.sv" "$RTL/EEPROM_24LC256.sv" "$RTL/lightgun.sv"
 	"$HERE/tb_daria.sv"
 )
+OBJ="$WORK/obj"
+DEFS=()
+if [ "${SHADOW:-0}" != 0 ]; then
+	BUP="$FPGA/core/bupchip"
+	SRCS+=("$BUP/bup_cpu.sv" "$BUP/daria_mem.sv" "$BUP/daria_call.sv" "$BUP/daria_mmio.sv")
+	OBJ="$WORK/obj_shadow${WIN_KB:-128}"
+	DEFS=(-DDARIA_SHADOW "-DDARIA_WIN_KB=${WIN_KB:-128}" "-I$HERE")
+fi
 
-BIN="$WORK/obj/vtb"
-if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$RTL" -newer "$BIN" -name '*.sv' 2>/dev/null | head -1)" ]; then
+BIN="$OBJ/vtb"
+if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$HERE/daria_shadow.svh" "$RTL" "$FPGA/core/bupchip" \
+		-newer "$BIN" \( -name '*.sv' -o -name '*.svh' \) 2>/dev/null | head -1)" ]; then
 	echo "building $BIN ..." >&2
 	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
-		-DNO_BUPCHIP -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
-		--top-module tb_daria -Mdir "$WORK/obj" -o vtb "${SRCS[@]}" > "$WORK/build.log" 2>&1 \
-		|| { grep -m20 "%Error" "$WORK/build.log"; exit 1; }
+		-DNO_BUPCHIP -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ "${DEFS[@]}" \
+		--top-module tb_daria -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
+		|| { grep -m20 "^%Error" "$OBJ.log" | cut -c1-300; exit 1; }
+	find "$OBJ" -name '*.gch' -delete
 fi
 
 [ -n "$BUILD_ONLY" ] && exit 0

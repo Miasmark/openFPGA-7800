@@ -5,7 +5,9 @@
 # git revision, output by output, for the MODES values given.
 #   ./aria_equiv.sh [REV] [MODES ...]      default: 806dcd4 (step 0), MODES 0 and 1
 # The register file is mapped to flip-flops on both sides (memory_map), so
-# the proof covers it too; new inputs are tied (arm_only = 1). Cell counts
+# the proof covers it too; new inputs are tied (arm_only = 1; step 5's
+# 2600 profile and call port off, their outputs open). CORE_SV proves another
+# copy of bup_cpu.sv instead of the working tree's. Cell counts
 # cannot show this: ABC's result moves by about 1% with any change to the
 # source text, even a renamed wire. YOSYS as in yosys_cells.sh. Work files go
 # to $WORK (default sim/work/bupchip/daria/yosys). Exits 0 when every proof
@@ -27,7 +29,7 @@ MODESLIST=("$@")
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 git -C "$ROOT" show "$REV:src/fpga/core/bupchip/bup_cpu.sv" > "$WORK/eq_gold_src.sv"
-cp "$ROOT/src/fpga/core/bupchip/bup_cpu.sv" "$WORK/eq_gate_src.sv"
+cp "${CORE_SV:-$ROOT/src/fpga/core/bupchip/bup_cpu.sv}" "$WORK/eq_gate_src.sv"
 cp "$ROOT/src/fpga/mister/rtl/arm7tdmi/arm7tdmi_pkg.sv" "$WORK/"
 # Qualify the package's names (Yosys does not take the import in the module
 # header) and rename the module per side.
@@ -50,6 +52,10 @@ done
 # The gate's ports beyond the gold's are tied here.
 GATE_TIES=""
 grep -q "arm_only" "$WORK/eq_gate.sv" && GATE_TIES="$GATE_TIES .arm_only(1'b1),"
+# DARIA's 2600 profile and call port (step 5): the BupChip profile, no calls.
+grep -q "call_go" "$WORK/eq_gate.sv" && GATE_TIES="$GATE_TIES .prof26(1'b0), .img_size(20'd0), .ram32(1'b0),
+	.call_go(1'b0), .clr_wd(32'd0), .clr_pc(32'd0), .clr_e(), .parked(), .returned(), .ro_valid(), .ro_idx(),
+	.ro_data(),"
 FAIL=0
 for m in "${MODESLIST[@]}"; do
 	cat > "$WORK/eq_wrap_$m.sv" <<SV

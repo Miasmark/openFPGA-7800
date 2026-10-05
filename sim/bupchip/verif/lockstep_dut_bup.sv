@@ -102,6 +102,8 @@ module lockstep_dut_bup (
 	bup_cpu cpu (
 `endif
 		.clk, .rst, .freeze, .w_wait(pr_wait || (asset_wait && w_asset)), .arm_only(ARM_ONLY),
+		.prof26(1'b0), .img_size(20'd0), .ram32(1'b0), .call_go(1'b0), .clr_wd(32'd0), .clr_pc(32'd0),
+		.clr_e(), .parked(), .returned(), .ro_valid(), .ro_idx(), .ro_data(),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata,
 		.rom_dq(rom_dq ^ {31'd0, inj}), .ram_q(ram_q ^ {31'd0, inj}),

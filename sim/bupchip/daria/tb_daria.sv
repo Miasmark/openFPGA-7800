@@ -938,4 +938,8 @@ module tb_daria;
 		foreach (pc_count[a]) $fwrite(fd, "%08x %0d\n", a, pc_count[a]);
 		$fclose(fd);
 	endtask
+
+`ifdef DARIA_SHADOW
+`include "daria_shadow.svh"
+`endif
 endmodule

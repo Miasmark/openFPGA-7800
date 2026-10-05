@@ -117,6 +117,8 @@ module bup_probe_top #(
 
 	bup_cpu #(.MODES(MODES), .THUMB(THUMB), .CODE_AW(CODE_AW)) cpu (
 		.clk, .rst, .freeze, .w_wait, .arm_only,
+		.prof26(1'b0), .img_size(20'd0), .ram32(1'b0), .call_go(1'b0), .clr_wd(32'd0), .clr_pc(32'd0),
+		.clr_e(), .parked(), .returned(), .ro_valid(), .ro_idx(), .ro_data(),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata, .rom_dq, .ram_q,
 		.asset_size, .asset_q(cpu_asset_q), .w_asset, .w_addr, .w_size,

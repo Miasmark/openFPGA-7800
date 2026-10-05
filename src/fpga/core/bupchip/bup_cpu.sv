@@ -33,6 +33,34 @@
 //
 // CODE_AW (default 12, the 16 KB ROM) is the code space in words; the
 // window checks, branch targets and the end of the code space follow it.
+// With THUMB 1 the code space depends on the profile instead: the BupChip's
+// 16 KB ROM, or the 2600 image up to min(img_size, 128 KB) with CODE_AW 15.
+//
+// THUMB 1 also has DARIA's 2600 profile (prof26, static while the core
+// runs) and its call port (docs/DARIA_CORE.md, "The memory system", 4 and 5):
+//
+//   - The 2600 memory map: the image window 0x0000_0000 to min(img_size,
+//     128 KB) - 1 (fetch and data, as the ROM); the image beyond it,
+//     0x0002_0000 to img_size - 1, through the asset port (data reads only:
+//     a fetch there halts FETCH, an LDM BLOCK); cart RAM at 0x4000_0000, 8 KB
+//     or 32 KB (ram32); MMIO 0xE000_0000-0xE01F_FFFF (reg_sel; the wrapper
+//     routes it by profile). The return sentinel 0xF000_0000 is not memory.
+//   - Parked (S_IDLE): after rst the clear writes every entry, then the core
+//     parks instead of fetching from 0, and it parks again after each call.
+//   - Launch (P1): call_go, while parked, re-enters S_CLEAR. It writes
+//     entries 0-21 with clr_wd, one a clock (clr_e says which; the wrapper
+//     reads its state RAM a clock ahead): r0-r12, r13 the stack, r14
+//     0xF000_0000, entry 15 unused, FIQ r8-r10 the counters and r11-r13 the
+//     frequencies. FIQ r14 and SVC r13-r14 keep what they had. In the last
+//     clock it fetches the entry, clr_pc (bit 0 the T bit), and loads the
+//     control byte SYS with that T and I = F = 0, and NZCV 0. An entry
+//     outside the code space halts FETCH, with halt_pc the entry.
+//   - Return (P2): a jump whose fetch address is 0xF000_0000 (BX, MOV pc,
+//     ADD pc, POP {pc}, LDR pc, the BL suffix) is not a fault in the 2600
+//     profile. The next clock's fetch is not the program's: the core goes to
+//     S_READOUT, puts FIQ r8-r13 (entries 16-21, whatever the mode) on port B
+//     for one clock each (ro_valid, ro_idx, ro_data = rb), raises returned
+//     with the last, and parks.
 //
 // Pipeline. The ROM's port A address register is the fetch register: the
 // next PC (rom_addr) is computed during execute and the ROM's unregistered
@@ -140,7 +168,9 @@ module bup_cpu
 #(
 	parameter bit MODES = 1'b0,     // 0 SVC only (ARIA), 1 SVC, SYS and FIQ (DARIA)
 	parameter bit THUMB = 1'b0,     // 1: Thumb as well (DARIA; implies MODES 1)
-	parameter int CODE_AW = 12      // code space in words: 12 = the 16 KB ROM (ARIA), 15 = 128 KB
+	parameter int CODE_AW = 12,     // code space in words: 12 = the 16 KB ROM (ARIA), 15 = 128 KB
+	parameter int WIN_KB = 128      // THUMB 1: the image window; smaller only for tests, where the
+	                                // image beyond it (code aside) goes through the asset cache
 )
 (
 	input  wire         clk,            // clk_arm
@@ -148,6 +178,21 @@ module bup_cpu
 	input  wire         freeze,         // do not start an instruction this clock
 	input  wire         w_wait,         // the asset load in W has no data yet
 	input  wire         arm_only,       // THUMB 1: stay in ARM state, BX to odd halts (BupChip)
+
+	// DARIA (THUMB 1): the 2600 profile and the call port (docs/DARIA_CORE.md,
+	// "The memory system", 4 and 5). Unused with THUMB 0.
+	input  wire         prof26,         // the 2600 profile; static while the core runs
+	input  wire  [19:0] img_size,       // the image's bytes (2600 profile)
+	input  wire         ram32,          // 32 KB of cart RAM (CDFJ+), else 8 KB
+	input  wire         call_go,        // one clock, while parked: launch a call
+	input  wire  [31:0] clr_wd,         // a launch's data for entry clr_e
+	input  wire  [31:0] clr_pc,         // a launch's entry address; bit 0 is the T bit
+	output wire   [4:0] clr_e,          // the register-file entry the clear writes this clock
+	output wire         parked,         // idle between calls
+	output wire         returned,       // one clock: the readout's last
+	output wire         ro_valid,       // the readout: FIQ r8-r13, one a clock
+	output wire   [2:0] ro_idx,         // 0 = r8 ... 5 = r13
+	output wire  [31:0] ro_data,
 
 	// Fetch: ROM port A. The ROM registers rom_addr; rom_q is the word at
 	// the address presented one clock earlier.
@@ -219,11 +264,14 @@ module bup_cpu
 	// Memory regions, from address bits [31:28] and [25].
 	localparam logic [1:0] RG_ROM = 2'd0, RG_RAM = 2'd1, RG_AST = 2'd2, RG_IO = 2'd3;
 
-	function automatic logic [1:0] region(input logic [31:0] a);
+	// In the 2600 profile (p) the "assets" are the image beyond the window,
+	// 0x0002_0000 up (WIN_KB): the asset cache serves them.
+	localparam logic [19:0] WIN_B = 20'(WIN_KB * 1024);
+	function automatic logic [1:0] region(input logic [31:0] a, input logic p);
 		case (a[31:28])
 			4'h4:    region = RG_RAM;
 			4'hE:    region = RG_IO;
-			default: region = a[25] ? RG_AST : RG_ROM;	// 0x0: ROM or assets; others fail the check
+			default: region = (p ? {1'b0, a[18:0]} >= WIN_B : a[25]) ? RG_AST : RG_ROM;	// 0x0: ROM or assets; others fail the check
 		endcase
 	endfunction
 
@@ -246,24 +294,32 @@ module bup_cpu
 	endfunction
 
 	// ---- state ----------------------------------------------------------------
-	typedef enum logic [2:0] {
-		S_CLEAR,	// writing 0 to r0-r14 after rst
-		S_RUN,		// the first (often the only) clock of an instruction
-		S_W,		// a load's data, a two-clock store, an MMIO access
-		S_SHR2,		// shift by register: the shift and the ALU
-		S_MUL2,		// MUL/MLA result, UMULL low word
-		S_MUL3,		// UMULL high word
-		S_SEQ,		// LDM/STM beats
-		S_HALT
-	} state_t;
-
 	localparam bit MD  = MODES || THUMB;	// the processor modes (THUMB implies them)
+	localparam bit DC  = THUMB;		// DARIA: the 2600 profile and the call port
 	localparam int RFA = MD ? 5 : 4;	// register-file address bits
+	localparam int SW  = DC ? 4 : 3;	// state bits: S_IDLE and S_READOUT need a fourth
+
+	typedef logic [SW-1:0] state_t;
+	localparam state_t S_CLEAR   = SW'(0);	// writing 0 to r0-r14 after rst; a call's launch
+	localparam state_t S_RUN     = SW'(1);	// the first (often the only) clock of an instruction
+	localparam state_t S_W       = SW'(2);	// a load's data, a two-clock store, an MMIO access
+	localparam state_t S_SHR2    = SW'(3);	// shift by register: the shift and the ALU
+	localparam state_t S_MUL2    = SW'(4);	// MUL/MLA result, UMULL low word
+	localparam state_t S_MUL3    = SW'(5);	// UMULL high word
+	localparam state_t S_SEQ     = SW'(6);	// LDM/STM beats
+	localparam state_t S_HALT    = SW'(7);
+	// DC only (with SW 3 these alias S_CLEAR and S_RUN: every use is gated by DC).
+	localparam state_t S_IDLE    = SW'(8);	// parked between calls
+	localparam state_t S_READOUT = SW'(9);	// a call's return: FIQ r8-r13 out on port B
 
 	state_t      state;
 	logic [CODE_AW-1:0] pc;         // word address of the instruction in rom_q
 	logic  [3:0] nzcv;
 	logic [RFA-1:0] clr_idx;
+	wire         p26 = DC && prof26;	// the 2600 profile
+	logic        launch;            // DC: S_CLEAR is a call's launch, not the reset clear
+	logic  [2:0] ro_cnt;            // DC: the readout's register, 0 = r8
+	logic        ret_v;             // DC: last clock jumped to the return sentinel
 
 	// The CPSR's control byte (I, F, T, mode). With MODES 0 it is 0xD3 and
 	// these registers fold to constants. m_fiq and m_svc decode the mode.
@@ -286,7 +342,18 @@ module bup_cpu
 	// halfword in Thumb (the same word again after the low half).
 	wire  [CODE_AW-1:0] seq_w = (tm && !ph) ? pc : pc_next1[CODE_AW-1:0];
 	wire         seq_h = tm && !ph;
-	wire         seq_ovf = tm ? (ph && pc_next1[CODE_AW]) : pc_next1[CODE_AW];
+	// The code space. ARIA's is CODE_AW words. DARIA's depends on the profile
+	// (open item 18): the BupChip's 16 KB ROM, or the 2600 image up to
+	// min(img_size, 128 KB). a is a fetch's byte address.
+	function automatic logic code_ok(input logic [31:0] a, input logic p, input logic [19:0] isz);
+		if (!DC) code_ok = a[31:CODE_AW+2] == '0;
+		else if (p) code_ok = a[31:19] == '0 && {1'b0, a[18:0]} < WIN_B && {1'b0, a[18:0]} < isz;
+		else code_ok = a[31:14] == '0;
+	endfunction
+	// The next instruction in sequence runs off the code space.
+	wire  [31:0] seq_byte = (tm && !ph) ? 32'({pc, 2'b10}) : 32'({pc_next1, 2'b00});
+	wire         seq_ovf = !DC ? (tm ? (ph && pc_next1[CODE_AW]) : pc_next1[CODE_AW])
+	                           : !code_ok(seq_byte, p26, img_size);
 	logic        pcrel;             // Thumb F6 and F12: r15 reads word-aligned
 	// r15 reads as the instruction's address + 8 (ARM) or + 4 (Thumb).
 	wire  [31:0] r15_value = tm ? 32'({pc_next1, ph && !pcrel, 1'b0}) : 32'({pc_next2, 2'b00});
@@ -655,6 +722,8 @@ module bup_cpu
 			S_SEQ:  pb_x = phys(blk_idx, m_fiq, m_svc);
 			default: ;
 		endcase
+		// The readout: FIQ r8-r13 are entries 16-21, whatever the mode.
+		if (DC && state == S_READOUT) pb_x = RFA'(5'd16 + {2'd0, ro_cnt});
 	end
 	wire [RFA-1:0] pa = THUMB ? pa_x : phys(ia, m_fiq, m_svc);
 	wire [RFA-1:0] pb = THUMB ? pb_x : phys(ib, m_fiq, m_svc);
@@ -703,6 +772,7 @@ module bup_cpu
 			S_SEQ:  ib = blk_idx;				// STM data
 			default: ;
 		endcase
+		if (DC && state == S_READOUT) ib = 4'd8 + {1'b0, ro_cnt};	// never r15
 	end
 
 	// ---- shifter --------------------------------------------------------------------
@@ -820,11 +890,23 @@ module bup_cpu
 	logic [31:0] wb_value;              // two-clock store: write-back in W
 	logic        wb_pend;
 
-	// The exact window checks, on the registered address.
-	wire in_rom = acc_addr[31:CODE_AW+2] == '0;
-	wire in_ast = acc_addr[31:24] == 8'h02 && acc_addr[23:0] < asset_size;
-	wire in_ram = acc_addr[31:14] == 18'h10000;
-	wire in_io  = acc_addr[31:8] == 24'hE00090;
+	// The exact window checks, on the registered address. With THUMB 1 the
+	// BupChip's ROM stays 16 KB whatever CODE_AW is. DARIA's 2600 profile has
+	// its own (docs/DARIA_CORE.md, "The memory system", 4): the window up to
+	// the image's size, the image beyond it through the asset cache, 8 or 32 KB
+	// of cart RAM, and upstream's MMIO window 0xE000_0000-0xE01F_FFFF.
+	wire in_rom_b = DC ? acc_addr[31:14] == '0 : acc_addr[31:CODE_AW+2] == '0;
+	wire in_ast_b = acc_addr[31:24] == 8'h02 && acc_addr[23:0] < asset_size;
+	wire in_ram_b = acc_addr[31:14] == 18'h10000;
+	wire in_io_b  = acc_addr[31:8] == 24'hE00090;
+	wire in_rom_g = acc_addr[31:19] == '0 && {1'b0, acc_addr[18:0]} < WIN_B && {1'b0, acc_addr[18:0]} < img_size;
+	wire in_ast_g = acc_addr[31:19] == '0 && {1'b0, acc_addr[18:0]} >= WIN_B && {1'b0, acc_addr[18:0]} < img_size;
+	wire in_ram_g = acc_addr[31:15] == 17'h08000 && (ram32 || acc_addr[14:13] == 2'b00);
+	wire in_io_g  = acc_addr[31:21] == 11'h700;
+	wire in_rom = p26 ? in_rom_g : in_rom_b;
+	wire in_ast = p26 ? in_ast_g : in_ast_b;
+	wire in_ram = p26 ? in_ram_g : in_ram_b;
+	wire in_io  = p26 ? in_io_g : in_io_b;
 	logic       chk_bad;
 	logic [3:0] chk_code;
 	always_comb begin
@@ -895,7 +977,7 @@ module bup_cpu
 	// muxes off the path to done (BUPCHIP_CORE, risk 2).
 	wire [31:0] st_off = tm ? th_offv : a_sdt ? {20'b0, insn[11:0]} : {24'b0, insn[11:8], insn[3:0]};
 	wire [31:0] st_addr = bit_p ? ra + (st_off ^ {32{!bit_u}}) + 32'(!bit_u) : ra;
-	wire        st_ram = region(st_addr) == RG_RAM;
+	wire        st_ram = region(st_addr, p26) == RG_RAM;
 	// The BL suffix's target, LR + offset, likewise on an adder of its own: the
 	// ALU's sum for the suffix, without the shifter and the operand muxes on
 	// the path to rom_addr.
@@ -916,7 +998,8 @@ module bup_cpu
 	// halts it whether or not the condition would pass.
 	logic        c_unk;             // C is unknown: set by a Thumb MUL (THUMB 1)
 	wire         flags_halt = c_unk && (cond_rd_c || (cond_ok && op_rd_c));
-	wire         halt_now = chk_bad || late_v || (state == S_RUN && !freeze && (cond_ok && dec_bad || flags_halt));
+	wire         halt_now = chk_bad || late_v ||
+		(state == S_RUN && !(DC && ret_v) && !freeze && (cond_ok && dec_bad || flags_halt));
 	wire  [3:0] halt_code_now = chk_bad ? chk_code : late_v ? late_code :
 		(!THUMB || (cond_ok && dec_bad && !(c_unk && cond_rd_c))) ? dec_code : HALT_FLAGS;
 	wire [31:0] halt_pc_now = chk_bad ? chk_pc : late_v ? late_pc : pc_byte;
@@ -933,13 +1016,19 @@ module bup_cpu
 	logic        acc_go;            // a single transfer or a beat accesses memory this clock
 	logic        late_go;
 	logic  [3:0] late_code_d;
+	logic        ret_go;            // DC: a jump to the return sentinel (not late_go)
 	logic        seq_next;          // npc is the next instruction in sequence
 
 	// A jump to the byte address in v, with bit 0 dropped (Thumb's MOV pc,
 	// ADD pc, POP {pc}, the BL suffix, and BX): {whether v lies outside the
 	// code space (halt FETCH, one clock later), npc_h, npc}.
 	function automatic logic [CODE_AW+1:0] jump(input logic [31:0] v);
-		jump = {v[31:CODE_AW+2] != '0, v[1], v[CODE_AW+1:2]};
+		jump = {!code_ok({v[31:1], 1'b0}, p26, img_size), v[1], v[CODE_AW+1:2]};
+	endfunction
+	// The 2600 profile's return: a jump whose fetch address is 0xF000_0000 (bit
+	// 0, the T bit, dropped), as upstream's return_fetch. 0xF000_0002 halts.
+	function automatic logic is_ret(input logic [31:0] v);
+		is_ret = v[31:1] == 31'h7800_0000;
 	endfunction
 
 	always_comb begin
@@ -967,6 +1056,7 @@ module bup_cpu
 		acc_go = 1'b0;
 		late_go = 1'b0;
 		late_code_d = HALT_FETCH;
+		ret_go = 1'b0;
 		reg_sel = 1'b0;
 
 		case (state)
@@ -976,7 +1066,16 @@ module bup_cpu
 				rf_wd = 32'd0;
 				npc = '0;
 				npc_h = 1'b0;
-				if (clr_idx == (MD ? 5'd31 : 5'd14)) nstate = S_RUN;
+				if (DC && launch) begin
+					// A call's launch: entries 0-21 from clr_wd, then the
+					// entry (an ARM one must be word-aligned).
+					rf_wd = clr_wd;
+					{late_go, npc_h, npc} = jump(clr_pc);
+					late_go = late_go || (!clr_pc[0] && clr_pc[1]);
+					if (clr_idx == RFA'(21)) nstate = S_RUN;
+					else late_go = 1'b0;
+				end else if (clr_idx == (MD ? 5'd31 : 5'd14))
+					nstate = p26 ? S_IDLE : S_RUN;
 			end
 
 			S_RUN: begin
@@ -1017,7 +1116,7 @@ module bup_cpu
 						if (THUMB) begin
 							npc = bt[CODE_AW:1];
 							npc_h = bt[0];
-							late_go = bt[30:CODE_AW+1] != '0;
+							late_go = !code_ok({bt, 1'b0}, p26, img_size);
 						end else begin
 							npc = br_target[CODE_AW-1:0];
 							late_go = br_target[29:CODE_AW] != '0;
@@ -1035,16 +1134,19 @@ module bup_cpu
 						{late_go, npc_h, npc} = jump(rb);
 						late_go = late_go || (rb[0] ? !THUMB || arm_only : rb[1]);
 						late_code_d = rb[0] && (!THUMB || arm_only) ? HALT_THUMB : HALT_FETCH;
+						ret_go = p26 && is_ret(rb);
 						t_we = THUMB && !arm_only;
 					end else if (k_bl2) begin		// BL suffix: LR + offset, link
 						done = 1'b1;
 						{late_go, npc_h, npc} = jump(bl_sum);
+						ret_go = p26 && is_ret(bl_sum);
 						rf_we = 1'b1;
 						rf_wa = 4'd14;
 						rf_wd = link_value;
 					end else if (k_movpc) begin		// MOV pc, Rm
 						done = 1'b1;
 						{late_go, npc_h, npc} = jump(rb);
+						ret_go = p26 && is_ret(rb);
 					end else if (k_addpc) begin		// ADD pc, Rm: the sum next clock
 						nstate = S_MUL3;
 					end else if (k_mem) begin
@@ -1088,7 +1190,8 @@ module bup_cpu
 							npc = ldata[CODE_AW+1:2];
 							npc_h = 1'b0;
 							seq_next = 1'b0;
-							late_go = ldata[1:0] != 2'b00 || ldata[31:CODE_AW+2] != '0;
+							late_go = ldata[1:0] != 2'b00 || !code_ok(ldata, p26, img_size);
+							ret_go = p26 && ldata == 32'hF000_0000;
 						end else begin
 							rf_we = 1'b1;
 							rf_wd = ldata;
@@ -1138,6 +1241,7 @@ module bup_cpu
 				if (THUMB && tm) begin			// ADD pc, Rm: the sum from execute
 					done = 1'b1;
 					{late_go, npc_h, npc} = jump(wb_value);
+					ret_go = p26 && is_ret(wb_value);
 				end else begin
 					rf_we = 1'b1;
 					rf_wa = l_rn;				// RdHi
@@ -1170,9 +1274,10 @@ module bup_cpu
 					rf_wd = blk_wb;
 				end
 				if (done) begin
-					if (THUMB && ld_pend && ld_idx == 4'hF)
+					if (THUMB && ld_pend && ld_idx == 4'hF) begin
 						{late_go, npc_h, npc} = jump(ldata);	// POP {pc}: T unchanged
-					else begin
+						ret_go = p26 && is_ret(ldata);
+					end else begin
 						npc = seq_w;
 						npc_h = seq_h;
 						seq_next = 1'b1;
@@ -1180,8 +1285,9 @@ module bup_cpu
 				end
 			end
 
-			default: ;					// S_HALT
+			default: ;					// S_HALT; DC: S_IDLE, S_READOUT (below)
 		endcase
+		if (ret_go) late_go = 1'b0;			// the sentinel is not a fault
 
 		// Running on from the end of the code space: the ARM7TDMI's fetch
 		// there aborts, so halt (one clock later, as for a branch out of it)
@@ -1189,6 +1295,32 @@ module bup_cpu
 		if (done && seq_next && seq_ovf && !late_go) begin
 			late_go = 1'b1;
 			late_code_d = HALT_FETCH;
+		end
+
+		// DARIA's call port. S_IDLE waits for a launch, which S_CLEAR writes. The
+		// clock after a jump to the sentinel fetches nothing of the program's: it
+		// goes to S_READOUT, which reads FIQ r8-r13 out on port B, one a clock,
+		// and parks.
+		if (DC && state == S_IDLE && call_go) nstate = S_CLEAR;
+		if (DC && state == S_READOUT && ro_cnt == 3'd5) nstate = S_IDLE;
+		if (DC && ret_v) begin
+			nstate = S_READOUT;
+			npc = pc;
+			npc_h = pc_h;
+			seq_next = 1'b0;
+			start = 1'b0;
+			done = 1'b0;
+			rf_we = 1'b0;
+			flags_we = 1'b0;
+			ctl_we = 1'b0;
+			t_we = 1'b0;
+			cu_set = 1'b0;
+			cu_clr = 1'b0;
+			ram_we = 1'b0;
+			reg_sel = 1'b0;
+			acc_go = 1'b0;
+			late_go = 1'b0;
+			ret_go = 1'b0;
 		end
 
 		// A halt, or rst, stops everything this clock.
@@ -1208,6 +1340,7 @@ module bup_cpu
 			reg_sel = 1'b0;
 			acc_go = 1'b0;
 			late_go = 1'b0;
+			ret_go = 1'b0;
 		end else if (done)
 			nstate = S_RUN;
 	end
@@ -1215,6 +1348,9 @@ module bup_cpu
 	assign rom_addr = npc;
 	wire [3:0] nzcv_next = flags_we ? flags_d : nzcv;
 	wire       c_unk_next = THUMB && (cu_set || (c_unk && !cu_clr));
+	// A launch's last clock (P1): SYS mode with the entry's T bit, I and F
+	// clear, NZCV 0, C known.
+	wire       launch_end = DC && launch && state == S_CLEAR && clr_idx == RFA'(21) && !halt_now;
 
 	always_ff @(posedge clk) begin
 		pc <= npc;
@@ -1233,6 +1369,9 @@ module bup_cpu
 			halted <= 1'b0;
 			halt_code <= 4'd0;
 			halt_pc <= 32'd0;
+			launch <= 1'b0;
+			ro_cnt <= 3'd0;
+			ret_v <= 1'b0;
 		end else begin
 			state <= nstate;
 			nzcv <= nzcv_next;
@@ -1244,6 +1383,22 @@ module bup_cpu
 			end
 			if (t_we) ctl[5] <= t_d;
 			if (state == S_CLEAR) clr_idx <= clr_idx + 1'b1;
+			if (DC) begin
+				ret_v <= ret_go;
+				ro_cnt <= state == S_READOUT ? ro_cnt + 3'd1 : 3'd0;
+				if (state == S_IDLE && call_go) begin
+					launch <= 1'b1;
+					clr_idx <= '0;
+				end
+				if (launch_end) begin
+					launch <= 1'b0;
+					nzcv <= 4'd0;
+					c_unk <= 1'b0;
+					ctl <= {2'b00, clr_pc[0], 5'h1F};
+					m_fiq <= 1'b0;
+					m_svc <= 1'b0;
+				end
+			end
 			if (halt_now && state != S_HALT) begin
 				halted <= 1'b1;
 				halt_code <= halt_code_now;
@@ -1254,7 +1409,7 @@ module bup_cpu
 			chk_v <= acc_go;
 			if (acc_go) begin
 				acc_addr <= d_addr;
-				acc_rg <= region(d_addr);
+				acc_rg <= region(d_addr, p26);
 				chk_pc <= pc_byte;
 				if (state == S_SEQ) begin
 					acc_size <= 2'd2;
@@ -1273,7 +1428,7 @@ module bup_cpu
 			late_v <= late_go;
 			if (late_go) begin
 				late_code <= late_code_d;
-				late_pc <= pc_byte;
+				late_pc <= DC && state == S_CLEAR ? {clr_pc[31:1], 1'b0} : pc_byte;	// a launch: the entry
 			end
 
 			if (state == S_RUN) begin
@@ -1305,6 +1460,12 @@ module bup_cpu
 	end
 
 	// ---- outputs ----------------------------------------------------------------------
+	assign clr_e     = 5'(clr_idx);
+	assign parked    = DC && state == S_IDLE;
+	assign returned  = DC && state == S_READOUT && ro_cnt == 3'd5;
+	assign ro_valid  = DC && state == S_READOUT;
+	assign ro_idx    = ro_cnt;
+	assign ro_data   = rb;
 	assign w_addr    = acc_addr;
 	assign w_size    = acc_size;
 	assign w_asset   = state == S_W && acc_rg == RG_AST && acc_load && !chk_bad;
