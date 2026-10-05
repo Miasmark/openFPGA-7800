@@ -160,8 +160,8 @@ The retire port gains `rt_t` (T after the instruction) and `rt_cunk` (C unknown 
 - **Decode beside ARM.** ARIA's decode keeps its logic under `a_` names (`:297-395`). The Thumb decode (`th_`, `:397-529`) fills the same controls from the pre-muxed halfword, and the controls the rest of the core uses are merged by T (`:531-590`). Each Thumb format maps onto an ARM class: data processing, a single transfer, LDM/STM, or a branch. Four cases have controls of their own: the BL suffix (`k_bl2`), MOV pc, ADD pc (two clocks: the sum goes through `wb_value`, and the second clock reuses UMULL's `S_MUL3`) and BX.
 - **The read indices.** The first clock's Thumb indices come from both halves of `rom_q` (`t_port_a`, `t_port_b`) and are picked by `pc_h` at the end. With `THUMB` 1, each candidate is bank-remapped before the select (`pa_x`, `pb_x`, `:636-660`).
 - **Registered role fields.** The register fields of the clocks after execute (W, a shift's second clock, MUL, LDM/STM) are registered at the end of execute (`x_rd`, `x_rn`, `x_rm`). They equal the re-decoded fields, because `rom_q` does not change meanwhile. Registered, they keep the Thumb decode off those clocks' index and write paths. The design document did not have this: the depth check below found that without it the later clocks' re-decode set the depth.
-- **Jumps.** Register targets (BX, MOV pc, ADD pc, POP {pc}, the BL suffix's sum) go through one function, `jump`. It drops bit 0, splits the address into word and half, and flags a target outside the code space (`:928-933`). BX writes T from bit 0 of Rm, unless `arm_only`. POP {pc} loads the jump from its last beat and leaves T as it is.
-- **C after a Thumb MUL.** The MUL's second clock writes N and Z, keeps C's bit and V, and sets `c_unk`. Anything that defines C clears it: an arithmetic flag-setting operation, a non-zero shift or rotation, or MSR with the f field. An instruction that reads C while it is set halts with code 8 (`flags_halt`, `:904-912`). A condition on C halts whether or not the condition would pass.
+- **Jumps.** Register targets (BX, MOV pc, ADD pc, POP {pc}, the BL suffix's sum) go through one function, `jump`. It drops bit 0, splits the address into word and half, and flags a target outside the code space (`:938-943`). BX writes T from bit 0 of Rm, unless `arm_only`. POP {pc} loads the jump from its last beat and leaves T as it is.
+- **C after a Thumb MUL.** The MUL's second clock writes N and Z, keeps C's bit and V, and sets `c_unk`. Anything that defines C clears it: an arithmetic flag-setting operation, a non-zero shift or rotation, or MSR with the f field. An instruction that reads C while it is set halts with code 8 (`flags_halt`, `:914-922`). A condition on C halts whether or not the condition would pass.
 
 **Results [sim]** (on the core at the commit that closes this step):
 
@@ -187,6 +187,154 @@ The retire port gains `rt_t` (T after the instruction) and `rt_cunk` (C unknown 
   - An `ldr rX, [pc]` at 0x3FFE reads 0x4000. Its DATA halt (5) wins over the FETCH of running on.
 - **A bench limit.** When the DUT halts, the last instruction it retired before the halt is not compared, because a record closes only at the next start. For a FETCH halt that is the jump itself. Such jumps are compared in the lockstep runs where they reach valid targets.
 - **`verif/directed/vhalt.py`** expects MSR to SYS mode, and MSR with I or F clear, to run on when the core has `MODES` 1 (`THUMB=1` or `MODES=1` in the environment).
+
+## Step 3 work: the probe build
+
+**The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2). `bup_cpu.sv` now decides a one-clock store from Rn and the immediate offset on an adder of its own (`st_off`, `st_addr`, `st_ram`, `:896-898`), not from the region of the ALU's sum. A store can take one clock only with an immediate offset, and there the two addresses are the same, so the change is exact:
+
+- `thumb/aria_equiv.sh`: with `THUMB` 0 the core is still sequentially equivalent to step 0's ARIA (806dcd4), for `MODES` 0 (1,888 signals matched) and `MODES` 1 (2,428).
+- The step 2 suites on the changed core:
+  - decode: 0 differences;
+  - directed: 12 of 12 in all five variants;
+  - halts: 210 of 210;
+  - fuzz: 48 of 48 in all three variants, with the same 193,605 retires and 2,191 predicted halts;
+  - random: 400 of 400 seeds;
+  - `s1/check.sh rv.a78`: passes with `THUMB` 1 + `arm_only` and with `THUMB` 0. The four songs are PCM-identical to MiSTer's in both, and Misery_F's CPI is unchanged at 1.3772.
+- The adder costs about 50 ALMs. In the empty device the CPU is 1,769–1,781 ALMs, against 1,720 before.
+
+**Empty device [probe]** (`quartus_probe/run_probe.sh`, `WINDOW=1 THUMB=1`: DARIA's memories at full size, 180 M10K). Worst setup slack at slow 85 °C:
+
+| Seed | CPU ALMs | 32.73 MHz | 40.43 MHz |
+|---|---|---|---|
+| 1 | 1,773 | +3.135 ns (Fmax 36.47) | −2.310 ns (36.97) |
+| 2 | 1,778 | +2.042 ns (35.07) | |
+| 3 | 1,769 | +2.771 ns (35.99) | |
+
+- **The worst path no longer goes through the store decision.** Seeds 1 and 2 end in the register file's write data: window → slice mux → profile mux → read-index select → MLAB read → bypass → shifter → operand mux → adder → result mux, 17–18 levels. That is S1's ordinary execute path.
+- **Seed 3 ends in `rom_addr`, through the Thumb BL suffix's target** (`jump(sum)`, LR + offset). Its shifter leg is just as false as the store's was. From `rom_addr` the path runs into the window's per-slice read-enable decode (`altsyncram`'s low-power decode) and then the slices' clock enables. Both are taken out below ("Two more levers").
+
+**Full build at ÷21 and ÷17 [probe]** (`quartus_probe/full/run_full.sh`, Quartus Lite 21.1.1 as CI runs it). The probe is the shipped core (`POCKET_BUPCHIP`, no `BUP_DEBUG`) with DARIA's CPU and memories in `bupchip_pocket.sv`:
+
+- the CPU: `THUMB` 1, `CODE_AW` 15, `arm_only` low in the 2600 profile;
+- the firmware ROM and the 128 KB window behind the profile mux;
+- the 32 KB cart RAM, with port B on `clk_sys`;
+- the 32 KB front-end ROM on `clk_sys`;
+- `clk_arm` at VCO ÷ 21 (PLL counter 3 at 11/10, with odd duty) or ÷ 17 (9/8);
+- the crossings below.
+
+It does not have:
+
+- the front ends' logic;
+- the call port, the MMIO and timer;
+- the state RAM and the cache's second way (4 M10K);
+- Fix B.
+
+Against the core as it is (`BASE=1`, ARIA at ÷24), at slow 85 °C:
+
+| Build | ALMs | M10K | CPU ALMs | `clk_arm` setup (Fmax) | hold into `clk_arm`, worst corner | `clk_sdram` setup | `clk_sys` setup |
+|---|---|---|---|---|---|---|---|
+| ARIA, ÷24 (28.64 MHz), seed 2 | 12,968 (70.2%) | 78 | 1,308 | +9.552 ns (39.42) | +0.121 ns | +1.158 ns | +11.318 ns |
+| DARIA, ÷21 (32.73 MHz), seed 1 | 13,617 (73.7%) | 254 | 1,748 | +2.197 ns (35.26) | +0.128 ns | +2.356 ns | +10.532 ns |
+| DARIA, ÷21, seed 2 | 13,604 (73.6%) | 254 | 1,729 | +3.072 ns (36.38) | +0.023 ns | +2.656 ns | +8.114 ns |
+| DARIA, ÷21, seed 3 | 13,609 (73.6%) | 254 | 1,741 | +3.019 ns (36.31) | −0.033 ns (the $8007 byte, a crossing) | +2.109 ns | +10.893 ns |
+| DARIA, ÷17 (40.43 MHz), seed 2 | 13,710 (74.2%) | 254 | 1,812 | −1.181 ns (38.58) | +0.139 ns | +2.471 ns | +10.587 ns |
+
+**The crossings (open item 9).** The clock groups stay as they are. The `clk_sys` ↔ `clk_arm` paths get `set_max_delay 20` and a `set_min_delay`, each way, in place of the edge relation. At ÷21 that relation can be one VCO period (1.46 ns).
+
+- **The forms built:**
+  - seeds 1 and 2 also bounded `clk_arm` against `clk_sdram` and `clk_sys_90`;
+  - seed 3 used 7.3's form, which leaves those two at their real relation as a tripwire;
+  - the three ÷21 builds used `set_min_delay` 0, the later builds 7.3's −20.
+- **Quartus Lite 21.1 honours the exceptions.** Its exceptions report lists each as complete, not overridden, and every crossing is timed against 20 ns.
+- **The tripwire stays quiet.** There is no path at all between `clk_arm` and `clk_sdram` or `clk_sys_90`, so the two forms time the same paths.
+- **The paths**, across the three seeds:
+
+  | Direction | Endpoints | Worst setup slack | The path |
+  |---|---|---|---|
+  | `clk_sys` → `clk_arm` | 61–63 | +15.1 ns | the capture's message payload into the receiver, about 4 ns of data delay |
+  | `clk_arm` → `clk_sys` | 33–34 | +15.2 ns | the frame toggle, 2.6 ns |
+
+- **Hold: keep −20.** With `set_min_delay` 0 the crossings were checked for hold too. On seed 3 the $8007 command byte (`cmd_byte` → `cmd_data_arm`) missed by 0.033 ns at fast 0 °C. That bus is held for two `clk_arm` clocks before the toggle lets it be used, so the check means nothing there, and 7.3's −20 removes it.
+- **Hold inside `clk_arm`** has positive slack at every corner on every build. On seeds 1 and 2 even the worst hold slack of any path into `clk_arm`, crossings included, is +0.128 ns and +0.023 ns, against +0.121 ns for ARIA.
+- **This is step 7's form.** The same lines go into `core_constraints.sdc`, and its comment that `clk_arm` is 2 × `clk_sys` goes.
+
+**Two more levers: S1 at 40.43 MHz [probe].** All ten of the worst paths in the 40.43 MHz full build ran:
+
+- from the window, through the register-file read, the shifter and the adder;
+- to `rom_addr[14]` and the window's per-slice read-enable decode (`altsyncram`'s low-power decode);
+- into the slices' clock enables.
+
+That is the Thumb BL suffix's target, LR + offset, which went through the ALU (`jump(sum)`), so its shifter leg is false like the store's was. Two changes take it out:
+
+1. **`bup_cpu.sv` computes the suffix's target on an adder of its own** (`bl_sum`, `:902`, used at `:1041`). It is exact, so the Thumb suites pass unchanged on it:
+   - directed: 12 of 12 in all five variants;
+   - halts: 210 of 210;
+   - fuzz: 48 of 48 in all three variants;
+   - random: 400 of 400;
+   - decode: 0 differences.
+
+   With `THUMB` 0 the suffix never decodes, and `aria_equiv.sh` proves the final core, with both adders, equivalent to step 0's ARIA for `MODES` 0 and 1.
+2. **The window as four 8K-deep RAMs read every clock, with a 4:1 mux on registered address bits** (`daria_probe.py --win4`, `run_full.sh WIN4=1`). There is no read-enable decode on `rom_addr`'s path. This is how step 5's wrapper builds the window (1.2).
+
+With both, 40.43 MHz misses by −0.466 ns (Fmax 39.68 MHz, 13,705 ALMs, seed 2), against −1.181 ns without them. The worst path is now S1's ordinary execute path, from the window through the register-file read, the shifter and the adder into the register file's write data. Neither lever touches it.
+
+**Late calls by clock and CPU [trace]** (`daria/dynamic_tables.py --only divs` on the traced runs: the bench's S1 and S3 cycle estimates, the image in block RAM, no margin). These are all 21 traced images, the 15 demos and the added ones:
+
+| CPU, clock | Late calls | The highest share of a call's budget |
+|---|---|---|
+| S1, ÷21 (32.73 MHz) | 34: Spiders 33, Qyx 1 | Spiders 121%, Qyx 107%, Zaxxon 100%, Elevator Agent 99% |
+| S1, ÷20 (34.36 MHz) | 17: Spiders 16, Qyx 1 | Spiders 116%, Qyx 102% |
+| S1, ÷19 (36.17 MHz) | 16, all Spiders | Spiders 110%, then Qyx 97% |
+| **S1, ÷18 (38.18 MHz)** | **16, all Spiders** | **Spiders 104%, then Qyx 92%** |
+| S1, ÷17 (40.43 MHz) | 0 | Spiders 98% |
+| S3, ÷24 (28.64 MHz) | 16, all Spiders | Spiders 111%, then Qyx 96% |
+| S3, ÷21 (32.73 MHz) | 0 | Spiders 97% |
+
+- **Spiders' 16 are upstream's 16.** At ÷19 and ÷18 they are the same calls the reference misses on upstream's own core, frames 557–572 at the start of play (`sim/work/bupchip/daria/dynamic_report.md`, "Spiders overruns on upstream's own core").
+- **Step 8 already accepts these 16:** "Spiders aside if it overruns as on upstream".
+
+**Full build at ÷18 (38.18 MHz) [probe]**, S1 + Thumb with both levers, `set_min_delay` −20:
+
+| Seed | ALMs | CPU ALMs | `clk_arm` setup (Fmax) | hold into `clk_arm`, worst corner | `clk_sdram` setup |
+|---|---|---|---|---|---|
+| 1 | 13,700 (74.1%) | 1,876 | +1.305 ns (40.18) | +0.143 ns | +1.852 ns |
+| 2 | 13,712 (74.2%) | 1,877 | +0.288 ns (38.61) | +0.112 ns | +2.210 ns |
+| 3 | 13,684 (74.0%) | 1,866 | +0.708 ns (39.24) | +0.170 ns | +2.998 ns |
+
+The setup slack and `clk_sdram` are at slow 85 °C; the hold slack is the worst corner, fast 0 °C.
+
+- **The worst paths** are S1's execute path into the register file's write data, 17–18 levels.
+- **The crossings** have at worst +13.5 ns of setup slack, and no hold check at −20.
+- **Nothing crosses** between `clk_arm` and `clk_sdram` or `clk_sys_90`.
+- **At this clock** the fitter spends about 130 ALMs more on the CPU than at ÷21.
+
+**Decisions.**
+
+- **CPU and clock: S1 with Thumb at ÷18, 38.18 MHz. S3 is not built.**
+  - **The result is upstream's.** Only Spiders' 16 calls at the start of play run late, the same ones upstream misses. Every other traced call stays within 92% of its budget.
+  - **What S3 would add.** At 32.73 MHz it would end those 16 calls in time too (Spiders at 97%). The price:
+    - step 4, a new pipeline with a 2-write/3-read register file;
+    - 150–560 ALMs, whose top end breaks the 84% gate (the projection below);
+    - a path at 32.73 MHz that nobody has measured.
+  - **S3 stays a later revision**, in case Spiders' start-of-play overrun ever matters, as the carry after a Thumb MUL does (open item 4).
+  - **40.43 MHz** would end every call in time with S1, but it misses by 0.47 ns.
+  - **The timing margin at ÷18 is thin on some seeds.** It ranges from +0.29 to +1.31 ns, and the front end and the rest of the memory system still have to join. If step 7's integrated build cannot hold ÷18 on three seeds, ÷19 (36.17 MHz) is the fallback. It has the same 16 late calls and 1.46 ns more period, but Qyx's heaviest call then takes 97% of its budget, against 92%.
+- **Window: 128 KB, as four 8K-deep RAMs** with a registered 4:1 mux. It fits and closes at that clock. The probe's 254 M10K, plus the 4 it leaves out, is the 258 of 308 budgeted. A 64 KB window is not needed.
+- **Area.** The projection adds what the probe leaves out:
+  - the front end, 850–1,100;
+  - the rest of the memory system, 320–550 (the 390–620 of "Budget", less the window's mux, which the probe measured);
+  - Fix B, −10 to +20.
+
+  | Build | ALMs | Share of the device |
+  |---|---|---|
+  | Measured at ÷18 (the largest seed) | 13,712 | 74.2% |
+  | Projected | 14,872–15,382 | 80.5–83.2% |
+  | S3, had it been built (+150–560 more) | 15,022–15,942 | 81.3–86.3% |
+
+- **What follows for later steps:**
+  - step 4 (S3) is dropped;
+  - `psram.sv` at 38.18 MHz becomes open item 10;
+  - the BupChip runs at 38.18 MHz too. CoreTone paces itself on the 48 kHz tick, so it only idles more.
 
 ## Design (step 1)
 
@@ -554,6 +702,7 @@ This section designs the memories DARIA's CPU and the lean 6507-side front ends 
 - **Fetch:** `rom_q = prof26 ? win_qa : fw_qa`. The firmware RAM takes `npc[11:0]`, the window `npc[14:0]` (plus Thumb's halfword bit, step 2). `prof26` is a static `clk_arm` register (section 4).
 - **Data:** `rom_dq = prof26 ? win_qb : fw_qb`. This folds into W's source mux (`bup_cpu.sv:568-575`).
 - **Slices.** The window is built from 8K × 1 blocks, 4 deep by 32 wide, so its own output decoder is a 4:1 mux on registered address bits [14:13]. A Pocket-owned wrapper fixes `maximum_depth` 8192. Upstream's `cache_ram.v` leaves the choice to Quartus, which could pick 2K × 4 slices and a 16:1 decoder.
+- **Since step 3:** the wrapper builds the window as four 8K × 32 RAMs read every clock, with the 4:1 mux on registered bits [14:13]. One `altsyncram` puts a per-slice read-enable decode between `rom_addr` and the slices' clock enables, and that led the 40.43 MHz probe's worst paths.
 - **Timing [E], the main risk of this design.**
   - The fetch output becomes a 4:1 slice mux followed by the 2:1 profile mux: one or two LUT levels in front of decode, where ARIA has none (`BUPCHIP_CORE.md`, "Pipeline").
   - `npc` fans out to 144 M10K instead of 16, and `d_addr` to about 180 (window, firmware, cart RAM, cache) instead of 35. They spread over about half the device's M10K columns.
@@ -695,7 +844,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 | Everything else, stores to ROM | halt 5, 6 or 7 | halt 5, 6 or 7, where upstream aborts (M5) |
 
 **Keeping the decode off the critical path:**
-- **Region at execute** (`bup_cpu.sv:182-188`). Only `rg_x == RG_RAM` reaches the one-clock store decision (`:711`), and it is `addr[31:28] == 4` in both profiles.
+- **Region at execute** (`bup_cpu.sv:182-188`). Only `rg_x == RG_RAM` reaches the one-clock store decision (`:711`), and it is `addr[31:28] == 4` in both profiles. Since step 3 that test is `st_ram`, on Rn ± the immediate ("Step 3 work").
   - The ROM/asset split becomes `prof26 ? |a[18:17] : a[25]`. That feeds only the `acc_rg` register (`:879`), never logic in the same clock.
   - `prof26` is a `clk_arm` register: the profile through two flops, stable whenever the CPU runs (2.3).
 - **Exact checks in W** (`:542-561`) gain the profile as one more LUT input:
@@ -839,7 +988,7 @@ Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 
 - **`clk_arm` ↔ `clk_sdram` and ↔ `clk_sys_90`** keep their real 4.37 ns or 1.46 ns relationship as a tripwire. Any path there is a design error, and it then fails timing visibly.
 - **Synchronisers.** Mark the first flop of every chain `SYNCHRONIZER_IDENTIFICATION FORCED` in `ap_core.qsf`, so the fitter packs the chains and reports their MTBF.
 - **Fitter over-constraint.** The fitter-only block (`:55-59`) still covers `core_clks` → `clk_sdram`.
-- Step 3's probe confirms the form with `report_timing` on the crossings.
+- Step 3's probe confirms the form with `report_timing` on the crossings. **Confirmed** (open item 9): the exceptions apply. −20 stays: with 0, a held bus fails a hold check that means nothing for it.
 
 ##### 7.4 `psram.sv`'s `CLOCK_SPEED` (the BupChip's assets)
 
@@ -1206,13 +1355,14 @@ The BupChip and DARIA share one CPU and one clock. CoreTone does not depend on t
 | `clk_arm` (687.27 MHz VCO ÷ C) | What it gives |
 |---|---|
 | ÷24, 28.64 MHz (today) | S3 misses Spiders' 16 late calls, as upstream does |
-| ÷21, 32.73 MHz | **The baseline:** every measured call on time with S3's CPI [trace] |
+| ÷21, 32.73 MHz | Every measured call on time with S3's CPI [trace]. The baseline until step 3 |
 | ÷20, 34.36 MHz | A little margin |
-| ÷17, 40.43 MHz | **The stretch goal:** 20% margin with S3, or every call on time with S1's CPI [trace] |
+| ÷18, 38.18 MHz | **DARIA's clock** (step 3): S1 with Thumb, late only on Spiders' 16 calls, as upstream |
+| ÷17, 40.43 MHz | 20% margin with S3, or every call on time with S1's CPI [trace]. **Dropped** (step 3): it does not close |
 
 - **What fits today.** In the 2.1.1 build ARIA had +8.08 ns of setup slack at 28.64 MHz: a critical path of about 26.8 ns, so a ceiling near 37 MHz. 32.73 and 34.36 MHz fit; 40.43 MHz needs the path shortened first, and the Thumb expander and S3's forwarding each add to it. The first fix is known: decide a one-clock store from the base register's region, not after the adder (`BUPCHIP_CORE.md`, risk 2).
 - **What changes with the divider.** The PLL's counter 3; `psram.sv`'s `CLOCK_SPEED` (28.636364 today); and `core_constraints.sdc`, which times `clk_arm` with `clk_sys` as one synchronous group only because it is exactly 2 × `clk_sys`. At any other ratio the crossings are declared asynchronous. The BupChip's crossings are synchronisers, stress-tested asynchronously at 16–29 MHz; they are re-run at the new rate, and DARIA's own crossings are built the same way.
-- Step 3's probe measures 32.73 and 40.43 MHz, with the path fix, inside the full build. If 40.43 MHz does not close, S3 at 32.73 MHz does the work S1 would need 40 MHz for.
+- Step 3's probe measures 32.73 and 40.43 MHz, with the path fix, inside the full build. If 40.43 MHz does not close, S3 at 32.73 MHz does the work S1 would need 40 MHz for. (Step 3 took a third way: S1 at 38.18 MHz, late only where upstream is. See below.)
 
 **The early probe (2026-10-05, during step 2) [probe].** `sim/bupchip/quartus_probe/run_probe.sh` with `WINDOW=1` gives the CPU DARIA's memories at full size: the 16 KB firmware ROM and the 128 KB window (`altsyncram` with `maximum_depth` 8192, so 8K × 1 slices and a 4:1 output mux) behind a registered profile mux, the 32 KB cart RAM with its port B on `clk_sys`, and the asset cache's 4 KB of data read at `d_addr` (180 M10K). `THUMB=1` compiles the step 2 core. One seed each, in an empty device, worst setup slack at slow 85 °C:
 
@@ -1226,6 +1376,18 @@ The BupChip and DARIA share one CPU and one clock. CoreTone does not depend on t
 - **Thumb costs about 2.7 ns more**, not the 0–1.9 ns this design estimated: the levels stay at 20, but the merged decode, the wider operand mux and the busier placement add delay along the whole path.
 - **The path** at 32.73 MHz with Thumb: window → slice mux → profile mux → read-index select (4 levels) → MLAB read → bypass → shifter (4) → operand mux → `alu_b` (2) → adder → the region of the sum (the one-clock-store decision) → `done` → `rom_addr` → 144 M10K address registers: 29.1 ns of data delay. The tail from the adder on is `BUPCHIP_CORE.md`'s risk 2.
 - **So:** 32.73 MHz closes with no margin, before the full build and before S3; the one-clock-store fix (the store decided from the base register's region, about 2–3.8 ns [E]) becomes required for it, not only for 40.43 MHz. **40.43 MHz is out of reach** without restructuring well beyond that fix (−4 ns with the window and Thumb); it is dropped as a goal unless step 3 finds otherwise. The Thumb core's area, +345 ALMs over ARIA with the same memories, is inside the 300–500 estimate.
+
+**Step 3 (2026-10-05) [probe]** ("Step 3 work"). The changes:
+- the store decision and the BL suffix's target each on an adder of its own;
+- the window built as four RAMs.
+
+| Build | Result |
+|---|---|
+| S1 + Thumb in the full build | 32.73 MHz with +2.20 to +3.07 ns on three seeds; 38.18 MHz (÷18) with +0.29 to +1.31 ns, and the fallback ÷19 |
+| 40.43 MHz | Misses by 0.47 ns |
+
+- **The clock: ÷18 with S1.** It is late only on Spiders' 16 calls, as upstream is.
+- **`psram.sv`'s `CLOCK_SPEED` at 38.18 MHz** is open item 10.
 
 ## Budget
 
@@ -1242,6 +1404,19 @@ The BupChip and DARIA share one CPU and one clock. CoreTone does not depend on t
 | **Total** | **1,710–2,825** (1,560–2,265 with S1) | |
 
 So the single bitstream lands at about 14,600–15,700 ALMs, 79–85% of the device (78–82% with S1). Area decides the CPU: step 3's probe measures the Thumb decoder and S3 before anything is integrated, and S1 with Thumb is the fallback.
+
+**Measured at step 3 [probe].** The full-build probe has DARIA's CPU (S1 + Thumb), the window, the firmware ROM, the 32 KB cart RAM and the front-end ROM.
+
+| | ALMs | M10K | Share of the device |
+|---|---|---|---|
+| The core as it is, the same seed | 12,968 | 78 | 70.2% |
+| The probe at ÷21, three seeds | 13,604–13,617 | 254 | 73.6–73.7% |
+| The probe at ÷18, three seeds | 13,684–13,712 | 254 | 74.0–74.2% |
+| Projected, S1 at ÷18 | 14,872–15,382 | | 80.5–83.2% |
+
+- **The probe's CPU** is 1,729–1,748 ALMs at ÷21, +421–440 over ARIA's 1,308 and inside the Thumb line above. At ÷18 it is 1,866–1,877, as the fitter spends area for the faster clock.
+- **The projection** adds what the probe leaves out (the "Step 3 work" decisions). Without S3, even its top end, 83.2%, stays under `BUPCHIP_CORE.md`'s 84% gate.
+- **M10K:** 254, plus the 4 left out, is the 258 budgeted.
 
 **M10K:** 258 of 308 (262 with an 8 KB cache), "The memory system", 1.5. The 2600-only fallback bitstream would take 217.
 
@@ -1272,8 +1447,8 @@ Each step has a done-when, as ARIA's had.
 0. **Scope.** *Done:* this document's requirements, checked against the traces; `MODES` 1.
 1. **Design.** *Done:* "Design (step 1)", "Budget" and "Verification"; every open item is decided or given to a step ("Open items").
 2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done* (2026-10-05): "Step 2 work". *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
-3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
-4. **S3**, if chosen (ARIA's steps 6–7). *Done when* CPI is within ±2% of the model on the demos' traces and the BupChip.
+3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done* (2026-10-05): "Step 3 work". The choices: S1 with Thumb, ÷18 (38.18 MHz), and the 128 KB window as four RAMs. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
+4. **S3** (ARIA's steps 6–7). *Not built* (step 3): S1 with Thumb at 38.18 MHz matches upstream's call timing, so S3 is left for a later revision (open item 3). *Its done-when, if it is ever built:* CPI within ±2% of the model on the demos' traces and the BupChip.
 5. **2600 memory system:** image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
 6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
 7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
@@ -1286,16 +1461,16 @@ What step 1 leaves open, each with the step that settles it:
 
 | # | Item | Settled in |
 |---|---|---|
-| 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. The early probe ("Clock") measured it at 1–2 ns, and Thumb at about 2.7 ns more: DARIA closes 32.73 MHz in an empty device with +0.03 ns. Levers: the one-clock-store fix (item 2), duplicating the last address stage (60–120 ALMs), a 64 KB window. | Step 3 |
-| 2 | **The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2) is now needed for 32.73 MHz itself: the worst path ends in the store decision taken from the adder's sum. **40.43 MHz** (−3.97 ns in the early probe) is out of reach without more than that fix. | Step 3 |
-| 3 | **S3 or S1 with Thumb**, by area. | Step 3 |
+| 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. The early probe ("Clock") measured it at 1–2 ns, and Thumb at about 2.7 ns more. | **Settled (step 3):** three changes cut the path. The store decision (item 2) and the BL suffix's target each get an adder of their own, and the window is built as four 8K-deep RAMs with a registered 4:1 mux, so no read-enable decode sits on `rom_addr`. With them, DARIA (S1 + Thumb, the 128 KB window) closes ÷18, 38.18 MHz, in the full build with +0.29 to +1.31 ns on three seeds ("Step 3 work"). Levers still unused: duplicating the last address stage (60–120 ALMs), a 64 KB window |
+| 2 | **The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2) is now needed for 32.73 MHz itself: the worst path ends in the store decision taken from the adder's sum. **40.43 MHz** (−3.97 ns in the early probe) is out of reach without more than that fix. | **Done (step 3):** the store is decided on its own adder, exactly, for about 50 ALMs. 40.43 MHz is dropped. It missed by 2.31 ns in an empty device and by 1.18 ns in the full build. With the two further levers of item 1 it still misses by 0.47 ns, on S1's execute path |
+| 3 | **S3 or S1 with Thumb**, by area. | **Step 3 chose S1 with Thumb at ÷18 (38.18 MHz).** Its only late calls are Spiders' 16 at the start of play, the same ones upstream misses, which step 8 already accepts. S3 at 32.73 MHz would end those too, but it costs a new pipeline and 150–560 ALMs. It stays a later revision ("Step 3 work", decisions) |
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above 128 KB** halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | Step 5, small-window builds |
 | 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | Step 5 |
 | 8 | **CoreTone after a 2600 ARM game:** the cart RAM is zeroed on every load; check that a Souper game then starts as from power-up. | Step 5 |
-| 9 | **The SDC form** for the held buses that cross (`set_max_delay` on related clocks) in Quartus Lite 21.1. | Step 3 |
-| 10 | **PSRAM at 40.43 MHz** with `CLOCK_SPEED` 50.0. | Step 8, if 40.43 MHz is chosen |
+| 9 | **The SDC form** for the held buses that cross (`set_max_delay` on related clocks) in Quartus Lite 21.1. | **Settled (step 3):** 7.3's form works. Quartus Lite 21.1 applies `set_max_delay` / `set_min_delay` between clocks of one synchronous group (complete, not overridden), and every crossing path is timed against 20 ns, with at worst +15.1 ns of setup slack. Keep 7.3's `set_min_delay` −20. The first builds used 0, and with it the $8007 byte's held bus missed hold by 0.033 ns at fast 0 °C on one seed. A hold check means nothing on a bus that is held for two clocks before use. Step 7 copies the probe's lines |
+| 10 | **PSRAM at 40.43 MHz** with `CLOCK_SPEED` 50.0. Since step 3: `psram.sv` at 38.18 MHz, between the 32.73 MHz where 28.636364 is known to work and the 40.43 MHz that needs 50.0 (7.4). It serves the BupChip's assets and the cache beyond the window. | Step 5 (simulation), step 8 (hardware) |
 | 11 | **The `BUP_DEBUG` overlay** samples `clk_arm` bits raw; it needs a snapshot with a toggle once the clocks are no longer 2:1. | Step 7 |
 | 12 | **Fix B's margins:** no spare against the `c_rdata` multicycle in the worst case (E0+19), hold at the coincident `clk_sys`/`clk_sdram` edge, and Flicker Blend's half-period paths as the possible next limit ("Fix B", 7). | Step 7 |
 | 13 | **Banked registers after a mapper reset:** DARIA clears them, upstream keeps them. No driver reads them first. | Accepted |
@@ -1303,3 +1478,4 @@ What step 1 leaves open, each with the step that settles it:
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | Step 6 |
 | 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): traced: nothing new for the CPU, the call protocol or the memory map ("The added images"). | Done |
 | 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | Step 5 |
+| 18 | **The code space per profile.** With `CODE_AW` 15, the BupChip profile's code space must still end at 16 KB, as ARIA's does. FETCH applies past 0x3FFC and to jumps above it, and DATA to ROM reads above 16 KB. Step 3's probe left it at 128 KB in both profiles. Step 5 adds the profile to those checks. They run a clock late or in W, off the critical path. | Step 5 |

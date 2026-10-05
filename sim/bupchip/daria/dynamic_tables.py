@@ -3,7 +3,7 @@
 
   dynamic_tables.py [--scan scan.json] [--margin F] [--only SECTION,...] RUN_DIR...
 
-Sections: schemes, overview, types, clock, overruns, late, cache, mix, rom, ram, harmony, polls,
+Sections: schemes, overview, types, clock, overruns, late, divs, cache, mix, rom, ram, harmony, polls,
 determinism
 (--ref DIR: compare each run with the run of the same name under DIR).
 
@@ -584,6 +584,31 @@ def sec_late(runs, margin):
     return table(hdr, rows)
 
 
+def sec_divs(runs, margin):
+    """Late calls (no margin) and the highest share of a call's safe budget, for S1
+    and S3 at each clk_arm divider of the 687.27 MHz VCO (block RAM, zero-wait;
+    DARIA_CORE.md, "Step 3 work")."""
+    vco = 687.272727
+    cfg = [("S1", "s1_cyc", d) for d in (21, 20, 19, 18, 17)] + [("S3", "s3_cyc", d) for d in (24, 21)]
+    hdr = ["Demo"] + ["%s \u00f7%d (%.2f MHz)" % (c, d, vco / d) for c, _, d in cfg]
+    rows = []
+    tot = [0] * len(cfg)
+    for R in runs:
+        if not R.has_s:
+            continue
+        bud = R.budgeted
+        cells = []
+        for i, (_, col, d) in enumerate(cfg):
+            hz = vco / d * 1e6
+            late = sum(1 for r in bud if r[col] / hz > r["safe"] / SYS_HZ)
+            share = max(((r[col] / hz) / (r["safe"] / SYS_HZ) for r in bud), default=0)
+            tot[i] += late
+            cells.append("%d (%.0f%%)" % (late, 100 * share))
+        rows.append([R.short] + cells)
+    rows.append(["total late"] + [str(t) for t in tot])
+    return table(hdr, rows)
+
+
 def sec_harmony(runs, margin):
     """The call that uses most of its budget on a Harmony at zero wait.
 
@@ -674,7 +699,7 @@ def sec_determinism(runs, margin, ref):
     return table(hdr, rows)
 
 
-SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "cache", "mix", "rom", "ram", "harmony", "polls",
+SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "divs", "cache", "mix", "rom", "ram", "harmony", "polls",
             "determinism"]
 
 
