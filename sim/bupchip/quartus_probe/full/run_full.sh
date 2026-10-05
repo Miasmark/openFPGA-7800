@@ -7,9 +7,11 @@
 #   ./run_full.sh                  DIV=21 (32.73 MHz), the qsf's seed (2)
 #   DIV=17 SEED=1 ./run_full.sh    40.43 MHz, seed 1
 #   BASE=1 SEED=1 ./run_full.sh    the core as it is (no edits), for comparison
+#   WIN4=1 ...                     the window as four RAMs and a registered mux
+#                                  (daria_probe.py --win4), in <tag>_w4
 #
 # The build is a copy of src/fpga in $WORK/<tag>/fpga (default WORK
-# sim/work/bupchip/fullprobe; tag d<DIV>_s<SEED>, or base_s<SEED>), edited
+# sim/work/bupchip/fullprobe; tag d<DIV>[_w4]_s<SEED>, or base_s<SEED>), edited
 # by daria_probe.py; the firmware files are not copied. After the compile,
 # full_report.tcl writes timing.txt, arm_paths.rpt and cross.rpt there, and
 # full_summary.py prints summary.txt: the device's resources, the BupChip's
@@ -27,6 +29,7 @@ case "$WORK/" in "$ROOT"/*) ;; *) echo "run_full.sh: WORK must be inside $ROOT f
 
 tag="d${DIV}"
 [ "${BASE:-0}" = 0 ] || tag="base"
+[ "${WIN4:-0}" = 0 ] || tag="${tag}_w4"
 tag="${tag}_s${SEED:-q}"
 dir="$WORK/$tag"
 rm -rf "$dir"
@@ -38,14 +41,16 @@ if [ -n "$SEED" ]; then
 	sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED $SEED/" "$dir/fpga/ap_core.qsf"
 	grep -q "^set_global_assignment -name SEED $SEED\$" "$dir/fpga/ap_core.qsf" || { echo "run_full.sh: no SEED line in ap_core.qsf" >&2; exit 1; }
 fi
-[ "${BASE:-0}" != 0 ] || python3 "$HERE/daria_probe.py" "$dir/fpga" --div "$DIV"
+W4=()
+[ "${WIN4:-0}" = 0 ] || W4=(--win4)
+[ "${BASE:-0}" != 0 ] || python3 "$HERE/daria_probe.py" "$dir/fpga" --div "$DIV" "${W4[@]}"
 cp "$HERE/full_report.tcl" "$dir/fpga/"
 
 echo "== $tag: $dir"
 docker run --rm -v "$ROOT:/build" -w "/build/${dir#$ROOT/}/fpga" "$IMAGE" \
 	bash -c "quartus_sh --flow compile ap_core && quartus_sta -t full_report.tcl" \
 	> "$dir/quartus.log" 2>&1 || { echo "Quartus failed, see $dir/quartus.log" >&2; exit 1; }
-for f in timing.txt arm_paths.rpt cross.rpt exceptions.rpt; do
+for f in timing.txt arm_paths.rpt arm_hold.rpt cross.rpt exceptions.rpt; do
 	[ ! -f "$dir/fpga/$f" ] || mv "$dir/fpga/$f" "$dir/"
 done
 python3 "$HERE/full_summary.py" "$dir" | tee "$dir/summary.txt"

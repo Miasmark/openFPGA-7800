@@ -1,7 +1,8 @@
 # quartus_sta -t full_report.tcl: the step 3 full-build probe's timing
 # figures (run_full.sh). Writes timing.txt (worst setup and hold slack per
 # clock at each corner, and clk_arm's Fmax), arm_paths.rpt (the ten worst
-# clk_arm setup paths), and cross.rpt (the worst paths each way between
+# clk_arm setup paths), arm_hold.rpt (the ten worst clk_arm hold paths at
+# each fast corner), and cross.rpt (the worst paths each way between
 # clk_arm and clk_sys, with the requirement that applied to them).
 project_open ap_core
 create_timing_netlist
@@ -63,6 +64,13 @@ foreach {label from to} [list "sys->arm" $sys $arm "arm->sys" $arm $sys "sdram->
 	puts $f "$label: $n endpoints, worst setup slack $ws, worst hold slack $wh (slow 85C)"
 }
 close $f
+# The worst hold paths into clk_arm at the fast corners, where hold is tightest.
+foreach c [get_available_operating_conditions] {
+	if {![string match "*fast*" $c]} { continue }
+	set_operating_conditions $c
+	update_timing_netlist
+	report_timing -hold -to_clock $arm -npaths 10 -nworst 1 -detail full_path -append -file arm_hold.rpt
+}
 catch { report_exceptions -file exceptions.rpt }
 delete_timing_netlist
 project_close

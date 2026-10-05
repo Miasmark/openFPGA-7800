@@ -21,7 +21,8 @@ The shipped core (POCKET_BUPCHIP, 2.1.2) gets, in the copy only:
   - core_constraints.sdc: the form of DARIA_CORE.md's 7.3 (open item 9). The
     clock groups stay as they are (Quartus would not apply set_max_delay to
     paths a clock group cuts), and the clk_sys <-> clk_arm paths get
-    set_max_delay 20 and set_min_delay 0 instead of the edge relation.
+    set_max_delay 20 and set_min_delay -20 (--mind; the first builds used 0)
+    instead of the edge relation.
     clk_arm <-> clk_sdram and <-> clk_sys_90 keep their real relationship as
     a tripwire: no path should exist there. --all-clocks bounds those too
     (the first seed-2 build's form).
@@ -38,6 +39,10 @@ ap.add_argument("fpga")
 ap.add_argument("--div", type=int, default=21)
 ap.add_argument("--maxd", type=float, default=20.0,
                 help="set_max_delay between clk_arm and clk_sys (ns)")
+ap.add_argument("--mind", type=float, default=-20.0,
+                help="set_min_delay between clk_arm and clk_sys (ns); 7.3's -20 leaves the held buses no hold check")
+ap.add_argument("--win4", action="store_true",
+                help="the window as four 8K-deep altsyncrams and a registered 4:1 mux, so no per-slice read-enable decode")
 ap.add_argument("--all-clocks", action="store_true",
                 help="bound clk_arm against all three other core counters, not only clk_sys")
 args = ap.parse_args()
@@ -105,7 +110,34 @@ block = r"""	// ---- the CPU and its memories: DARIA's step 3 probe ------------
 	always_ff @(posedge clk_arm)
 		if (wr_fw_start) win_page <= 3'd0;
 		else if (rom_we && rom_wa == 12'hFFF) win_page <= win_page + 3'd1;
-	altsyncram #(
+@WINDOW@	assign rom_q  = prof26 ? win_qa : fw_qa;
+	assign rom_dq = prof26 ? win_qb : fw_qb;
+
+	// Cart RAM, 32 KB: port A the CPU's, port B (clk_sys) the front ends'.
+	// The probe's port B takes the loader's bytes in the 2600 profile.
+	wire        img_we = load_valid && prof26_sys;
+	wire  [3:0] img_be = 4'b0001 << load_addr[1:0];
+	wire [31:0] crb_q, fe_qa, fe_qb;
+	cache_ram_tdp_dc_be #(.ADDR_WIDTH(13), .DATA_WIDTH(32)) ram (
+		.clk_a_i(clk_arm), .addr_a_i(d_addr[14:2]), .wren_a_i(ram_we), .byteena_a_i(ram_be),
+		.wdata_a_i(ram_wdata), .q_a_o(ram_q),
+		.clk_b_i(clk_sys), .addr_b_i(load_addr[14:2]), .wren_b_i(img_we), .byteena_b_i(img_be),
+		.wdata_b_i({4{load_data}}), .q_b_o(crb_q));
+
+	// The front-end ROM, 32 KB on clk_sys: capture writes on port A, reads
+	// at a counter on port B.
+	logic [12:0] fe_ra = 13'd0;
+	always_ff @(posedge clk_sys) fe_ra <= fe_ra + 13'd1;
+	cache_ram_tdp_dc_be #(.ADDR_WIDTH(13), .DATA_WIDTH(32)) fe_rom (
+		.clk_a_i(clk_sys), .addr_a_i(load_addr[14:2]), .wren_a_i(img_we), .byteena_a_i(img_be),
+		.wdata_a_i({4{load_data}}), .q_a_o(fe_qa),
+		.clk_b_i(clk_sys), .addr_b_i(fe_ra), .wren_b_i(1'b0), .byteena_b_i(4'd0),
+		.wdata_b_i(32'd0), .q_b_o(fe_qb));
+	logic probe_par = 1'b0;
+	always_ff @(posedge clk_sys) probe_par <= ^{crb_q, fe_qa, fe_qb};
+
+"""
+WIN1 = r"""	altsyncram #(
 		.intended_device_family        ("Cyclone V"),
 		.lpm_type                      ("altsyncram"),
 		.operation_mode                ("BIDIR_DUAL_PORT"),
@@ -140,33 +172,60 @@ block = r"""	// ---- the CPU and its memories: DARIA's step 3 probe ------------
 		.data_b    (rom_wd),
 		.q_b       (win_qb));
 
-	assign rom_q  = prof26 ? win_qa : fw_qa;
-	assign rom_dq = prof26 ? win_qb : fw_qb;
-
-	// Cart RAM, 32 KB: port A the CPU's, port B (clk_sys) the front ends'.
-	// The probe's port B takes the loader's bytes in the 2600 profile.
-	wire        img_we = load_valid && prof26_sys;
-	wire  [3:0] img_be = 4'b0001 << load_addr[1:0];
-	wire [31:0] crb_q, fe_qa, fe_qb;
-	cache_ram_tdp_dc_be #(.ADDR_WIDTH(13), .DATA_WIDTH(32)) ram (
-		.clk_a_i(clk_arm), .addr_a_i(d_addr[14:2]), .wren_a_i(ram_we), .byteena_a_i(ram_be),
-		.wdata_a_i(ram_wdata), .q_a_o(ram_q),
-		.clk_b_i(clk_sys), .addr_b_i(load_addr[14:2]), .wren_b_i(img_we), .byteena_b_i(img_be),
-		.wdata_b_i({4{load_data}}), .q_b_o(crb_q));
-
-	// The front-end ROM, 32 KB on clk_sys: capture writes on port A, reads
-	// at a counter on port B.
-	logic [12:0] fe_ra = 13'd0;
-	always_ff @(posedge clk_sys) fe_ra <= fe_ra + 13'd1;
-	cache_ram_tdp_dc_be #(.ADDR_WIDTH(13), .DATA_WIDTH(32)) fe_rom (
-		.clk_a_i(clk_sys), .addr_a_i(load_addr[14:2]), .wren_a_i(img_we), .byteena_a_i(img_be),
-		.wdata_a_i({4{load_data}}), .q_a_o(fe_qa),
-		.clk_b_i(clk_sys), .addr_b_i(fe_ra), .wren_b_i(1'b0), .byteena_b_i(4'd0),
-		.wdata_b_i(32'd0), .q_b_o(fe_qb));
-	logic probe_par = 1'b0;
-	always_ff @(posedge clk_sys) probe_par <= ^{crb_q, fe_qa, fe_qb};
+"""
+WIN4 = r"""	// The window as four 8K-deep RAMs read every clock, and a 4:1 mux on the
+	// registered address bits: no read-enable decode on rom_addr's path.
+	wire [14:0] win_ab = fw_loaded ? d_addr[16:2] : {win_page, rom_wa};
+	wire [31:0] win_qa_s [4], win_qb_s [4];
+	logic [1:0] win_sa = 2'd0, win_sb = 2'd0;
+	always_ff @(posedge clk_arm) begin
+		win_sa <= rom_addr[14:13];
+		win_sb <= win_ab[14:13];
+	end
+	genvar wi;
+	generate for (wi = 0; wi < 4; wi = wi + 1) begin : g_win
+		altsyncram #(
+			.intended_device_family        ("Cyclone V"),
+			.lpm_type                      ("altsyncram"),
+			.operation_mode                ("BIDIR_DUAL_PORT"),
+			.numwords_a                    (8192),
+			.numwords_b                    (8192),
+			.widthad_a                     (13),
+			.widthad_b                     (13),
+			.width_a                       (32),
+			.width_b                       (32),
+			.width_byteena_a               (1),
+			.width_byteena_b               (1),
+			.maximum_depth                 (8192),
+			.address_reg_b                 ("CLOCK0"),
+			.indata_reg_b                  ("CLOCK0"),
+			.wrcontrol_wraddress_reg_b     ("CLOCK0"),
+			.outdata_reg_a                 ("UNREGISTERED"),
+			.outdata_reg_b                 ("UNREGISTERED"),
+			.outdata_aclr_a                ("NONE"),
+			.outdata_aclr_b                ("NONE"),
+			.power_up_uninitialized        ("FALSE"),
+			.ram_block_type                ("M10K"),
+			.read_during_write_mode_port_a ("NEW_DATA_NO_NBE_READ"),
+			.read_during_write_mode_port_b ("NEW_DATA_NO_NBE_READ")
+		) window (
+			.clock0    (clk_arm),
+			.address_a (rom_addr[12:0]),
+			.wren_a    (1'b0),
+			.data_a    (32'd0),
+			.q_a       (win_qa_s[wi]),
+			.address_b (win_ab[12:0]),
+			.wren_b    (rom_we && !fw_loaded && prof26 && win_ab[14:13] == wi),
+			.data_b    (rom_wd),
+			.q_b       (win_qb_s[wi]));
+	end endgenerate
+	assign win_qa = win_qa_s[win_sa];
+	assign win_qb = win_qb_s[win_sb];
 
 """
+win1 = WIN1
+win4 = WIN4
+block = block.replace("@WINDOW@", win4 if args.win4 else win1)
 w = w[:start] + block + w[end:]
 with open(wrap, "w") as f:
     f.write(w)
@@ -208,13 +267,14 @@ s += f"""
 # crossing between it and clk_sys is a synchroniser with held data
 # (bupchip_pocket.sv, "Clocks"), so the edge-derived requirement (as little
 # as one VCO period) does not apply. Bounded instead: at most {args.maxd} ns of
-# data delay, and no hold requirement beyond the clocks' skew.
+# data delay. The buses are held for at least two destination clocks before
+# they are used, so set_min_delay {args.mind} leaves them no hold check.
 set clk_arm  {{{pll % "3"}}}
 set not_arm  [get_clocks {{{" ".join(pll % n for n in others)}}}]
 set_max_delay -from [get_clocks $clk_arm] -to $not_arm {args.maxd}
 set_max_delay -from $not_arm -to [get_clocks $clk_arm] {args.maxd}
-set_min_delay -from [get_clocks $clk_arm] -to $not_arm 0
-set_min_delay -from $not_arm -to [get_clocks $clk_arm] 0
+set_min_delay -from [get_clocks $clk_arm] -to $not_arm {args.mind}
+set_min_delay -from $not_arm -to [get_clocks $clk_arm] {args.mind}
 """
 with open(sdc, "w") as f:
     f.write(s)

@@ -896,6 +896,10 @@ module bup_cpu
 	wire [31:0] st_off = tm ? th_offv : a_sdt ? {20'b0, insn[11:0]} : {24'b0, insn[11:8], insn[3:0]};
 	wire [31:0] st_addr = bit_p ? ra + (st_off ^ {32{!bit_u}}) + 32'(!bit_u) : ra;
 	wire        st_ram = region(st_addr) == RG_RAM;
+	// The BL suffix's target, LR + offset, likewise on an adder of its own: the
+	// ALU's sum for the suffix, without the shifter and the operand muxes on
+	// the path to rom_addr.
+	wire [31:0] bl_sum = ra + {20'd0, hw[10:0], 1'b0};
 	wire [29:0] br_target = 30'(pc) + 30'd2 + {{6{insn[23]}}, insn[23:0]};	// ARIA's, in words
 	// THUMB 1: branch targets in halfwords, from the instruction's address +
 	// 8 (ARM) or + 4 (Thumb, F16 and F18).
@@ -1034,7 +1038,7 @@ module bup_cpu
 						t_we = THUMB && !arm_only;
 					end else if (k_bl2) begin		// BL suffix: LR + offset, link
 						done = 1'b1;
-						{late_go, npc_h, npc} = jump(sum);
+						{late_go, npc_h, npc} = jump(bl_sum);
 						rf_we = 1'b1;
 						rf_wa = 4'd14;
 						rf_wd = link_value;

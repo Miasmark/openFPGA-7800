@@ -33,14 +33,14 @@ for line in sec.splitlines()[1:]:
     if cols[0] == "Compilation Hierarchy Node":
         hdr = cols
         continue
-    if hdr is None or len(cols) < len(hdr) or cols[0] not in want:
+    win = re.fullmatch(r"\|altsyncram:(g_win\[\d\]\.)?window\|", cols[0])
+    if hdr is None or len(cols) < len(hdr) or (cols[0] not in want and not win):
         continue
     row = dict(zip(hdr, cols))
     print(f"  {cols[0]:32s} {row['ALMs needed [=A-B+C]']:>18s}  {row['[A] ALMs used in final placement']:>18s}"
           f"  {row.get('Dedicated Logic Registers', ''):>14s}  M10K {row.get('M10Ks', '?')}")
-    want.remove(cols[0])
-    if not want:
-        break
+    if cols[0] in want:
+        want.remove(cols[0])
 
 print("\n# Timing (full_report.tcl)")
 t = os.path.join(d, "timing.txt")
