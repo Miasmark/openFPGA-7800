@@ -182,7 +182,7 @@ The Pocket BupChip around ARIA S1: `src/fpga/core/bupchip/bupchip_pocket.sv` and
 sim/bupchip/s4/run_s4.sh sim/work/bupchip/game/rv.a78 13 4                 # one song, about 6 minutes
 NAME=x sim/bupchip/s4/run_s4.sh GAME.a78 13 4 +reload=300 +reloads=3 +rom3=OTHER.a78 +holdfill
 NAME=y sim/bupchip/s4/run_s4.sh GAME.a78 14 4 +arm15 +pal                  # clk_arm at 21.281 MHz
-sim/bupchip/s4/run_cache.sh                               # the cache: directed, random and mutations, about 4 minutes
+sim/bupchip/s4/run_cache.sh                               # the cache, WAYS 1 and 2: directed, random and mutations, about 25 minutes
 PSRAM=standin sim/bupchip/s4/run_s4.sh GAME.a78 13 4      # the stand-in instead of psram.sv and the model
 ```
 
@@ -193,12 +193,12 @@ PSRAM=standin sim/bupchip/s4/run_s4.sh GAME.a78 13 4      # the stand-in instead
 | `src/fpga/core/bupchip/bupchip_pocket.sv` | The wrapper: hold (`pll_locked` and `pll_busy` synchronised, `souper_profile`), `cpu_run`, the ROM (`cache_ram_dp`, no contents until the firmware slot fills it through port B) and RAM, `bupchip_peripheral` unmodified at CMD 8 / PCM 1,024 with the watermark remap, the `$8007` crossing, the 48 kHz pop, the frame back to `clk_sys` with the mute and `souper_profile`, and under `BUP_DEBUG` the status word, shadow FIFO counters and throttle. It drives `psram.sv`'s user ports; the parent instantiates `psram.sv` with `CLOCK_SPEED` = 28.636364 on `cram0` (step 5). |
 | `src/fpga/core/bupchip/bup_capture.sv` | `clk_sys`: the A78 header parse (copied from upstream's `bupchip_asset_ddr.sv`, MIT), the byte-pair packer with the odd tail on one lane, the firmware word packer, and the START/WRITE/END and FWSTART/FWWRITE/FWEND stream as one held 47-bit register and a toggle, messages at least 5 `clk_sys` apart |
 | `src/fpga/core/bupchip/bup_asset_wr.sv` | `clk_arm`, not held: the receiver (two flops, change detect, one-entry copy), `asset_ready`/`asset_size`, ROM writes and `fw_loaded`, PSRAM writes, and the arbitration between them and the cache's reads |
-| `src/fpga/core/bupchip/bup_asset_cache.sv` | `clk_arm`, held: 64 × 16 B direct-mapped, data and tags in two M10Ks, per-halfword arrival bits, critical halfword first, next-line prefetch, pre-emption (`PREEMPT`), the completion rule, the 64-clock tag sweep |
+| `src/fpga/core/bupchip/bup_asset_cache.sv` | `clk_arm`, held. `WAYS` = 1 (ARIA, the default): 64 × 16 B direct-mapped, data in 2 M10K and tags in 1. `WAYS` = 2 (DARIA): 128 sets of 2 ways × 16 B, 4 KB, FIFO replacement, data in 4 M10K and tags in 2. Per-halfword arrival bits, critical halfword first, next-line prefetch, pre-emption (`PREEMPT`), the completion rule, the tag sweep (one clock per set) |
 | `src/fpga/core/bupchip/bup_tick48k.sv` | `clk_74a` accumulator (`+= 8` mod 12,375) and the toggle into three `clk_arm` flops |
 | `src/fpga/pocket_utils/psram.sv` | agg23's controller, vendored unmodified (PSRAM layer above) |
 | `check.sh` | Every step 4 check (above) |
 | `tb_s4.sv`, `build_s4.sh`, `run_s4.sh` | The system testbench (its header lists the plusargs and every check), its build, and one run with the PCM compared (`../s1/pcm_check.py`, from the song's first frame, leading silence included) |
-| `tb_cache.sv`, `run_cache.sh` | The cache alone behind `bup_asset_wr`'s arbiter and `psram.sv` on the model: directed scenarios, random streams, mutations |
+| `tb_cache.sv`, `run_cache.sh` | The cache alone behind `bup_asset_wr`'s arbiter and `psram.sv` on the model, with one way and with two: directed scenarios, random streams, mutations; with one way also in lockstep with the step 4 cache |
 | `stress/` | An independent verifier's stress benches, all run by `check.sh` (`stress/README.md`) |
 | `psram_standin.sv` | `psram.sv`'s user ports and 5-clock timing on a plain array (`PSRAM=standin`), an option only. It was the stand-in until `psram.sv` and the model arrived; in `run_cache.sh` it gives the same counts as `psram.sv` on the model, clock for clock, which cross-checks the port contract. |
 
@@ -225,6 +225,8 @@ Busy, CPI and MIPS are counted by the retired PC as in `tb_s1.sv`; underflow, ov
 
 The driver behaves as S1 does at the asset port (execute with the address on `d_addr`, then W held by `w_wait`), behind `bup_asset_wr`'s arbiter and `psram.sv` on the model. Every completed load must return the pattern the PSRAM was loaded with; no load may complete on a collided M10K read; no load or fill may hang; the cache must start no PSRAM read while held; and the data M10K must not be written while the cache is held, except that a read in flight at the hold may land in the first held clock, in the line it was filling, whose tag is then invalid (the log counts them).
 
+`run_cache.sh` builds it for `WAYS` = 1 and, with `-DWAYS2`, for `WAYS` = 2; the scenarios and the load mix take the cache's geometry (64 or 128 sets; `+size` defaults to 64 KiB per way). With one way the bench runs exactly as in step 4, and the step 4 cache (`git show 633faf4:…`, renamed `bup_asset_cache_ref`) runs beside the new one on the same inputs: every output must agree on every clock (`eqv`). With two ways every check covers both ways' RAMs (a collision in either counts, as the cache's own rule does), and two more are made on every clock: the line under fill is valid in neither way, and no set holds one line in both (`dup`).
+
 **Directed scenarios** (before the random phase). Each first puts another tag's bytes, all different, in the index it tests, so a stale read is a wrong byte, and afterwards reads every line it filled word by word. Results with pre-emption and prefetch on (W clocks waited; 28.636 MHz, `psram.sv` on the model):
 
 | | Scenario | Result |
@@ -240,6 +242,18 @@ The driver behaves as S1 does at the asset port (execute with the address on `d_
 | G | The tag sweep: all 64 lines valid (filled from line 63 down, one at a time), a 100-clock hold, and every byte of the PSRAM changed behind them meanwhile, as a reload of another block would | 0 tags valid when the cache runs again, and all 256 word loads of the 64 lines return the new bytes. Without the sweep, or with it one tag short, G fails (before, every hold left the same bytes behind the stale tags, so nothing could see it) |
 
 109 checks with prefetch, 79 without (D1, E3 and F need it), counting the end-of-phase checks (no stray write, no read started while held, nothing stuck).
+
+With two ways, F first replaces the prefetched line beside the one it reads (a third line of the set; else the probe would find it and write no tag), G fills both ways of all 128 sets (256 lines, tags 63 then 62) and reads back 1,024 words, and these come before G, on sets 70–127, which A–F leave alone (each load drained, so every fill completes first):
+
+| | Scenario | Result (with pre-emption and prefetch) |
+|---|---|---|
+| H1 | Three lines A, B, C of one set: A, B, then A, B, A, C, B, A, C, B, A | A and B both stay resident, one in each way; C replaces A, the first in, not B, the least recently used; then A replaces B and B replaces C. Every load misses or hits as FIFO says, a hit waiting 0 clocks |
+| H2 | A line of a set valid, then a miss on the line before another line of that set | The prefetch fills the set's other way; both lines then hit |
+| H3a | V valid in a set, P prefetched into its other way, and a demand miss on a third line M while P's fill has a read in flight | M pre-empts the prefetch and takes P's way: V hits, M hits, P misses. Without `PREEMPT` M waits for P, whose fill completes and flips the FIFO bit, so M replaces V |
+| H3b | The same with P a demand fill | The same |
+| H4 | For each of the 12 tag bits, two lines of one set whose tags differ in that bit alone (tag 0x555 and its neighbour, offsets up to 7 MiB) | Both miss, then both hit, each with its own bytes |
+
+260 checks with prefetch, 210 without (H2 and H3a need it too).
 
 **Random phase.** 200,000 loads per run: 16 voice streams of byte loads, the boot's cold-line pattern, same-index conflicts and anything else (bytes, halfwords and words, odd and unaligned ones too), 0–40 clocks apart, with a hold of 1–100 clocks about every 20,000 clocks. Each run must reach demand misses, word-load misses, late hits, holds during a fill and, where enabled, prefetches, pre-emptions and misses on pre-empted lines.
 

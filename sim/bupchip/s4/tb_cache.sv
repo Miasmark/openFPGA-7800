@@ -2,7 +2,11 @@
 // Directed and random load streams on the asset cache
 // (src/fpga/core/bupchip/bup_asset_cache.sv), behind bup_asset_wr's PSRAM
 // arbitration and psram.sv on psram_model.sv (or, with -DPSRAM_STANDIN,
-// psram_standin.sv), at 28.636 MHz. Step 4 of docs/BUPCHIP_CORE.md.
+// psram_standin.sv), at 28.636 MHz. Step 4 of docs/BUPCHIP_CORE.md, and
+// DARIA's 2-way cache (docs/DARIA_CORE.md, "Bytes beyond 128 KB"): built with
+// -DWAYS2 the cache has WAYS = 2 (128 sets of 2 ways), otherwise WAYS = 1
+// (64 lines, direct-mapped), and the scenarios and the load mix use its
+// geometry. With WAYS = 1 the bench runs exactly as it did for step 4.
 //
 // The driver behaves as bup_cpu S1 does at the asset port: an execute clock
 // with the load's address on d_addr, then W (w_asset, w_addr, w_size) with
@@ -11,16 +15,19 @@
 // unrelated addresses on d_addr. A hold (pre_run low) resets the "CPU" and
 // the cache's fill and prefetch; the sweep then runs again.
 //
-// The PSRAM holds +size bytes (default 64 KiB) of a known pattern, and one
-// line more for the prefetch past the end, loaded through the model's
-// backdoor. Every completed load must return the pattern in each byte it
+// The PSRAM holds +size bytes (default 64 KiB per way) of a known pattern,
+// and one line more for the prefetch past the end, loaded through the
+// model's backdoor (with two ways, also the lines scenario H4 uses). Every
+// completed load must return the pattern in each byte it
 // touches: the byte, the aligned halfword, or the aligned word. Also, all the
 // time: no load completes on an M10K read registered on the same edge as a
 // port-B write to the same address (checked from the RAM instances' ports),
 // no load waits 200 clocks, the cache starts no PSRAM read while held, and
 // the data M10K is not written while the cache is held (a read in flight when
 // the hold came may still land in the first held clock, into the line whose
-// fill it was: its tag is invalid then).
+// fill it was: its tag is invalid then). With two ways the data and tag
+// M10K of either way count, and no line may be valid in both ways, nor valid
+// in either while it is under fill ("dup").
 //
 // Directed phase first. Each scenario puts the line it tests in a known
 // state: its index first holds another tag (whose bytes all differ from the
@@ -47,18 +54,34 @@
 //   F   a load whose tag read is registered on the edge a prefetch writes
 //       that line's tag invalid (PREFETCH): it must wait, not complete on
 //       the collided read
-//   G   the tag sweep: all 64 lines valid, a hold, and the PSRAM's contents
-//       change behind them (every byte, as a reload with another block
-//       would); when the cache runs again no tag may be valid, and every
-//       line must return the new bytes
+//   G   the tag sweep: all 64 lines valid (both ways of all 128 sets with
+//       two ways), a hold, and the PSRAM's contents change behind them
+//       (every byte, as a reload with another block would); when the cache
+//       runs again no tag may be valid, and every line must return the new
+//       bytes
 // After each scenario the lines it filled are read whole, word by word.
+// With two ways, before G:
+//   H1  three lines of one set, A, B, C: A and B both stay resident (A, B,
+//       A, B, A hit), C replaces the FIFO victim A, not the least recently
+//       used B, then A replaces B and B replaces C
+//   H2  a line valid in one way, and the next-line prefetch of the line
+//       before another line of its set (PREFETCH): the prefetch fills the
+//       other way, and both lines hit
+//   H3  a line V valid in one way, a fill of a second line P of its set
+//       running in the other way (a prefetch, H3a, PREFETCH; a demand fill,
+//       H3b), and a demand miss on a third line M of the set: with PREEMPT
+//       M pre-empts P and fills P's way, V stays, P misses again; without,
+//       M waits and replaces V (the FIFO bit flips when P's fill completes)
+//   H4  for each of the 12 tag bits, two lines of one set whose tags differ
+//       in that bit alone (offsets up to 7 MiB): both stay resident and each
+//       returns its own bytes
 //
 // Random phase. The loads, by weight:
 //   voices    16 streams of byte loads (LDRSB), each with its own step,
 //             as CoreTone's mixer reads samples (prefetch's case)
 //   cold      the boot's pattern: byte loads of bytes 0-3 of a cold line,
 //             back to back, then word loads of it
-//   conflict  a line at the same index as a recent one, other tag
+//   conflict  a line at the same index (set) as a recent one, other tag
 //   random    byte, halfword (odd ones too) and word (unaligned too) loads
 //             anywhere
 // with 0-40 clocks between loads and, now and then, a hold of 1-100 clocks
@@ -70,6 +93,11 @@
 //   +loads=N  (default 200,000)  +seed=S  +size=BYTES
 // The last line, "result: ...", is for run_cache.sh.
 //
+// With -DREF_CACHE (WAYS = 1 only) a second cache, bup_asset_cache_ref (the
+// step 4 file, renamed by run_cache.sh), runs on the same inputs, and every
+// output of the two must agree on every clock ("eqv" counts the clocks that
+// differ).
+//
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 `timescale 1ps/1ps
@@ -79,10 +107,22 @@
 `ifndef PREFETCH
 `define PREFETCH 1
 `endif
+`ifdef WAYS2
+`define WAYS 2
+`else
+`define WAYS 1
+`endif
 
 module tb_cache;
 	logic clk = 0;
 	always #17460 clk = ~clk;
+
+	// The cache's geometry: line(tag, set) = tag * WB + set * 16.
+	localparam int WAYS = `WAYS;
+	localparam int SB = WAYS == 2 ? 7 : 6;          // set bits
+	localparam int NS = 1 << SB;                    // sets
+	localparam int TWB = 19 - SB;                   // tag bits
+	localparam int WB = NS * 16;                    // bytes per way
 
 	// ---- PSRAM and the arbiter -------------------------------------------------------------
 	wire        p_bank, p_we, p_hi, p_lo, p_re, p_avail, p_busy;
@@ -136,14 +176,57 @@ module tb_cache;
 	wire         w_wait, st_miss, st_pf, st_preempt, st_late, st_stall;
 	always @(posedge clk) run <= pre_run && sweep_done;
 
-	bup_asset_cache #(.PREEMPT(`PREEMPT), .PREFETCH(`PREFETCH)) dut (
+	bup_asset_cache #(.PREEMPT(`PREEMPT), .PREFETCH(`PREFETCH), .WAYS(`WAYS)) dut (
 		.clk, .pre_run, .run, .sweep_done,
 		.d_addr, .w_asset, .w_addr, .w_size, .asset_q, .w_wait,
 		.rd_req, .rd_addr, .rd_ack, .rd_avail(p_avail), .rd_data(p_dout),
 		.st_miss, .st_pf, .st_preempt, .st_late, .st_stall);
 
+	// Way 1's RAMs (WAYS = 2): port-B writes, and port-B writes on the
+	// address port A reads.
+`ifdef WAYS2
+	wire dwe1  = dut.way1.data.wren_b_i;
+	wire dcol1 = dut.way1.data.wren_b_i && dut.way1.data.addr_b_i == dut.way1.data.addr_a_i;
+	wire tcol1 = dut.way1.tags.wren_b_i && dut.way1.tags.addr_b_i == dut.way1.tags.addr_a_i;
+`else
+	wire dwe1 = 1'b0, dcol1 = 1'b0, tcol1 = 1'b0;
+`endif
+	// A way's tag word for a set: [13] valid, [TWB-1:0] tag.
+	function automatic logic [13:0] tagw(input int w, input int s);
+`ifdef WAYS2
+		if (w != 0) return dut.way1.tags.mem_q[s];
+`endif
+		return dut.tags.mem_q[s];
+	endfunction
+	function automatic bit holds(input int w, input int s, input int t);
+		logic [13:0] q;
+		q = tagw(w, s);
+		return q[13] && int'(q[TWB-1:0]) == t;
+	endfunction
+
+`ifdef REF_CACHE
+	// The step 4 cache on the same inputs: every output must agree.
+	wire        r_sweep_done, r_w_wait, r_rd_req, r_st_miss, r_st_pf, r_st_preempt, r_st_late, r_st_stall;
+	wire [31:0] r_asset_q;
+	wire [21:0] r_rd_addr;
+	bup_asset_cache_ref #(.PREEMPT(`PREEMPT), .PREFETCH(`PREFETCH)) ref_c (
+		.clk, .pre_run, .run, .sweep_done(r_sweep_done),
+		.d_addr, .w_asset, .w_addr, .w_size, .asset_q(r_asset_q), .w_wait(r_w_wait),
+		.rd_req(r_rd_req), .rd_addr(r_rd_addr), .rd_ack, .rd_avail(p_avail), .rd_data(p_dout),
+		.st_miss(r_st_miss), .st_pf(r_st_pf), .st_preempt(r_st_preempt), .st_late(r_st_late), .st_stall(r_st_stall));
+	longint eqv = 0;
+	always @(posedge clk)
+		if ({sweep_done, w_wait, asset_q, rd_req, rd_addr, st_miss, st_pf, st_preempt, st_late, st_stall} !==
+				{r_sweep_done, r_w_wait, r_asset_q, r_rd_req, r_rd_addr, r_st_miss, r_st_pf, r_st_preempt, r_st_late, r_st_stall}) begin
+			if (eqv < 5) $display("lockstep: the step 4 cache differs at clock %0d", cyc);
+			eqv++;
+		end
+`else
+	longint eqv = 0;
+`endif
+
 	// ---- the pattern ---------------------------------------------------------------------------
-	int size = 65536;
+	int size = 65536 * WAYS;
 	int epoch = 0;                                  // scenario G changes every byte
 	function automatic logic [7:0] pat(input int b);
 		logic [31:0] x;
@@ -153,6 +236,9 @@ module tb_cache;
 	task automatic load_pattern();
 		// one line more: a prefetch may read the line after the last
 		for (int h = 0; h < size / 2 + 8; h++) preload(h, {pat(2 * h + 1), pat(2 * h)});
+	endtask
+	task automatic load_line(input int off);
+		for (int h = off / 2; h < off / 2 + 8; h++) preload(h, {pat(2 * h + 1), pat(2 * h)});
 	endtask
 
 	// ---- load generator ----------------------------------------------------------------------------
@@ -180,7 +266,7 @@ module tb_cache;
 			queue.push_back('{b + 8, 2'd2});
 		end else if (r < 70) begin                 // conflict: same index, other tag
 			o = recent[rnd(8)];
-			o = ((o & 32'h3F0) | (rnd(size / 1024) << 10) | rnd(16)) % size;
+			o = ((o & (WB - 16)) | (rnd(size / WB) * WB) | rnd(16)) % size;
 			queue.push_back('{o, 2'(rnd(3))});
 		end else begin                             // anything
 			o = rnd(size);
@@ -191,7 +277,7 @@ module tb_cache;
 	// ---- driver ---------------------------------------------------------------------------------
 	longint n_loads = 200000, done_loads = 0, bad = 0, cyc = 0, wait_clk = 0, max_wait = 0;
 	longint c_miss = 0, c_wmiss = 0, c_pf = 0, c_pre = 0, c_late = 0, c_stall = 0, c_hold = 0, c_hold_fill = 0;
-	longint c_remiss = 0, rdw_bad = 0, stuck = 0, held_wr = 0, held_wr1 = 0, rd_held = 0;
+	longint c_remiss = 0, rdw_bad = 0, stuck = 0, held_wr = 0, held_wr1 = 0, rd_held = 0, dup = 0;
 	logic   run_q = 0;
 	int     state = 0;                              // 0 gap, 1 execute, 2 W, 3 W dropped by a hold
 	int     gap = 0, hold_left = 0;
@@ -249,14 +335,28 @@ module tb_cache;
 		cyc++;
 		// The M10K rule, from the RAM instances' ports.
 		if (w_asset && !w_wait && (col_d || col_t)) rdw_bad++;
-		col_d = dut.data.wren_b_i && dut.data.addr_b_i == dut.data.addr_a_i;
-		col_t = dut.tags.wren_b_i && dut.tags.addr_b_i == dut.tags.addr_a_i;
+		col_d = dut.data.wren_b_i && dut.data.addr_b_i == dut.data.addr_a_i || dcol1;
+		col_t = dut.tags.wren_b_i && dut.tags.addr_b_i == dut.tags.addr_a_i || tcol1;
 		// A read in flight when the hold came is discarded: in the first held
 		// clock its halfword may still be written, but only into a line whose
 		// tag is invalid (as its fill left it); after that, nothing.
-		if (!run && dut.data.wren_b_i) begin
-			if (run_q && !dut.tags.mem_q[dut.f_idx][13]) held_wr1++;
+		if (!run && (dut.data.wren_b_i || dwe1)) begin
+			if (run_q && !tagw(dwe1 ? 1 : 0, int'(dut.f_idx))[13]) held_wr1++;
 			else held_wr++;
+		end
+		// Two ways: the line under fill is valid in neither way, and no set
+		// holds one line in both (the fill's set every clock, all sets every
+		// 1,024 clocks).
+		if (WAYS == 2) begin
+			if (dut.f_act && (holds(0, int'(dut.f_idx), int'(dut.f_tag)) || holds(1, int'(dut.f_idx), int'(dut.f_tag)))) begin
+				if (dup < 5) $display("clock %0d: the line under fill (set %0d, tag %0d) is valid in a way", cyc, dut.f_idx, dut.f_tag);
+				dup++;
+			end
+			for (int s = cyc % 1024 == 0 ? 0 : int'(dut.f_idx); s < (cyc % 1024 == 0 ? NS : int'(dut.f_idx) + 1); s++)
+				if (tagw(0, s)[13] && tagw(1, s)[13] && tagw(0, s)[TWB-1:0] == tagw(1, s)[TWB-1:0]) begin
+					if (dup < 5) $display("clock %0d: set %0d holds tag %0d in both ways", cyc, s, tagw(0, s)[TWB-1:0]);
+					dup++;
+				end
 		end
 		// No PSRAM read starts while held.
 		if (!run && rd_ack) begin
@@ -422,7 +522,7 @@ module tb_cache;
 	int dir_checks = 0, dir_fail = 0;
 
 	function automatic int line(input int tag, input int idx);
-		return tag * 1024 + idx * 16;
+		return tag * WB + idx * 16;
 	endfunction
 
 	task automatic dload(input int off, input logic [1:0] sz, input int gap = 0, input int hold_w = 0);
@@ -432,16 +532,18 @@ module tb_cache;
 		dq.push_back('{kind, 0, 2'd0, 0, len});
 	endtask
 
-	// Run what is queued, then wait for the cache to go idle.
+	// Run what is queued, then wait for the cache to go idle (at most 5,000
+	// clocks and 50 per item).
 	task automatic drain();
-		longint c0;
+		longint c0, lim;
 		ditem(K_IDLE);
 		c0 = cyc;
+		lim = 5000 + 50 * dq.size();
 		while ((dq.size() != 0 || state != 0 || gap != 0 || hold_left != 0 || !run) && stuck == 0) begin
 			@(posedge clk);
-			if (cyc - c0 > 5000) begin
-				$display("  directed: the queue did not drain in 5,000 clocks (state %0d, %0d items, fill %0d)",
-					state, dq.size(), dut.f_act);
+			if (cyc - c0 > lim) begin
+				$display("  directed: the queue did not drain in %0d clocks (state %0d, %0d items, fill %0d)",
+					lim, state, dq.size(), dut.f_act);
 				stuck++;
 			end
 		end
@@ -493,6 +595,104 @@ module tb_cache;
 		$display("%s", name);
 		for (int i = r0; i < res.size(); i++) $display("  %s", rs(i));
 		for (int i = r0; i < res.size(); i++) if (!res[i].dropped) expect_(res[i].ok, {"data of ", rs(i)});
+	endtask
+
+	// Two ways (before G, on sets 70-127, which A-F leave alone). Each load
+	// in H1, H2 and H4 is drained, so every fill completes before the next.
+	function automatic bit both(input int s, input int t0, input int t1);
+		return (holds(0, s, t0) && holds(1, s, t1)) || (holds(0, s, t1) && holds(1, s, t0));
+	endfunction
+	task automatic seq(input int lines[$], input bit misses[$], input string name);
+		int r;
+		r = res.size();
+		foreach (lines[i]) begin
+			dload(lines[i] + 4 * (i % 4), 2'd2, 2);
+			drain();
+		end
+		show(name, r);
+		foreach (misses[i]) expect_(res[r + i].miss == misses[i] && (misses[i] || res[r + i].waitc == 0),
+			$sformatf("%s: load %0d %s", name, i, misses[i] ? "misses" : "hits"));
+	endtask
+	task automatic two_way_tests();
+		int r, a, b, c, v, m, p, x, y, t;
+		bit pre;
+		pre = `PREEMPT;
+
+		// H1: three lines of set 70.
+		a = line(40, 70);
+		b = line(41, 70);
+		c = line(42, 70);
+		seq('{a, b}, '{1, 1}, "H1 two lines of one set");
+		expect_(both(70, 40, 41), "H1: both lines valid, one in each way");
+		seq('{a, b, a, c, b, a, c, b, a}, '{0, 0, 0, 1, 0, 1, 0, 1, 0},
+			"H1 A, B, A hit; C replaces A (FIFO), B hits, A replaces B, C hits, B replaces C, A hits");
+		expect_(both(70, 40, 41), "H1: A and B valid at the end");
+
+		if (`PREFETCH) begin
+		// H2: the prefetch fills the other way of a set with a valid line.
+		x = line(40, 80);
+		y = line(41, 80);
+		seq('{x, line(41, 79)}, '{1, 1}, "H2 a line of set 80, then the line before another line of set 80");
+		expect_(both(80, 40, 41), "H2: the prefetched line is in the other way");
+		seq('{x, y}, '{0, 0}, "H2 both lines of set 80 hit");
+
+		// H3a: a demand miss while a prefetch fills the other way of its set.
+		v = line(40, 90);
+		p = line(41, 90);
+		m = line(42, 90);
+		seq('{v}, '{1}, "H3a V, a line of set 90");
+		r = res.size();
+		dload(line(41, 89), 2'd0, 2);
+		ditem(K_PFRUN);                         // P, the prefetch, in set 90's other way
+		dload(m, 2'd2, 0);
+		ditem(K_IDLE);
+		dload(v + 4, 2'd2, 2);
+		dload(m + 8, 2'd2, 2);
+		dload(p + 12, 2'd2, 2);
+		drain();
+		show("H3a demand miss on M while the prefetch of P runs in the other way of V's set", r);
+		expect_(res[r + 1].miss == 1 && res[r + 1].pre == pre, "H3a: M misses, and pre-empts the prefetch iff PREEMPT");
+		expect_(res[r + 2].miss == !pre, "H3a: V stays with PREEMPT (M takes P's way); without, M replaces V");
+		expect_(res[r + 3].miss == 0, "H3a: M hits");
+		expect_(res[r + 4].miss == 1, "H3a: P misses (pre-empted, or replaced by V)");
+		end
+
+		// H3b: a demand miss while a demand fill runs in the other way.
+		v = line(40, 100);
+		p = line(41, 100);
+		m = line(42, 100);
+		seq('{v}, '{1}, "H3b V, a line of set 100");
+		r = res.size();
+		dload(p, 2'd0, 2);
+		dload(m, 2'd2, 0);
+		ditem(K_IDLE);
+		dload(v + 4, 2'd2, 2);
+		dload(m + 8, 2'd2, 2);
+		dload(p + 12, 2'd2, 2);
+		drain();
+		show("H3b demand miss on M while the demand fill of P runs in the other way of V's set", r);
+		expect_(res[r].miss == 1 && res[r + 1].miss == 1 && res[r + 1].pre == pre,
+			"H3b: P and M miss, and M pre-empts P's fill iff PREEMPT");
+		expect_(res[r + 2].miss == !pre, "H3b: V stays with PREEMPT (M takes P's way); without, M replaces V");
+		expect_(res[r + 3].miss == 0, "H3b: M hits");
+		expect_(res[r + 4].miss == 1, "H3b: P misses (pre-empted, or replaced by V)");
+
+		// H4: tags that differ in one bit, in sets 104, 106, ... 126.
+		for (int k = 0; k < TWB; k++) begin
+			t = 12'h555 ^ (1 << k);
+			x = line(12'h555, 104 + 2 * k);
+			y = line(t, 104 + 2 * k);
+			r = res.size();
+			dload(x, 2'd2, 2); drain();
+			dload(y, 2'd2, 2); drain();
+			dload(x + 5, 2'd0, 2); drain();
+			dload(y + 6, 2'd1, 2); drain();
+			dload(x + 12, 2'd2, 2); drain();
+			show($sformatf("H4 tags %03x and %03x (bit %0d) in set %0d", 12'h555, t, k, 104 + 2 * k), r);
+			expect_(res[r].miss == 1 && res[r + 1].miss == 1, $sformatf("H4 bit %0d: both lines miss", k));
+			expect_(res[r + 2].miss == 0 && res[r + 3].miss == 0 && res[r + 4].miss == 0, $sformatf("H4 bit %0d: then both hit", k));
+			expect_(both(104 + 2 * k, 12'h555, t), $sformatf("H4 bit %0d: both lines valid", k));
+		end
 	endtask
 
 	task automatic directed_tests();
@@ -648,11 +848,17 @@ module tb_cache;
 		// (29, 36) two clocks later and starts its prefetch, writing index
 		// 36's tag invalid on the edge that registers the tag read of a load
 		// of (28, 36) one instruction after the hit. That read is a mixed-port
-		// read-during-write: the load must not complete on it.
+		// read-during-write: the load must not complete on it. With two ways
+		// (29, 36), prefetched after (29, 35), stays beside (28, 36), so a
+		// third line of index 36, (27, 36), replaces it first.
 		dload(line(29, 35), 2'd2, 2);
 		drain();
 		dload(line(28, 36), 2'd2, 2);
 		drain();
+		if (WAYS == 2) begin
+			dload(line(27, 36), 2'd2, 2);
+			drain();
+		end
 		r = res.size();
 		dload(line(29, 35) + 1, 2'd0, 2);
 		dload(line(28, 36) + 2, 2'd0, 1);
@@ -665,21 +871,29 @@ module tb_cache;
 		whole(line(28, 36));
 		show("F the line afterwards", r);
 		end
+		if (WAYS == 2) two_way_tests();
 		// G: the tag sweep, with the PSRAM's contents changed behind every
 		// valid line during the hold.
 		begin
-			int nv, wrong;
+			int nv, wrong, gt;
 			// Each fill completes before the next load (no pre-emption), from
-			// line 63 down, so the next-line prefetches find their lines valid
-			// and the last one (line 63's, index 0) is replaced by line 0.
-			for (int i = 63; i >= 0; i--) begin
-				dload(line(40, i), 2'd2, 2);
-				drain();
-			end
+			// the last set down, so the next-line prefetches find their lines
+			// valid and the last one (the last set's, set 0) is replaced by
+			// set 0's line. With two ways, tag gt + 1 first, then tag gt:
+			// the last set's prefetch fills set 0 first, and is the FIFO
+			// victim when set 0's second line comes.
+			gt = WAYS == 2 ? size / WB - 2 : 40;
+			for (int t = gt + WAYS - 1; t >= gt; t--)
+				for (int i = NS - 1; i >= 0; i--) begin
+					dload(line(t, i), 2'd2, 2);
+					drain();
+				end
 			nv = 0;
-			for (int i = 0; i < 64; i++) if (dut.tags.mem_q[i] == {1'b1, 13'd40}) nv++;
-			$display("G tag sweep: %0d of 64 lines valid before the hold", nv);
-			expect_(nv == 64, "G: every line valid before the hold");
+			for (int w = 0; w < WAYS; w++)
+				for (int i = 0; i < NS; i++)
+					for (int t = gt; t < gt + WAYS; t++) if (holds(w, i, t)) nv++;
+			$display("G tag sweep: %0d of %0d lines valid before the hold", nv, WAYS * NS);
+			expect_(nv == WAYS * NS, "G: every line valid before the hold");
 			ditem(K_HOLDNOW, 100);
 			wait_for(0, 0);                     // the hold
 			wait_for(1, 0);                     // psram.sv idle
@@ -687,19 +901,20 @@ module tb_cache;
 			load_pattern();
 			wait_for(0, 1);                     // running again
 			nv = 0;
-			for (int i = 0; i < 64; i++) if (dut.tags.mem_q[i][13]) nv++;
+			for (int w = 0; w < WAYS; w++) for (int i = 0; i < NS; i++) if (tagw(w, i)[13]) nv++;
 			$display("  %0d tags valid when the cache runs again", nv);
 			expect_(nv == 0, "G: no tag valid after the sweep");
 			r = res.size();
-			for (int i = 0; i < 64; i++) for (int k = 0; k < 16; k += 4) dload(line(40, i) + k, 2'd2, k == 0 ? 2 : 0);
+			for (int t = gt + WAYS - 1; t >= gt; t--)
+				for (int i = 0; i < NS; i++) for (int k = 0; k < 16; k += 4) dload(line(t, i) + k, 2'd2, k == 0 ? 2 : 0);
 			drain();
 			wrong = 0;
 			for (int i = r; i < res.size(); i++) if (!res[i].ok) begin
 				if (wrong < 5) $display("  %s", rs(i));
 				wrong++;
 			end
-			$display("  %0d word loads of the 64 lines afterwards, %0d with old or wrong bytes", res.size() - r, wrong);
-			expect_(wrong == 0 && res.size() - r == 256, "G: every line returns the new contents");
+			$display("  %0d word loads of the %0d lines afterwards, %0d with old or wrong bytes", res.size() - r, WAYS * NS, wrong);
+			expect_(wrong == 0 && res.size() - r == 4 * WAYS * NS, "G: every line returns the new contents");
 		end
 		expect_(held_wr == 0, "no data M10K write while held, but a discarded read's into an invalid line");
 		expect_(rd_held == 0, "no PSRAM read started while held");
@@ -714,6 +929,13 @@ module tb_cache;
 		void'($value$plusargs("size=%d", size));
 		void'($urandom(seed));
 		load_pattern();
+		if (WAYS == 2)
+			for (int k = 0; k < TWB; k++) begin
+				load_line(line(12'h555, 104 + 2 * k));
+				load_line(line(12'h555, 105 + 2 * k));
+				load_line(line(12'h555 ^ (1 << k), 104 + 2 * k));
+				load_line(line(12'h555 ^ (1 << k), 105 + 2 * k));
+			end
 		for (int v = 0; v < 16; v++) begin
 			vptr[v] = rnd(size);
 			vstep[v] = 1 + rnd(3);
@@ -724,8 +946,8 @@ module tb_cache;
 		directed_tests();
 		directed = 0;
 		while (done_loads < n_loads && stuck == 0) @(posedge clk);
-		$display("cache, pre-emption %0d, prefetch %0d, %0d bytes: %0d loads in %0d clocks, %0d wrong; %0d stall clocks, longest wait %0d",
-			`PREEMPT, `PREFETCH, size, done_loads, cyc, bad, c_stall, max_wait);
+		$display("cache, %0d way%s, pre-emption %0d, prefetch %0d, %0d bytes: %0d loads in %0d clocks, %0d wrong; %0d stall clocks, longest wait %0d",
+			WAYS, WAYS == 2 ? "s" : "", `PREEMPT, `PREFETCH, size, done_loads, cyc, bad, c_stall, max_wait);
 		$display("  %0d demand misses (%0d word loads), %0d prefetches, %0d pre-emptions, %0d misses on a pre-empted line, %0d late hits, %0d holds (%0d during a fill), %0d completed reads that collided with a write",
 			c_miss, c_wmiss, c_pf, c_pre, c_remiss, c_late, c_hold, c_hold_fill, rdw_bad);
 `ifndef PSRAM_STANDIN
@@ -733,9 +955,13 @@ module tb_cache;
 `endif
 		$display("  %0d halfwords of a read in flight at a hold written in the first held clock, into an invalid line; %0d other writes while held; %0d PSRAM reads started while held",
 			held_wr1, held_wr, rd_held);
-		$display("result: loads=%0d bad=%0d rdw=%0d stuck=%0d heldwr=%0d rdheld=%0d dirfail=%0d dir=%0d miss=%0d wmiss=%0d pf=%0d pre=%0d remiss=%0d late=%0d holds=%0d holdfill=%0d",
+		if (WAYS == 2) $display("  %0d clocks with a line in both ways or valid while under fill", dup);
+`ifdef REF_CACHE
+		$display("  lockstep with the step 4 cache: %0d clocks differ", eqv);
+`endif
+		$display("result: loads=%0d bad=%0d rdw=%0d stuck=%0d heldwr=%0d rdheld=%0d dirfail=%0d dir=%0d miss=%0d wmiss=%0d pf=%0d pre=%0d remiss=%0d late=%0d holds=%0d holdfill=%0d dup=%0d eqv=%0d",
 			done_loads, bad, rdw_bad, stuck, held_wr, rd_held, dir_fail, dir_checks, c_miss, c_wmiss, c_pf, c_pre, c_remiss, c_late,
-			c_hold, c_hold_fill);
+			c_hold, c_hold_fill, dup, eqv);
 		$finish;
 	end
 endmodule

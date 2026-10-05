@@ -4,7 +4,7 @@ Stress benches for step 4 of `docs/BUPCHIP_CORE.md` (the Pocket wrapper around A
 
 ```sh
 sim/bupchip/s4/stress/run_all.sh        # everything below, one after another, about 25 minutes on one core
-sim/bupchip/s4/stress/run_cstress.sh    # the asset cache: 4 configurations x 6 latencies, psram.sv, 10 mutations (7 min)
+sim/bupchip/s4/stress/run_cstress.sh    # the asset cache, WAYS 1 and 2: 4 configurations x 6 latencies, psram.sv, 30 mutations (25 min)
 sim/bupchip/s4/stress/run_capstress.sh  # the download path and its crossing (4 min)
 sim/bupchip/s4/stress/run_slotswitch.sh # the Pocket's slot sequence through the real loader (30 s)
 sim/bupchip/s4/stress/run_tick.sh       # the 48 kHz tick's crossing (iverilog, 2 min)
@@ -22,7 +22,7 @@ Verilator is `/opt/verilator-5.040` if present (`VERILATOR` overrides); `run_tic
 |---|---|
 | `psram_var.sv` | `psram.sv`'s user-port handshake with a random latency of `+plmin`..`+plmax` clocks per access (psram.sv is the 5-clock case); contents are a pattern of the address and an `epoch` the bench changes to model a reload |
 | `cache_ram_poison.v` | Drop-in for `src/fpga/mister/rtl/cache_ram.v` (same modules and ports, simulation only): a read registered on the same edge as a write of the same address through the other port returns garbage, not the old word. The data and ROM/RAM models return the inverted word, so any use of it is wrong data; `cache_ram_tdp_dc` (tags, PCM FIFO) returns the inverted, old or new word at random (`+poison_tdp`, 0 for always inverted), so a valid bit can come back either way for a port-watching bench to catch |
-| `tb_cstress.sv`, `run_cstress.sh` | The asset cache behind `bup_asset_wr`'s arbiter, driven as S1 drives it, on the poisoning M10Ks (below) |
+| `tb_cstress.sv`, `run_cstress.sh` | The asset cache (one way, or with `-DWAYS2` two) behind `bup_asset_wr`'s arbiter, driven as S1 drives it, on the poisoning M10Ks (below) |
 | `tb_capstress.sv`, `run_capstress.sh` | `bup_capture` + message crossing + `bup_asset_wr` + `psram.sv` on `../psram_model.sv`, random downloads, synchronous and asynchronous `clk_arm` (below) |
 | `tb_slotswitch.sv`, `run_slotswitch.sh` | The real `data_loader` (with a `dcfifo` whose pointers cross through synchroniser stages), `core_top`'s slot flags and every `data.json` slot in order, into `bup_capture`, `bup_asset_wr`, `psram.sv` and `bup_load_probe` (below) |
 | `tb_tick.sv`, `run_tick.sh` | `bup_tick48k` against a drifting, jittered `clk_74a` |
@@ -41,6 +41,10 @@ Three phases (`+mode=pairs|holds|random|all`):
 - **random**: 300,000 loads mixed as `../tb_cache.sv` mixes them, with a hold and new contents every few thousand loads.
 
 Checked on every clock: each completed load's bytes against the contents in effect; no completion on a read registered on the edge of a port-B write of the same data word or tag line (from the RAM ports, and through the poisoned data); every data M10K write goes into a line whose tag is invalid at that edge, and while held only in the first held clock; all 64 tags invalid at the first clock after a hold; each line's data equal to the PSRAM's when its tag is written valid, and every valid line every 2,048 clocks; no load waits more than 60 + 20 x the longest latency. It also measures each load's wait beyond the earliest clock the read-during-write rule allows ("excess").
+
+**Two ways** (DARIA, `WAYS` = 2, built with `-DWAYS2`; `run_cstress.sh` runs everything for both). The phases are the same, on the 2-way geometry: "same index" is the same set, which with two ways keeps both lines, and the random phase's conflicts pick lines of a recent load's set. Every check covers both ways: a collision in either way's RAMs counts (the cache's rule takes both), a data write must go into a line invalid in the way written, all 256 tags must be invalid after a hold, and every valid line of both ways is compared with the PSRAM. Two checks are added: the line under fill is valid in neither way, and no set holds one line in both (`dup`, the fill's set every clock and all sets every 1,024 clocks). The excess wait is measured on the way that holds the line, against writes to the same word in either way. The replacement order (FIFO) changes no data, so its mutations are `../tb_cache.sv`'s (H1-H3).
+
+With one way the cache is the step 4 file clock for clock (`../tb_cache.sv` runs it in lockstep), and a run here with `+poison_tdp=0`, `1` or `2` gives step 4's counts exactly (checked at latency 1-12 with pre-emption and prefetch). With the default `+poison_tdp=3` the counts can differ a little from step 4's: the poisoning tag model draws from the same random stream as the bench, and the order in which Verilator runs the two processes in a clock depends on the design's structure, so the stream is split differently.
 
 ## The download path (`tb_capstress.sv`)
 

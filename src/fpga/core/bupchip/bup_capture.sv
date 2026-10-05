@@ -1,15 +1,29 @@
 //------------------------------------------------------------------------------
 // BupChip capture, on clk_sys (docs/BUPCHIP_CORE.md, "Firmware load" and
-// "Capture"): what the loader delivers for the BupChip, turned into one
-// ordered message stream for bup_asset_wr on clk_arm.
+// "Capture"; docs/DARIA_CORE.md, "Image capture"): what the loader delivers
+// for the BupChip and for DARIA, turned into one ordered message stream for
+// bup_asset_wr on clk_arm.
 //
-// Cartridge slot. The ARSC block starts at 128 + the ROM size the A78 header
-// declares in bytes 49-52 (big-endian); that parse is copied from upstream's
-// bupchip_asset_ddr.sv (MIT, Copyright (c) 2026 Jamie Blanks). Block byte b
-// belongs to PSRAM halfword b >> 1, low byte when b is even. Bytes are packed
-// in pairs; an odd tail is written with its low byte lane only. Bytes past
-// 8 MiB (the PSRAM die) are dropped; the cartridge slot holds 4 MiB, so none
-// ever are.
+// Cartridge slot. Bytes 1-5 are compared with "ATARI", as atari7800_pocket.sv
+// does for cart_is_7800, and pick one of two modes:
+//
+//   A78 (ARSC mode). The ARSC block starts at 128 + the ROM size the A78
+//   header declares in bytes 49-52 (big-endian); that parse is copied from
+//   upstream's bupchip_asset_ddr.sv (MIT, Copyright (c) 2026 Jamie Blanks).
+//   Block byte b belongs to PSRAM halfword b >> 1, low byte when b is even.
+//   Bytes past 8 MiB (the PSRAM die) are dropped; the cartridge slot holds
+//   4 MiB, so none ever are.
+//
+//   Image mode, any other file (a 2600 image for DARIA). File byte b belongs
+//   to PSRAM halfword b >> 1, from offset 0. Bytes at or past 512 KiB, DARIA's
+//   largest image, are dropped (they still count in the size).
+//
+// In both, bytes are packed in pairs, and an odd tail is written with its low
+// byte lane only. The mode is known at byte 5, so bytes 0-5 wait in head: in
+// image mode they leave as three WRITEs (the head) once the mode is known; in
+// A78 mode they are not sent (the ARSC block starts at 128 or later). A file
+// that ends before byte 5 is in image mode, and its head leaves when the
+// window closes.
 //
 // Firmware slot (bupchip.bin). Bytes are packed four to a little-endian word,
 // word w holding bytes 4w..4w+3. A trailing partial word is zero-padded, and
@@ -33,14 +47,20 @@
 // Messages, in order (payload msg_pl):
 //
 //   START     at load_start
-//   WRITE     one per halfword: [39] upper byte lane, [38] lower byte lane,
+//   WRITE     one per halfword: [40] image mode (bup_asset_wr also writes
+//             the image window), [39] upper byte lane, [38] lower byte lane,
 //             [37:16] halfword address, [15:0] the halfword
-//   END       when the cartridge window closes: [23:0] asset_size, the bytes
-//             captured
+//   END       when the cartridge window closes: [24] image (the file is not
+//             an A78: is_a78 = ~[24]), [23:0] the size: for an A78 the bytes
+//             of the ARSC block captured (asset_size), for an image the
+//             file's bytes, all of them (16,777,215 at most)
 //   FWSTART   when fw_download rises
 //   FWWRITE   one per word: [43:32] word address, [31:0] the word
 //   FWEND     when the firmware window closes: [14:0] the bytes captured
 //             (<= 16,384)
+//
+// For an A78 file and for the firmware the stream is the BupChip's before
+// DARIA, bit for bit: the image bits are 0, and the head is not sent.
 //
 // Each message is held in msg_type / msg_pl and announced by flipping msg_tog;
 // the receiver copies it when it sees the change. Consecutive messages are at
@@ -50,16 +70,24 @@
 //
 // Every message waits in a flag for the spacing, and they leave in this order
 // of priority: WRITE, FWSTART, FWWRITE, START, the firmware's tail FWWRITE,
-// the cartridge's tail WRITE, FWEND, END. WRITE and FWWRITE each wait with
-// their payload in a register (write_pl, fwword_pl): a WRITE at most 4
-// clocks, as nothing goes before it, an FWWRITE at most 9. A cartridge's last
-// bytes can arrive after the firmware slot has started (the window above),
-// so a WRITE can find another message just sent. A load_start drops the
-// tail and END the previous cartridge download still had waiting, and a new
-// firmware download what the previous firmware download had: the receiver's
-// START or FWSTART withdraws the old contents anyway. A firmware byte may
-// arrive in the clock fw_download rises; it starts the new download's first
-// word.
+// the cartridge's head WRITEs, its tail WRITE, FWEND, END. WRITE and FWWRITE
+// each wait with their payload in a register (write_pl, fwword_pl): a WRITE
+// at most 4 clocks, as nothing goes before it, an FWWRITE at most 9. The head
+// takes the slots the WRITEs leave free: none while the loader runs at full
+// rate, so then it leaves after the file. A cartridge's last bytes can arrive
+// after the firmware slot has started (the window above), so a WRITE can find
+// another message just sent. A load_start drops the head, tail and END the
+// previous cartridge download still had waiting, and a new firmware download
+// what the previous firmware download had: the receiver's START or FWSTART
+// withdraws the old contents anyway. A firmware byte may arrive in the clock
+// fw_download rises; it starts the new download's first word.
+//
+// START leaves before the first WRITE of its download: the head waits behind
+// it, and the first other WRITE completes with byte 7, at least 17 clocks
+// after load_start. By then at most the previous cartridge's last WRITE, an
+// FWSTART and one or two FWWRITEs from the firmware bytes the loader still
+// held can have gone first (simulation flags a halfword that completes while
+// START waits, start_sim).
 //
 // The download is sequential, as data_loader.sv delivers it. seq_err
 // (sticky) flags a byte that breaks the pairing, and lost a halfword or word
@@ -139,6 +167,36 @@ module bup_capture (
 			f_drain <= f_drain - 7'd1;
 	end
 
+	// ---- the A78 gate (atari7800_pocket.sv's cart_header) -----------------------------
+	// h_match: bytes 1 up to the last one seen match "ATAR" so far. At byte 5
+	// the mode is known (g_known), and g_a78 picks ARSC mode.
+	logic        h_match = 1'b0, g_known = 1'b0, g_a78 = 1'b0;
+	logic [47:0] head = 48'd0;	// bytes 0-5, little-endian
+	wire         h_byte = c_valid && load_addr < 25'd6;
+	wire         h_last = h_byte && load_addr[2:0] == 3'd5;
+	wire         a78_now = h_match && load_data == "I";	// with h_last
+	wire         img_on = g_known && !g_a78;
+	always_ff @(posedge clk) begin
+		if (load_start) begin
+			h_match <= 1'b0;
+			g_known <= 1'b0;
+			g_a78 <= 1'b0;
+		end else if (h_byte) begin
+			case (load_addr[2:0])
+				3'd0: head[7:0] <= load_data;
+				3'd1: begin head[15:8] <= load_data; h_match <= load_data == "A"; end
+				3'd2: begin head[23:16] <= load_data; h_match <= h_match && load_data == "T"; end
+				3'd3: begin head[31:24] <= load_data; h_match <= h_match && load_data == "A"; end
+				3'd4: begin head[39:32] <= load_data; h_match <= h_match && load_data == "R"; end
+				default: begin
+					head[47:40] <= load_data;
+					g_known <= 1'b1;
+					g_a78 <= a78_now;
+				end
+			endcase
+		end
+	end
+
 	// ---- the A78 header's declared ROM size (bupchip_asset_ddr.sv:82-104) ----
 	// It comes from the header bytes as they stream past: the core's own
 	// cart_size is still counting while the download runs.
@@ -157,12 +215,20 @@ module bup_capture (
 		end
 	end
 	wire [24:0] asset_start = declared_size[24:0] + 25'd128;
-	wire        in_block = c_valid && |declared_size && load_addr >= asset_start;
+	wire        in_block = c_valid && g_a78 && |declared_size && load_addr >= asset_start;
 	wire [24:0] off = load_addr - asset_start;
-	wire        a_byte = in_block && off[24:23] == 2'd0;	// within the 8 MiB die
-	wire        a_pair = a_byte && off[0];				// a halfword completes
+	wire        r_byte = in_block && off[24:23] == 2'd0;		// ARSC: within the 8 MiB die
+	wire        i_byte = c_valid && img_on && load_addr[24:19] == 6'd0;	// image: below 512 KiB
 
-	// Cartridge: the even byte waiting for its partner, and the size so far.
+	// A byte for the PSRAM in either mode, at offset a_off there.
+	wire [22:0] a_off = g_a78 ? off[22:0] : load_addr[22:0];
+	wire        a_byte = r_byte || i_byte;
+	wire        a_pair = a_byte && a_off[0];				// a halfword completes
+	// The file's size, for image mode's END (saturating).
+	wire [23:0] f_size = load_addr[24] || &load_addr[23:0] ? 24'hFFFFFF : load_addr[23:0] + 24'd1;
+
+	// Cartridge: the even byte waiting for its partner, and the size so far:
+	// the block's bytes in A78 mode, the file's otherwise (and until byte 5).
 	// The tail's halfword is size >> 1: the last byte was the even one.
 	logic        have_lo = 1'b0;
 	logic  [7:0] lo = 8'd0;
@@ -189,12 +255,27 @@ module bup_capture (
 	wire  [13:0] fw_last = fw_count[13:0] - 14'd1;
 
 	// ---- messages ---------------------------------------------------------------------
-	logic p_write = 1'b0, p_start = 1'b0, p_tail = 1'b0, p_end = 1'b0;
+	logic p_write = 1'b0, p_start = 1'b0, p_head = 1'b0, p_tail = 1'b0, p_end = 1'b0;
 	logic p_fwstart = 1'b0, p_fwword = 1'b0, p_fwtail = 1'b0, p_fwend = 1'b0;
 	logic [43:0] write_pl = 44'd0;	// the WRITE waiting in p_write
 	logic [43:0] fwword_pl = 44'd0;	// the FWWRITE waiting in p_fwword
 	logic [2:0] gap = 3'd4;			// clocks since the last message, up to 4
 	wire  can_send = gap == 3'd4;
+
+	// The head: halfword h_idx of bytes 0-5 waits in p_head. h_n is the
+	// number of head bytes that came (6, or the size of a shorter file).
+	logic  [1:0] h_idx = 2'd0;
+	wire   [2:0] h_n = g_known ? 3'd6 : size[2:0];
+	wire         h_hi = {h_idx, 1'b1} < h_n;	// its odd byte came
+	logic [15:0] h_hw;
+	always_comb begin
+		case (h_idx)
+			2'd0:    h_hw = head[15:0];
+			2'd1:    h_hw = head[31:16];
+			default: h_hw = head[47:32];
+		endcase
+	end
+
 	logic [2:0] s_type;
 	always_comb begin
 		if      (p_write)   s_type = M_WRITE;
@@ -202,6 +283,7 @@ module bup_capture (
 		else if (p_fwword)  s_type = M_FWWRITE;
 		else if (p_start)   s_type = M_START;
 		else if (p_fwtail)  s_type = M_FWWRITE;
+		else if (p_head)    s_type = M_WRITE;
 		else if (p_tail)    s_type = M_WRITE;
 		else if (p_fwend)   s_type = M_FWEND;
 		else if (p_end)     s_type = M_END;
@@ -230,16 +312,20 @@ module bup_capture (
 				p_fwtail <= 1'b0;
 				fw_have <= 1'b0;
 				msg_pl <= {fw_last[13:2], 8'd0, fw_word};
+			end else if (p_head) begin
+				h_idx <= h_idx + 2'd1;
+				p_head <= {h_idx + 2'd1, 1'b0} < h_n;	// the next halfword's even byte came
+				msg_pl <= {4'd1, h_hi, 1'b1, 20'd0, h_idx, h_hi ? h_hw[15:8] : 8'd0, h_hw[7:0]};
 			end else if (p_tail) begin
 				p_tail <= 1'b0;
 				have_lo <= 1'b0;
-				msg_pl <= {4'd0, 2'b01, size[22:1], 8'd0, lo};
+				msg_pl <= {3'd0, img_on, 2'b01, size[22:1], 8'd0, lo};
 			end else if (p_fwend) begin
 				p_fwend <= 1'b0;
 				msg_pl <= {29'd0, fw_count};
 			end else begin
 				p_end <= 1'b0;
-				msg_pl <= {20'd0, size};
+				msg_pl <= {19'd0, !g_a78, size};
 			end
 		end
 
@@ -247,25 +333,37 @@ module bup_capture (
 		// sent stays set).
 		if (load_start) begin
 			p_start <= 1'b1;
+			p_head <= 1'b0;
 			p_tail <= 1'b0;
 			p_end <= 1'b0;
 			have_lo <= 1'b0;
 			size <= 24'd0;
 		end else begin
-			if (a_byte) begin
+			if (r_byte)
 				size <= off[23:0] + 24'd1;
-				if (have_lo != off[0]) seq_err <= 1'b1;	// two even or two odd bytes running
-				have_lo <= !off[0];
+			else if (c_valid && !g_a78)	// image mode, or the mode not yet known
+				size <= h_last && a78_now ? 24'd0 : f_size;
+			if (a_byte) begin
+				if (have_lo != a_off[0]) seq_err <= 1'b1;	// two even or two odd bytes running
+				have_lo <= !a_off[0];
 				lo <= load_data;
 			end
 			if (a_pair) begin
 				if (p_write && !send_write) lost <= 1'b1;	// the last halfword still waits
 				p_write <= 1'b1;
-				write_pl <= {4'd0, 1'b1, have_lo, off[22:1], load_data, have_lo ? lo : 8'd0};
+				write_pl <= {3'd0, img_on, 1'b1, have_lo, a_off[22:1], load_data, have_lo ? lo : 8'd0};
+			end
+			if (h_last && !a78_now) begin	// image mode: bytes 0-5 can go
+				p_head <= 1'b1;
+				h_idx <= 2'd0;
 			end
 			if (c_close) begin
 				p_tail <= have_lo;
 				p_end <= 1'b1;
+				if (!g_known && size != 24'd0) begin	// a file shorter than 6 bytes
+					p_head <= 1'b1;
+					h_idx <= 2'd0;
+				end
 			end
 		end
 
@@ -297,14 +395,26 @@ module bup_capture (
 	end
 
 `ifndef ALTERA_RESERVED_QIS
-	// Simulation: every byte must follow the one before it.
-	logic [24:0] exp_off = 25'd0, exp_fw = 25'd0;
-	logic        seq_sim = 1'b0;
+	// Simulation: every byte must follow the one before it: the ARSC block's
+	// bytes in A78 mode, and every byte of the file until the mode is known
+	// and in image mode. start_sim: a halfword completed while its START
+	// still waited.
+	logic [24:0] exp_off = 25'd0, exp_fw = 25'd0, exp_img = 25'd0;
+	logic        seq_sim = 1'b0, start_sim = 1'b0;
 	always_ff @(posedge clk) begin
-		if (load_start) exp_off <= 25'd0;
-		else if (a_byte) begin
-			if (off != exp_off) seq_sim <= 1'b1;
-			exp_off <= off + 25'd1;
+		if (load_start) begin
+			exp_off <= 25'd0;
+			exp_img <= 25'd0;
+		end else begin
+			if (r_byte) begin
+				if (off != exp_off) seq_sim <= 1'b1;
+				exp_off <= off + 25'd1;
+			end
+			if (c_valid && !g_a78) begin
+				if (load_addr != exp_img) seq_sim <= 1'b1;
+				exp_img <= load_addr + 25'd1;
+			end
+			if (a_pair && p_start) start_sim <= 1'b1;
 		end
 		if (fw_valid && fw_win) begin
 			if (load_addr != (fw_rise ? 25'd0 : exp_fw)) seq_sim <= 1'b1;
