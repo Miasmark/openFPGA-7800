@@ -30,6 +30,7 @@
 //   pcs.txt     every retired PC with its count (game-derived: sim/work only)
 //   snap_*.ppm  frames for checking the game got past its title screen
 //   dtrace.txt  with +dtrace=1 (game-derived: sim/work only)
+//   mmio.csv    with +mmiolog=1: every MMIO access
 //
 // Plusargs:
 //   +rom=FILE      2600 image (.bin)                         (required)
@@ -52,6 +53,10 @@
 //   +dtrace=1      also write dtrace.txt: every ARM data read from
 //                  cartridge ROM as one hex word, size << 24 | address,
 //                  and "c CALL FRAME" where each call starts   (default 0)
+//   +mmiolog=1     also write mmio.csv: every MMIO access with its call,
+//                  frame, the instructions retired and clk_arm edges
+//                  since the call started, clk_arm edges since time 0,
+//                  and the data written or read           (default 0)
 //
 // Cache model: direct-mapped, 1/2/4/8/16 KiB, 16 and 32 byte lines, cold at
 // power-up and warm across calls. Stream I is the retired-PC stream in
@@ -432,6 +437,8 @@ module tb_daria;
 	bit     g_l16 [0:32767], g_l32 [0:16383];
 	int     call_id = 0;             // calls started
 	int     dtrace = 0, fd_dt = 0;
+	int     mmiolog = 0, fd_mm = 0;
+	longint t_arm = 0;               // clk_arm edges since time 0
 	longint unal_rd = 0, unal_wr = 0;
 	int     unal_n = 0;
 	logic [31:0] unal_addr [16], unal_pc [16];
@@ -474,6 +481,7 @@ module tb_daria;
 			first_bl = 0;
 			if (dtrace != 0) $fwrite(fd_dt, "c %0d %0d\n", call_id, frame);
 		end
+		t_arm++;
 		if (in_call) cs[S_ARMCYC]++;
 
 		if (a_retire && in_call && ce_last) begin
@@ -532,6 +540,8 @@ module tb_daria;
 				if (is_ram) begin cs[S_WR_RAM]++; ram_wr_kib[m_addr[14:10]]++; end
 				else if (is_mmio) begin
 					cs[S_WR_MMIO]++;
+					if (mmiolog != 0) $fwrite(fd_mm, "%0d,%0d,%0d,%0d,%0d,w,%08x,%08x,%0d\n", call_id, frame,
+						cs[S_THUMB] + cs[S_ARM], cs[S_ARMCYC], t_arm, m_addr, dut.arm_mem_wdata, m_size);
 					if (mmio_wr.exists(m_addr)) mmio_wr[m_addr]++; else mmio_wr[m_addr] = 1;
 				end else cs[S_WR_OTHER]++;
 			end else begin
@@ -547,6 +557,8 @@ module tb_daria;
 				end else if (is_ram) begin cs[S_RD_RAM]++; ram_rd_kib[m_addr[14:10]]++; end
 				else if (is_mmio) begin
 					cs[S_RD_MMIO]++;
+					if (mmiolog != 0) $fwrite(fd_mm, "%0d,%0d,%0d,%0d,%0d,r,%08x,%08x,%0d\n", call_id, frame,
+						cs[S_THUMB] + cs[S_ARM], cs[S_ARMCYC], t_arm, m_addr, dut.arm_mem_rdata, m_size);
 					if (mmio_rd.exists(m_addr)) mmio_rd[m_addr]++; else mmio_rd[m_addr] = 1;
 				end else cs[S_RD_OTHER]++;
 			end
@@ -795,6 +807,7 @@ module tb_daria;
 		void'($value$plusargs("snap=%d", snap_every));
 		void'($value$plusargs("arm_div=%d", arm_div));
 		void'($value$plusargs("dtrace=%d", dtrace));
+		void'($value$plusargs("mmiolog=%d", mmiolog));
 		if (arm_div > 1) begin
 			force dut.arm_host.ce = arm_ce_run;
 			force dut.cart2600.mem_ce = arm_ce_run;
@@ -842,6 +855,10 @@ module tb_daria;
 		$fwrite(fd_zero, "call,slack_zero_sys\n");
 		fd_frames = $fopen({out, "frames.csv"}, "w");
 		if (dtrace != 0) fd_dt = $fopen({out, "dtrace.txt"}, "w");
+		if (mmiolog != 0) begin
+			fd_mm = $fopen({out, "mmio.csv"}, "w");
+			$fwrite(fd_mm, "call,frame,call_instr,call_arm_cyc,t_arm,rw,addr,data,size\n");
+		end
 		$fwrite(fd_frames, "frame,t_sys,len_sys,lines,calls,instr,arm_cyc,stall_sys,dma_sys,max_call_instr\n");
 
 		// Power-up, then the download as the MiSTer loader streams it, paced
@@ -880,6 +897,7 @@ module tb_daria;
 		$fclose(fd_frames);
 		$fclose(fd_zero);
 		if (dtrace != 0) $fclose(fd_dt);
+		if (mmiolog != 0) $fclose(fd_mm);
 		$finish;
 	end
 

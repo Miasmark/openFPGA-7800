@@ -8,7 +8,7 @@ Tags, as in `BUPCHIP_CORE.md`:
 
 | Tag | Meaning |
 |---|---|
-| [trace] | Measured on upstream's ARM7TDMI core running the 15 Champ Games NTSC demos for 1,500 frames each (`sim/bupchip/daria/`, `tb_daria.sv`). The demos and everything made from them stay in `sim/work/`, never committed. |
+| [trace] | Measured on upstream's ARM7TDMI core, 1,500 frames per image (`sim/bupchip/daria/`, `tb_daria.sv`): the 15 Champ Games NTSC demos (the demo set) and, since 2026-10-05, six more images ("The added images", below). The images and everything made from them stay in `sim/work/`, never committed. |
 | [C] | Read from upstream's RTL (`src/fpga/mister/rtl/`), Jamie Blanks's MIT code |
 | [probe] | Quartus 21.1 on 5CEBA4F23C8 with the core's settings: the CPU alone with its ROM and RAM (`sim/bupchip/quartus_probe/`), or one front-end block alone with every input live (`sim/bupchip/daria/frontend_study/`) |
 | [sim] | Measured in simulation of this repository's RTL, or of a scratch copy of it (step 1's experiments, in `sim/work/`) |
@@ -41,12 +41,12 @@ These carry over from ARIA:
 
 | # | Requirement | Source | Status |
 |---|---|---|---|
-| C1 | **Thumb-1, all of it, exact or halting.** All but 40,446 of the traces' 460 M instructions are Thumb. Every format appears except SWI: F15 LDMIA in 3 demos (3,114), STMIA in 11 (1.53 M), F8 STRH in 14, F12 in 14, the rest in all 15. | [trace] | Step 2 (the expander) |
-| C2 | **ARM state: the drivers' helpers.** 14 of the 15 demo images (every CDF-family one) carry the same four helpers in their 2 KB driver at 0x750–0x7FF: Thumb trampolines at 0x750, 0x754, 0x758 and 0x75C (`ldr r4, [pc, #148]; bx r4`) branch to ARM routines at 0x760 (set a voice's frequency), 0x784 (reset its counter), 0x7A0 (read its counter) and 0x7BC (set its waveform size, a read-modify-write of two RAM tables). Each returns with `orr r4, lr, #1; bx r4`. Only Mappy calls one in the traces: the first, 4,494 times, which is all of the traces' 40,446 ARM-state instructions. The DPC+ image (Scramble) has none. The 2026 CDFJ+ template (driver version 48) calls the same four at the same addresses (`defines_cdfjplus.c`), and its helpers are the demos' instruction for instruction, bar two RAM table addresses. The rest of a driver's first 2 KB is the Harmony's own bus loop, which no demo executes: every traced PC is at 0x750 or above. | [trace], the images, [CDFJ+ template](https://github.com/Aganarr/cdfjplus-template) | ARIA already runs every ARM instruction they use, except the mode changes (C3, done) and the BX back to Thumb (C4) |
+| C1 | **Thumb-1, all of it, exact or halting.** All but 40,446 of the demos' 460 M instructions are Thumb. Every format appears except SWI: F15 LDMIA in 3 demos (3,114), STMIA in 11 (1.53 M), F8 STRH in 14, F12 in 14, the rest in all 15. The added images use no other format and nothing that halts ("What halts"). | [trace] | Step 2 (the expander) |
+| C2 | **ARM state: the drivers' helpers.** 14 of the 15 demo images (every CDF-family one) carry the same four helpers in their 2 KB driver at 0x750–0x7FF: Thumb trampolines at 0x750, 0x754, 0x758 and 0x75C (`ldr r4, [pc, #148]; bx r4`) branch to ARM routines at 0x760 (set a voice's frequency), 0x784 (reset its counter), 0x7A0 (read its counter) and 0x7BC (set its waveform size, a read-modify-write of two RAM tables). Each returns with `orr r4, lr, #1; bx r4`. Among the demos only Mappy calls one: the first, 4,494 times, which is all of the demos' 40,446 ARM-state instructions. Draconian, one of the added images, carries the helpers byte for byte and calls the first three: 5, 4 and 144 times (1,525 ARM-state instructions). Its second and third end with an ARM B to the first one's return, which no demo executes. The DPC+ images (Scramble; Space Rocks and Stay Frosty 2 among the added ones) have none. The 2026 CDFJ+ template (driver version 48) calls the same four at the same addresses (`defines_cdfjplus.c`), and its helpers are the demos' instruction for instruction, bar two RAM table addresses. The rest of a driver's first 2 KB is the Harmony's own bus loop, which no traced image executes: every traced PC is at 0x750 or above. | [trace], the images, [CDFJ+ template](https://github.com/Aganarr/cdfjplus-template) | ARIA already runs every ARM instruction they use, except the mode changes (C3, done) and the BX back to Thumb (C4) |
 | C3 | **Processor modes.** The first three helpers switch to FIQ mode (`mrs r4, cpsr; msr cpsr_c, #0xD1`) and move values into or out of r8–r13, then restore the mode with `msr cpsr_c, r4`. Calls start in SYS mode (P1). So DARIA needs SYS and FIQ, FIQ's banked r8–r14, the I and F bits kept and read back by MRS, and MSR of the control byte from an immediate or a register. No SPSR access, no exception entry. | [trace], [C] | **Done**: `bup_cpu.sv`'s `MODES` 1 (below) |
 | C4 | **Interworking.** BX both ways (Thumb `bx r4` to the ARM helper, ARM `bx r4` back with bit 0 set); `POP {pc}` and `LDR pc` do not change state on ARMv4T; BL as a prefix/suffix pair. | [trace], ARM ARM | Step 2 |
-| C5 | **What never happens.** No SWI, undefined or coprocessor instruction, no unaligned access, no SPSR access and no read of any MMIO register in any trace. DARIA halts on all of them, as ARIA does. | [trace] | Holds by the halt rule |
-| C6 | **Speed.** Two calls a frame. Every call meets its budget at about 32 MHz with S3's CPI; S3 at 28.636 MHz misses only Spiders' 16 calls, as upstream does. | [trace] (`BUPCHIP_CORE.md`, "Later") | Step 3 measures |
+| C5 | **What never happens.** No SWI, undefined or coprocessor instruction, no unaligned access and no SPSR access in any trace. DARIA halts on all of them, as ARIA does. MMIO reads are as rare: the only one in any trace is Draconian's T1TC read (M4). | [trace] | Holds by the halt rule |
+| C6 | **Speed.** Two calls a frame. Every call meets its budget at about 32 MHz with S3's CPI; S3 at 28.636 MHz misses only Spiders' 16 calls, as upstream does. The added images' worst calls need 17.7–21.3 (four of the six traced so far) MHz at CPI 1.4, against the demos' 11.8–41.6. | [trace] (`BUPCHIP_CORE.md`, "Later") | Step 3 measures |
 
 ### The call protocol
 
@@ -61,10 +61,10 @@ These carry over from ARIA:
 
 | # | Requirement | Source |
 |---|---|---|
-| M1 | **ROM** at 0 up to the image size (capped at 1 MB), read-only. A write aborts. Images in the test set: 32 KB (12), 64 KB (2), 128 KB (Turbo). **DARIA supports images up to 512 KB**, CDFJ+'s largest (Stella's `CartCDF.hxx`: 64–512 KB of ROM with 16 or 32 KB of RAM, on the LPC213x boards; upstream's `detect2600.sv:70-72` accepts CDF images up to 524,288 bytes). None above 128 KB is available to test. The cartridge slot takes files up to 4 MB, and the loader keeps the whole file in SDRAM. | [C] `arm_mapper_memory.sv:375, 566-567, 624-626`; [trace]; `data.json` |
-| M2 | **RAM** at 0x4000_0000, `mapper_ram_size` bytes: 32 KB for CDFJ+, 8 KB for every other scheme. A CDFJ+ game uses 8 KB with a 32 KB ROM, 16 KB with 64 or 128 KB, and 32 KB with 256 or 512 KB (the template's `cdfj+_template.asm` header). The demos stay inside 8 KB, except three CDFJ+ ones (Elevator Agent, Turbo, Zaxxon) that reach the 16th KB. DARIA has the full 32 KB (Decisions, 4). | [C] `:568-569`, `top.sv:779-783`; [trace]; the CDFJ+ template |
-| M3 | **MMIO window** 0xE000_0000–0xE01F_FFFF (`addr[31:21] == 0x700`): MAMCR (0xE01F_C000) and timer 1's TCR (0xE000_8004) and TC (0xE000_8008) read back. Everything else in the window reads 0 and drops writes, and never aborts, because the drivers program the PLL, MEMMAP, MAM timing, PINSEL and TIMER0. The traces write MAMCR (Scramble, 4,172 times) and nothing else, and read nothing. Timer 1's other registers (prescaler, match, capture; the template defines them all) and APBDIV read 0 on upstream too, so a game that set T1PR would see the timer run at full rate there as well. | [C] `:570-575, 606-609`; [trace]; the CDFJ+ template |
-| M4 | **Timer 1** counts at 70 MHz while enabled (TCR bit 0). Upstream divides its 5 × `clk_sys` ARM clock: it skips 1 tick in 45 for NTSC (exactly 70 MHz) and 1 in 76 for PAL (70.0045 MHz). DARIA's clock will differ, so it counts on `clk_sys` instead: per 9 clocks 8 × 5 + 4 (NTSC), per 76 clocks 71 × 5 + 5 × 4 (PAL), the same rates. No demo reads it; Draconian does (not in the set). | [C] `:474-489, 729-737`; [E] |
+| M1 | **ROM** at 0 up to the image size (capped at 1 MB), read-only. A write aborts. Images in the demo set: 32 KB (12), 64 KB (2), 128 KB (Turbo); the six added images are 32 KB. **DARIA supports images up to 512 KB**, CDFJ+'s largest (Stella's `CartCDF.hxx`: 64–512 KB of ROM with 16 or 32 KB of RAM, on the LPC213x boards; upstream's `detect2600.sv:70-72` accepts CDF images up to 524,288 bytes). None above 128 KB is available to test. The cartridge slot takes files up to 4 MB, and the loader keeps the whole file in SDRAM. | [C] `arm_mapper_memory.sv:375, 566-567, 624-626`; [trace]; `data.json` |
+| M2 | **RAM** at 0x4000_0000, `mapper_ram_size` bytes: 32 KB for CDFJ+, 8 KB for every other scheme. A CDFJ+ game uses 8 KB with a 32 KB ROM, 16 KB with 64 or 128 KB, and 32 KB with 256 or 512 KB (the template's `cdfj+_template.asm` header). The demos stay inside 8 KB, except three CDFJ+ ones (Elevator Agent, Turbo, Zaxxon) that reach the 16th KB. The added images stay inside 8 KB. DARIA has the full 32 KB (Decisions, 4). | [C] `:568-569`, `top.sv:779-783`; [trace]; the CDFJ+ template |
+| M3 | **MMIO window** 0xE000_0000–0xE01F_FFFF (`addr[31:21] == 0x700`): MAMCR (0xE01F_C000) and timer 1's TCR (0xE000_8004) and TC (0xE000_8008) read back. Everything else in the window reads 0 and drops writes, and never aborts, because the drivers program the PLL, MEMMAP, MAM timing, PINSEL and TIMER0. The demos write MAMCR (Scramble, 4,172 times) and nothing else, and read nothing. Of the added images, the DPC+ ones write MAMCR twice a call, and Draconian uses timer 1 (M4). Timer 1's other registers (prescaler, match, capture; the template defines them all) and APBDIV read 0 on upstream too, so a game that set T1PR would see the timer run at full rate there as well. | [C] `:570-575, 606-609`; [trace]; the CDFJ+ template |
+| M4 | **Timer 1** counts at 70 MHz while enabled (TCR bit 0). Upstream divides its 5 × `clk_sys` ARM clock: it skips 1 tick in 45 for NTSC (exactly 70 MHz) and 1 in 76 for PAL (70.0045 MHz). DARIA's clock will differ, so it counts on `clk_sys` instead: per 9 clocks 8 × 5 + 4 (NTSC), per 76 clocks 71 × 5 + 5 × 4 (PAL), the same rates. No demo touches it. Draconian times one frame with it at power-on and compares the count with 1,171,987, 0.33% above an NTSC frame's ("The added images"), so the rate must be right to better than that; counting `clk_arm` undivided would read 2.3% high on upstream. | [C] `:474-489, 729-737`; [trace]; [sim]; [E] |
 | M5 | **Anything else** (outside ROM, RAM, the MMIO window and the sentinel) aborts on upstream. DARIA halts. | [C] `:603-604, 626` |
 
 ### The 6507 side (front ends)
@@ -76,7 +76,7 @@ The front ends are the cartridge logic the 6507 sees: bank switching, the data f
 | F1 | **Bus timing.** A 6507 cycle is 12 `clk_sys`. The address is valid from the phase-1 edge (E0). The CPU latches read data at E0+6, and the front end commits its state on that edge, only when `access` is high. So a read has 6 `clk_sys`. During a call or a copy, RDY holds the read and the front end sees only its first phase 2. | [C] `top.sv`, `6502/mos6502_dp.sv:299`, `TIA.sv:505-557` |
 | F2 | **DPC+:** 8 fetchers (12-bit counter, top, bottom, 20-bit fraction, increment), the 32-bit random number, 3 waveforms and notes, PUSH and WRITE, 6 banks, fast fetch on any `$A9` read, the copy/fill service (the 6507 held meanwhile), and the call (`$FE`/`$FF` to CALLFUNCTION). | [C] `mapper_dpcplus.sv` |
 | F3 | **CDF, CDFJ, CDFJ+:** 32-bit stream pointers and increments in cart RAM (34 or 35 streams; table addresses per version), DSWRITE/DSPTR, SETMODE, fast fetch at the address after `$A9` (CDFJ+ also `$A2`/`$A0` and a fetch offset), fast jump on `$4C` with a two-byte lookahead in the image, 7 banks. | [C] `mapper_cdf.sv`, `cdf_fastjump_table.sv` |
-| F4 | **BUS (1–3), left out (Decisions, 6):** streams and a map in cart RAM, STY stuffing into TIA/RIOT writes, BUS3's fast jump. BUS0 shows the bad-game screen. No released game uses BUS: Stella calls the scheme experimental and lists only development builds and demos from 2016–2017 (an early Draconian, `128bus`, `128chronocolour`, `parrot`, `rpg`; `CartBUS.hxx`). None is in the test set. | [C] `mapper_bus.sv`; Stella |
+| F4 | **BUS (1–3), left out (Decisions, 6):** streams and a map in cart RAM, STY stuffing into TIA/RIOT writes, BUS3's fast jump. BUS0 shows the bad-game screen. No released game uses BUS: Stella calls the scheme experimental and lists only development builds and demos from 2016–2017 (an early Draconian, `128bus`, `128chronocolour`, `parrot`, `rpg`; `CartBUS.hxx`). None is in the test set: the library's two Draconian builds are CDF1. | [C] `mapper_bus.sv`; Stella |
 | F5 | **AMPLITUDE.** A 20 kHz tick on `clk_sys` adds each voice's frequency to its counter. DPC+ sums three waveform samples from RAM; CDF and BUS sum three samples through each voice's pointer and size words, or in digital mode return a nibble of a ROM or RAM byte. | [C] `arm_mapper_audio.sv` |
 | F6 | **The RAM image.** At load end and on every console reset, with the console held: DPC+ zeroes RAM and copies the image's display data; CDF and BUS copy the 2 KB driver and zero the rest. | [C] `arm_mapper_ram_init.sv` |
 | F7 | **Upstream's quirks**, kept where a game could see them: DPC+ fast fetch arms on data bytes too; hotspots are ignored on substituted reads; the jump lookahead crosses bank ends; the BUS map aliases `$20–$24`. Two are open: BUS stuffing reaches the RIOT but not the TIA (an upstream bug?), and upstream's data bus changes after the latch edge, which only `open_bus` keeps. | [C], study §2.7 |
@@ -89,6 +89,27 @@ The front ends are the cartridge logic the 6507 sees: bank switching, the data f
 - Upstream's read path runs from the SDRAM byte through the decode to SRAM within one cycle and is timed at `clk_sdram`. It forces the parallel window compares, and in the full build the fitter duplicated `mapper_dpcplus` by 47% for it (the path in `SRAM_TIMING.md`).
 
 The lean front end that replaces them is in "Design (step 1)".
+
+### The added images (2026-10-05)
+
+Six images joined the test library after step 1, all of them 32 KB. Each was traced as the demos were [trace]. The images, their traces and the scripts' per-image output stay in `sim/work/`; below are statistics only.
+
+| Image | Scheme | Calls | ARM state | MMIO | Cart RAM | Worst call: MHz at CPI 1.4 |
+|---|---|---|---|---|---|---|
+| Draconian, Harmony-fix build | CDF1 | 3,000 | the helpers: 1,525 instructions in 147 calls | timer 1: 3 writes, 1 read | 8 KB | 18.41 |
+| Draconian, 2017-10-20 RC8 | CDF1 | the same trace, call for call | | | | |
+| Space Rocks, Harmony fix | DPC+ | 2,999 | none | MAMCR, 2 writes a call | 8 KB | 17.65 |
+| Robot War: 2684 demo, Harmony fix | CDFJ | trace running | | | | |
+| Stay Frosty 2 (`SF2fix`), NTSC | DPC+ | 2,577 | none | MAMCR, 2 writes a call | 8 KB | 21.29 |
+| Stay Frosty 2 (`SF2fix`), PAL | DPC+ | trace running | | | | |
+
+- **The Harmony fixes do not reach DARIA.** The two Draconian builds differ in 927 bytes, all inside the 2 KB driver. 925 lie below 0x750, in the Harmony's own start-up and bus code, which no trace executes. The other 2 lie at 0x7F8–0x7FC, past the helpers' literals: the only ROM reads in that kilobyte are the trampolines' 153 literal loads. So the two traces are identical. Robot War's Harmony-fix build keeps the demo's driver byte for byte and differs from the demo in 28,724 bytes after it, so it is a rebuilt game and is traced as one.
+- **Draconian's helpers (C2).** It is the only traced game that resets a voice's counter (the second helper, 4 calls) or reads one (the third, 144). That makes it the first real use of P1's counter load into FIQ r8–r10 and of P2's rule that a counter is taken back only if it changed.
+- **Draconian's timer (M4)** is a single frame measurement at power-on, in its second and fourth calls; "Precision" in the memory system (6) has the numbers and DARIA's error budget for it.
+- **Space Rocks' first call** is its start-up: 117,525 instructions, 3.5 ms on upstream with the 6507 held, and no timer deadline after it. At 32.73 MHz and CPI 1.4 it would take about 5.0 ms, once, at power-on.
+- **Stay Frosty 2** makes about one call a frame in its attract mode and two in play.
+- **Nothing new for the CPU.** No Thumb form the demos do not use, nothing that halts, no MUL site from which a path reads C (C1; "The CPU: Thumb"), and code ends below 0x4A00.
+- Every image reaches play in its trace (the snapshots at frame 1,350).
 
 ### Packaging
 
@@ -141,10 +162,10 @@ Four sections follow: the CPU's Thumb support, the memory system with the call p
 **Choices step 1 made**, beyond the decisions above (each is argued in its section):
 
 1. **Thumb is decoded beside ARM**, into the same controls, not translated into ARM first. The register-index path that starts the critical path keeps today's depth [syn]; translating first would cost about 4–7 ns and miss 32.73 MHz [E].
-2. **The C flag after a Thumb MUL is unknown.** An instruction that reads it before anything rewrites it halts with a new code 8. The reference computes that C from the ARM7TDMI multiplier's internals [sim]; no executed path in the demos reads it [trace].
+2. **The C flag after a Thumb MUL is unknown.** An instruction that reads it before anything rewrites it halts with a new code 8. The reference computes that C from the ARM7TDMI multiplier's internals [sim]; no executed path in the demos or the added images reads it [trace].
 3. **The front ends get their own 32 KB copy of the image's start** (32 M10K). A block-RAM port has one clock, and the CPU (`clk_arm`) needs both ports of the window.
 4. **Bytes beyond the 128 KB window come from the PSRAM** through ARIA's asset cache, not from the SDRAM. The SDRAM controller and its `clk_sdram` paths stay untouched, the CPU's misses cross no clock, and a miss takes 13 `clk_arm` instead of 24–30.
-5. **Code must lie in the window:** a fetch beyond 128 KB halts (code 4). Code ends below 0xB30A in every demo, and the CDFJ+ template starts it at `C_START` ≤ $7800.
+5. **Code must lie in the window:** a fetch beyond 128 KB halts (code 4). Code ends below 0xB30A in every demo (below 0x4A00 in the added images), and the CDFJ+ template starts it at `C_START` ≤ $7800.
 6. **`clk_arm` stays a related clock** in the SDC, with bounded delays on the held buses that cross.
 7. **Fix B's register sits inside `sram_ctrl`.**
 
@@ -164,7 +185,7 @@ Tags are this document's, plus [syn]: Yosys 0.69 (`sim/work/bupchip/venv/bin/yow
    - Taken branches stay free.
 2. **The PC becomes a halfword address** (17 bits, byte bits 17:1). `rom_addr` is its word part. PC bit 1, registered with `rom_addr`, picks the halfword, so two sequential Thumb instructions read the same word twice and nothing is buffered.
 3. **BL runs as two instructions**, as ARMv4T defines it and as the reference retires it [sim]. The prefix is an ADD to LR. The suffix branches to LR + offset and links (address + 2) | 1. Each takes one clock, and lone halves work.
-4. **The C flag after MUL.** The reference sets C from both operands, ignores the old C and keeps V [sim]. Its MUL time follows the ARM7TDMI's early termination (4 + m clocks between retires), so it models the real multiplier [sim]. DARIA does not reproduce that carry. It marks C unknown after a Thumb MUL and halts (new code 8) on any instruction that reads C before something rewrites it. No executed path in the 15 demos reads C after a MUL [trace]. The lockstep testbench compares C only when it is known.
+4. **The C flag after MUL.** The reference sets C from both operands, ignores the old C and keeps V [sim]. Its MUL time follows the ARM7TDMI's early termination (4 + m clocks between retires), so it models the real multiplier [sim]. DARIA does not reproduce that carry. It marks C unknown after a Thumb MUL and halts (new code 8) on any instruction that reads C before something rewrites it. No executed path in the 15 demos or the added images reads C after a MUL [trace]. The lockstep testbench compares C only when it is known.
 5. **What halts.** SWI, Bcc with cond 1110, the v5/v6 encoding spaces, BX with H1 or nonzero should-be-zero bits, the H1 = H2 = 0 hi-register forms, and empty register lists halt with UNDEF (1). Bad targets halt with FETCH (4). BX to an odd address no longer halts, except in the BupChip profile.
 6. **Area:** about 300–500 ALMs [E; 289 ALUTs of decode measured, syn]. No M10K.
 
@@ -311,7 +332,7 @@ The later clocks of multi-clock instructions (S_W, S_SHR2, S_MUL2, S_SEQ) read t
   - Thumb: Bcc with CS, CC, HI or LS; ADC; SBC;
   - ARM state: a CS, CC, HI or LS condition; ADC, SBC, RSC; RRX; MRS, whose result would expose C.
 
-A program can see C only through those readers, so nothing is silently different. The demos never trip it: they execute 4.33 M MULs at 693 sites [trace]. From 692 of the sites, every executed path writes C before any read. One site, run once in Turbo, returns from its function first, and the static walk stops at the return. No path reaches a read (`sim/work/daria_thumb/mulc_scan.py`). ARM-state MULS and MLAS still halt with UNDEF, as in ARIA.
+A program can see C only through those readers, so nothing is silently different. The demos never trip it: they execute 4.33 M MULs at 693 sites [trace]. From 692 of the sites, every executed path writes C before any read. One site, run once in Turbo, returns from its function first, and the static walk stops at the return. No path reaches a read (`sim/work/daria_thumb/mulc_scan.py`). The added images' MUL sites (32 in Draconian, 18 in Space Rocks, 4 in Stay Frosty 2) all write C first on every executed path. ARM-state MULS and MLAS still halt with UNDEF, as in ARIA.
 
 **MUL with Rd = Rm** runs. ARMv4T calls it UNPREDICTABLE, but the reference returns the product in 121 of 121 cases [sim]. ARIA's ARM MUL runs the same form (`:293-298`). GCC 13 used a spare register for a square; GAS accepts `muls r0, r0`.
 
@@ -339,6 +360,7 @@ The H1 = H2 = 0 forms could run for free, because the reference's result is the 
 - **Common:** F6 LDR PC-relative 5.98% (half of them at addresses 2 mod 4), BL 2.31 M pairs, POP {pc} 1.27 M, BX LR 0.77 M.
 - **Rare:** MOV pc, Rm 7,188 (2 demos); PC read as a hi-register operand 4,494 (1 demo).
 - **Never executed:** ADD pc, CMP with PC, the H1 = H2 = 0 forms, MUL with Rd = Rm, LDMIA/STMIA with the base in the list, BX PC.
+- **The added images** use only forms the demos use, and none of those above. Draconian reads PC as a hi-register operand at its helper calls, as Mappy does (153 times); the DPC+ images never.
 
 #### Changes to ARIA's blocks
 
@@ -600,7 +622,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 
 - **Fetches beyond the window halt** with code 4 (FETCH), checked one clock late as today (`bup_cpu.sv:694, 703, 742`).
   - A fetch through the cache would need a stall in front of `rom_q`, on the critical path.
-  - Code in the 15 demos ends at or below 0xB30A [trace], and the CDFJ+ template starts its C code at `C_START`, at most $7800.
+  - Code in the 15 demos ends at or below 0xB30A, and in the added images below 0x4A00 [trace]; the CDFJ+ template starts its C code at `C_START`, at most $7800.
 - **LDM/STM beats into the cache region** halt with code 7 (BLOCK), as asset LDMs do today (`:552-554`). The traced LDMIAs read RAM.
 
 ##### 3.4 Miss latency
@@ -614,7 +636,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 | Whole line | about 40 `clk_arm`, 1.2 µs | about 48, 1.2 µs |
 
 - The step 0 study charged 524 ns per 16 B line [trace, assumption]; the critical word comes back faster than that, and the line about as fast.
-- With the 128 KB window, no traced demo misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent.
+- With the 128 KB window, no traced image misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent.
 
 #### 4. The two memory maps and the profile switch
 
@@ -726,7 +748,7 @@ The front ends keep a call block of 14 words in their state RAM: entry, stack, s
 
 - **Writes to TC.** {data, strobes, token} go held, with a toggle, to `clk_sys`, which merges the strobed bytes into the counter. A write wins over the increment in that clock, as upstream's later assignment does. The mirror takes the written bytes at once.
 - **Reads of TC.** Every 4 `clk_sys`, the counter is copied into a hold register with a toggle; `clk_arm` copies it into the mirror only when the snapshot's token matches the last write. A read is then at most about 8 `clk_sys` (0.56 µs, about 40 counts) stale, and never older than the CPU's own last write.
-- **Precision.** Draconian compares T1TC against 1,171,987 per frame [C, comment], so 40 counts do not matter. No traced demo reads the timer.
+- **Precision.** Draconian is the only traced game that uses the timer, and only at power-on [trace; sim, `tb_daria +mmiolog=1`]. 42–44 instructions into its second call it zeroes T1TC and sets TCR bit 0; 43 instructions into its fourth, a frame later, it clears the bit and reads T1TC three instructions on: 1,168,115 on upstream, one NTSC frame at 70 MHz less 0.8 µs. It compares that with 1,171,987 [C, comment], so the margin is 3,872 counts (0.33%). Both accesses lie the same depth into their calls, so DARIA's slower clock moves the reading by under 1 µs (about 55 counts); the stop's two-flop delay and the read's staleness add at most about 55 more. Together that is about 3% of the margin.
 - MAMCR keeps all 32 bits, because upstream reads them back. Scramble writes it 4,172 times with `strb` [trace].
 - Cost: about 230 FF; 110–150 ALMs [E].
 
@@ -1178,13 +1200,13 @@ So the single bitstream lands at about 14,600–15,700 ALMs, 79–85% of the dev
 | CPU, Thumb | Directed tests per format, halt tests, random streams (400 seeds), the exhaustive 65,536-halfword decode check, fuzz and mutations, all in lockstep with the reference ("The CPU: Thumb", verification). The record gains T, and C is skipped only while the core reports it unknown. | 2 |
 | CPU, modes | `daria/modes/run_modes.sh` | 0 (done) |
 | CPU, ARIA unchanged | `s1/check.sh` with Rikki & Vikki, with `THUMB` 0 and with `THUMB` 1 + `arm_only`; the four songs bit-identical to MiSTer | 2 |
-| Memory system and calls | `tb_daria` runs every demo on DARIA beside upstream: registers at each return, every RAM write, the audio values. Again with a 16–32 KB window, so the asset cache serves real traffic; then a synthetic 512 KB image. | 5 |
+| Memory system and calls | `tb_daria` runs every demo and added image on DARIA beside upstream: registers at each return, every RAM write, the audio values. Again with a 16–32 KB window, so the asset cache serves real traffic; then a synthetic 512 KB image. | 5 |
 | Capture | 2600 images through the loader into the window, the front-end ROM and the PSRAM, each compared with the file; A78 files as today | 5 |
 | Front end | A cycle-by-cycle shadow of upstream's front ends in `tb_daria`, directed tests per scheme, the random differential bench | 6 |
 | Fix B | `cartram2600_test.py` and the `+cartram` monitor in `extra_tests.sh`; the structural check that no `clk_sdram` path runs through `cart2600` | 7 |
 | Integration | `run_sim.sh`, `extra_tests.sh`, `s4/check.sh`; the demos' frames against upstream in whole-core simulation | 7 |
 | Timing | Step 3's probe with the RAMs at full size, at 32.73 and 40.43 MHz; the release gate, `clk_sdram` ≥ +1.5 ns on three seeds | 3, 7 |
-| Hardware | A status overlay; the 15 demos, Draconian (it reads the timer), RAM-mapper games, the Supercharger, 7800 games and the BupChip | 8 |
+| Hardware | A status overlay; the 15 demos, the six added images (Draconian uses the timer), RAM-mapper games, the Supercharger, 7800 games and the BupChip | 8 |
 
 ## Steps
 
@@ -1195,10 +1217,10 @@ Each step has a done-when, as ARIA's had.
 2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
 3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
 4. **S3**, if chosen (ARIA's steps 6–7). *Done when* CPI is within ±2% of the model on the demos' traces and the BupChip.
-5. **2600 memory system:** image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
-6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo, and passes directed tests per scheme and the random differential bench.
+5. **2600 memory system:** image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
+6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
 7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
-8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and Draconian play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
+8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and the six added images play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
 9. **2.2.1.**
 
 ## Open items
@@ -1222,4 +1244,5 @@ What step 1 leaves open, each with the step that settles it:
 | 13 | **Banked registers after a mapper reset:** DARIA clears them, upstream keeps them. No driver reads them first. | Accepted |
 | 14 | **Thumb hi-register forms with H1 = H2 = 0** halt; running them is free if a game needs it. | When needed |
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | Step 6 |
-| 16 | **Draconian** (two builds, added to the test library on 2026-10-05): its calls, its timer reads and its PLL block, from `tb_daria`. | Step 0's traces, then 5 |
+| 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): nothing new for the CPU, the call protocol or the memory map in the four traced so far ("The added images"). | Robot War and Stay Frosty 2 PAL: traces running |
+| 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | Step 5 |
