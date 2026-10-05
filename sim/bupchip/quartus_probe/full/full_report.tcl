@@ -46,10 +46,21 @@ report_timing -setup -from_clock $sys -to_clock $arm -npaths 5 -detail full_path
 report_timing -setup -from_clock $arm -to_clock $sys -npaths 5 -detail full_path -append -file cross.rpt
 report_timing -hold -from_clock $sys -to_clock $arm -npaths 5 -detail summary -append -file cross.rpt
 report_timing -hold -from_clock $arm -to_clock $sys -npaths 5 -detail summary -append -file cross.rpt
-foreach {label from to} [list "sys->arm" $sys $arm "arm->sys" $arm $sys] {
+set sdram [get_clocks "${pre}1$post"]
+set sys90 [get_clocks "${pre}2$post"]
+foreach {label from to} [list "sys->arm" $sys $arm "arm->sys" $arm $sys "sdram->arm" $sdram $arm \
+		"arm->sdram" $arm $sdram "sys90->arm" $sys90 $arm "arm->sys90" $arm $sys90] {
 	set n 0
-	foreach_in_collection p [get_timing_paths -setup -from_clock $from -to_clock $to -npaths 100000] { incr n }
-	puts $f "$label: $n setup paths (slow 85C)"
+	set ws "-"
+	foreach_in_collection p [get_timing_paths -setup -from_clock $from -to_clock $to -npaths 100000] {
+		if {$n == 0} { set ws [format "%.3f" [get_path_info $p -slack]] }
+		incr n
+	}
+	set wh "-"
+	foreach_in_collection p [get_timing_paths -hold -from_clock $from -to_clock $to -npaths 1] {
+		set wh [format "%.3f" [get_path_info $p -slack]]
+	}
+	puts $f "$label: $n endpoints, worst setup slack $ws, worst hold slack $wh (slow 85C)"
 }
 close $f
 catch { report_exceptions -file exceptions.rpt }

@@ -18,11 +18,13 @@ The shipped core (POCKET_BUPCHIP, 2.1.2) gets, in the copy only:
     (2 M10K).
   - pll_core.v: counter 3 (clk_arm) at VCO / D: 21 (32.73 MHz) by default,
     17 (40.43 MHz) with --div 17.
-  - core_constraints.sdc: clk_arm leaves the synchronous group's timing. Its
-    crossings with the other core clocks keep set_max_delay / set_min_delay
-    (open item 9), which Quartus applies only to paths not cut by clock
-    groups: the groups stay as they are, and the exceptions replace the
-    edge-derived requirements.
+  - core_constraints.sdc: the form of DARIA_CORE.md's 7.3 (open item 9). The
+    clock groups stay as they are (Quartus would not apply set_max_delay to
+    paths a clock group cuts), and the clk_sys <-> clk_arm paths get
+    set_max_delay 20 and set_min_delay 0 instead of the edge relation.
+    clk_arm <-> clk_sdram and <-> clk_sys_90 keep their real relationship as
+    a tripwire: no path should exist there. --all-clocks bounds those too
+    (the first seed-2 build's form).
 
 Usage: daria_probe.py FPGA_DIR [--div N] [--maxd NS]
 """
@@ -35,7 +37,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("fpga")
 ap.add_argument("--div", type=int, default=21)
 ap.add_argument("--maxd", type=float, default=20.0,
-                help="set_max_delay between clk_arm and the other core clocks (ns)")
+                help="set_max_delay between clk_arm and clk_sys (ns)")
+ap.add_argument("--all-clocks", action="store_true",
+                help="bound clk_arm against all three other core counters, not only clk_sys")
 args = ap.parse_args()
 
 core = os.path.join(args.fpga, "core")
@@ -197,14 +201,16 @@ edit(os.path.join(core, "pll", "pll_core.v"), [
 sdc = os.path.join(core, "core_constraints.sdc")
 with open(sdc) as f:
     s = f.read()
+others = ["0", "1", "2"] if args.all_clocks else ["0"]
+pll = "ic|pll|altera_pll_i|cyclonev_pll|counter[%s].output_counter|divclk"
 s += f"""
 # DARIA step 3 probe: clk_arm at VCO / {div}, no longer 2 x clk_sys. Every
-# crossing between it and the other core clocks is a synchroniser with held
-# data (bupchip_pocket.sv, "Clocks"), so the edge-derived requirement (as
-# little as one VCO period) does not apply. Bounded instead: at most
-# {args.maxd} ns of data delay, and no hold requirement beyond the clocks' skew.
-set clk_arm  {{ic|pll|altera_pll_i|cyclonev_pll|counter[3].output_counter|divclk}}
-set not_arm  [get_clocks {{ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk ic|pll|altera_pll_i|cyclonev_pll|counter[1].output_counter|divclk ic|pll|altera_pll_i|cyclonev_pll|counter[2].output_counter|divclk}}]
+# crossing between it and clk_sys is a synchroniser with held data
+# (bupchip_pocket.sv, "Clocks"), so the edge-derived requirement (as little
+# as one VCO period) does not apply. Bounded instead: at most {args.maxd} ns of
+# data delay, and no hold requirement beyond the clocks' skew.
+set clk_arm  {{{pll % "3"}}}
+set not_arm  [get_clocks {{{" ".join(pll % n for n in others)}}}]
 set_max_delay -from [get_clocks $clk_arm] -to $not_arm {args.maxd}
 set_max_delay -from $not_arm -to [get_clocks $clk_arm] {args.maxd}
 set_min_delay -from [get_clocks $clk_arm] -to $not_arm 0
@@ -214,4 +220,4 @@ with open(sdc, "w") as f:
     f.write(s)
 
 print(f"daria_probe.py: {args.fpga}: DARIA CPU and memories, clk_arm = VCO / {div} ({mhz:.3f} MHz), "
-      f"crossings bounded at {args.maxd} ns")
+      f"crossings with {'all core clocks' if args.all_clocks else 'clk_sys'} bounded at {args.maxd} ns")
