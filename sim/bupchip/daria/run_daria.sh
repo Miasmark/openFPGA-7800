@@ -13,7 +13,8 @@
 # emulated second, on one CPU. Set NAME= to name the run directory.
 # SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
 # daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
-# (default 128). Those builds go to obj_shadow<WIN_KB>.
+# (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
+# runs/shadow<WIN_KB>/<rom name>/.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -70,8 +71,7 @@ if [ "${SHADOW:-0}" != 0 ]; then
 fi
 
 BIN="$OBJ/vtb"
-if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$HERE/daria_shadow.svh" "$RTL" "$FPGA/core/bupchip" \
-		-newer "$BIN" \( -name '*.sv' -o -name '*.svh' \) 2>/dev/null | head -1)" ]; then
+if [ ! -x "$BIN" ] || [ -n "$(find "${SRCS[@]}" "$HERE/daria_shadow.svh" -newer "$BIN" 2>/dev/null | head -1)" ]; then
 	echo "building $BIN ..." >&2
 	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
@@ -82,7 +82,9 @@ if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$HERE/daria_shadow.svh" 
 fi
 
 [ -n "$BUILD_ONLY" ] && exit 0
-NAME="${NAME:-$(basename "$ROM" .bin)}"
+PREFIX=""
+[ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
+NAME="${NAME:-$PREFIX$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"
 rm -f "$OUT"/snap_*.ppm "$OUT"/snap_*.png

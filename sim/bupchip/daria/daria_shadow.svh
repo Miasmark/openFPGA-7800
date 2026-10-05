@@ -23,10 +23,18 @@
 //     in order: writes and reads by value, except T1TC (0xE0008008) reads,
 //     within +/- MMIO_TOL counts (open item 17).
 //   - daria.csv, one line per compared call: call, frame, DARIA's clk_arm
-//     from call_go to returned, the microseconds that is, upstream's clk_arm
-//     for the call, RAM writes and MMIO accesses compared, and ok or the
-//     first difference. dynamic_tables.py --only daria counts late calls
-//     with these times.
+//     from call_go to returned and the microseconds that is, the clk_sys from
+//     the post to the last return word read (what a front end waits, less
+//     its own share), upstream's clk_arm for the call, RAM writes and MMIO
+//     accesses compared, and ok or the first difference. dynamic_tables.py
+//     --only daria counts late calls with these times.
+//
+//   - Cart RAM collisions (open item 7): a read on the console side
+//     (clk_sys: cartram_rd, audio and mapper reads) of a word one CPU writes
+//     less than one clk_sys (69.84 ns) before or after. Counted for
+//     upstream's ARM and for DARIA against the same console-side reads, a
+//     stand-in for the front ends' (step 6). In a dual-clock M10K such a read
+//     may return old or undefined data.
 //
 // Plusargs: +shadow_stop=N stops comparing after N bad calls (default 20);
 // +d_await=P (default 0).
@@ -193,6 +201,7 @@
 	// ---- DARIA's side: post the call (clk_sys), time it and log its accesses ---------------
 	logic  [2:0] d_post_s = 0, d_ret_s = 0;
 	int          d_ph = 0, d_k = 0, d_call = 0;
+	longint      d_t0 = 0, d_e2e = 0;
 	logic        d_done = 0, d_acc_clear = 0, shadow_off = 0;
 	logic [31:0] d_res [0:5];
 	int          shadow_calls = 0, shadow_bad = 0, shadow_skip = 0, shadow_stop = 20, fd_dar = 0;
@@ -207,6 +216,7 @@
 				if (d_done || d_rst_sys) shadow_skip++;
 				else begin
 					d_call <= up_call;
+					d_t0 <= now;
 					for (int i = 0; i < 8192; i++) dmem.cart_ram.mem_q[i] = up_snap[i];
 					d_k <= 0;
 					d_ph <= 1;
@@ -234,6 +244,7 @@
 				if (d_k > 0) d_res[d_k - 1] <= d_stb_q;
 				if (d_k == 6) begin
 					d_done <= 1;
+					d_e2e <= now - d_t0;
 					d_ph <= 0;
 				end
 				d_k <= d_k + 1;
@@ -265,6 +276,32 @@
 		if (d_reg_sel)
 			d_acc.push_back('{d_w_addr, lanes(d_w_size, d_w_addr[1:0]),
 				d_reg_write ? d_reg_wdata : d_reg_rdata, 1'b1, !d_reg_write});
+	end
+
+	// ---- cart RAM collisions (open item 7) -------------------------------------------------
+	localparam longint COLL_PS = 69840;
+	longint up_wt [0:8191], d_wt [0:8191], fe_rt [0:8191];
+	longint coll_up = 0, coll_d = 0, fe_reads = 0;
+	initial for (int i = 0; i < 8192; i++) begin
+		up_wt[i] = -COLL_PS;
+		d_wt[i] = -COLL_PS;
+		fe_rt[i] = -COLL_PS;
+	end
+	always @(posedge clk_sys) if (running && dut.cartram_rd && !dut.cartram_wr && dut.cartram_addr[17:15] == 3'd0) begin
+		int w;
+		w = int'(dut.cartram_addr[14:2]);
+		fe_reads++;
+		if ($time - up_wt[w] < COLL_PS) coll_up++;
+		if ($time - d_wt[w] < COLL_PS) coll_d++;
+		fe_rt[w] = $time;
+	end
+	always @(posedge clk_arm) if (up_running && m_req && m_rdy && !m_fetch && arm_ce_run && m_wr && m_addr[31:28] == 4'h4) begin
+		if ($time - fe_rt[m_addr[14:2]] < COLL_PS) coll_up++;
+		up_wt[m_addr[14:2]] = $time;
+	end
+	always @(posedge clk_d) if (d_ram_we) begin
+		if ($time - fe_rt[d_d_addr[14:2]] < COLL_PS) coll_d++;
+		d_wt[d_d_addr[14:2]] = $time;
 	end
 
 	// ---- compare, once both have returned ------------------------------------------------
@@ -302,8 +339,8 @@
 		shadow_calls++;
 		shadow_writes += nw;
 		shadow_io += ni;
-		$fwrite(fd_dar, "%0d,%0d,%0d,%.3f,%0d,%0d,%0d,%s\n", d_call, frame, d_cyc,
-			real'(d_cyc) * 1.0e6 / D_HZ, up_cyc_by[d_call], nw, ni, why == "" ? "ok" : why);
+		$fwrite(fd_dar, "%0d,%0d,%0d,%.3f,%0d,%0d,%0d,%0d,%s\n", d_call, frame, d_cyc,
+			real'(d_cyc) * 1.0e6 / D_HZ, d_e2e, up_cyc_by[d_call], nw, ni, why == "" ? "ok" : why);
 		if (why != "") begin
 			shadow_bad++;
 			if (!shadow_off) $display("DARIA call %0d (frame %0d): %s", d_call, frame, why);
@@ -323,7 +360,7 @@
 		void'($value$plusargs("d_await=%d", d_await));
 		#1;
 		fd_dar = $fopen({out, "daria.csv"}, "w");
-		$fwrite(fd_dar, "call,frame,daria_clk,daria_us,up_clk,ram_writes,mmio,result\n");
+		$fwrite(fd_dar, "call,frame,daria_clk,daria_us,e2e_sys,up_clk,ram_writes,mmio,result\n");
 	end
 	final begin
 		string stopped;
@@ -331,5 +368,6 @@
 		if (shadow_off) stopped = ", stopped comparing";
 		$display("DARIA shadow: %0d calls compared, %0d differ or halted, %0d skipped (DARIA busy)%s; %0d RAM writes and %0d MMIO accesses compared",
 			shadow_calls, shadow_bad, shadow_skip, stopped, shadow_writes, shadow_io);
+		$display("DARIA collisions: upstream %0d, DARIA %0d, in %0d console-side cart RAM reads", coll_up, coll_d, fe_reads);
 		$fclose(fd_dar);
 	end

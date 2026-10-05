@@ -3,8 +3,8 @@
 
   dynamic_tables.py [--scan scan.json] [--margin F] [--only SECTION,...] RUN_DIR...
 
-Sections: schemes, overview, types, clock, overruns, late, divs, cache, mix, rom, ram, harmony, polls,
-determinism
+Sections: schemes, overview, types, clock, overruns, late, divs, daria, cache, mix, rom, ram, harmony,
+polls, determinism
 (--ref DIR: compare each run with the run of the same name under DIR).
 
 Safe budget of a call: the time the 6507 was held plus the slack it had left
@@ -609,6 +609,56 @@ def sec_divs(runs, margin):
     return table(hdr, rows)
 
 
+def load_daria(R):
+    """daria.csv of a SHADOW=1 run (daria_shadow.svh), by call; None without one."""
+    p = os.path.join(R.path, "daria.csv")
+    if not os.path.exists(p):
+        return None
+    with open(p) as f:
+        return {int(r["call"]): r for r in csv.DictReader(f)}
+
+
+def sec_daria(runs, margin):
+    """DARIA beside upstream (SHADOW=1 runs): calls compared and how many differ;
+    late calls, DARIA's measured time from the post to the last return word
+    read against the safe budget (no margin), beside the model's S1 at ÷18
+    (sec_divs); the highest share of a budget; and DARIA's clocks per call
+    over the model's s1_cyc (DARIA's include the launch and readout, 28)."""
+    hz = 687.272727e6 / 18
+    hdr = ["Demo", "Calls compared", "Differ", "Skipped", "Budgeted", "DARIA late", "Model late",
+           "DARIA max share", "Model max share", "DARIA clk / s1_cyc p50", "max"]
+    rows = []
+    tot = [0, 0, 0, 0]
+    for R in runs:
+        D = load_daria(R)
+        if D is None:
+            continue
+        skipped = 0
+        with open(os.path.join(R.path, "run.log")) as f:
+            for line in f:
+                if line.startswith("DARIA shadow:"):
+                    skipped = int(line.split(",")[2].split()[0])
+        differ = sum(1 for d in D.values() if d["result"] != "ok")
+        bud = [(r, D[r["call"]]) for r in R.budgeted if r["call"] in D]
+        dl = sum(1 for r, d in bud if int(d["e2e_sys"]) > r["safe"])
+        ml = sum(1 for r, d in bud if r["s1_cyc"] / hz > r["safe"] / SYS_HZ) if R.has_s else None
+        dshare = max((int(d["e2e_sys"]) / r["safe"] for r, d in bud), default=0)
+        mshare = max(((r["s1_cyc"] / hz) / (r["safe"] / SYS_HZ) for r, d in bud), default=0) if R.has_s else 0
+        ratio = sorted(int(D[r["call"]]["daria_clk"]) / r["s1_cyc"] for r in R.rows
+                       if r["call"] in D and R.has_s and r["s1_cyc"] > 0)
+        tot[0] += len(D)
+        tot[1] += differ
+        tot[2] += dl
+        tot[3] += ml or 0
+        rows.append([R.short, len(D), differ, skipped, len(bud), dl, "-" if ml is None else ml,
+                     "%.0f%%" % (100 * dshare), "%.0f%%" % (100 * mshare),
+                     "%.2f" % pct(ratio, 50) if ratio else "-", "%.2f" % ratio[-1] if ratio else "-"])
+    if not rows:
+        return "No run has daria.csv (run_daria.sh with SHADOW=1)."
+    rows.append(["total", tot[0], tot[1], "", "", tot[2], tot[3], "", "", "", ""])
+    return table(hdr, rows)
+
+
 def sec_harmony(runs, margin):
     """The call that uses most of its budget on a Harmony at zero wait.
 
@@ -699,8 +749,8 @@ def sec_determinism(runs, margin, ref):
     return table(hdr, rows)
 
 
-SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "divs", "cache", "mix", "rom", "ram", "harmony", "polls",
-            "determinism"]
+SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "divs", "daria", "cache", "mix", "rom", "ram", "harmony",
+            "polls", "determinism"]
 
 
 def main():
