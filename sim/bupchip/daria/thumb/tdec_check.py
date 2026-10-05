@@ -86,11 +86,11 @@ def check(d, t, ctx, td):
     want("state/tm/pc_h/c_unk", (d["state"], d["tm"], d["pc_h"], d["c_unk"]), (1, 1, ctx["pc_h"], ctx["c_unk"]))
     # Both halves' port candidates.
     sel, oth = ("hi", "lo") if ctx["pc_h"] else ("lo", "hi")
-    for row, half in ((t, sel), (td, oth)):
+    for row, half, tag in ((t, sel, ""), (td, oth, " (decoy %04x, %s)" % (d["decoy"], td["fmt"]))):
         if row["A"] != "-":
-            want("ta_" + half, d["ta_" + half], hx(row["A"]))
+            want("ta_" + half + tag, d["ta_" + half], hx(row["A"]))
         if row["B"] != "-":
-            want("tb_" + half, d["tb_" + half], hx(row["B"]))
+            want("tb_" + half + tag, d["tb_" + half], hx(row["B"]))
 
     want("cond", d["cond"], hx(t["cond"]))
     want("reads C", d["cond_rd_c"] | d["op_rd_c"], int(t["rdc"]))

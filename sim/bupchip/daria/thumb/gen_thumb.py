@@ -133,6 +133,7 @@ class Gen:
         self.funcs = []             # every function made (Thumb and ARM)
         self.pending = []           # blocks waiting for a dead region
         self.veneers = {}           # register -> veneer Func
+        self.dirty = set()          # registers written since the last dump
         self.main = Ctx("main", "known")
         self.c = self.main
 
@@ -183,6 +184,8 @@ class Gen:
         else:
             self.c.known[r] = v & M
         self.c.written.add(r)
+        if self.c is self.main:
+            self.dirty.add(r)
 
     def kv(self, r):
         if r == 13 and self.c.kind == "main":
@@ -413,6 +416,11 @@ class Gen:
             a = max(STK_LO, self.sp - 64) + R.randrange(1024)
         return a & ~(align - 1)
 
+    def bounds(self, region):
+        return {"data": (DATA, DATA + DATA_SIZE), "rom": (RTAB, RTAB + 4 * RTAB_WORDS),
+                "asset": (ASSET, ASSET + ASSET_SIZE), "sig": (SIG, SIG + min(SIG_SIZE, self.sig_used + 64)),
+                "stack": (STK_LO, STK_HI)}[region]
+
     def set_base(self, a, align, imm_max, avoid=()):
         """Make some low register hold a base b with a - b in [0, imm_max],
         aligned like a. Returns (register, offset)."""
@@ -506,8 +514,24 @@ class Gen:
         a = self.pick_addr(region, align)
         regoff = size in ("sh", "sb") or R.random() < 0.35
         d = R.randrange(8) if store else self.rd()
-        if regoff:
+        # Most accesses go near a pointer some register already holds, as
+        # compiled code does (a field of a structure, the next element).
+        lo, hi = self.bounds(region)
+        ptrs = [(r, v) for r, v in self.c.known.items() if r < 8 and lo <= v < hi - 4]
+        if ptrs and R.random() < 0.6:
+            b, p = R.choice(ptrs)
+            if not regoff and p % align == 0:
+                off = align * R.randrange(min(32, (hi - p) // align))
+                self.ins(f"{op}\t{rn(d)}, [{rn(b)}, #{off}]")
+                if not store:
+                    self.wr(d)
+                return
+            a = max(lo, min(hi - align, p + R.randrange(-64, 128))) & ~(align - 1)
+            regoff = True
+            near = [b]
+        elif regoff:
             near = [r for r, v in self.c.known.items() if r < 8 and abs(a - v) <= 1024]
+        if regoff:
             if near and R.random() < 0.5:
                 b = R.choice(near)
             elif R.random() < 0.6:  # a base near the address, unaligned as it comes
@@ -531,7 +555,7 @@ class Gen:
             self.wr(d)
 
     def op_load(self):
-        if self.R.random() < 0.12:
+        if self.R.random() < 0.06:
             self.op_const()
         else:
             self.mem(False)
@@ -557,20 +581,65 @@ class Gen:
         return off
 
     def dump(self, hi=False):
-        regs = self.data_lo()
-        self.R.shuffle(regs)
-        self.sig_slot(len(regs) + (8 if hi else 0), flags_free=True)
+        """The low registers written since the last dump into the signature:
+        mostly STMIA rS! (rS moved to the next free word first), else one STR
+        each. hi: every register, r8-r12, SP and LR through a low one."""
+        R = self.R
+        regs = self.data_lo() if hi else sorted(r for r in self.dirty if r < 8 and r != self.rS)
+        self.dirty = set()
+        if not regs:
+            return
+        if hi and R.random() < 0.7:
+            # STMIA the low registers, MOV r8-r12, SP, LR into them, STMIA
+            # those, and get the low ones back with LDMIA t, {..., t, ...}
+            # (the base in the list: the loaded value wins). final: no reload.
+            at = self.stmia_sig(regs)
+            his = HI + [13, 14]
+            lows = sorted(R.sample(regs, len(his)))
+            for h, r in zip(his, lows):
+                self.ins(f"mov\t{rn(r)}, {rn(h)}")
+            self.stmia_sig(lows)
+            if hi != "final":
+                t = R.choice(regs)
+                self.ldr_lit(t, at)
+                self.ins(f"ldmia\t{rn(t)}, {rlist(regs)}")
+            self.dirty = set()
+            return
+        if not hi and R.random() < 0.85:
+            self.stmia_sig(regs)
+            return
+        R.shuffle(regs)
+        self.sig_slot(len(regs) + (8 if hi else 0), flags_free=True)   # one window for all
         self.sig_used -= 4 * (len(regs) + (8 if hi else 0))
         where = {}
         for r in regs:
             where[r] = self.sig_slot()
             self.ins(f"str\t{rn(r)}, [{rn(self.rS)}, #{where[r]}]")
         if hi:
-            t = self.R.choice(regs)
+            t = R.choice(regs)
             for h in HI + [13, 14]:
                 self.ins(f"mov\t{rn(t)}, {rn(h)}")
                 self.ins(f"str\t{rn(t)}, [{rn(self.rS)}, #{self.sig_slot()}]")
             self.ins(f"ldr\t{rn(t)}, [{rn(self.rS)}, #{where[t]}]")
+        self.dirty = set()
+
+    def stmia_sig(self, regs):
+        """STMIA rS!, {regs} at the next free signature word; returns its address."""
+        if self.sig_used != self.sig_rbase:
+            d = self.sig_used - self.sig_rbase
+            if self.R.random() < 0.5:
+                self.ins(f"adds\t{rn(self.rS)}, #{d}")
+                self.c_write()
+            else:
+                self.ldr_lit(self.rS, SIG + self.sig_used)
+        at = SIG + self.sig_used
+        self.ins(f"stmia\t{rn(self.rS)}!, {rlist(regs)}")
+        self.sig_used += 4 * len(regs)
+        self.sig_rbase = self.sig_used
+        assert self.sig_used <= SIG_SIZE, "signature full"
+        self.wr(self.rS, SIG + self.sig_used)
+        self.dirty.discard(self.rS)
+        return at
 
     def op_capture(self, conds=None):
         """Flags into the signature: each Bcc skips a store of rS."""
@@ -598,6 +667,11 @@ class Gen:
             self.op_store()
         elif k < 0.93 and self.c.depth < 2:
             self.op_bcc()
+        elif k < 0.95:
+            L = self.label("b")
+            self.ins(f"b\t{L}")
+            self.dead()
+            self.lab(L)
         elif k < 0.97 and self.c.kind == "main":
             self.op_bl()
         else:
@@ -610,8 +684,21 @@ class Gen:
         self.ins(f"b{cond}\t{L}")
         snap = self.snapshot()
         self.c.depth += 1
-        for _ in range(self.R.choice([0, 1, 1, 2, 2, 2, 3, 4] if self.c.depth == 1 else [0, 1, 2, 3])):
+        n = [0, 1, 1, 2, 2, 2, 3, 4] if self.c.depth == 1 else [0, 1, 2, 3]
+        for _ in range(self.R.choice(n)):
             self.inner()
+        if self.R.random() < (0.6 if self.c.depth == 1 else 0.3):     # if/else: B over the else part
+            E = self.label("e")
+            self.ins(f"b\t{E}")
+            then = self.snapshot()
+            self.c.known, self.c.cstate = dict(snap[0]), snap[1]
+            self.lab(L)
+            for _ in range(self.R.choice(n[1:])):
+                self.inner()
+            self.c.depth -= 1
+            self.lab(E)
+            self.merge(then)
+            return
         self.c.depth -= 1
         self.lab(L)
         self.merge(snap)
@@ -993,9 +1080,9 @@ class Gen:
     def op(self):
         R = self.R
         k = R.random() * 100
-        for w, f in ((34, self.op_dp), (3.5, self.op_mul), (19, self.op_load), (10, self.op_store),
-                     (10, self.op_bcc), (5, self.op_capture), (5, self.op_b), (2, self.op_bl),
-                     (1.2, self.op_bx), (0.8, self.op_jump), (1.5, self.op_stack), (1, self.f13)):
+        for w, f in ((28, self.op_dp), (3.5, self.op_mul), (18, self.op_load), (8, self.op_store),
+                     (13, self.op_bcc), (6, self.op_capture), (9, self.op_b), (3.5, self.op_bl),
+                     (1.4, self.op_bx), (1, self.op_jump), (1.6, self.op_stack), (1, self.f13)):
             if k < w:
                 return f()
             k -= w
@@ -1029,17 +1116,17 @@ class Gen:
             self.ldr_lit(r, SIG if r == self.rS else
                          (R.choice(SPECIAL) if R.random() < 0.2 else R.getrandbits(32)))
         self.c.written = set()
-        nd = R.randrange(10, 20)
+        nd = R.randrange(8, 16)
         for i in range(self.nops):
             if self.pool_due():
                 self.op_b()
             self.op()
             nd -= 1
             if nd == 0:
-                self.dump(hi=R.random() < 0.3)
-                nd = R.randrange(10, 20)
+                self.dump(hi=R.random() < 0.12)
+                nd = R.randrange(8, 16)
         # The end: every register, the flags, IDENT, then FAULT = 0xAA.
-        self.dump(hi=True)
+        self.dump(hi="final")
         conds = [c for c in CONDS if self.c_ok() or c not in CREAD]
         self.op_capture(conds)
         t, u = R.sample(self.data_lo(), 2)
