@@ -111,7 +111,7 @@ class Gen:
         self.seed, self.ncells = seed, ncells
         R = self.R
         self.tables = [[self.val() for _ in range(14)] for _ in range(16)]
-        self.kinds = [(self.k_f1, 6), (self.k_f2, 5), (self.k_f3, 5), (self.k_f4, 10), (self.k_mul, 4),
+        self.kinds = [(self.k_f1, 6), (self.k_f2, 5), (self.k_f3, 5), (self.k_f4, 9), (self.k_f4sh, 3), (self.k_mul, 4),
                       (self.k_rdc, 4), (self.k_f5, 9), (self.k_bx, 6), (self.k_f6, 3), (self.k_f78, 7),
                       (self.k_f9, 6), (self.k_f10, 4), (self.k_f11, 4), (self.k_f12, 3), (self.k_f13, 2),
                       (self.k_f14, 7), (self.k_f15, 5), (self.k_f16, 6), (self.k_f18, 3), (self.k_bl1, 2),
@@ -185,6 +185,9 @@ class Gen:
 
     def k_f4(self):
         return 0x4000 | self.R.randrange(16) << 6 | self.lo() << 3 | self.lo()
+
+    def k_f4sh(self):                               # LSL, LSR, ASR, ROR by register
+        return 0x4000 | self.R.choice([2, 3, 4, 7]) << 6 | self.lo() << 3 | self.lo()
 
     def k_mul(self):
         rd = self.lo()
@@ -371,7 +374,7 @@ class Gen:
         elif cls in ("BR", "BL"):
             target = "tl"
         elif cls == "DP" and rec["sh"].endswith(":R"):     # the amount: 0, 32, past 32, Rs[7:0] only
-            want_reg(hx("B"), R.choice([0, 0, 1, 31, 32, 33, 64, 0xff, 0x100, 0x120, 0xffffff20, 0x80000000,
+            want_reg(hx("B"), R.choice([0, 0, 1, 31, 32, 32, 33, 64, 0xff, 0x100, 0x120, 0xffffff20, 0x80000000,
                                         self.val()]))
         if cls == "BR":
             mb, mf = R.choice([0, 1, 2, 3, 5, 8]), R.choice([0, 1, 2, 3, 5, 8])
