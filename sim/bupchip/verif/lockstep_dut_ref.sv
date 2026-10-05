@@ -36,6 +36,8 @@ module lockstep_dut_ref (
 	output logic [31:0] rt_insn,
 	output logic  [3:0] rt_nzcv,
 	output logic  [4:0] rt_mode,
+	output logic        rt_t,			// T after the instruction
+	output logic        rt_cunk,		// always 0: the reference's C is always known
 	output logic        rt_e_we,
 	output logic  [3:0] rt_e_idx,
 	output logic [31:0] rt_e_data,
@@ -158,6 +160,7 @@ module lockstep_dut_ref (
 		logic        start, v;
 		logic [31:0] pc, insn;
 		logic  [3:0] f;
+		logic        t;			// T after the instruction
 		logic  [4:0] mode;			// the mode before the instruction
 		logic        e_we;			// port E this beat
 		logic  [3:0] e_idx;
@@ -167,6 +170,7 @@ module lockstep_dut_ref (
 		logic [31:0] wn_d;
 	} beat_t;
 	beat_t       bq [$];
+	assign rt_cunk = 1'b0;
 	logic [31:0] snap [30];		// the flat register file, every bank
 	logic  [3:0] snap_f;
 	logic  [4:0] snap_m;
@@ -224,8 +228,11 @@ module lockstep_dut_ref (
 		z.pc = core.trace_retire_pc;
 		z.insn = i;
 		z.f = f;
+		z.t = core.cpsr[5];
 		z.mode = snap_m;
-		if (cond_pass(i[31:28], snap_f)) begin
+		// A Thumb retire (encoding {16'h0, halfword}) is one beat with every
+		// register it changed on port E, by the catch-all below.
+		if (!core.trace_retire_thumb && cond_pass(i[31:28], snap_f)) begin
 			if (i[27:25] == 3'b100) begin                                   // LDM / STM
 				for (int k = 0; k < 16; k++) if (i[k]) begin
 					beat_t x;
@@ -293,6 +300,7 @@ module lockstep_dut_ref (
 			snap_f = 4'b0;
 			snap_m = 5'h13;			// SVC, as the core leaves reset
 			rt_mode <= 5'h13;
+			rt_t <= 1'b0;
 			owe_we = 0;
 		end else begin
 			if (d_retire) add_record();
@@ -312,6 +320,7 @@ module lockstep_dut_ref (
 				rt_pc <= x.pc;
 				rt_insn <= x.insn;
 				rt_nzcv <= x.f;
+				rt_t <= x.t;
 				rt_mode <= x.mode;
 				rt_e_we <= x.e_we;
 				rt_e_idx <= x.e_idx;

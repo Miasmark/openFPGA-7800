@@ -1232,7 +1232,7 @@ What step 1 leaves open, each with the step that settles it:
 | 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. This, not the Thumb decoder, is the main threat to 40.43 MHz. Levers: duplicating the last address stage (60–120 ALMs), a 64 KB window. | Step 3 |
 | 2 | **40.43 MHz** needs the one-clock-store fix (`BUPCHIP_CORE.md`, risk 2) and item 1; 32.73 MHz holds with the Thumb decoder even without it [E]. | Step 3 |
 | 3 | **S3 or S1 with Thumb**, by area. | Step 3 |
-| 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | Accepted unless the owner objects |
+| 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above 128 KB** halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | Step 5, small-window builds |
 | 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | Step 5 |

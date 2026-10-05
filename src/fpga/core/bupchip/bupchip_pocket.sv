@@ -216,7 +216,7 @@ module bupchip_pocket #(
 `endif
 
 	bup_cpu cpu (
-		.clk(clk_arm), .rst(~cpu_run), .freeze, .w_wait,
+		.clk(clk_arm), .rst(~cpu_run), .freeze, .w_wait, .arm_only(1'b1),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata, .rom_dq, .ram_q,
 		.asset_size, .asset_q, .w_asset, .w_addr, .w_size,

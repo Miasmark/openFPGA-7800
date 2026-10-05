@@ -68,7 +68,7 @@ vdec() {
 	(cd "$HERE/../../model" && python3 -B -c 'import inventory
 for a in sorted(inventory.discover()[0]): print("%08x %08x" % (a, inventory.W[a // 4]))') > "$d/code.txt" || return 1
 	"$VERILATOR" --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module tb_vdec \
-		-Mdir "$d/obj" -o vtb "$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$core/bup_cpu.sv" "$HERE/tb_vdec.sv" \
+		$([ "${THUMB:-0}" = 0 ] || echo -DBUP_THUMB) -Mdir "$d/obj" -o vtb "$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$core/bup_cpu.sv" "$HERE/tb_vdec.sv" \
 		> "$d/build.log" 2>&1 || { echo "build failed: $d/build.log"; return 1; }
 	find "$d/obj" -name '*.gch' -delete
 	(cd "$d" && ./obj/vtb +list=code.txt) | grep -v "^- " | tee "$d/vdec.log"

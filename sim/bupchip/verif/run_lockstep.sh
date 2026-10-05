@@ -5,7 +5,9 @@
 # from BUP_SRCS (default: src/fpga/core/bupchip/bup_cpu.sv and bup_regfile.sv);
 # with LATE_RF=1 it is built with BUP_SIM_LATE_RF, so register-file writes
 # land a clock late (bup_cpu.sv) and only the bypass keeps results right;
-# with MODES=1 the core is built with MODES 1 (SVC, SYS and FIQ, banked).
+# with MODES=1 the core is built with MODES 1 (SVC, SYS and FIQ, banked);
+# with THUMB=1, with THUMB 1 (and MODES 1: DARIA), arm_only low unless
+# ARM_ONLY=1 (the BupChip profile).
 #   ./run_lockstep.sh IMAGE.a78 [+plusargs...]
 #   ./run_lockstep.sh rv.a78 +song=13 +songcyc=1000000 +maxret=1000000
 #   ./run_lockstep.sh --build     only build, and print the binary's path
@@ -31,6 +33,8 @@ case "$DUT" in
 		NAME=lockstep_bup
 		[ "${LATE_RF:-0}" = 0 ] || { NAME=lockstep_bup_laterf; BUP_SRCS="$BUP_SRCS -DBUP_SIM_LATE_RF"; }
 		[ "${MODES:-0}" = 0 ] || { NAME=${NAME}_modes; BUP_SRCS="$BUP_SRCS -DBUP_MODES"; }
+		[ "${THUMB:-0}" = 0 ] || { NAME=${NAME}_thumb; BUP_SRCS="$BUP_SRCS -DBUP_THUMB"; }
+		[ "${ARM_ONLY:-0}" = 0 ] || { NAME=${NAME}_armonly; BUP_SRCS="$BUP_SRCS -DBUP_ARM_ONLY"; }
 		# shellcheck disable=SC2086
 		BIN="$("$HERE/build.sh" "$NAME" tb_lockstep lockstep_dut_bup.sv $BUP_SRCS -DDUT_BUP)" ;;
 	*)

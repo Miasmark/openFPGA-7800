@@ -5,7 +5,8 @@
 #   ./build_s1.sh [PCM_DEPTH]      1024 (default, with the watermark remap) or 4096
 # LATE_RF=1 builds the core with BUP_SIM_LATE_RF (register-file writes land
 # a clock late, with garbage in between; see bup_cpu.sv) into
-# $WORK/obj_s1_<PCM_DEPTH>_laterf.
+# $WORK/obj_s1_<PCM_DEPTH>_laterf. THUMB=1 builds DARIA's core (THUMB 1,
+# MODES 1) in the BupChip profile (arm_only) into ..._thumb.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RTL="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)"
@@ -18,6 +19,7 @@ WORK="$(cd "$WORK" && pwd)"
 OBJ="$WORK/obj_s1_$DEPTH"
 DEFS=()
 [ "${LATE_RF:-0}" = 0 ] || { OBJ="${OBJ}_laterf"; DEFS+=(-DBUP_SIM_LATE_RF); }
+[ "${THUMB:-0}" = 0 ] || { OBJ="${OBJ}_thumb"; DEFS+=(-DBUP_THUMB); }
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
 	"$CORE/bup_cpu.sv" "$HERE/tb_s1.sv")
 if [ -x "$OBJ/vtb" ] && [ -z "$(find "${SRCS[@]}" -newer "$OBJ/vtb" 2>/dev/null)" ]; then

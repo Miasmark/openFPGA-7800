@@ -4,6 +4,10 @@
 # per clock, and print the figures the step's gates need.
 #   ./run_probe.sh [MHZ ...]       default: 28.636364 21.477273
 # MODES=1 compiles bup_cpu with MODES 1 (SVC, SYS and FIQ; DARIA).
+# WINDOW=1 gives it DARIA's memories at full size and CODE_AW 15 (with
+# MODES 1; bup_probe_top.sv): the fetch path of docs/DARIA_CORE.md, open
+# item 1. Its build directory is <MHZ>_window. THUMB=1 compiles bup_cpu with
+# THUMB 1 (DARIA; arm_only from a pin), in <MHZ>[_window]_thumb.
 # Each clock builds in $WORK/<MHZ>/ (default sim/work/bupchip/qprobe):
 # Analysis & Synthesis, Fitter and Timing Analyzer (no Assembler), a Timing
 # Analyzer script for the five worst setup paths at slow 85 C (paths.txt),
@@ -33,6 +37,8 @@ case "$WORK/" in "$ROOT"/*) ;; *) [ "$QUARTUS" = native ] || { echo "run_probe.s
 
 for mhz in "${CLOCKS[@]}"; do
 	dir="$WORK/$mhz"
+	[ "${WINDOW:-0}" = 0 ] || dir="$WORK/${mhz}_window"
+	[ "${THUMB:-0}" = 0 ] || dir="${dir}_thumb"
 	period=$(python3 -c "print('%.3f' % (1000.0 / float('$mhz')))")
 	rm -rf "$dir"
 	mkdir -p "$dir"
@@ -40,7 +46,9 @@ for mhz in "${CLOCKS[@]}"; do
 	sed "s#^set_global_assignment -name QIP_FILE bup_probe.qip\$#set_global_assignment -name QIP_FILE $qip#" \
 		"$HERE/bup_probe.qsf" > "$dir/bup_probe.qsf"
 	grep -q "QIP_FILE $qip\$" "$dir/bup_probe.qsf" || { echo "run_probe.sh: no QIP_FILE line in bup_probe.qsf" >&2; exit 1; }
-	[ "${MODES:-0}" = 0 ] || echo "set_parameter -name MODES 1" >> "$dir/bup_probe.qsf"
+	[ "${MODES:-0}" = 0 ] && [ "${WINDOW:-0}" = 0 ] || echo "set_parameter -name MODES 1" >> "$dir/bup_probe.qsf"
+	[ "${WINDOW:-0}" = 0 ] || echo "set_parameter -name WINDOW 1" >> "$dir/bup_probe.qsf"
+	[ "${THUMB:-0}" = 0 ] || echo "set_parameter -name THUMB 1" >> "$dir/bup_probe.qsf"
 	sed "s/^set period .*/set period $period/" "$HERE/bup_probe.sdc" > "$dir/bup_probe.sdc"
 	grep -q "^set period $period\$" "$dir/bup_probe.sdc" || { echo "run_probe.sh: no period line in bup_probe.sdc" >&2; exit 1; }
 
@@ -66,6 +74,7 @@ close $f
 report_timing -setup -npaths 5 -nworst 1 -detail full_path -file paths.rpt
 # The worst setup path into each kind of endpoint.
 proc worst {f label k} {
+	if {[get_collection_size $k] == 0} { return }
 	foreach_in_collection p [get_timing_paths -setup -to $k -npaths 1] {
 		puts $f [format "%-36s %4d %8.3f %8.3f %6d %s -> %s" $label [get_collection_size $k] \
 			[get_path_info $p -slack] [get_path_info $p -data_delay] [get_path_info $p -num_logic_levels] \
@@ -78,6 +87,10 @@ worst $f "ROM port A address (fetch)" [get_keepers *rom|*porta_address_reg*]
 worst $f "ROM port B (data, firmware write)" [get_keepers *rom|*portb_*]
 worst $f "RAM port A (address, data, we, be)" [get_keepers *cache_ram_tdp_dc_be:ram|*porta_*]
 worst $f "Register file MLAB write port" [get_keepers *rf*rtl_0*]
+worst $f "Window port A address (fetch)" [get_keepers *window|*porta_address_reg*]
+worst $f "Window port B (data, image write)" [get_keepers *window|*portb_*]
+worst $f "Cart RAM port A (32 KB)" [get_keepers *g_daria.ram|*porta_*]
+worst $f "Asset cache data port A" [get_keepers *g_daria.cache|*porta_*]
 worst $f "DSP data inputs (multiplier)" [get_pins -compatibility_mode "cpu|Mult0*|a?\[*\]"]
 worst $f "CPU flip-flops and MLAB inputs" [get_keepers cpu|*]
 worst $f "Output boundary flip-flops" [get_keepers *_o*~reg0]

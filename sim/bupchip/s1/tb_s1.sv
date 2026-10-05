@@ -73,8 +73,12 @@ module tb_s1;
 	wire   [3:0] rt_nzcv, rt_e_idx, rt_w_idx;
 	int          a_base = 0, a_size = 0;
 
+`ifdef BUP_THUMB
+	bup_cpu #(.MODES(1'b1), .THUMB(1'b1)) cpu (	// DARIA's core in the BupChip profile
+`else
 	bup_cpu cpu (
-		.clk, .rst, .freeze, .w_wait,
+`endif
+		.clk, .rst, .freeze, .w_wait, .arm_only(1'b1),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata, .rom_dq, .ram_q,
 		.asset_size(24'(a_size)), .asset_q, .w_asset, .w_addr, .w_size,

@@ -21,7 +21,9 @@
 #      underrun or overflow, and Misery_F (song 13) at a CPI within 1% of
 #      1.383.
 #   ./check.sh [GAME.a78]
-# About 5 minutes without a game, 8 with one on 4 cores. Exits 0 when
+# THUMB=1 runs all of it on DARIA's core (THUMB 1, MODES 1) in the BupChip
+# profile, arm_only high (docs/DARIA_CORE.md, step 2: "ARIA unchanged"); use
+# a separate WORK. About 5 minutes without a game, 8 with one on 4 cores. Exits 0 when
 # everything passes.
 #
 # Steps 1-4 need no firmware. Step 5's mixer harness and synthetic ARSC, and
@@ -31,6 +33,7 @@
 # an error.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
+[ "${THUMB:-0}" = 0 ] || export THUMB=1 ARM_ONLY=1
 WORK="${WORK:-$HERE/../../work/bupchip/s1}"
 FW="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
 mkdir -p "$WORK"

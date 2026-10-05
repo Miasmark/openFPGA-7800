@@ -20,8 +20,12 @@ module tb_vdec;
 	logic [31:0] q = 0;
 	int          n = 0, n_bad = 0;
 
+`ifdef BUP_THUMB
+	bup_cpu #(.MODES(1'b1), .THUMB(1'b1)) cpu (
+`else
 	bup_cpu cpu (
-		.clk, .rst, .freeze(1'b1), .w_wait(1'b0),
+`endif
+		.clk, .rst, .freeze(1'b1), .w_wait(1'b0), .arm_only(1'b1),
 		.rom_addr(), .rom_q(q),
 		.d_addr(), .ram_we(), .ram_be(), .ram_wdata(), .rom_dq(32'd0), .ram_q(32'd0),
 		.asset_size(24'd0), .asset_q(32'd0), .w_asset(), .w_addr(), .w_size(),
