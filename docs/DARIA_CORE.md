@@ -34,6 +34,7 @@ These carry over from ARIA:
 4. **32 KB of cart RAM** in block RAM (32 M10K), as upstream gives CDFJ+; the other schemes keep their 8 KB window inside it.
 5. **`bupchip.bin` stays resident.** The CPU's ROM gets 16 KB beside the image window, and the profile picks the firmware or the image with one address bit set at load. A 2600 ARM game then never overwrites the firmware, and a Souper game loaded after one does not depend on the Pocket reloading `bupchip.bin` (16 M10K).
 6. **No BUS.** BUS cartridges show the bad-game screen, as BUS0 already does upstream and every ARM scheme does in 2.1.x. No released game uses BUS. AtariAge will not sell BUS games because the scheme fails on a number of consoles, mostly the 2600 Junior and the 7800, and nothing has come of it since 2020.
+7. **S1 with Thumb at 38.18 MHz (VCO ÷ 18); no S3** (2026-10-05, after step 3). DARIA is late only on Spiders' 16 calls at the start of play, the same calls upstream misses. S3 would end them in time too, but it costs a new pipeline and 150–560 ALMs. The owner takes the better 80% for the work: S3 stays a later revision ("Step 3 work", decisions).
 
 ## Requirements
 
@@ -310,7 +311,7 @@ The setup slack and `clk_sdram` are at slow 85 °C; the hold slack is the worst 
 
 **Decisions.**
 
-- **CPU and clock: S1 with Thumb at ÷18, 38.18 MHz. S3 is not built.**
+- **CPU and clock: S1 with Thumb at ÷18, 38.18 MHz. S3 is not built.** The owner accepted this (decision 7).
   - **The result is upstream's.** Only Spiders' 16 calls at the start of play run late, the same ones upstream misses. Every other traced call stays within 92% of its budget.
   - **What S3 would add.** At 32.73 MHz it would end those 16 calls in time too (Spiders at 97%). The price:
     - step 4, a new pipeline with a 2-write/3-read register file;
@@ -1463,7 +1464,7 @@ What step 1 leaves open, each with the step that settles it:
 |---|---|---|
 | 1 | **The fetch path:** the window's 4:1 slice mux and the profile mux on `rom_q`, and the fetch and data addresses fanning out to 144–180 M10K. The early probe ("Clock") measured it at 1–2 ns, and Thumb at about 2.7 ns more. | **Settled (step 3):** three changes cut the path. The store decision (item 2) and the BL suffix's target each get an adder of their own, and the window is built as four 8K-deep RAMs with a registered 4:1 mux, so no read-enable decode sits on `rom_addr`. With them, DARIA (S1 + Thumb, the 128 KB window) closes ÷18, 38.18 MHz, in the full build with +0.29 to +1.31 ns on three seeds ("Step 3 work"). Levers still unused: duplicating the last address stage (60–120 ALMs), a 64 KB window |
 | 2 | **The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2) is now needed for 32.73 MHz itself: the worst path ends in the store decision taken from the adder's sum. **40.43 MHz** (−3.97 ns in the early probe) is out of reach without more than that fix. | **Done (step 3):** the store is decided on its own adder, exactly, for about 50 ALMs. 40.43 MHz is dropped. It missed by 2.31 ns in an empty device and by 1.18 ns in the full build. With the two further levers of item 1 it still misses by 0.47 ns, on S1's execute path |
-| 3 | **S3 or S1 with Thumb**, by area. | **Step 3 chose S1 with Thumb at ÷18 (38.18 MHz).** Its only late calls are Spiders' 16 at the start of play, the same ones upstream misses, which step 8 already accepts. S3 at 32.73 MHz would end those too, but it costs a new pipeline and 150–560 ALMs. It stays a later revision ("Step 3 work", decisions) |
+| 3 | **S3 or S1 with Thumb**, by area. | **Accepted by the owner (2026-10-05), decision 7. Step 3 chose S1 with Thumb at ÷18 (38.18 MHz).** Its only late calls are Spiders' 16 at the start of play, the same ones upstream misses, which step 8 already accepts. S3 at 32.73 MHz would end those too, but it costs a new pipeline and 150–560 ALMs. It stays a later revision ("Step 3 work", decisions) |
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above 128 KB** halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | Step 5, small-window builds |
