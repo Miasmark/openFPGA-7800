@@ -25,7 +25,9 @@
 #            fill had a PSRAM read in flight; HOLDMID and HOLDLAND, how many
 #            of them with psram.sv mid-access and with the halfword arriving
 #   WMSWEEP=1 with +wmsweep: the remap sweep must have run
-#   PSRAM, PREEMPT, PREFETCH, PCM_DEPTH: see build_s4.sh
+#   PSRAM, PREEMPT, PREFETCH, PCM_DEPTH, DARIA, PSRAM_CS: see build_s4.sh
+#   ARM38=1  clk_arm at 38.18 MHz (+arm38; DARIA's clock), except in runs
+#            that ask for +arm15
 #   WORK     default sim/work/bupchip/s4
 # Exits 0 when the CPU did not halt, nothing underflowed or overflowed, the
 # FIFO stayed at or above MINLEV, every testbench check passed (ROM and PSRAM
@@ -44,6 +46,7 @@ GAME="$(realpath "${1:?usage: run_s4.sh GAME.a78 [SONG] [SECONDS] [+plusargs...]
 SONG="${2:-13}"
 SECS="${3:-4}"
 shift $(( $# < 3 ? $# : 3 ))
+[ "${ARM38:-0}" = 0 ] || set -- "$@" +arm38
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 export WORK
