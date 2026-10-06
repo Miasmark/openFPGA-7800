@@ -14,7 +14,10 @@
 # SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
 # daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
 # (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
-# runs/shadow<WIN_KB>/<rom name>/. NOBUILD=1 runs the binary that is there
+# runs/shadow<WIN_KB>/<rom name>/. With WRAPPER=1 as well, DARIA is the
+# whole wrapper (bupchip_pocket.sv with POCKET_DARIA: capture, window, the
+# two-way cache over psram.sv and psram_model.sv, MMIO, the call port):
+# obj_wrap<WIN_KB>, runs/wrap<WIN_KB>/. NOBUILD=1 runs the binary that is there
 # without checking its sources (run_all.sh builds once, then sets it).
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
@@ -69,6 +72,13 @@ if [ "${SHADOW:-0}" != 0 ]; then
 	SRCS+=("$BUP/bup_cpu.sv" "$BUP/daria_mem.sv" "$BUP/daria_call.sv" "$BUP/daria_mmio.sv")
 	OBJ="$WORK/obj_shadow${WIN_KB:-128}"
 	DEFS=(-DDARIA_SHADOW "-DDARIA_WIN_KB=${WIN_KB:-128}" "-I$HERE")
+	if [ "${WRAPPER:-0}" != 0 ]; then
+		S4="$HERE/../s4"
+		SRCS+=("$RTL/bupchip_peripheral.sv" "$BUP/bup_tick48k.sv" "$BUP/bup_capture.sv" "$BUP/bup_asset_wr.sv"
+			"$BUP/bup_asset_cache.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv")
+		OBJ="$WORK/obj_wrap${WIN_KB:-128}"
+		DEFS+=(-DDARIA_WRAPPER -DPOCKET_DARIA)
+	fi
 fi
 
 BIN="$OBJ/vtb"
@@ -86,6 +96,7 @@ fi
 [ -n "$BUILD_ONLY" ] && exit 0
 PREFIX=""
 [ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
+[ "${SHADOW:-0}" = 0 ] || [ "${WRAPPER:-0}" = 0 ] || PREFIX="wrap${WIN_KB:-128}/"
 NAME="${NAME:-$PREFIX$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"

@@ -100,7 +100,10 @@ job() {         # job NAME LOG command...
 	shift 2
 	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 2; done
 	echo "start  $name"
-	("$@") > "$log" 2>&1 &
+	# Each job writes its own exit code: on runs of several hours, wait can
+	# lose a finished job's status once its PID has been reused.
+	rm -f "$log.rc"
+	(rc=0; "$@" || rc=$?; echo "$rc" > "$log.rc") > "$log" 2>&1 &
 	NAMES+=("$name"); PIDS+=("$!"); LOGS+=("$log")
 }
 S4() {          # S4 NAME SONG SECONDS GAME [env...] -- [plusargs...]
@@ -201,7 +204,8 @@ fi
 # ---- results --------------------------------------------------------------------------------
 RESULTS=()
 for i in "${!PIDS[@]}"; do
-	if wait "${PIDS[$i]}"; then r=PASS; else r=FAIL; fi
+	wait "${PIDS[$i]}" 2> /dev/null || true
+	if [ "$(cat "${LOGS[$i]}.rc" 2> /dev/null)" = 0 ]; then r=PASS; else r=FAIL; fi
 	RESULTS+=("$r  ${NAMES[$i]}")
 	echo "=== $r  ${NAMES[$i]} (${LOGS[$i]})"
 	grep -E "^(PASS|FAIL|SKIP|firmware slot|cartridge:|booted|reload|retune|hold at|held|pause|resume|busy|work|audio|fifo|cache|capture|crossing|m10k|holds|pop|watermark|mute|wmsweep|PCM|lowest|directed|G tag|  [0-9]+ (halfwords|tags|word loads)|run_[a-z]*\.sh:|stress)" \

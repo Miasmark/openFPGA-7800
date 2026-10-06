@@ -45,12 +45,91 @@
 `ifndef DARIA_WIN_KB
 `define DARIA_WIN_KB 128
 `endif
+`ifndef DARIA_PSRAM_CS
+`define DARIA_PSRAM_CS 50.0
+`endif
 
 	// ---- DARIA's clock ---------------------------------------------------------
 	logic clk_d = 0;
 	always #13095 clk_d = ~clk_d;		// 26.19 ns, 8 per 3 clk_sys
 	localparam real D_HZ = 687272727.0 / 18.0;
 
+`ifdef DARIA_WRAPPER
+	// ---- the wrapper as DARIA builds it, in the 2600 profile ----------------------------
+	// bupchip_pocket.sv with POCKET_DARIA: the cartridge reaches it as the
+	// loader delivers it (bup_capture: the window, the front-end ROM and the
+	// PSRAM, at tb_daria's load_gap pace), and the image beyond the window
+	// comes through the two-way cache from psram.sv (CLOCK_SPEED
+	// DARIA_PSRAM_CS) on a psram_model.sv die. Calls go through the front
+	// ends' ports: state RAM port B, call_tog, ret_tog, ready.
+	logic clk_74a = 0;
+	always #6734 clk_74a = ~clk_74a;
+	wire         d_ram32 = dut.mapper_ram_size == 16'd32768;
+	int          d_await = 0;		// +d_await has no effect here: the cache makes the waits
+	logic  [7:0] d_stb_addr = 0;
+	logic        d_stb_we = 0;
+	logic [31:0] d_stb_wd = 0;
+	wire  [31:0] d_stb_q;
+	logic        d_call_tog = 0;
+	wire         d_ret_tog, d_ready;
+	wire         p_bank, p_we, p_hi, p_lo, p_re, p_avail, p_busy;
+	wire  [21:0] p_addr;
+	wire  [15:0] p_din, p_dout;
+
+	bupchip_pocket #(.WIN_KB(`DARIA_WIN_KB)) dw (
+		.clk_sys, .clk_arm(clk_d), .clk_74a,
+		.pll_locked(1'b1), .pll_busy(1'b0), .souper_profile(1'b0), .pause(1'b0),
+		.byte_valid(ioctl_wr && cart_download), .byte_hi(3'd0), .load_addr(ioctl_addr), .load_data(ioctl_dout),
+		.load_start(cart_download && !old_cart_download), .load_end(!cart_download && old_cart_download),
+		.fw_download(1'b0), .cmd_valid(1'b0), .cmd_data(8'd0), .audio_l(), .audio_r(),
+		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
+		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
+		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
+		.daria_profile(1'b1), .daria_ram32(d_ram32), .daria_pal(1'b0), .daria_mreset(1'b0),
+		.daria_call_tog(d_call_tog), .daria_ret_tog(d_ret_tog), .daria_ready(d_ready), .daria_halted(),
+		.daria_stb_addr(d_stb_addr), .daria_stb_we(d_stb_we), .daria_stb_wd(d_stb_wd), .daria_stb_q(d_stb_q),
+		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
+		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q());
+
+	wire [21:16] cram_a;
+	wire  [15:0] cram_dq;
+	wire         cram_wait, cram_clk, cram_adv_n, cram_cre, cram_ce0_n, cram_ce1_n;
+	wire         cram_oe_n, cram_we_n, cram_ub_n, cram_lb_n;
+	psram #(.CLOCK_SPEED(`DARIA_PSRAM_CS)) dps (
+		.clk(clk_d), .bank_sel(p_bank), .addr(p_addr), .write_en(p_we), .data_in(p_din),
+		.write_high_byte(p_hi), .write_low_byte(p_lo), .read_en(p_re),
+		.read_avail(p_avail), .data_out(p_dout), .busy(p_busy),
+		.cram_a, .cram_dq, .cram_wait, .cram_clk, .cram_adv_n, .cram_cre, .cram_ce0_n, .cram_ce1_n,
+		.cram_oe_n, .cram_we_n, .cram_ub_n, .cram_lb_n);
+	psram_model dchip (
+		.cram_a, .cram_dq, .cram_wait, .cram_clk, .cram_adv_n, .cram_cre, .cram_ce0_n, .cram_ce1_n,
+		.cram_oe_n, .cram_we_n, .cram_ub_n, .cram_lb_n);
+
+	// What the comparison watches, inside the wrapper.
+	wire        d_ram_we = dw.ram_we, d_reg_sel = dw.reg_sel, d_reg_write = dw.reg_write, d_halted = dw.halted;
+	wire [31:0] d_d_addr = dw.d_addr, d_ram_wdata = dw.ram_wdata, d_w_addr = dw.w_addr;
+	wire [31:0] d_reg_wdata = dw.reg_wdata, d_reg_rdata = dw.reg_rdata, d_halt_pc = dw.halt_pc;
+	wire  [3:0] d_ram_be = dw.ram_be, d_halt_code = dw.halt_code;
+	wire  [1:0] d_w_size = dw.w_size;
+	wire        d_call_go = dw.call_go, d_returned = dw.returned;
+	wire        d_not_ready = !d_ready;
+	`define D_CART_RAM dw.mem.cart_ram
+
+	// The cache beyond the window: demand misses and the clocks W waited.
+	longint d_miss = 0, d_stall = 0, d_pf = 0;
+	always @(posedge clk_d) begin
+		if (dw.st_miss) d_miss++;
+		if (dw.st_pf) d_pf++;
+		if (dw.st_stall) d_stall++;
+	end
+	// The image as captured: the receiver's size, against upstream's.
+	logic d_size_seen = 0;
+	always @(posedge clk_sys) if (running && !d_size_seen && dw.img_ready) begin
+		d_size_seen <= 1;
+		if (dw.img_size != 20'(rom_size > 32'h80000 ? 32'h80000 : rom_size))
+			$display("DARIA img_size %0d, upstream's rom_size %0d", dw.img_size, rom_size);
+	end
+`else
 	// ---- the core and its memories --------------------------------------------------
 	logic        d_rst = 1, d_rst_sys = 1;
 	logic [19:0] d_img_size = 0;
@@ -121,6 +200,9 @@
 		.size(d_w_size), .wdata(d_reg_wdata), .rdata(d_reg_rdata),
 		.clk_sys, .rst_sys(d_rst_sys), .pal(1'b0), .run(1'b1));
 
+	wire        d_not_ready = d_rst_sys;
+	`define D_CART_RAM dmem.cart_ram
+
 	// ---- the image, when the run starts ---------------------------------------------------
 	always @(posedge clk_sys) if (running && d_rst_sys) begin
 		d_img_size <= 20'(rom_size > 32'h80000 ? 32'h80000 : rom_size);
@@ -137,6 +219,8 @@
 		d_rst_s <= {d_rst_s[0], d_rst_sys};
 		d_rst <= d_rst_s[1];
 	end
+
+`endif
 
 	function automatic logic [3:0] lanes(input logic [1:0] size, input logic [1:0] a);
 		lanes = size == 2'd0 ? 4'b0001 << a : size == 2'd1 ? 4'b0011 << {a[1], 1'b0} : 4'b1111;
@@ -213,11 +297,11 @@
 		d_stb_we <= 0;
 		case (d_ph)
 			0: if (d_post_s[2] != d_post_s[1]) begin
-				if (d_done || d_rst_sys) shadow_skip++;
+				if (d_done || d_not_ready) shadow_skip++;
 				else begin
 					d_call <= up_call;
 					d_t0 <= now;
-					for (int i = 0; i < 8192; i++) dmem.cart_ram.mem_q[i] = up_snap[i];
+					for (int i = 0; i < 8192; i++) `D_CART_RAM.mem_q[i] = up_snap[i];
 					d_k <= 0;
 					d_ph <= 1;
 				end
@@ -369,5 +453,9 @@
 		$display("DARIA shadow: %0d calls compared, %0d differ or halted, %0d skipped (DARIA busy)%s; %0d RAM writes and %0d MMIO accesses compared",
 			shadow_calls, shadow_bad, shadow_skip, stopped, shadow_writes, shadow_io);
 		$display("DARIA collisions: upstream %0d, DARIA %0d, in %0d console-side cart RAM reads", coll_up, coll_d, fe_reads);
+`ifdef DARIA_WRAPPER
+		$display("DARIA cache: %0d demand misses, %0d prefetches, %0d clocks W waited; PSRAM model: %0d timing violations",
+			d_miss, d_pf, d_stall, dchip.n_viol);
+`endif
 		$fclose(fd_dar);
 	end

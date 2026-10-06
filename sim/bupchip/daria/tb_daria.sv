@@ -125,6 +125,14 @@ module tb_daria;
 	// ----------------------------------------------------- DDR3 stand-in
 	// 64-bit words, fixed read latency, BURSTCNT beats, never busy.
 	int lat = 20;
+	// Extra clk_sys per downloaded byte. 0: 2 clk_sys a byte. With the DARIA
+	// wrapper 1, 3 clk_sys a byte, under the Pocket loader's rate (2.5):
+	// bup_capture needs at least 5 clk_sys between messages, one a halfword.
+`ifdef DARIA_WRAPPER
+	int load_gap = 1;
+`else
+	int load_gap = 0;
+`endif
 	wire [28:0] ddram_addr;
 	wire  [7:0] ddram_burstcnt, ddram_be;
 	wire [63:0] ddram_din;
@@ -869,6 +877,7 @@ module tb_daria;
 		cart_download = 1;
 		for (int i = 0; i < n; i++) begin
 			@(posedge clk_sys);
+			repeat (load_gap) @(posedge clk_sys);
 			while (mapper_load_wait) @(posedge clk_sys);
 			ioctl_addr <= 25'(i);
 			ioctl_dout <= img[i];

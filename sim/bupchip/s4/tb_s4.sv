@@ -13,8 +13,12 @@
 //            (+rom); the cartridge's header byte 53 sets souper_profile, as
 //            atari7800_pocket.sv's cart_flags does
 //   PSRAM    agg23's psram.sv (src/fpga/pocket_utils/) at CLOCK_SPEED =
-//            28.636364 on a psram_model.sv die, or, built with
-//            -DPSRAM_STANDIN, psram_standin.sv (the same port timing)
+//            28.636364 (-DPSRAM_CS sets another) on a psram_model.sv die,
+//            or, built with -DPSRAM_STANDIN, psram_standin.sv (the same port
+//            timing)
+//   DARIA    built with -DPOCKET_DARIA, the wrapper as DARIA builds it
+//            (THUMB 1, the cache's two ways, daria_mem's cart RAM, the
+//            profile mux), held in the BupChip profile
 //   command  $80|+song on the clk_sys command port once the firmware has
 //            enabled PCM, as cart.sv's $8007 pair does
 //
@@ -57,6 +61,11 @@
 //   +pal            PAL clocks from the start
 //   +arm15          clk_arm at 1.5 x clk_sys (21.477 MHz; 21.281 with +pal),
 //                   S3's clock, instead of 2 x
+//   +arm38          clk_arm at 8/3 x clk_sys (38.18 MHz, DARIA's VCO / 18;
+//                   37.83 with +pal), rising edges together every 3 clk_sys
+//   +ramjunk=SEED   POCKET_DARIA builds: fill all 32 KB of cart RAM with
+//                   random words before the downloads, as a 2600 ARM game
+//                   leaves it (DARIA_CORE.md, open item 8)
 //   +silent=MS      no song: after the downloads, run MS ms and require the
 //                   BupChip held and silent (missing or short firmware)
 //   +reload=MS      MS ms into the song, download +rom2 (default +rom) again,
@@ -116,6 +125,10 @@
 `define BUP_THROTTLE 16
 `endif
 
+`ifndef PSRAM_CS
+`define PSRAM_CS 28.636364
+`endif
+
 module tb_s4;
 	localparam int PCM_DEPTH = `PCM_DEPTH;
 
@@ -123,10 +136,18 @@ module tb_s4;
 	longint arm_half = 17460;           // ps: 28.636 MHz; clk_sys is half the rate
 	longint u15 = 11640;                // ps, +arm15: clk_arm period 4 u15, clk_sys 6 u15
 	bit     r15 = 0;
+	longint u38 = 4365;                 // ps, +arm38: clk_arm period 6 u38, clk_sys 16 u38
+	bit     r38 = 0;
 	real    arm_mhz = 28.636364;
 	logic   clk_arm = 0, clk_sys = 0, clk_74a = 0;
 	initial forever begin
-		if (!r15) begin
+		if (r38) begin                  // rising edges together every 48 u38
+			for (int k = 0; k < 48; k++) begin
+				if (k % 3 == 0) clk_arm = (k / 3) % 2 == 0;
+				if (k % 8 == 0) clk_sys = (k / 8) % 2 == 0;
+				#(u38);
+			end
+		end else if (!r15) begin
 			#(arm_half); clk_arm = 1; clk_sys = 1;
 			#(arm_half); clk_arm = 0;
 			#(arm_half); clk_arm = 1;
@@ -145,16 +166,17 @@ module tb_s4;
 	always #6734 clk_74a = ~clk_74a;
 
 	function automatic longint arm_per();
-		return r15 ? 4 * u15 : 2 * arm_half;
+		return r38 ? 6 * u38 : r15 ? 4 * u15 : 2 * arm_half;
 	endfunction
 	function automatic longint sys_per();
-		return r15 ? 6 * u15 : 4 * arm_half;
+		return r38 ? 16 * u38 : r15 ? 6 * u15 : 4 * arm_half;
 	endfunction
 
 	task automatic set_pal(input bit pal);
 		arm_half = pal ? 17621 : 17460;
 		u15 = pal ? 11747 : 11640;
-		arm_mhz = (r15 ? 21.477273 : 28.636364) * (pal ? 0.99088 : 1.0);
+		u38 = pal ? 4405 : 4365;
+		arm_mhz = (r38 ? 38.181818 : r15 ? 21.477273 : 28.636364) * (pal ? 0.99088 : 1.0);
 	endtask
 
 	// ---- the wrapper's inputs ----------------------------------------------------------------
@@ -187,7 +209,31 @@ module tb_s4;
 		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
 		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
 		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
+`ifdef POCKET_DARIA
+		// The BupChip profile only: the 2600 side is idle.
+		.daria_profile(1'b0), .daria_ram32(1'b0), .daria_pal(1'b0), .daria_mreset(1'b0),
+		.daria_call_tog(1'b0), .daria_ret_tog(), .daria_ready(), .daria_halted(),
+		.daria_stb_addr(8'd0), .daria_stb_we(1'b0), .daria_stb_wd(32'd0), .daria_stb_q(),
+		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
+		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q(),
+`endif
 		.dbg_status, .dbg_halt_pc, .dbg_load());
+
+`ifdef POCKET_DARIA
+	initial begin
+		int junk_seed;
+		if ($value$plusargs("ramjunk=%d", junk_seed)) begin
+			int unsigned x;
+			x = junk_seed;
+			#1;	// after the RAM model's own power-up zeroes
+			for (int i = 0; i < 8192; i++) begin
+				x = x ^ (x << 13); x = x ^ (x >> 17); x = x ^ (x << 5);
+				dut.mem.cart_ram.mem_q[i] = x;
+			end
+			$display("cart RAM filled with random words (seed %0d)", junk_seed);
+		end
+	end
+`endif
 
 `ifdef PSRAM_STANDIN
 	psram_standin ps (
@@ -205,7 +251,7 @@ module tb_s4;
 	wire  [15:0] cram_dq;
 	wire         cram_wait, cram_clk, cram_adv_n, cram_cre, cram_ce0_n, cram_ce1_n;
 	wire         cram_oe_n, cram_we_n, cram_ub_n, cram_lb_n;
-	psram #(.CLOCK_SPEED(28.636364)) ps (
+	psram #(.CLOCK_SPEED(`PSRAM_CS)) ps (
 		.clk(clk_arm), .bank_sel(p_bank), .addr(p_addr), .write_en(p_we), .data_in(p_din),
 		.write_high_byte(p_hi), .write_low_byte(p_lo), .read_en(p_re),
 		.read_avail(p_avail), .data_out(p_dout), .busy(p_busy),
@@ -765,6 +811,8 @@ module tb_s4;
 		void'($value$plusargs("holddelay=%d", hold_delay));
 		void'($value$plusargs("holdstep=%d", hold_step));
 		r15 = $test$plusargs("arm15");
+		r38 = $test$plusargs("arm38") && !r15;
+		if (r38) arm_mhz = 38.181818;
 		byte_ps *= 1000.0;
 		jit_ps *= 1000.0;
 		void'($urandom(seed));
@@ -790,7 +838,7 @@ module tb_s4;
 		if (rom_file == "") $fatal(1, "no +rom");
 		read_image(rom_file);
 		$display("BupChip at %.3f MHz (%s clk_sys), PCM FIFO %0d, pre-emption %0d, prefetch %0d, throttle %0d/16; PSRAM: %s",
-			arm_mhz, r15 ? "1.5 x" : "2 x", PCM_DEPTH, `PREEMPT, `PREFETCH, `BUP_THROTTLE, PSRAM_KIND);
+			arm_mhz, r38 ? "8/3 x" : r15 ? "1.5 x" : "2 x", PCM_DEPTH, `PREEMPT, `PREFETCH, `BUP_THROTTLE, PSRAM_KIND);
 		begin
 			string fw_s, skip_s;
 			fw_s = fw_file == "" ? "(none)" : fw_file;
