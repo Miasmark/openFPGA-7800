@@ -339,7 +339,7 @@ The setup slack and `clk_sdram` are at slow 85 °C; the hold slack is the worst 
 
 ## Step 5 work: the memory system (in progress)
 
-Paused by the owner on 2026-10-05 with the pieces built and tested on their own benches, and DARIA compared with upstream call by call on five images. What follows is the state at the pause, then what is left.
+Paused by the owner on 2026-10-05 with the pieces built and tested on their own benches, and DARIA compared with upstream call by call on five images; resumed on 2026-10-06 with the wrapper. What follows is the state now, then what is left.
 
 ### What is built
 
@@ -351,7 +351,32 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 | MMIO and timer 1 | `daria_mmio.sv` | Done (section 6, with the changes below) |
 | Image capture | `bup_capture.sv`, `bup_asset_wr.sv` | Done (section 2, with the changes below) |
 | Two-way cache | `bup_asset_cache.sv` (`WAYS`) | Done (section 3, with the changes below) |
-| Wrapper | `bupchip_pocket.sv` | **Not started.** Ties only. The connections are listed under "What is left" |
+| Wrapper | `bupchip_pocket.sv` under `POCKET_DARIA` | Done (2026-10-06; below). The shipped build is unchanged |
+
+### The wrapper (`POCKET_DARIA`)
+
+- **Profile and hold.** `daria_profile`, `daria_ram32` and the mapper reset reach `clk_arm` through two flops. The hold also releases for `daria_profile`. The run gate is `img_ready` in the 2600 profile and `fw_loaded & asset_ready` in the BupChip's, and a mapper reset holds the CPU in the 2600 profile only (a 7800 reset leaves the music playing, as before).
+- **CPU:** `THUMB` 1, `CODE_AW` 15, `WIN_KB`; `arm_only` in the BupChip profile.
+- **Memories:** `daria_mem`. The profile picks `rom_q` and `rom_dq` between the window and the firmware ROM. The cart RAM replaces the BupChip's RAM, which is its low 16 KB. The front-end ROM takes the cartridge slot's bytes below 32 KB inside the capture's cartridge window.
+- **Cache:** `WAYS` 2. `daria_call` and `daria_mmio` are both held while `cpu_run` is low, so a new cartridge, a mapper reset or a PAL retune clears MAMCR, TCR and TC (P4) and abandons a call.
+- **MMIO.** The peripheral sees `reg_sel` only in the BupChip profile, `daria_mmio` only in the 2600 one, and the peripheral is held in the 2600 profile. Upstream's peripheral decodes `reg_rdata` from `reg_addr` alone, without `reg_sel`. Its word is therefore masked in the 2600 profile; otherwise a MAMCR read would OR in its ID word, and a T1TC read its status bits.
+- **Front ends' side** (`clk_sys`): `daria_call_tog` in, `daria_ret_tog` out, `daria_ready` (parked and `img_ready`) and `daria_halted` through two flops, and the state RAM's, cart RAM's and front-end ROM's B ports.
+- **Synthesis** (`quartus_probe/daria_wrap_map.sh`, Analysis & Synthesis only). Every RAM maps as designed:
+  - the window, the cart RAM and the front-end ROM as 8K × 32 true-dual-port M10K, the cart RAM with byte lanes on two clocks;
+  - the state RAM 256 × 32;
+  - the cache's tags 2 × 128 × 14 and data 2 × 512 × 32.
+
+  The wrapper's estimates:
+
+  | Wrapper | ALMs (estimate) | Registers | Block memory bits |
+  |---|---|---|---|
+  | DARIA | 3,007 | 1,285 | 1.78 M |
+  | The shipped wrapper | 2,033 | 948 | 0.30 M |
+
+  The check found that the two-way cache's bare `generate` `if` fails Quartus 21.1, in the shipped build too; it now spells out the region.
+- **The benches through it.**
+  - `s4`: `DARIA=1` builds the wrapper with `POCKET_DARIA`, `+arm38` runs `clk_arm` at 38.18 MHz, `PSRAM_CS` sets `psram.sv`'s `CLOCK_SPEED`, and `ARM38=1` runs a whole `check.sh` at 38.18 MHz.
+  - `tb_daria`: `WRAPPER=1` runs DARIA as the whole wrapper in the 2600 profile. The cartridge is captured from the loader, and the image beyond the window comes through the cache over `psram.sv` and `psram_model.sv`.
 
 ### Results
 
@@ -372,6 +397,14 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
   - DARIA's measured clocks per call equal the model's `s1_cyc` (median ratio 1.00, at most 1.01 and 1.12 on the two full runs), so the model's lateness table ("Step 3 work") stands.
   - A DARIA call takes about as long as upstream's: Mappy's first, 283 µs at 38.18 MHz against 293 µs at 71.6 MHz.
+- **The BupChip through the DARIA wrapper.** Song 13 is PCM-identical in both streams:
+
+  | Clock | `CLOCK_SPEED` | Busy | Cache misses | Stall clocks | PSRAM model violations |
+  |---|---|---|---|---|---|
+  | 28.64 MHz | 28.636364 | 72.8% | 1,269 | 11,381 | 0 |
+  | 38.18 MHz | 50.0 | 54.6% | 1,275 | 13,091 | 0 |
+- **Open item 8** (CoreTone after a 2600 game). All 32 KB of cart RAM were filled with random words before the downloads (`tb_s4 +ramjunk`). Song 13 is still PCM-identical, and its counts equal the clean run's clock for clock (83,432,084 busy clocks). CoreTone does not depend on what the RAM holds at boot.
+- **Through the whole wrapper in the 2600 profile** (`tb_daria`, `WRAPPER=1`): Mappy's 79 calls (40 frames) match upstream. The cartridge comes through the capture, `psram.sv` runs at `CLOCK_SPEED` 50.0, and the PSRAM model reports 0 violations.
 - **Cart RAM collisions** (open item 7, counted by the shadow): a console-side read within one `clk_sys` of a CPU write to the same word. Elevator Agent: 0 in 25.6 M reads. Galagon: 21 in 17.8 M, for upstream's ARM and DARIA alike. The equal counts suggest a console-side read repeating at one address while the CPU writes it. Step 6's front ends decide whether such a read needs ordering.
 
 ### Changes against the design
@@ -396,20 +429,11 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
 ### What is left
 
-1. **The wrapper** (`bupchip_pocket.sv` under `POCKET_DARIA`):
-   - the profile and mapper reset through two flops;
-   - the run gate `prof26 ? img_ready : fw_loaded & asset_ready`;
-   - the CPU with `THUMB` 1 and `CODE_AW` 15, with `daria_mem`, `daria_call` and `daria_mmio`;
-   - the receiver's window port, and the cache at `WAYS` 2;
-   - `reg_rdata` as the peripheral's OR the MMIO's, with each block's `sel` gated by its profile;
-   - `rom_q`/`rom_dq` muxed by the profile;
-   - ports for the front ends.
-
-   `s4/check.sh` must still pass.
+1. **The wrapper:** done; `s4/check.sh` on it at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) is running.
 2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
 3. **Small-window runs** with the real cache, `psram.sv` at 38.18 MHz and the PSRAM model (open items 6 and 10): Zaxxon with a 32 KB window (its code ends at 0x7B9C), Turbo and Elevator Agent with 48 KB (code to 0xB30A).
-4. **Open item 8** (CoreTone after a 2600 game) once the wrapper exists.
-5. **`s4/check.sh`'s tally.** Its `wait` can lose a job's exit status on runs of several hours. Each job's log ended in PASS while the tally said FAIL for 3 of 28 jobs. Each job should write its own exit code to a file.
+4. **Open item 8:** settled (above).
+5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
 6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
 
 ## Design (step 1)
