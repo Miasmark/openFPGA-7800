@@ -179,6 +179,8 @@ module bup_asset_cache #(
 		.clk_b_i(clk), .addr_b_i({f_idx, f_fl_hw[2:1]}), .wren_b_i(rx && !f_way),
 		.byteena_b_i(f_fl_hw[0] ? 4'b1100 : 4'b0011), .wdata_b_i({rd_data, rd_data}), .q_b_o());
 
+	// Quartus 21.1 wants the generate region spelled out.
+	generate
 	if (TWO) begin : way1
 		cache_ram_tdp_dc #(.ADDR_WIDTH(IW), .DATA_WIDTH(14)) tags (
 			.clk_a_i(clk), .addr_a_i(d_addr[IW+3:4]), .wren_a_i(1'b0), .wdata_a_i(14'd0), .q_a_o(tq_a1),
@@ -193,6 +195,7 @@ module bup_asset_cache #(
 		assign tq_b1 = 14'd0;
 		assign dq_a1 = 32'd0;
 	end
+	endgenerate
 
 	// Port-B writes of last clock: a port-A read registered on the same edge
 	// is not used.
