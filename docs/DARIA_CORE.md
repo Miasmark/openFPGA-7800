@@ -436,6 +436,29 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
 6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
 
+## Comparisons: upstream and lroby74's fork (2026-10-07)
+
+Upstream MiSTer's ARM is the reference DARIA follows. The owner asked how a second implementation handles the same cartridges: lroby74's fork of the MiSTer core (github.com/lroby74/Atari7800_ARM_MiSTer, CC BY-NC 4.0). Its ARM and Thumb sources are not read (the clean-room rule), so it is measured as a black box only: its own Quartus build and its reports, and simulation of the whole core at the console's outputs. Everything built from it stays in `sim/work`.
+
+| | Upstream MiSTer | lroby74's fork (MiSTer) | DARIA (Pocket) |
+|---|---|---|---|
+| CPU | ARM7TDMI (GPL core) | its own Thumb CPU, one for 2600 and one for 7800 cartridges | ARIA (the BupChip's CPU) with ARM and Thumb, one instance for both uses |
+| CPU clock | 71.59 MHz (5 × `clk_sys`) | 57.27 MHz (4 × `clk_sys`, the video clock); Fmax 59.2 MHz at slow 100 °C | 38.18 MHz (VCO ÷ 18); Fmax 38.6–40.2 MHz on three seeds, slow 85 °C |
+| Device | 5CSEBA6, speed grade 7 | 5CSEBA6, speed grade 7 | 5CEBA4, speed grade 8 |
+| CPU size | 13,424 ALUTs, 2,846 registers, 5 DSP [syn] | about 3,600 ALMs, 2,348 registers, 2 DSP, plus an instruction cache in 16 MLABs [fit] | 1,876 ALMs, 628 registers [fit, step 3] |
+| Whole ARM cost | 13,760 ALMs, 7,855 registers, 5 DSP, 72 Kbit of block RAM over the build without it [syn] | about 9,700 ALMs and 281 M10K for both paths; the 2600 path about 6,200 ALMs and 168 M10K [fit] | the wrapper's DARIA additions about 970 ALMs and 199 M10K [syn]; front ends 850–1,100 ALMs [E] |
+| Image | DDR3 shadow, 2 KB I- and D-caches | first 128 KB in block RAM (128 M10K) | first 128 KB in block RAM (128 M10K), the rest through a 4 KB cache over PSRAM |
+
+- **Sources.** Upstream: `quartus_probe/upstream_arm_map.sh`, Analysis & Synthesis of its core with and without `NO_ARM_MAPPER` on 5CSEBA6 (estimates, no fit). The fork: a full compile of its own project in Quartus 21.1 (its project targets 17.0.2), from the fitter's per-entity table and timing reports. That compile also fills 74% of the 5CSEBA6's ALMs and 93% of its M10K, and meets timing on every core clock. Its PLL has a 64.43 MHz output that nothing uses.
+- **Upstream's ARM** is larger than the whole Pocket core's logic budget allows. That is why the Pocket build leaves it out (`NO_ARM_MAPPER`) and DARIA exists.
+- **The fork's ARM blocks** alone would take over half the Pocket's 18,480 ALMs and 91% of its 308 M10K. That suits MiSTer's larger device, not the Pocket.
+- **Behaviour** (whole cores, frame fingerprints: `tb_daria +fp=1`, `fp_compare.py`). On Mappy, 600 frames through FIRE and the joystick script, the fork matches upstream on every frame in frame length and in all 128 bytes of RIOT RAM, so the ARM's work comes out the same. The picture differs only by one extra black line per frame on upstream's side.
+- **Audio differs in two ways:**
+  - Upstream holds the 6507 during each call (about 5,500 `clk_sys` at the median), so AUDV0 stops changing there; the fork's 6507 keeps writing it.
+  - In the main kernel, the values written differ: upstream's are 0, 3, 6, 9 or 12 where the fork's take every value 0–12.
+
+  Which is right is for step 6, the front ends, to check against Stella. DARIA follows upstream.
+
 ## Design (step 1)
 
 Four sections follow: the CPU's Thumb support, the memory system with the call port and the clock crossings, the front end, and Fix B. Line references to `bup_cpu.sv` in this part are to its version before step 2 (806dcd4); "Step 2 work" points into the current one. Each was drafted with experiments of its own: Yosys on models of the decode, black-box runs of the reference core, elaborations of `psram.sv`, and 57 whole-core simulations of Fix B. Those experiments are kept in `sim/work/` until their step moves them into `sim/bupchip/daria/`; none uses game data.
