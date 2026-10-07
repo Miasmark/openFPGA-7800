@@ -456,8 +456,8 @@ Upstream MiSTer's ARM is the reference DARIA follows. The owner asked how a seco
 | CPU clock | 71.59 MHz (5 × `clk_sys`) | 57.27 MHz (4 × `clk_sys`, the video clock); Fmax 59.2 MHz at slow 100 °C | 38.18 MHz (VCO ÷ 18); Fmax 38.6–40.2 MHz on three seeds, slow 85 °C |
 | Device | 5CSEBA6, speed grade 7 | 5CSEBA6, speed grade 7 | 5CEBA4, speed grade 8 |
 | CPU size | 13,424 ALUTs, 2,846 registers, 5 DSP [syn] | about 3,600 ALMs, 2,348 registers, 2 DSP, plus an instruction cache in 16 MLABs [fit] | 1,876 ALMs, 628 registers [fit, step 3] |
-| Whole ARM cost | 13,760 ALMs, 7,855 registers, 5 DSP, 72 Kbit of block RAM over the build without it [syn] | about 9,700 ALMs and 281 M10K for both paths; the 2600 path about 6,200 ALMs and 168 M10K [fit] | the wrapper's DARIA additions about 970 ALMs and 199 M10K [syn]; front ends 850–1,100 ALMs [E] |
-| Image | DDR3 shadow, 2 KB I- and D-caches | first 128 KB in block RAM (128 M10K) | first 128 KB in block RAM (128 M10K), the rest through a 4 KB cache over PSRAM |
+| Whole ARM cost | 13,760 ALMs, 7,855 registers, 5 DSP, 72 Kbit of block RAM over the build without it [syn] | about 9,700 ALMs and 281 M10K for both paths; the 2600 path about 6,200 ALMs and 168 M10K [fit] | the wrapper's DARIA additions about 950 ALMs and 135 M10K with the 64 KB window [syn]; front ends 850–1,100 ALMs [E] |
+| Image | DDR3 shadow, 2 KB I- and D-caches | first 128 KB in block RAM (128 M10K) | first 64 KB in block RAM (64 M10K, decision 8), the rest through a 4 KB cache over PSRAM |
 
 - **Sources.** Upstream: `quartus_probe/upstream_arm_map.sh`, Analysis & Synthesis of its core with and without `NO_ARM_MAPPER` on 5CSEBA6 (estimates, no fit). The fork: a full compile of its own project in Quartus 21.1 (its project targets 17.0.2), from the fitter's per-entity table and timing reports. That compile also fills 74% of the 5CSEBA6's ALMs and 93% of its M10K, and meets timing on every core clock. Its PLL has a 64.43 MHz output that nothing uses.
 - **Upstream's ARM** is larger than the whole Pocket core's logic budget allows. That is why the Pocket build leaves it out (`NO_ARM_MAPPER`) and DARIA exists.
@@ -489,8 +489,8 @@ Four sections follow: the CPU's Thumb support, the memory system with the call p
 1. **Thumb is decoded beside ARM**, into the same controls, not translated into ARM first. The register-index path that starts the critical path keeps today's depth [syn]; translating first would cost about 4–7 ns and miss 32.73 MHz [E].
 2. **The C flag after a Thumb MUL is unknown.** An instruction that reads it before anything rewrites it halts with a new code 8. The reference computes that C from the ARM7TDMI multiplier's internals [sim]; no executed path in the demos or the added images reads it [trace].
 3. **The front ends get their own 32 KB copy of the image's start** (32 M10K). A block-RAM port has one clock, and the CPU (`clk_arm`) needs both ports of the window.
-4. **Bytes beyond the 128 KB window come from the PSRAM** through ARIA's asset cache, not from the SDRAM. The SDRAM controller and its `clk_sdram` paths stay untouched, the CPU's misses cross no clock, and a miss takes 13 `clk_arm` instead of 24–30.
-5. **Code must lie in the window:** a fetch beyond 128 KB halts (code 4). Code ends below 0xB30A in every demo (below 0x5700 in the added images), and the CDFJ+ template starts it at `C_START` ≤ $7800.
+4. **Bytes beyond the window (64 KB since decision 8; 128 KB as designed) come from the PSRAM** through ARIA's asset cache, not from the SDRAM. The SDRAM controller and its `clk_sdram` paths stay untouched, the CPU's misses cross no clock, and a miss takes 13 `clk_arm` instead of 24–30.
+5. **Code must lie in the window:** a fetch beyond it (64 KB since decision 8) halts (code 4). Code ends below 0xB30A in every demo (below 0x5700 in the added images), and the CDFJ+ template starts it at `C_START` ≤ $7800.
 6. **`clk_arm` stays a related clock** in the SDC, with bounded delays on the held buses that cross.
 7. **Fix B's register sits inside `sram_ctrl`.**
 
@@ -819,7 +819,7 @@ This section designs the memories DARIA's CPU and the lean 6507-side front ends 
 | Memory | Words × bits | M10K | Port A | Port B |
 |---|---|---|---|---|
 | Firmware ROM (ARIA's, `bupchip_pocket.sv:234-238`) | 4,096 × 32 | 16 | `clk_arm`: fetch, BupChip profile | `clk_arm`: CPU data reads (BupChip); FWWRITE while `fw_loaded` is low |
-| Image window (new) | 32,768 × 32 | 128 | `clk_arm`: fetch, 2600 profile | `clk_arm`: CPU data reads (2600); the receiver's image writes while `img_ready` is low |
+| Image window (new) | 16,384 × 32 (64 KB, decision 8; designed as 32,768 × 32) | 64 | `clk_arm`: fetch, 2600 profile | `clk_arm`: CPU data reads (2600); the receiver's image writes while `img_ready` is low |
 | Front-end ROM (new) | 8,192 × 32, byte lanes | 32 | `clk_sys`: capture writes during a download; a second front-end read port at run time (for example the jump lookahead) | `clk_sys`: 6507 reads, copy engine (DPC+ copy, F6) |
 | Cart RAM (ARIA's RAM, `:240-244`, widened) | 8,192 × 32, byte lanes | 32 (16 were ARIA's) | `clk_arm`: CPU loads, stores, LDM/STM in both profiles | `clk_sys`: front ends, copy engine, audio samples (was tied off) |
 | State RAM (front ends) | 256 × 32, dual clock | 2 | `clk_arm`: the call port, only while the CPU is parked | `clk_sys`: DPC+ fetchers, audio counters, frequencies, seeds, call block |
@@ -867,14 +867,14 @@ This section designs the memories DARIA's CPU and the lean 6507-side front ends 
 | | One bitstream | 2600-only fallback |
 |---|---|---|
 | Start (2.1.2), including ARIA's ROM 16, RAM 16, PCM 4 and asset cache 3 | 78 | 50 |
-| Image window, 128 KB | +128 | +112 (the firmware ROM reused) |
+| Image window, 64 KB (decision 8; designed at 128 KB: +128, +112) | +64 | +48 (the firmware ROM reused) |
 | Front-end ROM, 32 KB (new in this design) | +32 | +32 |
 | Cart RAM to 32 KB | +16 | +16 |
 | State RAM | +2 | +2 |
-| Asset cache widened to 4 KB 2-way (8 KB: +6) | +2 | +5 (no BupChip cache to widen) |
-| **Total of 308** | **258 (84%)**; 262 with 8 KB | **217** |
+| Asset cache widened to 4 KB 2-way, as built (step 5: 6 M10K, the tags in 2) | +3 | +6 (no BupChip cache to widen) |
+| **Total of 308** | **195 (63%)**; 259 with the 128 KB window | **154** |
 
-The budget still fits, with 50 M10K spare. The step 0 figure of about 231 lacked the front-end ROM.
+The budget fits with 113 M10K spare (49 with the 128 KB window), which decision 8 keeps for later improvements. The step 0 figure of about 231 lacked the front-end ROM.
 
 #### 2. Image capture
 
@@ -920,7 +920,7 @@ The budget still fits, with 50 M10K spare. The step 0 figure of about 231 lacked
 - **DPC+** zeroes $0000–$0BFF and copies $6C00–$7FFF to RAM $0C00–$1FFF. **CDF** copies $0000–$07FF and zeroes the rest of `mapper_ram_size`.
 - The CPU plays no part. The window is not needed, and a call cannot come before the 6507 runs.
 
-#### 3. Bytes beyond 128 KB: the asset cache over PSRAM
+#### 3. Bytes beyond the window (64 KB, decision 8): the asset cache over PSRAM
 
 ##### 3.1 Why PSRAM, not SDRAM
 
@@ -962,7 +962,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 | Whole line | about 40 `clk_arm`, 1.2 µs | about 48, 1.2 µs |
 
 - The step 0 study charged 524 ns per 16 B line [trace, assumption]; the critical word comes back faster than that, and the line about as fast.
-- With the 128 KB window, no traced image misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent.
+- With the 128 KB window, no traced image misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent. **Measured in step 5:** with 48 and 32 KB windows the cache serves them with no late call ("Step 5 work"), which led to the 64 KB window (decision 8).
 
 #### 4. The two memory maps and the profile switch
 
@@ -1551,7 +1551,7 @@ So the single bitstream lands at about 14,600–15,700 ALMs, 79–85% of the dev
 - **The projection** adds what the probe leaves out (the "Step 3 work" decisions). Without S3, even its top end, 83.2%, stays under `BUPCHIP_CORE.md`'s 84% gate.
 - **M10K:** 254, plus the 4 left out, is the 258 budgeted.
 
-**M10K:** 258 of 308 (262 with an 8 KB cache), "The memory system", 1.5. The 2600-only fallback bitstream would take 217.
+**M10K:** 195 of 308 with the 64 KB window of decision 8 (258 as designed with 128 KB), "The memory system", 1.5. The 2600-only fallback bitstream would take 217.
 
 - **Against upstream.** The Mappy-specific CPU work, FIQ mode with its banked registers, turned out the cheapest item: the register file already had the room. Since 2.1.2 the ARM schemes' front ends are out of the build (Fix A), so the lean ones are an addition to the shipped core. Against bringing upstream's back live (about 3,000 ALMs with glue and controller), the lean front end and call port save 1,700–2,000. They use block RAM, not the SRAM, so they stay off the `clk_sdram` path that Fix A cleared.
 - **Images above 128 KB do not fit in block RAM alone:** 256 KB would need 352 M10K of 308, 512 KB 608. The window holds the start of the image: the 6507 banks (in the first 32 KB, by each scheme's layout), the driver, the code (it ends below 0xB30A, about 45 KB, in every demo) and as many tables as fit. The rest of the data comes through the asset cache from the PSRAM. In the traces, every data read outside the code span through a 4 KB cache cost a median 2% more clock; with the 128 KB window no demo touches the cache at all.
@@ -1582,7 +1582,7 @@ Each step has a done-when, as ARIA's had.
 2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done* (2026-10-05): "Step 2 work". *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
 3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done* (2026-10-05): "Step 3 work". The choices: S1 with Thumb, ÷18 (38.18 MHz), and the 128 KB window as four RAMs. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
 4. **S3** (ARIA's steps 6–7). *Not built* (step 3): S1 with Thumb at 38.18 MHz matches upstream's call timing, so S3 is left for a later revision (open item 3). *Its done-when, if it is ever built:* CPI within ±2% of the model on the demos' traces and the BupChip.
-5. **2600 memory system** (*in progress*, "Step 5 work"): image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond 128 KB; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
+5. **2600 memory system** (*in progress*, "Step 5 work"): image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond the window; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
 6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
 7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
 8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and the six added images play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
@@ -1598,7 +1598,7 @@ What step 1 leaves open, each with the step that settles it:
 | 2 | **The one-clock-store fix** (`BUPCHIP_CORE.md`, risk 2) is now needed for 32.73 MHz itself: the worst path ends in the store decision taken from the adder's sum. **40.43 MHz** (−3.97 ns in the early probe) is out of reach without more than that fix. | **Done (step 3):** the store is decided on its own adder, exactly, for about 50 ALMs. 40.43 MHz is dropped. It missed by 2.31 ns in an empty device and by 1.18 ns in the full build. With the two further levers of item 1 it still misses by 0.47 ns, on S1's execute path |
 | 3 | **S3 or S1 with Thumb**, by area. | **Accepted by the owner (2026-10-05), decision 7. Step 3 chose S1 with Thumb at ÷18 (38.18 MHz).** Its only late calls are Spiders' 16 at the start of play, the same ones upstream misses, which step 8 already accepts. S3 at 32.73 MHz would end those too, but it costs a new pipeline and 150–560 ALMs. It stays a later revision ("Step 3 work", decisions) |
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
-| 5 | **Code or LDM above 128 KB** halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
+| 5 | **Code or LDM above the window** (64 KB, decision 8) halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | Step 5, small-window builds |
 | 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | Step 5 |
 | 8 | **CoreTone after a 2600 ARM game:** the cart RAM is zeroed on every load; check that a Souper game then starts as from power-up. | Step 5 |
