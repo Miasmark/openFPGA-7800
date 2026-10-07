@@ -441,7 +441,7 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
 1. **The wrapper:** done; `s4/check.sh` on it at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) is running.
 2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
-3. **Small-window runs:** done (above). They led to decision 8, a 64 KB window. `daria_mem` builds it as two 8K × 32 RAMs (`WIN_KB`, any size up to 128 KB for test builds). Synthesis confirms it: block memory falls from 1,781,312 to 1,257,024 bits (64 M10K) and the logic by 26 ALMs. Through the wrapper at 64 KB, Mappy matches on all its calls, and the call suite (`WIN_KB=64`) passes 81 of 81 runs, with a new test that a fetch at the window's end halts. Turbo, the one image larger than 64 KB, is running at 64 KB for 1,500 frames.
+3. **Small-window runs:** done (above). They led to decision 8, a 64 KB window. `daria_mem` builds it as two 8K × 32 RAMs (`WIN_KB`, any size up to 128 KB for test builds). Synthesis confirms it: block memory falls from 1,781,312 to 1,257,024 bits (64 M10K) and the logic by 26 ALMs. Through the wrapper at 64 KB, Mappy matches on all its calls, and the call suite (`WIN_KB=64`) passes 81 of 81 runs, with a new test that a fetch at the window's end halts. Turbo, the one image larger than 64 KB, at 64 KB for 1,500 frames: all 2,999 calls match, none late, highest share 52% (the model's 52%); 150 demand misses and 2,220 clocks W waited in the whole run, against 614 and 7,030 with a 48 KB window.
 4. **Open item 8:** settled (above).
 5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
 6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
@@ -462,7 +462,19 @@ Upstream MiSTer's ARM is the reference DARIA follows. The owner asked how a seco
 - **Sources.** Upstream: `quartus_probe/upstream_arm_map.sh`, Analysis & Synthesis of its core with and without `NO_ARM_MAPPER` on 5CSEBA6 (estimates, no fit). The fork: a full compile of its own project in Quartus 21.1 (its project targets 17.0.2), from the fitter's per-entity table and timing reports. That compile also fills 74% of the 5CSEBA6's ALMs and 93% of its M10K, and meets timing on every core clock. Its PLL has a 64.43 MHz output that nothing uses.
 - **Upstream's ARM** is larger than the whole Pocket core's logic budget allows. That is why the Pocket build leaves it out (`NO_ARM_MAPPER`) and DARIA exists.
 - **The fork's ARM blocks** alone would take over half the Pocket's 18,480 ALMs and 91% of its 308 M10K. That suits MiSTer's larger device, not the Pocket.
-- **Behaviour** (whole cores, frame fingerprints: `tb_daria +fp=1`, `fp_compare.py`). On Mappy, 600 frames through FIRE and the joystick script, the fork matches upstream on every frame in frame length and in all 128 bytes of RIOT RAM, so the ARM's work comes out the same. The picture differs only by one extra black line per frame on upstream's side.
+- **Behaviour** (whole cores, frame fingerprints: `tb_daria +fp=1`, `fp_compare.py`; 600 frames each, through FIRE at 420 and the joystick script from 480):
+
+  | Image (scheme) | Frame length | RIOT RAM | Picture | Audio |
+  |---|---|---|---|---|
+  | Mappy (CDFJ) | same | same | differs every frame | 145 frames differ, from 7 |
+  | Stay Frosty 2 (DPC+) | same | same | differs every frame | 391 differ, from 4 |
+  | Draconian (CDF) | same | 2 frames differ, from 426; the same after | differs every frame | 1 differs, frame 1 |
+  | Galagon (CDFJ) | same | same | differs every frame | 53 differ, from 85 |
+  | Turbo (CDFJ+) | same | same | differs every frame | 73 differ, from 421 |
+
+  - The game's state and timing match upstream's, so the ARM's work comes out the same.
+  - Draconian's two frames come right after FIRE and then agree again. They point at the fork's other changes (its TIA and controller handling), not at the ARM; telling which would need more diagnostics.
+  - The picture differs by one extra black line per frame on upstream's side, shown on Mappy: every line both draw is identical.
 - **Audio differs in two ways:**
   - Upstream holds the 6507 during each call (about 5,500 `clk_sys` at the median), so AUDV0 stops changing there; the fork's 6507 keeps writing it.
   - In the main kernel, the values written differ: upstream's are 0, 3, 6, 9 or 12 where the fork's take every value 0–12.
