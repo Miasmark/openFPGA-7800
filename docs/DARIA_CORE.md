@@ -338,16 +338,16 @@ The setup slack and `clk_sdram` are at slow 85 °C; the hold slack is the worst 
   - `psram.sv` at 38.18 MHz becomes open item 10;
   - the BupChip runs at 38.18 MHz too. CoreTone paces itself on the 48 kHz tick, so it only idles more.
 
-## Step 5 work: the memory system (in progress)
+## Step 5 work: the memory system (done 2026-10-07)
 
-Paused by the owner on 2026-10-05 with the pieces built and tested on their own benches, and DARIA compared with upstream call by call on five images; resumed on 2026-10-06 with the wrapper. What follows is the state now, then what is left.
+Paused by the owner on 2026-10-05 with the pieces built and tested on their own benches, and DARIA compared with upstream call by call on five images; resumed on 2026-10-06 with the wrapper; done on 2026-10-07. DARIA matches upstream's ARM call by call on all 21 images, late only where upstream is, and the cache serves the image beyond 32, 48 and 64 KB windows with no late call. The owner took the 64 KB window (decision 8).
 
 ### What is built
 
 | Part | File | State |
 |---|---|---|
 | The 2600 profile and the call port in the CPU | `bup_cpu.sv` (`WIN_KB`, `prof26`, `img_size`, `ram32`, `call_go`, `clr_*`, `parked`, `returned`, `ro_*`) | Done. The map of section 4 (window and image beyond it split at `WIN_KB`; 8 or 32 KB of cart RAM; MMIO 0xE000_0000–0xE01F_FFFF), code space per profile (open item 18: 16 KB in the BupChip profile), the parked state, the launch through S_CLEAR (22 entries, `clr_e`/`clr_wd`), the 0xF000_0000 return on every kind of jump, and the FIQ r8–r13 readout. Existing instances tie the new ports |
-| Memories | `daria_mem.sv` | Done: the window as four 8K × 32 RAMs with a registered 4:1 mux, cart RAM 8K × 32 with byte lanes (port B on `clk_sys`), the front-end ROM, the state RAM, all one `daria_ram` (TDP, byte lanes, `maximum_depth` 8,192) |
+| Memories | `daria_mem.sv` | Done: the window as `WIN_KB` / 32 RAMs of 8K × 32 with a registered mux (two and 2:1 at decision 8's 64 KB; four and 4:1 at 128 KB, kept for test builds), cart RAM 8K × 32 with byte lanes (port B on `clk_sys`), the front-end ROM, the state RAM, all one `daria_ram` (TDP, byte lanes, `maximum_depth` 8,192) |
 | Call port, `clk_arm` side | `daria_call.sv` | Done: the call block in state RAM words 0xF0–0xFD, `call_tog`/`ret_tog` |
 | MMIO and timer 1 | `daria_mmio.sv` | Done (section 6, with the changes below) |
 | Image capture | `bup_capture.sv`, `bup_asset_wr.sv` | Done (section 2, with the changes below) |
@@ -371,7 +371,8 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
   | Wrapper | ALMs (estimate) | Registers | Block memory bits |
   |---|---|---|---|
-  | DARIA | 3,007 | 1,285 | 1.78 M |
+  | DARIA, 64 KB window (decision 8) | 2,981 | 1,283 | 1.26 M |
+  | DARIA, 128 KB window | 3,007 | 1,285 | 1.78 M |
   | The shipped wrapper | 2,033 | 948 | 0.30 M |
 
   The check found that the two-way cache's bare `generate` `if` fails Quartus 21.1, in the shipped build too; it now spells out the region.
@@ -386,36 +387,64 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 - **MMIO** (`sim/bupchip/daria/mmio/`): seven clock variants (NTSC and PAL, aligned and asynchronous, 28.5–44.6 MHz) and three controls pass; 22 of 22 mutations caught. The counter matches the model on every `clk_sys` edge. The Draconian-like reading lands 10.6–30.5 counts below the ideal (bound 55), leaving a margin of 3,826–3,841 counts to the game's limit.
 - **Capture** (`sim/bupchip/daria/capture/`): 81 of 81 checks in each of six clock variants (28.64–39.7 MHz, `CLOCK_SPEED` 28.636364 and 50.0), random mixes of images up to 594 KB, A78s and firmware, and 18 of 18 mutations. For an A78 and the firmware the message stream and every receiver output are bit-identical to before (lockstep, 0 differences over about 10 M clocks in each of three clock variants). `stress/run_slotswitch.sh` passes 31 of 31. `s4/check.sh` with the game, on the step 5 tree (the new capture, the cache at `WAYS` 1, the stress benches with their header), passes 28 of 28, every song PCM-identical.
 - **Cache** (`s4/run_cache.sh`, `s4/stress/run_cstress.sh`): `WAYS` 1 is the step 4 cache clock for clock (0 differences beside a copy of it). Both settings pass 24 of 24 cache runs and 26 of 26 stress runs, with 22.2 M stress loads and 0 wrong. Mutations caught: 11 of 11 and 10 of 10 (`WAYS` 1), 24 of 24 and 20 of 20 (`WAYS` 2). With `WAYS` 2 in the wrapper, every song in `s4/check.sh` stays PCM-identical. Song 13 then has 1,269 demand misses and 11,381 stall clocks, against 8,297 and 70,127 with one way.
-- **DARIA beside upstream** (`tb_daria` with `daria_shadow.svh`, `run_daria.sh` with `SHADOW=1`). The 128 KB window. Every call is posted the way the front ends will post it (state RAM port B, `call_tog`), and compared once both have returned: FIQ r8–r13, every RAM write (address, lanes, data), and every MMIO access, T1TC reads within 200 counts (open item 17).
+- **DARIA beside upstream** (`tb_daria` with `daria_shadow.svh`; `run_all.sh` with `SHADOW=1` over the 15 demos and the six added images). 1,500 frames each, with the 128 KB window. Every call is posted the way the front ends will post it (state RAM port B, `call_tog`), and compared once both have returned: FIQ r8–r13, every RAM write (address, lanes, data), and every MMIO access, T1TC reads within 200 counts (open item 17). Late calls are counted against each call's safe budget (`dynamic_tables.py --only daria`), with DARIA's measured time and with the model's `s1_cyc`.
 
-  | Image | Frames | Calls | Differ | RAM writes compared | MMIO compared | Late (DARIA / model) | Highest share of a budget (DARIA / model) |
+  | Image | Calls | Differ | RAM writes compared | MMIO compared | Late (DARIA / model) | Highest share of a budget (DARIA / model) | Collisions (upstream / DARIA) |
   |---|---|---|---|---|---|---|---|
-  | Elevator Agent | 1,500 | 2,999 | 0 | 6,893,261 | 0 | 0 / 0 | 85% / 85% |
-  | Galagon | 1,500 | 2,999 | 0 | 3,969,599 | 0 | 0 / 0 | 53% / 52% |
-  | Mappy | 40 | 79 | 0 | 46,220 | 0 | | |
-  | Draconian (Harmony fix) | 60 | 119 | 0 | 15,371 | 4 | | |
-  | Stay Frosty 2 NTSC | 60 | 61 | 0 | 17,550 | 122 | | |
+  | Elevator Agent | 2,999 | 0 | 6,893,261 | 0 | 0 / 0 | 85% / 85% | 0 / 0 |
+  | Galagon | 2,999 | 0 | 3,969,599 | 0 | 0 / 0 | 53% / 52% | 21 / 21 |
+  | Gorf | 2,999 | 0 | 3,681,218 | 0 | 0 / 0 | 58% / 57% | 0 / 0 |
+  | Lady Bug | 2,999 | 0 | 4,801,428 | 0 | 0 / 0 | 75% / 75% | 9 / 4 |
+  | Mappy | 2,999 | 0 | 2,577,215 | 0 | 0 / 0 | 31% / 31% | 56 / 63 |
+  | Qyx | 2,999 | 0 | 2,040,732 | 0 | 0 / 0 | 92% / 92% | 0 / 0 |
+  | Robot War 2684 | 2,999 | 0 | 2,217,434 | 0 | 0 / 0 | 45% / 45% | 7 / 17 |
+  | Scramble | 2,086 | 0 | 3,065,860 | 4,172 | 0 / 0 | 60% / 60% | 0 / 0 |
+  | Spiders | 2,999 | 0 | 2,911,793 | 0 | **16 / 16** | 104% / 104% | 0 / 0 |
+  | Super Cobra | 2,999 | 0 | 2,291,314 | 0 | 0 / 0 | 48% / 48% | 3 / 6 |
+  | Turbo | 2,999 | 0 | 3,792,485 | 0 | 0 / 0 | 52% / 52% | 0 / 0 |
+  | Tutankham | 2,999 | 0 | 3,961,169 | 0 | 0 / 0 | 52% / 52% | 0 / 0 |
+  | Wizard of Wor | 3,003 | 0 | 2,388,948 | 0 | 0 / 0 | 31% / 31% | 4 / 1 |
+  | Zaxxon | 2,999 | 0 | 4,778,952 | 0 | 0 / 0 | 86% / 86% | 0 / 0 |
+  | Zoo Keeper | 2,999 | 0 | 4,955,099 | 0 | 0 / 0 | 60% / 59% | 8 / 7 |
+  | Draconian (Harmony fix) | 3,000 | 0 | 4,850,003 | 4 | 0 / 0 | 46% / 46% | 17 / 12 |
+  | Draconian RC8 | 3,000 | 0 | 4,850,003 | 4 | 0 / 0 | 46% / 46% | 17 / 12 |
+  | Robot War 2684 (Harmony fix) | 2,999 | 0 | 1,834,595 | 0 | 0 / 0 | 45% / 44% | 14 / 9 |
+  | Space Rocks (Harmony fix) | 2,998 | 0 | 3,172,104 | 5,996 | 0 / 0 | 44% / 44% | 11 / 11 |
+  | Stay Frosty 2, NTSC | 2,577 | 0 | 2,518,303 | 5,154 | 0 / 0 | 56% / 56% | 0 / 0 |
+  | Stay Frosty 2, PAL | 2,577 | 0 | 2,518,303 | 5,154 | 0 / 0 | 56% / 56% | 0 / 0 |
+  | **21 images** | **61,227** | **0** | **74,069,818** | **20,484** | **16 / 16** | | **167 / 163** |
 
-  - DARIA's measured clocks per call equal the model's `s1_cyc` (median ratio 1.00, at most 1.01 and 1.12 on the two full runs), so the model's lateness table ("Step 3 work") stands.
+  - **Every call matches.** No register at return, RAM write or MMIO access differs, no call halts, and none is skipped.
+  - **Late only where upstream is.** Spiders' 16 calls at the start of play are late, on DARIA and in the model alike: the same calls upstream misses on its own core. Every other image's highest share of a budget is the model's, or 1 point above it.
+  - **DARIA's clocks per call are the model's `s1_cyc`**: a median ratio of 1.00 on 19 images and 1.01 on Super Cobra and Wizard of Wor, and at most 1.16 in one call (Draconian). The model's lateness table ("Step 3 work") stands.
   - A DARIA call takes about as long as upstream's: Mappy's first, 283 µs at 38.18 MHz against 293 µs at 71.6 MHz.
+  - **Identical pairs.** The two Draconian builds give identical counts, and so do Stay Frosty 2's NTSC and PAL builds, as their traces predicted ("The added images").
+  - **The 64 KB window (decision 8).** These runs use the 128 KB window. Turbo is the only image larger than 64 KB; every other image is 32 or 64 KB, so it lies whole in either window and runs alike. Turbo at 64 KB runs through the whole wrapper (below): all 2,999 calls match.
+  - **Timer reads (open item 17)**, from 64 KB runs of 300 frames (520 for Scramble, whose calls start at frame 427). The final report gives the range of DARIA's reading less upstream's. Only Draconian reads T1TC: once, at power-on, in both builds. DARIA reads 37 counts above upstream. The bound is 200; the game's own margin is 3,872 counts. Scramble (MAMCR) and Stay Frosty 2 access MMIO, but neither reads T1TC, so their accesses match exactly. Space Rocks' short run is pending.
 - **The BupChip through the DARIA wrapper.** Song 13 is PCM-identical in both streams:
 
   | Clock | `CLOCK_SPEED` | Busy | Cache misses | Stall clocks | PSRAM model violations |
   |---|---|---|---|---|---|
   | 28.64 MHz | 28.636364 | 72.8% | 1,269 | 11,381 | 0 |
   | 38.18 MHz | 50.0 | 54.6% | 1,275 | 13,091 | 0 |
+
+  `s4/check.sh` on the DARIA wrapper at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) passes 28 of 28: the PSRAM layer, the cache and stress benches, the synthetic ARSC jobs, the game's songs PCM-identical (also across reloads, a PAL retune, a 20 ms pause and loader jitter), and the held-and-silent cases (no firmware, a 4-byte firmware, not a Souper cartridge, no ARSC block). The retune job's hold delay now follows the clock (3 at 38.18 MHz, 2 at 28.64). `check.sh`'s tally is fixed too: each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait`. Before the fix, 3 of 28 jobs had read FAIL with PASS in their logs.
 - **Open item 8** (CoreTone after a 2600 game). All 32 KB of cart RAM were filled with random words before the downloads (`tb_s4 +ramjunk`). Song 13 is still PCM-identical, and its counts equal the clean run's clock for clock (83,432,084 busy clocks). CoreTone does not depend on what the RAM holds at boot.
 - **Through the whole wrapper in the 2600 profile** (`tb_daria`, `WRAPPER=1`): Mappy's 79 calls (40 frames) match upstream. The cartridge comes through the capture, `psram.sv` runs at `CLOCK_SPEED` 50.0, and the PSRAM model reports 0 violations.
-- **Small windows through the whole wrapper** (`tb_daria`, `WRAPPER=1`, 1,500 frames, open items 6 and 10). The image beyond the window comes through the cache from `psram.sv` (`CLOCK_SPEED` 50.0 at 38.18 MHz) on the PSRAM model. Every call matches upstream, none is late, and the highest share of a budget is unchanged:
+- **Small windows through the whole wrapper** (`tb_daria`, `WRAPPER=1`, 1,500 frames, open items 6 and 10). The image beyond the window comes through the cache from `psram.sv` (`CLOCK_SPEED` 50.0 at 38.18 MHz) on the PSRAM model. Every call matches upstream, none is late, and the highest share of a budget is the model's, or 1 point above it:
 
   | Image | Window | Calls (differ) | Demand misses | Prefetches | Clocks W waited, whole run | Highest share (model) | PSRAM model violations |
   |---|---|---|---|---|---|---|---|
   | Elevator Agent | 48 KB | 2,999 (0) | 38 | 31 | 941 | 85% (85%) | 0 |
   | Turbo | 48 KB | 2,999 (0) | 614 | 1,851 | 7,030 | 53% (52%) | 0 |
   | Zaxxon | 32 KB | 2,999 (0) | 67 | 214 | 1,248 | 86% (86%) | 0 |
+  | **Turbo** | **64 KB (decision 8)** | 2,999 (0) | 150 | 924 | 2,220 | 52% (52%) | 0 |
 
-  Against its 128 KB run, Elevator Agent's calls take 941 clocks more in all, at most 726 in one call (a cold fill). The 4 KB two-way cache with 16 B lines is enough (open item 6). `psram.sv` at `CLOCK_SPEED` 50.0 meets the model's timing at 38.18 MHz (open item 10, in simulation; step 8 checks hardware).
-- **Cart RAM collisions** (open item 7, counted by the shadow): a console-side read within one `clk_sys` of a CPU write to the same word. Elevator Agent: 0 in 25.6 M reads. Galagon: 21 in 17.8 M, for upstream's ARM and DARIA alike. The equal counts suggest a console-side read repeating at one address while the CPU writes it. Step 6's front ends decide whether such a read needs ordering.
+  Against its 128 KB run, Elevator Agent's calls take 941 clocks more in all, at most 726 in one call (a cold fill). The 4 KB two-way cache with 16 B lines is enough (open item 6). These runs led to decision 8. `psram.sv` at `CLOCK_SPEED` 50.0 meets the model's timing at 38.18 MHz (open item 10, in simulation; step 8 checks hardware).
+- **Cart RAM collisions** (open item 7, counted by the shadow): a console-side read within one `clk_sys` of a CPU write to the same word. Over the 21 images, 167 for upstream's ARM and 163 for DARIA in 402 M console-side reads, about one in 2.4 M. Ten images have none. The most is Mappy's 56 and 63, in 18.7 M reads.
+  - **The rate is the games', not DARIA's:** both CPUs give it, image by image, against the same reads.
+  - **The count is an upper bound:** it takes any read within 69.84 ns of a write. `clk_arm` and `clk_sys` come from one VCO (÷18 and ÷48), so their rising edges either coincide, once every 3 `clk_sys`, or lie at least 8.73 ns (6 VCO periods) apart. A read on a shared edge with a write to its word races in the dual-clock M10K. One 8.73 ns or more away most likely does not, but the timing analysis does not check it. The bench offsets the two clocks by 4.37 ns, so it never puts them on a shared edge.
+  - **Upstream sits out the shared edge:** its ARM's cart RAM port takes no access on the one `clk_arm` edge in five that is also a `clk_sys` edge (`cart_ram_tdp.sv:29-39`). DARIA has no such guard. Step 6, which builds the console-side reader, decides between that guard (a W wait on cart RAM stores, one `clk_arm` edge in 8) and accepting a race that touches one byte-lane read in millions (open item 7).
 
 ### Changes against the design
 
@@ -437,14 +466,23 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
   - The two resets come from one level, which must last at least 4 `clk_sys`; the held buses are deliberately not reset.
   - Step 7 marks `en_s[0]`, `w_s[0]` and `sn_a[0]` as synchronisers.
 
-### What is left
+### The 64 KB window (decision 8)
 
-1. **The wrapper:** done; `s4/check.sh` on it at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) is running.
-2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
-3. **Small-window runs:** done (above). They led to decision 8, a 64 KB window. `daria_mem` builds it as two 8K × 32 RAMs (`WIN_KB`, any size up to 128 KB for test builds). Synthesis confirms it: block memory falls from 1,781,312 to 1,257,024 bits (64 M10K) and the logic by 26 ALMs. Through the wrapper at 64 KB, Mappy matches on all its calls, and the call suite (`WIN_KB=64`) passes 81 of 81 runs, with a new test that a fetch at the window's end halts. Turbo, the one image larger than 64 KB, at 64 KB for 1,500 frames: all 2,999 calls match, none late, highest share 52% (the model's 52%); 150 demand misses and 2,220 clocks W waited in the whole run, against 614 and 7,030 with a 48 KB window.
-4. **Open item 8:** settled (above).
-5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
-6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
+- **`daria_mem`** builds the window as `WIN_KB` / 32 RAMs of 8K × 32: two, with a 2:1 mux on registered bit 13. Any size up to 128 KB builds for tests.
+- **Synthesis:** block memory falls from 1,781,312 to 1,257,024 bits (64 M10K fewer), and the logic by 26 ALMs.
+- **The call suite** (`WIN_KB=64`) passes 81 of 81 runs, with a new test that a fetch at the window's end halts.
+- **Through the wrapper at 64 KB:** Mappy matches on all its calls, and so does Turbo, the one image larger than 64 KB, over 1,500 frames (above).
+- **The rest of the images** are 32 or 64 KB and lie whole in the window, so the 128 KB shadow runs stand for them.
+
+### Step 5's done-when
+
+- **"Every demo and added image ... call by call":** all 21 match on every call (registers at return, every RAM write, every MMIO access, the audio values in FIQ r8–r13).
+- **"No lateness beyond the model's":** DARIA is late on Spiders' 16 calls, as the model is and as upstream is.
+- **"Again with a small window":** Elevator Agent at 48 KB, Zaxxon at 32 KB, and Turbo at 48 and 64 KB. The cache serves each through `psram.sv` with every call matching and none late.
+- **Open items:**
+  - 6, 8 and 18 are settled, and 10 is settled in simulation.
+  - 17 is settled: the one timer read is 37 counts from upstream's.
+  - 7 is counted. Step 6 decides whether the shared edge needs a guard.
 
 ## Comparisons: upstream and lroby74's fork (2026-10-07)
 
@@ -847,7 +885,7 @@ This section designs the memories DARIA's CPU and the lean 6507-side front ends 
 - **Fetch:** `rom_q = prof26 ? win_qa : fw_qa`. The firmware RAM takes `npc[11:0]`, the window `npc[14:0]` (plus Thumb's halfword bit, step 2). `prof26` is a static `clk_arm` register (section 4).
 - **Data:** `rom_dq = prof26 ? win_qb : fw_qb`. This folds into W's source mux (`bup_cpu.sv:568-575`).
 - **Slices.** The window is built from 8K × 1 blocks, 4 deep by 32 wide, so its own output decoder is a 4:1 mux on registered address bits [14:13]. A Pocket-owned wrapper fixes `maximum_depth` 8192. Upstream's `cache_ram.v` leaves the choice to Quartus, which could pick 2K × 4 slices and a 16:1 decoder.
-- **Since step 3:** the wrapper builds the window as four 8K × 32 RAMs read every clock, with the 4:1 mux on registered bits [14:13]. One `altsyncram` puts a per-slice read-enable decode between `rom_addr` and the slices' clock enables, and that led the 40.43 MHz probe's worst paths.
+- **Since step 3:** the wrapper builds the window as four 8K × 32 RAMs read every clock, with the 4:1 mux on registered bits [14:13]. Since decision 8 it is two, with a 2:1 mux on bit 13 (`daria_mem.sv`, `WIN_KB`). One `altsyncram` puts a per-slice read-enable decode between `rom_addr` and the slices' clock enables, and that led the 40.43 MHz probe's worst paths.
 - **Timing [E], the main risk of this design.**
   - The fetch output becomes a 4:1 slice mux followed by the 2:1 profile mux: one or two LUT levels in front of decode, where ARIA has none (`BUPCHIP_CORE.md`, "Pipeline").
   - `npc` fans out to 144 M10K instead of 16, and `d_addr` to about 180 (window, firmware, cart RAM, cache) instead of 35. They spread over about half the device's M10K columns.
@@ -860,7 +898,7 @@ This section designs the memories DARIA's CPU and the lean 6507-side front ends 
 - **Yes, ARIA's 16 KB RAM is folded in.** The instance at `bupchip_pocket.sv:240` becomes `ADDR_WIDTH` 13, with port B wired to the front ends instead of tied off. It costs +16 M10K net, as decision 4 budgets.
 - The BupChip's window check stays at 16 KB (`bup_cpu.sv:544`). A wild store beyond it now lands in the unused upper 16 KB instead of aliasing (`BUPCHIP_CORE.md`, "Wild stores"), which is better.
 - **Port B** is 32 bits wide, with byte enables for the 6507's byte writes, as the study's word register needs.
-- **A collision to accept:** during a call the audio engine reads waveform bytes on port B while the CPU may write the same word on port A. With asynchronous ports such a read is undefined for that clock. It would give one glitched sample per collision, and upstream has the same race in other timing. It is counted, not prevented (open question 7).
+- **A collision to accept:** during a call the audio engine reads waveform bytes on port B while the CPU may write the same word on port A. With asynchronous ports such a read is undefined for that clock. It would give one glitched sample per collision, and upstream has the same race in other timing. It is counted, not prevented (open question 7). Step 5 counted it, and found the race narrower: the clocks share a VCO, so only a shared edge races. Step 6 decides whether to guard that edge as upstream does ("Step 5 work", results).
 - **Clearing.** Every cartridge download zeroes all 32 KB through port B, by words on `clk_sys`: about 0.6 ms, with the core held anyway. The BupChip then never starts on RAM a 2600 game left behind (open question 8).
 
 ##### 1.4 The third port: alternatives considered
@@ -974,7 +1012,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
 | Whole line | about 40 `clk_arm`, 1.2 µs | about 48, 1.2 µs |
 
 - The step 0 study charged 524 ns per 16 B line [trace, assumption]; the critical word comes back faster than that, and the line about as fast.
-- With the 128 KB window, no traced image misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent. **Measured in step 5:** with 48 and 32 KB windows the cache serves them with no late call ("Step 5 work"), which led to the 64 KB window (decision 8).
+- With the 128 KB window, no traced image misses at all. A small-window build ("Budget", testing) measures the cost on Turbo, Zaxxon and Elevator Agent. **Measured in step 5:** with 48 and 32 KB windows the cache serves them with no late call ("Step 5 work"), which led to the 64 KB window (decision 8). At 64 KB, Turbo alone reaches beyond the window: 150 demand misses in 1,500 frames, every call matching upstream.
 
 #### 4. The two memory maps and the profile switch
 
@@ -1086,7 +1124,7 @@ The front ends keep a call block of 14 words in their state RAM: entry, stack, s
 
 - **Writes to TC.** {data, strobes, token} go held, with a toggle, to `clk_sys`, which merges the strobed bytes into the counter. A write wins over the increment in that clock, as upstream's later assignment does. The mirror takes the written bytes at once.
 - **Reads of TC.** Every 4 `clk_sys`, the counter is copied into a hold register with a toggle; `clk_arm` copies it into the mirror only when the snapshot's token matches the last write. A read is then at most about 8 `clk_sys` (0.56 µs, about 40 counts) stale, and never older than the CPU's own last write.
-- **Precision.** Draconian is the only traced game that uses the timer, and only at power-on [trace; sim, `tb_daria +mmiolog=1`]. 42–44 instructions into its second call it zeroes T1TC and sets TCR bit 0; 43 instructions into its fourth, a frame later, it clears the bit and reads T1TC three instructions on: 1,168,115 on upstream, one NTSC frame at 70 MHz less 0.8 µs. It compares that with 1,171,987 [C, comment], so the margin is 3,872 counts (0.33%). Both accesses lie the same depth into their calls, so DARIA's slower clock moves the reading by under 1 µs (about 55 counts); the stop's two-flop delay and the read's staleness add at most about 55 more. Together that is about 3% of the margin.
+- **Precision.** Draconian is the only traced game that uses the timer, and only at power-on [trace; sim, `tb_daria +mmiolog=1`]. 42–44 instructions into its second call it zeroes T1TC and sets TCR bit 0; 43 instructions into its fourth, a frame later, it clears the bit and reads T1TC three instructions on: 1,168,115 on upstream, one NTSC frame at 70 MHz less 0.8 µs. It compares that with 1,171,987 [C, comment], so the margin is 3,872 counts (0.33%). Both accesses lie the same depth into their calls, so DARIA's slower clock moves the reading by under 1 µs (about 55 counts); the stop's two-flop delay and the read's staleness add at most about 55 more. Together that is about 3% of the margin. **Measured in step 5:** DARIA reads 37 counts above upstream, in both Draconian builds.
 - MAMCR keeps all 32 bits, because upstream reads them back. Scramble writes it 4,172 times with `strb` [trace].
 - Cost: about 230 FF; 110–150 ALMs [E].
 
@@ -1594,7 +1632,7 @@ Each step has a done-when, as ARIA's had.
 2. **Thumb in simulation**, on the S1 core: the decoder, the T bit, `BX` both ways, halt code 8. *Done* (2026-10-05): "Step 2 work". *Done when* the conditions in "The CPU: Thumb" hold: every directed and halt test passes, the exhaustive decode check shows 0 differences, 400 random streams and fuzz seeds 1–48 pass in lockstep (also with `LATE_RF=1` and with waits and throttle), every mutation is caught, ARIA's checks pass with `THUMB` 0 and 1, and the four songs are bit-identical.
 3. **Probe build:** DARIA alone in an empty device and inside the full build, with the window, firmware ROM and cart RAM at full size. *Done* (2026-10-05): "Step 3 work". The choices: S1 with Thumb, ÷18 (38.18 MHz), and the 128 KB window as four RAMs. *Done when* ALMs and Fmax are measured at 32.73 and 40.43 MHz, the window size is confirmed (128 or 64 KB), and S3 or S1 with Thumb is chosen.
 4. **S3** (ARIA's steps 6–7). *Not built* (step 3): S1 with Thumb at 38.18 MHz matches upstream's call timing, so S3 is left for a later revision (open item 3). *Its done-when, if it is ever built:* CPI within ±2% of the model on the demos' traces and the BupChip.
-5. **2600 memory system** (*in progress*, "Step 5 work"): image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond the window; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
+5. **2600 memory system.** *Done* (2026-10-07): "Step 5 work". All 21 images match upstream call by call, late only on Spiders' 16 calls as upstream is; the cache serves Turbo, Zaxxon and Elevator Agent through 32–64 KB windows; the window is 64 KB (decision 8). The step covers image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond the window; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
 6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
 7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
 8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and the six added images play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
@@ -1612,7 +1650,7 @@ What step 1 leaves open, each with the step that settles it:
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above the window** (64 KB, decision 8) halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | **Settled (step 5):** 4 KB in two ways of 2 KB, 16 B lines, FIFO. Through the whole wrapper with 32, 48 and 64 KB windows, every call of Elevator Agent, Turbo and Zaxxon matches upstream and none is late. Turbo, the one image larger than 64 KB, has 150 demand misses in 1,500 frames at 64 KB. With `WAYS` 2 the BupChip's song 13 has 1,269 demand misses, against 8,297 with one way ("Step 5 work") |
-| 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | Step 5 |
+| 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | **Counted (step 5):** within one `clk_sys` of a write to the same word, upstream's ARM gives 167 and DARIA 163 in 402 M console-side reads over the 21 images; ten images have none. That bounds the real races, which need a shared `clk_arm`/`clk_sys` edge (once every 3 `clk_sys`). Upstream's ARM takes no cart RAM access on its shared edge; DARIA has no such guard. **Step 6** decides: the guard (a W wait on cart RAM stores, one `clk_arm` edge in 8) or accepting the race ("Step 5 work", results) |
 | 8 | **CoreTone after a 2600 ARM game:** the cart RAM is zeroed on every load; check that a Souper game then starts as from power-up. | **Settled (step 5):** with all 32 KB of cart RAM filled with random words before the downloads (`tb_s4 +ramjunk`), song 13 is PCM-identical and its busy clocks equal the clean run's. CoreTone does not depend on what the RAM holds at boot |
 | 9 | **The SDC form** for the held buses that cross (`set_max_delay` on related clocks) in Quartus Lite 21.1. | **Settled (step 3):** 7.3's form works. Quartus Lite 21.1 applies `set_max_delay` / `set_min_delay` between clocks of one synchronous group (complete, not overridden), and every crossing path is timed against 20 ns, with at worst +15.1 ns of setup slack. Keep 7.3's `set_min_delay` −20. The first builds used 0, and with it the $8007 byte's held bus missed hold by 0.033 ns at fast 0 °C on one seed. A hold check means nothing on a bus that is held for two clocks before use. Step 7 copies the probe's lines |
 | 10 | **PSRAM at 40.43 MHz** with `CLOCK_SPEED` 50.0. Since step 3: `psram.sv` at 38.18 MHz, between the 32.73 MHz where 28.636364 is known to work and the 40.43 MHz that needs 50.0 (7.4). It serves the BupChip's assets and the cache beyond the window. | **Settled in simulation (step 5):** `psram.sv` with `CLOCK_SPEED` 50.0 at 38.18 MHz meets the PSRAM model's timing (0 violations) for the BupChip's song 13 through the DARIA wrapper and for the cache beyond the window in every small-window run. Step 8 checks hardware |
@@ -1622,5 +1660,5 @@ What step 1 leaves open, each with the step that settles it:
 | 14 | **Thumb hi-register forms with H1 = H2 = 0** halt; running them is free if a game needs it. | When needed |
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | Step 6 |
 | 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): traced: nothing new for the CPU, the call protocol or the memory map ("The added images"). | Done |
-| 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | Step 5 |
+| 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | **Settled (step 5):** Draconian is the only image that reads T1TC: once, at power-on, in both builds. DARIA's reading is 37 counts above upstream's, inside the 200 bound and about 1% of the game's 3,872-count margin. Every call after it matches upstream's |
 | 18 | **The code space per profile.** With `CODE_AW` 15, the BupChip profile's code space must still end at 16 KB, as ARIA's does. FETCH applies past 0x3FFC and to jumps above it, and DATA to ROM reads above 16 KB. Step 3's probe left it at 128 KB in both profiles. Step 5 adds the profile to those checks. They run a clock late or in W, off the critical path. | **Done (step 5):** the call suite's BupChip-profile tests on the `CODE_AW` 15 core halt a jump to 0x4000, the fall-through past 0x3FFC and a ROM read at 0x4000, and the return sentinel stays a fetch fault there (`call/run_call.py`, `bup_*`) |
