@@ -49,7 +49,7 @@ build() {           # build NAME DEFINES...
 	{
 		echo 'set_global_assignment -name FAMILY "Cyclone V"'
 		echo "set_global_assignment -name DEVICE $DEVICE"
-		echo 'set_global_assignment -name TOP_LEVEL_ENTITY top'
+		echo 'set_global_assignment -name TOP_LEVEL_ENTITY Atari7800'
 		echo 'set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files'
 		echo 'set_global_assignment -name NUM_PARALLEL_PROCESSORS 2'
 		echo 'set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"'
