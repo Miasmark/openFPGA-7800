@@ -114,6 +114,21 @@ Six images joined the test library after step 1, all of them 32 KB. Each was tra
 - **Nothing new for the CPU.** No Thumb form the demos do not use, nothing that halts, no MUL site from which a path reads C (C1; "The CPU: Thumb"), and code ends below 0x5700.
 - Every image reaches play in its trace (the snapshots at frame 1,350).
 
+### The Champ Games Presents batch (2026-10-07)
+
+Thirteen more demo images, published by Champ Games but written by others, joined the library during step 6. They stay in `sim/work/` like the rest. `detect2600` classes them as follows:
+
+| Scheme | Images |
+|---|---|
+| DPC+, revision 1 (`stable_fractional`) | Chaotic Grill, Dino Eggs, Lucky Chase, Tomahawk 777 |
+| DPC+, revision 0 | Stratovox, The End |
+| CDFJ (revision 2) | Boom!, GridLock, rubyQ |
+| Not ARM | Juno First (F4), Squish 'Em Deluxe (F8, 8 KB), Star Castle Arcade (FA2, 28 KB) |
+
+- **Coverage.** The nine ARM images more than double DPC+'s share of the set, which before had only Space Rocks and Stay Frosty 2, and they bring both DPC+ revisions, so both forms of the FRACLOW rule meet real games. rubyQ is the game `top.sv`'s stall comment is written around.
+- **Step 5's shadow** (DARIA against upstream's ARM, 64 KB window, 1,500 frames) is running on the nine; results follow. Step 6's mode-A shadow adds them to its set.
+- **FA2 aside.** The Pocket build runs FA2, but its NVRAM bridge is not connected (`atari7800_pocket.sv:1002-1008`: reads give `$FF`), so Star Castle Arcade's saves do not persist. That is outside DARIA.
+
 ### Packaging
 
 | # | Finding | Source |

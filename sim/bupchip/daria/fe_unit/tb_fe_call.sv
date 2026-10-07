@@ -473,6 +473,7 @@ module tb_fe_call;
 	// ---- U: upstream's audio counters and call controller ---------------------------------------------
 	logic [31:0] uc [0:2], uf [0:2], useed [0:2];
 	logic        up_pend = 1'b0;
+	logic        up_fresh = 1'b0;                 // the pending call came while upstream was idle
 	logic [31:0] u_pay [0:5];
 	longint      u_acc = 0;
 	logic        dep = 1'b0;                      // deposit (both models), a pulse
@@ -509,7 +510,10 @@ module tb_fe_call;
 				end
 				u_acc++;
 			end
-			if (cf && !up_pend && !drop3) up_pend <= 1'b1;
+			if (cf && !up_pend && !drop3) begin
+				up_pend  <= 1'b1;
+				up_fresh <= !up_busy;
+			end
 			// a stale return (the stand-in kept running through a reset) is not this call's:
 			// upstream's completion token rejects it (arm_mapper_controller.sv:163-177)
 			u_cd <= bnew & up_busy & !stale_ret;
@@ -603,6 +607,7 @@ module tb_fe_call;
 		logic  [7:0] e_a;
 		logic  [8:0] e_st;
 		if (drop3) inc("callfn_dropped_m_mfe");
+		if (cf & up_pend & !up_busy & !up_fresh) inc("callfn_while_upstream_pending_at_m");
 
 		if (e < trace)
 			$display("@%0d p1 %b p0 %b acc %b held %b stl %b a %04x rw %b d %02x | rst %b cf %b st %03x busy %b p2 %b pu %b req %b we %b a %02x gnt %b wd %08x cap %b rot %b shin %b cmp %b app %b mw %b tog %b rdy %b rel %b bnew %b tick %b | post %b pk %0d wf %b out %b jx %0d rel %b bbusy %b bp2 %b | dc0 %08x uc0 %08x df0 %08x uf0 %08x tdef %b dep %b rs %b",
@@ -690,7 +695,7 @@ module tb_fe_call;
 		if (cf & arm_call_busy) inc("rmw_call_events");
 
 		// pend_up against upstream's call_pending (masked in the accept clock and after a late CALLFN)
-		if (!(up_pend & !up_busy) && !cart_reset) begin
+		if (!(up_pend & !up_busy & up_fresh) && !cart_reset) begin
 			if (u_call.pend_up !== up_pend)
 				fail("pend_up", $sformatf("pend_up %b, upstream's call_pending %b", u_call.pend_up, up_pend));
 			if (up_pend) inc("pend_up_compares_set");

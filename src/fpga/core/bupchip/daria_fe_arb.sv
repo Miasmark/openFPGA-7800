@@ -144,6 +144,23 @@ module daria_fe_arb (
 	output logic        ca_gnt,
 	output logic        crb_use       // reg: this clock's crb_q is consumed
 );
+	// the owner bit of each user (daria_fe_pkg::OR_/OS_/OA_*; local copies,
+	// as Quartus 21.1 rejects a package-scoped name in a select on an
+	// assign's left-hand side)
+	localparam int B_OR_F6   = daria_fe_pkg::OR_F6;
+	localparam int B_OR_FIX  = daria_fe_pkg::OR_FIX;
+	localparam int B_OR_AUD  = daria_fe_pkg::OR_AUD;
+	localparam int B_OR_P32  = daria_fe_pkg::OR_P32;
+	localparam int B_OR_WB   = daria_fe_pkg::OR_WB;
+	localparam int B_OR_COPY = daria_fe_pkg::OR_COPY;
+	localparam int B_OS_CZ   = daria_fe_pkg::OS_CZ;
+	localparam int B_OS_CORE = daria_fe_pkg::OS_CORE;
+	localparam int B_OS_CALL = daria_fe_pkg::OS_CALL;
+	localparam int B_OA_F6   = daria_fe_pkg::OA_F6;
+	localparam int B_OA_LOOK = daria_fe_pkg::OA_LOOK;
+	localparam int B_OA_AUD  = daria_fe_pkg::OA_AUD;
+	localparam int B_OA_COPY = daria_fe_pkg::OA_COPY;
+
 	// ---- bench taps (design 1.7; frozen names; daria_fe_pkg::OR_/OS_/OA_*) ------
 	logic  [5:0] own_r;               // one-hot or 0
 	logic  [2:0] own_s;
@@ -171,12 +188,12 @@ module daria_fe_arb (
 	wire f6_gnt  = cp_req & f6_act;                          // F6 (priority 0)
 	assign cp_gnt   = f6_gnt | cpy_gnt;
 
-	assign own_r[daria_fe_pkg::OR_F6]   = f6_gnt;
-	assign own_r[daria_fe_pkg::OR_FIX]  = fix_eff;
-	assign own_r[daria_fe_pkg::OR_AUD]  = aud_take;
-	assign own_r[daria_fe_pkg::OR_P32]  = p32_gnt;
-	assign own_r[daria_fe_pkg::OR_WB]   = wb_gnt;
-	assign own_r[daria_fe_pkg::OR_COPY] = cpy_gnt;
+	assign own_r[B_OR_F6]   = f6_gnt;
+	assign own_r[B_OR_FIX]  = fix_eff;
+	assign own_r[B_OR_AUD]  = aud_take;
+	assign own_r[B_OR_P32]  = p32_gnt;
+	assign own_r[B_OR_WB]   = wb_gnt;
+	assign own_r[B_OR_COPY] = cpy_gnt;
 
 	// one-hot AND-OR muxes; no owner: address 0, no write
 	assign crb_addr = ({13{cp_gnt}}   & cp_a)
@@ -205,9 +222,9 @@ module daria_fe_arb (
 	wire cs_gnt = cs_req & !cz_req;                          // implicitly granted
 	assign cl_gnt = cl_req & !cz_req & !cs_req;
 
-	assign own_s[daria_fe_pkg::OS_CZ]   = cz_req;
-	assign own_s[daria_fe_pkg::OS_CORE] = cs_gnt;
-	assign own_s[daria_fe_pkg::OS_CALL] = cl_gnt;
+	assign own_s[B_OS_CZ]   = cz_req;
+	assign own_s[B_OS_CORE] = cs_gnt;
+	assign own_s[B_OS_CALL] = cl_gnt;
 
 	assign stb_addr = ({8{cz_req}} & cz_a) | ({8{cs_gnt}} & cs_a) | ({8{cl_gnt}} & cl_a);
 	assign stb_we   = cz_req | (cs_gnt & cs_we) | (cl_gnt & cl_we);
@@ -221,10 +238,10 @@ module daria_fe_arb (
 	assign aud_a_gnt = aud_a_req & !f6_act & !look_req;
 	assign ca_gnt    = ca_req & (f6_act | (!look_req & !aud_a_req));
 
-	assign own_a[daria_fe_pkg::OA_F6]   = ca_req & f6_act;
-	assign own_a[daria_fe_pkg::OA_LOOK] = look_gnt;
-	assign own_a[daria_fe_pkg::OA_AUD]  = aud_a_gnt;
-	assign own_a[daria_fe_pkg::OA_COPY] = ca_gnt & !f6_act;
+	assign own_a[B_OA_F6]   = ca_req & f6_act;
+	assign own_a[B_OA_LOOK] = look_gnt;
+	assign own_a[B_OA_AUD]  = aud_a_gnt;
+	assign own_a[B_OA_COPY] = ca_gnt & !f6_act;
 
 	assign fea_addr = ({13{look_gnt}} & look_a) | ({13{aud_a_gnt}} & aud_a_a) | ({13{ca_gnt}} & ca_a);
 

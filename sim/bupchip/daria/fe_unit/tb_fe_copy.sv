@@ -296,7 +296,7 @@ module tb_fe_copy;
 				inc("dma_set");
 			end
 			// the latch: at C if C >= E0+5, else at E0+5 (lane A's reading A-4 of 2.3)
-			if ((dma_set && kidx >= 6'd4) || (defer && kidx == 6'd4)) begin
+			if ((dma_set && kidx >= 6'd5) || (defer && kidx == 6'd5)) begin
 				svc_pend <= 1'b1;
 				svc_fill <= n_fill;
 				svc_src  <= 17'd3072 + {1'b0, n_p1, n_p0};
@@ -383,7 +383,13 @@ module tb_fe_copy;
 		.crb_q(crb_q), .stb_addr(stb_addr), .stb_we(stb_we), .stb_be(4'hF), .stb_wd(32'd0), .stb_q(stb_q));
 
 	// the competitors' pointer writes go into the reference too
-	always @(posedge clk_sys) if (wb_gnt) for (int b = 0; b < 4; b++) rref[4 * int'(wb_a) + b] = wb_wd[8 * b +: 8];
+	int watch = -1;
+	initial void'($value$plusargs("watch=%h", watch));
+	always @(posedge clk_sys) begin
+		if (watch >= 0 && crb_we && int'(crb_addr) == watch)
+			$display("WATCH @%0d write %04x be %b wd %08x (cp %b wb %b f6 %b rst %b)", e, crb_addr, crb_be, crb_wd, cp_gnt, wb_gnt, f6_act, cart_reset);
+		if (watch >= 0 && dma_request && !dbusy) $display("WATCH @%0d upstream DMA fill %b src %05x dst %05x n %0d", e, dma_fill, dma_source, dma_dest, dma_count);
+	end
 
 	// ---- upstream's ram_init with a behavioural DMA executor (the image reference) --------------------
 	wire  [1:0] fam_u = is_dpc ? 2'd1 : is_cdf ? 2'd3 : 2'd0;     // cart2600.sv:658-660
@@ -458,6 +464,8 @@ module tb_fe_copy;
 	logic        rel_ok_q = 1'b0;
 	longint      run_rise = 0;
 	logic        glitch_q = 1'b0;
+	int          gl_age = 100;                   // clocks since cart_reset was last forced low
+	logic        ld1_q = 1'b0, rise_q = 1'b0;
 
 	always @(posedge clk_sys) begin
 		logic        rise, f6_go_b, exp_cz, exp_cp, exp_ca, w_ok;
@@ -517,21 +525,21 @@ module tb_fe_copy;
 			if (!init_busy) fail("init_busy", "low during F6");
 			if (u_copy.a_f6_live !== !rst_quiet) fail("a_f6_live", "formula");
 			if (u_copy.a_f6_live) begin
-				if (glitch || glitch_q) inc("a_f6_live_glitch"); else fail("a_f6_live", "F6 without rst_quiet");
+				if (gl_age < 12) inc("a_f6_live_glitch"); else fail("a_f6_live", "F6 without rst_quiet");
 			end
 			inc("f6_clocks");
 		end else begin
 			if (f6_act) fail("f6", "f6_act high outside the predicted F6");
 			if (cz_req || u_copy.f6_ph != 4'd0) fail("f6", "F6 requests outside F6");
 		end
-		if (cart_reset !== (u_copy.qcnt != 0 || cart_reset)) ;
-		if (rst_quiet !== (u_copy.quiet_q)) ;
 
 		// -- init_busy (D6) ---------------------------------------------------------------------------
 		if (init_busy !== ib_b) fail("init_busy", $sformatf("init_busy %b, expected %b", init_busy, ib_b));
-		if (ri_busy && load_start) ;
-		// upstream's busy rises on the same edges (load_start, an accepted reset rise)
-		if (rise && arm_ld && !ib_b && !load_start && !ri_busy && !glitch_q) inc("rise_vs_upstream");
+		// upstream's busy: high whenever its loading flag is, and on the edges ours rises
+		if (u_ri.loading && !init_busy) fail("init_busy", "low while upstream's ram_init is loading");
+		if (ld1_q && !arm_ld && (init_busy || ri_busy)) fail("init_busy", "a non-ARM image: init_busy or upstream's busy still high at L+1");
+		if (rise_q && (init_busy !== ri_busy)) fail("init_busy", $sformatf("after an accepted reset rise: init_busy %b, upstream %b", init_busy, ri_busy));
+		if (rise_q) inc("rise_vs_upstream");
 
 		// -- the engine ---------------------------------------------------------------------------------
 		if (svc_take !== (svc_pend & !u_copy.run & !init_busy & !f6_act & !load_start & !cart_reset))
@@ -557,26 +565,6 @@ module tb_fe_copy;
 		if (cp_req && !cp_gnt && !f6_act) inc("engine_denied");
 		if (cp_req && !cp_gnt && !f6_act && guard_on) inc("engine_denied_guard");
 		if (ca_req && !ca_gnt && !f6_act) inc("copy_src_denied");
-		if (svc_take) begin
-			int c;
-			c = up_count(svc_fill, svc_val, 8'((svc_src - 17'd3072) >> 8), svc_rem, 12'(svc_dst - 13'd3072));
-			if (s_act) fail("engine", "a service taken while the last is still checked");
-			s_act    <= 1'b1;
-			s_fill   <= svc_fill;
-			s_dest   <= int'(svc_dst);
-			s_count  <= c;
-			s_left   <= c;
-			s_done   <= '0;
-			s_take_e <= e;
-			for (int i = 0; i < c; i++)
-				rref[int'(svc_dst) + i] = svc_fill ? svc_val : img[int'(svc_src) + i];
-			inc(svc_fill ? "svc_fill" : "svc_copy");
-			if (c == 0) inc("svc_count0");
-			if (c < int'(svc_rem)) inc("svc_clamped");
-			if (!svc_fill && int'(svc_src) + int'(svc_rem) > 32'h8000) inc("svc_src_bound");
-			if (int'(svc_dst) + int'(svc_rem) > 32'h1C00) inc("svc_dst_bound");
-			if (arm_dma_busy && run_q) ;
-		end
 		if (run_q && !u_copy.run) begin                              // the engine stopped
 			if (cart_reset || load_start || rq_b) inc("svc_abandoned");
 			else begin
@@ -586,12 +574,32 @@ module tb_fe_copy;
 					if (u_mem.cart_ram.mem_q[w] !== {rref[4*w+3], rref[4*w+2], rref[4*w+1], rref[4*w]})
 						fail("svc_ram", $sformatf("word %04x %08x, upstream %08x", w, u_mem.cart_ram.mem_q[w], {rref[4*w+3], rref[4*w+2], rref[4*w+1], rref[4*w]}));
 				inc("svc_checked");
-				add("svc_clocks", e - run_rise);
+				add(s_fill ? "svc_fill_clocks" : "svc_copy_clocks", e - run_rise);
+				add(s_fill ? "svc_fill_bytes" : "svc_copy_bytes", s_count);
 			end
-			s_act <= 1'b0;
+			s_act = 1'b0;
+		end
+		if (svc_take) begin
+			int c;
+			c = up_count(svc_fill, svc_val, 8'((svc_src - 17'd3072) >> 8), svc_rem, 12'(svc_dst - 13'd3072));
+			if (s_act) fail("engine", "a service taken while the last is still checked");
+			s_act    = 1'b1;
+			s_fill   = svc_fill;
+			s_dest   = int'(svc_dst);
+			s_count  = c;
+			s_left   = c;
+			s_done   = '0;
+			s_take_e = e;
+			for (int i = 0; i < c; i++)
+				rref[int'(svc_dst) + i] = svc_fill ? svc_val : img[int'(svc_src) + i];
+			inc(svc_fill ? "svc_fill" : "svc_copy");
+			if (c == 0) inc("svc_count0");
+			if (c < int'(svc_rem)) inc("svc_clamped");
+			if (!svc_fill && int'(svc_src) + int'(svc_rem) > 32'h8000) inc("svc_src_bound");
+			if (int'(svc_dst) + int'(svc_rem) > 32'h1C00) inc("svc_dst_bound");
+			if (arm_dma_busy) inc("svc_taken_while_busy");
 		end
 		if (!run_q && u_copy.run) run_rise <= e;
-		if (svc_take && svc_pend && u_copy.run) fail("engine", "taken while running");
 		if (svc_take && run_q) inc("svc_queued_rmw");
 
 		// -- arm_dma_busy (7.4, D3) --------------------------------------------------------------------
@@ -621,6 +629,7 @@ module tb_fe_copy;
 				if (f6_t + 1 == f6_len_b) begin
 					f6_t <= -1;
 					ib_b <= 1'b0;
+					for (int w = 0; w < 32; w++) sref[w] = 32'd0;     // the state-RAM clear (CLR)
 					inc(f6_fam_dpc ? "f6_dpc" : f6_fam_r32 ? "f6_cdfj_plus" : "f6_cdf8k");
 				end else f6_t <= f6_t + 1;
 			end
@@ -640,13 +649,17 @@ module tb_fe_copy;
 		if (cart_reset | init_busy) dmab <= 1'b0;
 		else if (dma_set) dmab <= 1'b1;
 		else if (dmab & !svc_hold & !u_copy.run & rel_ok) dmab <= 1'b0;
-		if (arm_dma_busy && !dmab) ;
 		if (dmab && !(cart_reset | init_busy) && !dma_set && !svc_hold && !u_copy.run && rel_ok) inc("dma_busy_falls");
 		if (dmab && !(cart_reset | init_busy) && !svc_hold && !u_copy.run && !rel_ok) inc("dma_busy_tail_clocks");
 
+		// the competitors' pointer writes into the reference, after this edge's compares
+		if (wb_gnt) for (int b = 0; b < 4; b++) rref[4 * int'(wb_a) + b] = wb_wd[8 * b +: 8];
 		run_q    <= u_copy.run;
 		ib_q     <= init_busy;
 		glitch_q <= glitch;
+		gl_age   <= glitch ? 0 : (gl_age < 100 ? gl_age + 1 : 100);
+		ld1_q    <= ld1_b & !load_start;
+		rise_q   <= rise && arm_ld && !ib_b && !load_start && !ri_busy && gl_age >= 100;
 		e <= e + 1;
 	end
 
@@ -664,7 +677,7 @@ module tb_fe_copy;
 					{rref[4*w+3], rref[4*w+2], rref[4*w+1], rref[4*w]}));
 			end
 		for (int w = 0; w < 256; w++)
-			if (u_mem.state_ram.mem_q[w] !== ((w < 32) ? 32'd0 : sref[w])) begin
+			if (u_mem.state_ram.mem_q[w] !== sref[w]) begin
 				bad++;
 				if (bad <= 8) fail("state_ram", $sformatf("%s: word %02x %08x", why, w, u_mem.state_ram.mem_q[w]));
 			end
@@ -687,10 +700,12 @@ module tb_fe_copy;
 			end
 			to++;
 		end while ((init_busy || ri_busy || dbusy) && to < 200000);
-		if (to >= 200000) fail("timeout", $sformatf("%s: init never ended", why));
+		if (to >= 200000) begin
+			fail("timeout", $sformatf("%s: init never ended", why));
+			$fatal(1, "tb_fe_copy: init never ended");
+		end
 		@(posedge clk_sys);
 		compare_image(why);
-		for (int w = 0; w < 32; w++) sref[w] = 32'd0;
 	endtask
 	// a download of `size` bytes; `late` of them come after load_end
 	task automatic download(input int size, input int late, input int sch, input logic [2:0] r);

@@ -18,8 +18,9 @@
 //                8730, 17460 ps: the shared edge on each of the three
 //                clk_sys edges of the 144-step frame; BEN 6.3's d_ofs)
 //   d18_mvA/B    /18 with phase moves (PLL relock): every 2,000-22,000
-//                clocks clk_arm stops for 0-5 clk_sys periods and resumes
-//                on a random one of the three offsets
+//                clocks clk_arm stops for 0-5 clk_sys periods (none in a
+//                quarter of the moves) and resumes on a random one of the
+//                three offsets (the same one in a third of them)
 //   d19_*        /19 (the fallback, 19 steps = 27,645 ps) at five offsets
 //   x5_*         clk_arm = 5 x clk_sys (mode A's upstream clk_arm), two offsets
 //   x1           clk_arm = clk_sys (coincident)
@@ -31,7 +32,8 @@
 //         two clk_sys edges (the receiver pair, independently of the lattice)
 //   fly   ph, good and locked against an independent restatement of 8.1's
 //         flywheel: ph = (clocks since the last mismatch) mod 3, good =
-//         min(that - 1, 12), locked iff that >= 14 (13 matches)
+//         min(that - 1, 12), locked iff that >= 14 (13 matches); phb_next
+//         == that locked & that ph == 0 (from the flywheel, not pd_same)
 //   gd    guard_on == locked & (call_win | !cpu_ready) with random call_win
 //         and cpu_ready; ev_unlock == locked now and not in the next clock
 // and in the /18 lanes, in every settled clock (no move within reach of
@@ -134,7 +136,7 @@ module tb_fe_guard_lane #(
 			tnext = tn + PER;
 			if (MOVES && tnext >= next_move) begin
 				// clk_arm stops for g ps and resumes on one of the three /18 offsets
-				g = int'(rnd() % (5 * TS + 1));
+				g = (rnd() % 4 == 0) ? 0 : int'(rnd() % (5 * TS + 1));   // 0: a pure phase jump (or none)
 				t_stop_p = t_stop;  t_res_p = t_res;  a0_old = a0_cur;
 				t_stop   = tn;
 				a0_cur   = SYS0 + (rnd() % 3) * 8730 + (rnd() % 4) * longint'(PER);
@@ -215,6 +217,8 @@ module tb_fe_guard_lane #(
 			if (u_guard.ph != 2'(ph_r) || u_guard.good != 4'(good_r) || lk != (run >= 14)) begin
 				e_fly++; err($sformatf("flywheel (ref ph %0d good %0d locked %0d)", ph_r, good_r, run >= 14), i);
 			end
+			// phb_next comes from the flywheel register (8.1), never from the receiver
+			if (phb_next != ((run >= 14) && ph_r == 0)) begin e_fly++; err("phb_next != locked & ph == 0", i); end
 			mism = ps != (ph_r == 0);
 			if (run > maxrun) maxrun = run;
 			if (mism) lm = i;
