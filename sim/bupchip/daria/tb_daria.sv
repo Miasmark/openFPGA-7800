@@ -1006,4 +1006,9 @@ module tb_daria;
 `ifdef DARIA_SHADOW
 `include "daria_shadow.svh"
 `endif
+// The front-end shadow (run_daria.sh FE=1): fe.csv, fe_err.txt and the "FE"
+// lines of run.log.
+`ifdef FE_SHADOW
+`include "fe_shadow.svh"
+`endif
 endmodule

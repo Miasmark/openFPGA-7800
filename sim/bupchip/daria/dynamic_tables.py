@@ -659,6 +659,57 @@ def sec_daria(runs, margin):
     return table(hdr, rows)
 
 
+def sec_fe(runs, margin):
+    """The front-end shadow (FE=1 runs, fe_shadow.svh): per run, the 6507 latches
+    and commits checked, the bad counts (all must be 0: dout is L1, state is
+    C1/C2, the tap checks are port, rom, ram, pointer, jump map and L3), the
+    read latches whose byte came from RAM (checked at the reference's own
+    address), the hidden pclk0 edges (information), the E0 -> latch range (S1)
+    and the console resets and handoffs. Not in the default list: --only fe."""
+    import re
+    hdr = ["Demo", "Scheme", "Frames", "Latches", "Commits", "dout bad", "state bad",
+           "port/rom/ram/ptr/jump/L3 bad", "RAM reads", "Hidden pclk0 (differ)", "E0->latch",
+           "E0->latch < 6", "Resets/handoffs"]
+    rows = []
+    for R in runs:
+        if not os.path.exists(os.path.join(R.path, "fe.csv")):
+            continue
+        with open(os.path.join(R.path, "fe.csv")) as f:
+            frames = sum(1 for _ in csv.DictReader(f))
+        sh = det = rd = rs = short6 = None
+        with open(os.path.join(R.path, "run.log")) as f:
+            for line in f:
+                if line.startswith("FE shadow:"):
+                    sh = re.match(r"FE shadow: (\S+) (\d+) latches, (\d+) commits; dout (\d+), "
+                                  r"state (\d+) bad; E0->latch (\S+)", line)
+                elif line.startswith("FE detail:"):
+                    # Older runs have no ram/pointer fields.
+                    det = re.search(r"(?P<hid>\d+) hidden pclk0 \((?P<hbad>\d+) differ.*"
+                                    r"port (?P<port>\d+), rom (?P<rom>\d+), "
+                                    r"(?:ram (?P<ram>\d+), pointer (?P<ptr>\d+), )?"
+                                    r"jump map (?P<jump>\d+), L3 (?P<l3>\d+) bad", line)
+                elif line.startswith("FE reads:"):
+                    rd = re.search(r"(\d+) with a RAM byte", line)
+                elif line.startswith("FE resets:"):
+                    rs = re.match(r"FE resets: (\d+) console resets.*, (\d+) handoffs", line)
+                elif line.startswith("FE S1:") and "latches with" in line:
+                    short6 = line.split()[2]
+        if sh is None:
+            rows.append([R.short, "(no FE shadow line)"] + [""] * (len(hdr) - 2))
+            continue
+        if det:
+            tap = "/".join(det.group(k) or "-" for k in ("port", "rom", "ram", "ptr", "jump", "l3"))
+            hid = "%s (%s)" % (det.group("hid"), det.group("hbad"))
+        else:
+            tap = hid = "?"
+        rows.append([R.short, sh.group(1), frames, sh.group(2), sh.group(3), sh.group(4),
+                     sh.group(5), tap, rd.group(1) if rd else "-", hid, sh.group(6), short6 or "?",
+                     "%s/%s" % (rs.group(1), rs.group(2)) if rs else "-"])
+    if not rows:
+        return "No run has fe.csv (run_daria.sh with FE=1)."
+    return table(hdr, rows)
+
+
 def sec_harmony(runs, margin):
     """The call that uses most of its budget on a Harmony at zero wait.
 

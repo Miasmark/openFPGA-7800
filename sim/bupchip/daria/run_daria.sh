@@ -19,6 +19,10 @@
 # two-way cache over psram.sv and psram_model.sv, MMIO, the call port):
 # obj_wrap<WIN_KB>, runs/wrap<WIN_KB>/. NOBUILD=1 runs the binary that is there
 # without checking its sources (run_all.sh builds once, then sets it).
+# FE=1 adds the front-end shadow (fe_shadow.svh, -DFE_SHADOW): fe.csv,
+# fe_err.txt and the "FE ..." lines of run.log. It combines with the others:
+# the object directory gets _fe (obj_fe, obj_shadow<WIN_KB>_fe, ...), the
+# runs go to runs/fe/ (runs/shadow<WIN_KB>_fe/, runs/wrap<WIN_KB>_fe/).
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -81,9 +85,16 @@ if [ "${SHADOW:-0}" != 0 ]; then
 	fi
 fi
 
+INCS=("$HERE/daria_shadow.svh")
+if [ "${FE:-0}" != 0 ]; then
+	OBJ="${OBJ}_fe"
+	DEFS+=(-DFE_SHADOW "-I$HERE")
+	INCS+=("$HERE/fe_shadow.svh")
+fi
+
 BIN="$OBJ/vtb"
 if [ ! -x "$BIN" ] || { [ "${NOBUILD:-0}" = 0 ] && \
-		[ -n "$(find "${SRCS[@]}" "$HERE/daria_shadow.svh" -newer "$BIN" 2>/dev/null | head -1)" ]; }; then
+		[ -n "$(find "${SRCS[@]}" "${INCS[@]}" -newer "$BIN" 2>/dev/null | head -1)" ]; }; then
 	echo "building $BIN ..." >&2
 	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
@@ -97,6 +108,7 @@ fi
 PREFIX=""
 [ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
 [ "${SHADOW:-0}" = 0 ] || [ "${WRAPPER:-0}" = 0 ] || PREFIX="wrap${WIN_KB:-128}/"
+[ "${FE:-0}" = 0 ] || { PREFIX="${PREFIX%/}"; PREFIX="${PREFIX:+${PREFIX}_}fe/"; }
 NAME="${NAME:-$PREFIX$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"

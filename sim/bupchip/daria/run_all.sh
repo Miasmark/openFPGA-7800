@@ -4,8 +4,8 @@
 #   ./run_all.sh DIR [+plusargs...]
 # A run whose report.txt exists is skipped; FORCE=1 reruns it. JOBS sets the
 # number of parallel simulations (default 2). Outputs as run_daria.sh;
-# SHADOW=1, WRAPPER=1 and WIN_KB pass through to it (runs/shadow<WIN_KB>/,
-# runs/wrap<WIN_KB>/).
+# SHADOW=1, WRAPPER=1, WIN_KB and FE=1 pass through to it (runs/shadow<WIN_KB>/,
+# runs/wrap<WIN_KB>/; with FE=1 runs/fe/, runs/shadow<WIN_KB>_fe/, ...).
 # SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -15,6 +15,7 @@ shift
 PREFIX=""
 [ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
 [ "${SHADOW:-0}" = 0 ] || [ "${WRAPPER:-0}" = 0 ] || PREFIX="wrap${WIN_KB:-128}/"
+[ "${FE:-0}" = 0 ] || { PREFIX="${PREFIX%/}"; PREFIX="${PREFIX:+${PREFIX}_}fe/"; }
 # Build once, before the parallel runs race to do it; they then use that
 # binary even if a source changes while they run.
 "$HERE/run_daria.sh" --build-only
