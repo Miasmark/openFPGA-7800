@@ -420,7 +420,7 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
   - A DARIA call takes about as long as upstream's: Mappy's first, 283 µs at 38.18 MHz against 293 µs at 71.6 MHz.
   - **Identical pairs.** The two Draconian builds give identical counts, and so do Stay Frosty 2's NTSC and PAL builds, as their traces predicted ("The added images").
   - **The 64 KB window (decision 8).** These runs use the 128 KB window. Turbo is the only image larger than 64 KB; every other image is 32 or 64 KB, so it lies whole in either window and runs alike. Turbo at 64 KB runs through the whole wrapper (below): all 2,999 calls match.
-  - **Timer reads (open item 17)**, from 64 KB runs of 300 frames (520 for Scramble, whose calls start at frame 427). The final report gives the range of DARIA's reading less upstream's. Only Draconian reads T1TC: once, at power-on, in both builds. DARIA reads 37 counts above upstream. The bound is 200; the game's own margin is 3,872 counts. Scramble (MAMCR) and Stay Frosty 2 access MMIO, but neither reads T1TC, so their accesses match exactly. Space Rocks' short run is pending.
+  - **Timer reads (open item 17)**, from 64 KB runs of 300 frames (520 for Scramble, whose calls start at frame 427). The final report gives the range of DARIA's reading less upstream's. Only Draconian reads T1TC: once, at power-on, in both builds. DARIA reads 37 counts above upstream. The bound is 200; the game's own margin is 3,872 counts. Scramble (MAMCR), Space Rocks and Stay Frosty 2 access MMIO, but none of them reads T1TC, so their accesses match exactly.
 - **The BupChip through the DARIA wrapper.** Song 13 is PCM-identical in both streams:
 
   | Clock | `CLOCK_SPEED` | Busy | Cache misses | Stall clocks | PSRAM model violations |
