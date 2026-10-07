@@ -21,7 +21,7 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 ## Status (2026-10-07)
 
 - Specs, design and stage-0 bench: done.
-- **The owner chose the exact audio** (2026-10-07; `docs/DARIA_CORE.md`, decision 9): `design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate. This is meant as the front end's last major revision. If it causes trouble later, the lean audio (`daria_fe_audio_lean`, the same ports, about 250 ALMs less, AMPLITUDE may lag one tick, counted) is the way back.
+- **The owner chose the exact audio** (2026-10-07; `docs/DARIA_CORE.md`, decision 9): `design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate. DARIA is meant as the 7800 core's last major revision, so spare area matters only as far as routing and timing closure need it: the 84% gate is a guide, and step 7's fit decides. If the exact audio causes trouble later, the lean audio (`daria_fe_audio_lean`, the same ports, about 250 ALMs less, AMPLITUDE may lag one tick, counted) is the way back.
 - Step 0 of `design.md` 12.2 (the interfaces frozen as stubs, `interfaces.md`): done, and independently reviewed (`interfaces.md` section 11: fixes R-1 … R-4, questions L-1 … L-6 for the lead). Any port change from here needs the lead's sign-off.
 - Next: build the modules and their unit benches (five lanes), then mode A on three images, then all 21 (`design.md` 12).
 

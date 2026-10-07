@@ -1650,6 +1650,8 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 
 ### 10.3 Probe gates, levers, fallback
 
+**Owner's note (2026-10-07).** DARIA is meant as the 7800 core's last major revision, so spare area matters only as far as routing and timing closure need it. The gates below are guides for spotting an overrun early, not targets: a lever is applied only if it keeps every exactness result, or if step 7's fit or timing needs it.
+
 **Probes.** Each block is compiled alone with the study's probe method (`frontend_study/run_study.sh`: virtual pins, the core's settings, 69.8 ns) as soon as its unit bench passes. The targets:
 
 | Block | Target ALMs |
