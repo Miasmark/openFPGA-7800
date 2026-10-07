@@ -405,6 +405,15 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
   | 38.18 MHz | 50.0 | 54.6% | 1,275 | 13,091 | 0 |
 - **Open item 8** (CoreTone after a 2600 game). All 32 KB of cart RAM were filled with random words before the downloads (`tb_s4 +ramjunk`). Song 13 is still PCM-identical, and its counts equal the clean run's clock for clock (83,432,084 busy clocks). CoreTone does not depend on what the RAM holds at boot.
 - **Through the whole wrapper in the 2600 profile** (`tb_daria`, `WRAPPER=1`): Mappy's 79 calls (40 frames) match upstream. The cartridge comes through the capture, `psram.sv` runs at `CLOCK_SPEED` 50.0, and the PSRAM model reports 0 violations.
+- **Small windows through the whole wrapper** (`tb_daria`, `WRAPPER=1`, 1,500 frames, open items 6 and 10). The image beyond the window comes through the cache from `psram.sv` (`CLOCK_SPEED` 50.0 at 38.18 MHz) on the PSRAM model. Every call matches upstream, none is late, and the highest share of a budget is unchanged:
+
+  | Image | Window | Calls (differ) | Demand misses | Prefetches | Clocks W waited, whole run | Highest share (model) | PSRAM model violations |
+  |---|---|---|---|---|---|---|---|
+  | Elevator Agent | 48 KB | 2,999 (0) | 38 | 31 | 941 | 85% (85%) | 0 |
+  | Turbo | 48 KB | 2,999 (0) | 614 | 1,851 | 7,030 | 53% (52%) | 0 |
+  | Zaxxon | 32 KB | 2,999 (0) | 67 | 214 | 1,248 | 86% (86%) | 0 |
+
+  Against its 128 KB run, Elevator Agent's calls take 941 clocks more in all, at most 726 in one call (a cold fill). The 4 KB two-way cache with 16 B lines is enough (open item 6). `psram.sv` at `CLOCK_SPEED` 50.0 meets the model's timing at 38.18 MHz (open item 10, in simulation; step 8 checks hardware).
 - **Cart RAM collisions** (open item 7, counted by the shadow): a console-side read within one `clk_sys` of a CPU write to the same word. Elevator Agent: 0 in 25.6 M reads. Galagon: 21 in 17.8 M, for upstream's ARM and DARIA alike. The equal counts suggest a console-side read repeating at one address while the CPU writes it. Step 6's front ends decide whether such a read needs ordering.
 
 ### Changes against the design
@@ -431,7 +440,7 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
 1. **The wrapper:** done; `s4/check.sh` on it at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) is running.
 2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
-3. **Small-window runs** with the real cache, `psram.sv` at 38.18 MHz and the PSRAM model (open items 6 and 10): Zaxxon with a 32 KB window (its code ends at 0x7B9C), Turbo and Elevator Agent with 48 KB (code to 0xB30A).
+3. **Small-window runs:** done (above). The window could shrink to 64 KB (64 M10K freed, a 2:1 fetch mux) or 48 KB (80 freed): every image's code fits (it ends at 0xB30A at most), and the cache serves the rest with no late call. The owner decides; the window's size is a parameter of the CPU and of `daria_mem`.
 4. **Open item 8:** settled (above).
 5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
 6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
