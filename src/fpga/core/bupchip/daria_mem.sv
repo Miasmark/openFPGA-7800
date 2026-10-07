@@ -3,13 +3,16 @@
 // image window, the cart RAM, the front-end ROM and the state RAM, beside
 // ARIA's firmware ROM (which stays in bupchip_pocket.sv).
 //
-//   window      4 x 8,192 x 32 (128 KB, 128 M10K). Port A (clk_arm) fetches
-//               at rom_addr; port B (clk_arm) serves the CPU's data reads at
-//               d_addr, or, while img_ready is low, takes the receiver's
-//               image writes (bup_asset_wr.sv) with their byte lanes. All four
-//               RAMs read every clock, and a 4:1 mux on the registered address
-//               bits [14:13] picks one: no read-enable decode sits between
-//               rom_addr and the slices (step 3, "Two more levers").
+//   window      WIN_KB / 32 RAMs of 8,192 x 32, rounded up: the image's
+//               first WIN_KB (64 KB by the owner's decision 8: 2 RAMs, 64
+//               M10K; other sizes up to 128 KB for test builds). Port A (clk_arm) fetches at rom_addr; port B
+//               (clk_arm) serves the CPU's data reads at d_addr, or, while
+//               img_ready is low, takes the receiver's image writes
+//               (bup_asset_wr.sv) with their byte lanes; writes beyond the
+//               window go nowhere (the PSRAM has the whole image). All the
+//               RAMs read every clock, and a mux on the registered address bits
+//               [14:13] picks one: no read-enable decode sits between rom_addr
+//               and the slices (step 3, "Two more levers").
 //   cart RAM    8,192 x 32 with byte lanes (32 KB, 32 M10K): port A (clk_arm)
 //               the CPU's in both profiles (the BupChip sees the low 16 KB),
 //               port B (clk_sys) the front ends'.
@@ -107,7 +110,9 @@ module daria_ram #(
 `endif
 endmodule
 
-module daria_mem (
+module daria_mem #(
+	parameter int WIN_KB = 64           // 1 to 128; a multiple of 32 uses every word
+) (
 	input  wire         clk_arm,
 	input  wire         clk_sys,
 
@@ -155,22 +160,30 @@ module daria_mem (
 	output wire  [31:0] stb_q
 );
 	// ---- the window -------------------------------------------------------------
+	// The CPU fetches and reads ROM only below WIN_KB (bup_cpu's WIN_KB), so
+	// the slice index never names a RAM that is not there.
+	localparam int NW = (WIN_KB + 31) / 32;
 	wire [14:0] wb_addr = img_ready ? d_addr[16:2] : win_wa;
-	wire [31:0] qa [4], qb [4];
+	wire [31:0] qa [NW], qb [NW];
 	logic [1:0] sel_a = 2'd0, sel_b = 2'd0;
 	always_ff @(posedge clk_arm) begin
 		sel_a <= rom_addr[14:13];
 		sel_b <= wb_addr[14:13];
 	end
 	genvar i;
-	generate for (i = 0; i < 4; i = i + 1) begin : g_win
+	generate for (i = 0; i < NW; i = i + 1) begin : g_win
 		daria_ram #(.AW(13)) win (
 			.clk_a(clk_arm), .addr_a(rom_addr[12:0]), .we_a(1'b0), .be_a(4'd0), .wd_a(32'd0), .q_a(qa[i]),
 			.clk_b(clk_arm), .addr_b(wb_addr[12:0]),
 			.we_b(!img_ready && win_we && wb_addr[14:13] == i), .be_b(win_be), .wd_b(win_wd), .q_b(qb[i]));
 	end endgenerate
-	assign win_qa = qa[sel_a];
-	assign win_qb = qb[sel_b];
+	generate if (NW == 1) begin : g_one
+		assign win_qa = qa[0];
+		assign win_qb = qb[0];
+	end else begin : g_mux
+		assign win_qa = qa[sel_a[$clog2(NW)-1:0]];
+		assign win_qb = qb[sel_b[$clog2(NW)-1:0]];
+	end endgenerate
 
 	// ---- cart RAM -----------------------------------------------------------------
 	daria_ram #(.AW(13)) cart_ram (

@@ -43,7 +43,7 @@
 //------------------------------------------------------------------------------
 
 `ifndef DARIA_WIN_KB
-`define DARIA_WIN_KB 128
+`define DARIA_WIN_KB 64
 `endif
 `ifndef DARIA_PSRAM_CS
 `define DARIA_PSRAM_CS 50.0
@@ -177,7 +177,7 @@
 	logic        d_stb_we = 0;
 	logic [31:0] d_stb_wd = 0;
 
-	daria_mem dmem (
+	daria_mem #(.WIN_KB(`DARIA_WIN_KB)) dmem (
 		.clk_arm(clk_d), .clk_sys,
 		.rom_addr(d_rom_addr), .win_qa(d_rom_q), .d_addr(d_d_addr), .win_qb(d_rom_dq),
 		.ram_we(d_ram_we), .ram_be(d_ram_be), .ram_wdata(d_ram_wdata), .ram_q(d_ram_q),
@@ -206,14 +206,14 @@
 	// ---- the image, when the run starts ---------------------------------------------------
 	always @(posedge clk_sys) if (running && d_rst_sys) begin
 		d_img_size <= 20'(rom_size > 32'h80000 ? 32'h80000 : rom_size);
-		for (int i = 0; i < 8192; i++) begin
-			dmem.g_win[0].win.mem_q[i] = img_word(4 * i);
-			dmem.g_win[1].win.mem_q[i] = img_word(32768 + 4 * i);
-			dmem.g_win[2].win.mem_q[i] = img_word(65536 + 4 * i);
-			dmem.g_win[3].win.mem_q[i] = img_word(98304 + 4 * i);
-		end
 		d_rst_sys <= 0;
 	end
+	// The window's RAMs, as many as daria_mem has.
+	genvar d_w;
+	generate for (d_w = 0; d_w < (`DARIA_WIN_KB + 31) / 32; d_w = d_w + 1) begin : g_d_load
+		always @(posedge clk_sys) if (running && d_rst_sys)
+			for (int i = 0; i < 8192; i++) dmem.g_win[d_w].win.mem_q[i] = img_word(32768 * d_w + 4 * i);
+	end endgenerate
 	logic [1:0] d_rst_s = 2'b11;
 	always @(posedge clk_d) begin
 		d_rst_s <= {d_rst_s[0], d_rst_sys};

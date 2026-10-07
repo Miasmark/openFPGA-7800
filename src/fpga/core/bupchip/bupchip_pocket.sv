@@ -90,7 +90,7 @@
 //             ready: prof26 ? img_ready : fw_loaded & asset_ready
 //
 // Memories (daria_mem.sv): the firmware ROM stays as above; the image window
-// (four 8K x 32 RAMs, the image's first WIN_KB) gives the fetch and data
+// (the image's first WIN_KB, 64 KB: two 8K x 32 RAMs) gives the fetch and data
 // words in the 2600 profile, the profile picking rom_q and rom_dq; the cart
 // RAM (8K x 32, byte lanes) replaces the BupChip's RAM, which is its low
 // 16 KB, its port B the front ends' on clk_sys; the front-end ROM takes the
@@ -117,7 +117,7 @@ module bupchip_pocket #(
 	parameter int BUP_THROTTLE = 16,    // BUP_DEBUG: clocks of every 16 that may start an instruction
 	parameter bit PREEMPT      = 1'b1,  // bup_asset_cache
 	parameter bit PREFETCH     = 1'b1,  // bup_asset_cache
-	parameter int WIN_KB       = 128    // POCKET_DARIA: the window's size (smaller for test builds)
+	parameter int WIN_KB       = 64     // POCKET_DARIA: the image window (decision 8; up to 128 for tests)
 ) (
 	input  wire        clk_sys,
 	input  wire        clk_arm,
@@ -345,7 +345,7 @@ module bupchip_pocket #(
 	wire  [7:0] sta_addr;
 	wire        sta_we;
 	wire [31:0] sta_wd, sta_q;
-	daria_mem mem (
+	daria_mem #(.WIN_KB(WIN_KB)) mem (
 		.clk_arm, .clk_sys,
 		.rom_addr, .win_qa, .d_addr, .win_qb,
 		.ram_we, .ram_be, .ram_wdata, .ram_q,
