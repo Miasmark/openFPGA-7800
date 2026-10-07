@@ -216,14 +216,14 @@ cpu_run  = ~bup_hold_arm & fw_loaded & asset_ready & sweep_done   (clk_arm)
   - it invalidates the 64 cache tags;
   - it writes 0 to r0–r14 through write port E.
   
-  The S1 core clears its own registers: for 15 clocks after its synchronous `rst` falls it writes 0 to r0–r14, then fetches from 0 (`bup_cpu.sv:111-113, 973-980`). With S1 the sweep only has the tags to invalidate.
+  The S1 core clears its own registers: for 15 clocks after its synchronous `rst` falls it writes 0 to r0–r14, then fetches from 0 (`bup_cpu.sv:139-141, 1063-1079`). With S1 the sweep only has the tags to invalidate.
 
 **Held (in reset) while `cpu_run` is low:**
 - the CPU;
 - the peripheral and its FIFOs;
 - the pop and the frame register (the output reads 0);
 - the read cache's fill and prefetch state machines;
-- the halt status, which the reset clears (`bup_cpu.sv:1233-1235`).
+- the halt status, which the reset clears (`bup_cpu.sv:1369-1371`).
 
 **Not held:**
 - the capture (on `clk_sys`; only `load_start` restarts it);
@@ -257,7 +257,7 @@ The download happens exactly while the CPU is held, so the capture writes must k
   - LDM/STM outside ROM and RAM.
 - **Where they live.** The region decode, the exact checks and the sticky halt status are inside the CPU, `bup_cpu.sv` (region `:220-228`, checks `:823-843`, status `:182-184, 1247-1251`). The CPU therefore takes `asset_size` as an input (`:168`). In S1 each check runs in the clock after its access (`:830, 1254`): in W for a load or a two-clock store. For a one-clock store or an STM's last beat, it runs in the next instruction's first clock, and the halt wins over that instruction. For any other LDM/STM beat, it runs in the LDM/STM's next clock.
 - **Wild stores.** A store with addr[31:28] = 4 that lies beyond the 16 KiB RAM aliases into the RAM. It commits at the end of execute, one clock before W's exact check halts the core.
-  - In S1 that is a one-clock store (immediate offset) or an STM beat (`bup_cpu.sv:73-76, 1056-1060, 1158`). A two-clock store to the same address writes nothing, because the check halts the core in its W clock, which gates the write (`:1098, 1195-1210`).
+  - In S1 that is a one-clock store (immediate offset) or an STM beat (`bup_cpu.sv:101-104, 1158-1162, 1262`). A two-clock store to the same address writes nothing, because the check halts the core in its W clock, which gates the write (`:1098, 1195-1210`).
   - Upstream never writes in that case (`bupchip_memory.sv:85`).
   - It is harmless. The firmware never does it, and the core halts with the output silent either way.
   - Gating the write enable with the bounds check would put a 14-bit compare on the execute path [E].
@@ -297,7 +297,7 @@ Latencies are for S3, with S1 in brackets:
 - **S1's asset port.** In S1 the load's own second clock is W.
   - The cache's data and tag M10Ks take `d_addr` at the end of execute, as ROM port B and the RAM do, so that they answer in W. `bup_cpu.sv`'s header says the same: the memories answer in W from the address registered at the end of execute.
   - In W the CPU raises `w_asset`, with `w_addr` (the same address, registered) and `w_size`. The cache compares the tag and the arrival bits, answers with the aligned word on `asset_q`, and holds `w_wait` high until the halfwords the load touches are there.
-  - While `w_wait` is high, the CPU keeps the ROM, RAM and asset addresses on the access, so `d_addr` stays put and the cache re-reads it (`bup_cpu.sv:120-125, 167-172, 1080, 1308-1310`).
+  - While `w_wait` is high, the CPU keeps the ROM, RAM and asset addresses on the access, so `d_addr` stays put and the cache re-reads it (`bup_cpu.sv:148-153, 212-217, 1182, 1469-1471`).
   - So `w_wait` is a W-clock tag compare on an M10K output, and it feeds the CPU's `done` and next-PC logic in front of `rom_addr`. The step 3 probe drives `w_wait` from a flip-flop, so it does not time this path. Step 5 does.
 
 ## Pipeline and cycle counts
@@ -324,12 +324,12 @@ Latencies are for S3, with S1 in brackets:
 - SQUASH: the clock after `LDR pc`.
 - HALT.
 
-S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3 (UMULL's high word), SEQ and HALT (`bup_cpu.sv:249-258`). S1 needs no SQUASH: W is the load's own second clock, and `LDR pc` loads its data straight into the ROM's address register (`:1087-1091`).
+S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3 (UMULL's high word), SEQ and HALT (`bup_cpu.sv:302-310`). S1 needs no SQUASH: W is the load's own second clock, and `LDR pc` loads its data straight into the ROM's address register (`:1087-1091`).
 
 **Freeze** stops execute only. It happens on an asset miss or a fill stall in W, or for the debug throttle.
 - W is never frozen by the throttle. An asset load in W waits for its halfwords; every other W completes in its clock.
 - Hold does not freeze the core. It resets it (see "Reset and hold").
-- **S1 has two separate inputs** (`bup_cpu.sv:117-123, 148-149`). `freeze` is the throttle: it holds off the start of an instruction, and an instruction that has started always runs to its end (`:984`). `w_wait` holds W while an asset load's data is missing (`:1080`). In S1, W belongs to the same instruction, so nothing else runs while it waits. The wrapper must never raise `w_wait` for an MMIO access: `reg_sel` would stay high, and the peripheral acts on every clock it sees it.
+- **S1 has two separate inputs** (`bup_cpu.sv:145-151, 178-179`). `freeze` is the throttle: it holds off the start of an instruction, and an instruction that has started always runs to its end (`:984`). `w_wait` holds W while an asset load's data is missing (`:1080`). In S1, W belongs to the same instruction, so nothing else runs while it waits. The wrapper must never raise `w_wait` for an MMIO access: `reg_sel` would stay high, and the peripheral acts on every clock it sees it.
 
 **Commit gate.** `commit = advance & cond_pass & !halt` gates every side effect: register-file writes, NZCV, RAM write enable, `reg_sel`, fills and redirects.
 
@@ -351,7 +351,7 @@ S1's states are CLEAR (the register clear after reset), RUN, W, SHR2, MUL2, MUL3
 | LDM / STM of n registers | n+2 / n+1 | n / n |
 | Unsupported encoding | Halt | Halt |
 
-The S1 column is the delivered core's (`bup_cpu.sv:43-49`). B's sketch, on which the study measured CPI 1.383, takes the same except for LDM/STM: n+3 / n+2, with an extra first clock in its sequencer (`sim/bupchip/model/study/sketch/bup_cpu.sv:304-306, 324-331`). An S1 store with an immediate offset takes 1 clock only to RAM; to MMIO it takes 2.
+The S1 column is the delivered core's (`bup_cpu.sv:71-77`). B's sketch, on which the study measured CPI 1.383, takes the same except for LDM/STM: n+3 / n+2, with an extra first clock in its sequencer (`sim/bupchip/model/study/sketch/bup_cpu.sv:371-373, 391-398`). An S1 store with an immediate offset takes 1 clock only to RAM; to MMIO it takes 2.
 
 S2 is S3 with 2-clock MUL/MLA and 2-clock register-offset stores.
 
@@ -395,7 +395,7 @@ The whole iteration is 22 instructions:
 **Notes on the table:**
 - The model agrees with the RTL to within 0.3% on the sketch, and to within 0.1% on the S1 core. That supports using the model for S2 and S3.
 - The sketch's column comes from `cycles.py`'s `S1-sketch`, which charges LDM n+2 with write-back and n+1 without, and STM n (`sim/bupchip/model/cycles.py:51-52`). The sketch's RTL takes n+3 and n+2, which is about 9.6 per instruction [E]. That column therefore undercounts LDM/STM by about 0.003 CPI.
-- The S1 core takes LDM n+2 and STM n+1 (`bup_cpu.sv:49`), modelled as `S1`. Its halfword loads cost less than the sketch's only because `tb_s1.sv`'s asset memory answers at once, where the sketch's stream buffer stalls. With the design's asset cache instead, the S1 core's CPI is 1.378 [model].
+- The S1 core takes LDM n+2 and STM n+1 (`bup_cpu.sv:77`), modelled as `S1`. Its halfword loads cost less than the sketch's only because `tb_s1.sv`'s asset memory answers at once, where the sketch's stream buffer stalls. With the design's asset cache instead, the S1 core's CPI is 1.378 [model].
 - The figures are from `cycles.py ... --song 13 --secs 4` (`sim/bupchip/model/README.md`).
 - In S3, LDM/STM account for about 1.3% of clocks (0.19% × 7.06 / 1.013).
 - In S3, asset stalls account for 0.13%.
@@ -484,7 +484,7 @@ The bypass means the array is only ever read for data written at least two clock
   - A 12-bit word address within the ROM window.
   - The `npc` mux takes: PC + 1, branch target, BX Rm, `LDR pc` data from W, or hold.
   - A target outside the window halts, and so does one that is not word-aligned. The check runs one clock later.
-  - So does running on past the last ROM word, 0x3FFC, where the ARM7TDMI's fetch from 0x4000 would abort; S1 does not wrap to 0 (`bup_cpu.sv:1186-1192`).
+  - So does running on past the last ROM word, 0x3FFC, where the ARM7TDMI's fetch from 0x4000 would abort; S1 does not wrap to 0 (`bup_cpu.sv:1292-1324`).
 - **Decode** works straight from the ROM's unregistered output. Register indices are raw instruction bits behind one mux level. `condition_pass` comes from `arm7tdmi_pkg.sv:82-111`.
 - **Supported encodings** are the firmware's inventory of 1,704 code words:
   - all 16 data-processing opcodes with every operand-2 form;
@@ -503,7 +503,7 @@ The bypass means the array is only ever read for data written at least two clock
   The halt codes below list every case.
 - **Cost:** 300–450 ALMs including the state machine [E].
 
-**Halt codes.** A halt stops the core and records a code and the address of the instruction responsible in `halt_code` and `halt_pc`. They stay until the next reset (`bup_cpu.sv:78-110, 204-211, 1233-1251`). A decode halt needs the instruction's condition to pass: a condition-failed halting encoding takes one clock and does nothing, as on the reference (`:918`). A fault found by an earlier clock's check wins over the instruction then in execute (`:914-922`). With `THUMB` 1 (DARIA) the same codes cover Thumb encodings, and code 8 (FLAGS) halts an instruction that reads C while a Thumb MUL has left it unknown (`docs/DARIA_CORE.md`, "What halts").
+**Halt codes.** A halt stops the core and records a code and the address of the instruction responsible in `halt_code` and `halt_pc`. They stay until the next reset (`bup_cpu.sv:106-138, 249-256, 1369-1406`). A decode halt needs the instruction's condition to pass: a condition-failed halting encoding takes one clock and does nothing, as on the reference (`:918`). A fault found by an earlier clock's check wins over the instruction then in execute (`:914-922`). With `THUMB` 1 (DARIA) the same codes cover Thumb encodings, and code 8 (FLAGS) halts an instruction that reads C while a Thumb MUL has left it unknown (`docs/DARIA_CORE.md`, "What halts").
 
 | Code | Name | Meaning | Instructions (S1) |
 |---|---|---|---|
@@ -556,7 +556,7 @@ The bypass means the array is only ever read for data written at least two clock
 
 ### Load/store unit
 
-- **Address:** Rn plus or minus a 12-bit immediate, a split 8-bit immediate, or a shifted Rm (pre-index); or Rn alone (post-index). Write-back goes through port E in execute. (S1 writes a two-clock store's base back at the end of W, the clock in which it reads the store data, `bup_cpu.sv:701, 1097-1102`.)
+- **Address:** Rn plus or minus a 12-bit immediate, a split 8-bit immediate, or a shifted Rm (pre-index); or Rn alone (post-index). Write-back goes through port E in execute. (S1 writes a two-clock store's base back at the end of W, the clock in which it reads the store data, `bup_cpu.sv:770, 1200-1205`.)
 - **Stores:**
   - byte enables: one-hot from addr[1:0] for a byte, from addr[1] for a halfword, all four for a word;
   - data is replicated across the lanes.
@@ -582,7 +582,7 @@ The bypass means the array is only ever read for data written at least two clock
   - STM reads that register through P3.
   - LDM writes it through W, one clock later.
 - **Cost:** n clocks in S3.
-- **S1** takes LDM n+2 and STM n+1: execute computes the write-back value and the start address, the base is written in the first beat, and LDM's last register lands one clock after the last beat (`bup_cpu.sv:1152-1182, 1279-1303`). Its order of base and data writes is the same as described here.
+- **S1** takes LDM n+2 and STM n+1: execute computes the write-back value and the start address, the base is written in the first beat, and LDM's last register lands one clock after the last beat (`bup_cpu.sv:1256-1287, 1434-1458`). Its order of base and data writes is the same as described here.
 - **Base register in the list.** Writing the base in the first clock gives ARM7's results without special cases: for LDM the loaded value wins; for STM the first beat stores the old base and later beats store the new one. The firmware never does this.
 - **Cost:** 80–200 ALMs [E; 246 LUT + 109 arithmetic cells is an upper bound, syn].
 
@@ -648,7 +648,7 @@ The bypass means the array is only ever read for data written at least two clock
 | 17 | UMULL: unsigned 64-bit result, RdLo [15:12], RdHi [19:16] | 0x300, 0x1b20 | Unsigned DSP product |
 | 18 | LDM/STM order and start addresses; `stmib` without write-back starts at base + 4 | Push/pop; `stmib sp,{r0,r1}` at 0x888 | Sequencer |
 | 19 | Rd == Rn with write-back; base register in the list | Never | ARM7 results by construction; directed tests |
-| 20 | MRS CPSR = `{NZCV, 20'b0, 8'hD3}`; MSR CPSR_f writes NZCV; MSR CPSR_c may only write the byte it already holds, 0xD3 | 0x20–0x2c: `mrs`, `bic #31`, `orr #0xd3`, `msr CPSR_c` | Constant mode bits. A control byte other than 0xD3, nonzero bits 27:24, the x or s field, or SPSR halts (UNDEF; `bup_cpu.sv:389, 992-1004`). |
+| 20 | MRS CPSR = `{NZCV, 20'b0, 8'hD3}`; MSR CPSR_f writes NZCV; MSR CPSR_c may only write the byte it already holds, 0xD3 | 0x20–0x2c: `mrs`, `bic #31`, `orr #0xd3`, `msr CPSR_c` | Constant mode bits. A control byte other than 0xD3, nonzero bits 27:24, the x or s field, or SPSR halts (UNDEF; `bup_cpu.sv:456, 1091-1103`). |
 | 21 | MMIO is 32-bit, one access per instruction, in program order | Every boot and poll | `reg_sel` driven from W as a one-clock pulse |
 | 22 | Where MiSTer aborts (`bupchip_memory.sv:125-136`), halt | Never in normal play | HALT. The visible result matches MiSTer's `b .` vectors: silence. |
 
@@ -688,6 +688,8 @@ The firmware is the user's file `/Assets/7800/common/bupchip.bin` (format and ch
 - **Cost.** About 20–30 ALMs for the packer, the extra message types and `fw_loaded` [E]. The ROM still needs no MIF, and its 16 M10K are unchanged.
 
 ### Capture (on `clk_sys`) and the write receiver (on `clk_arm`)
+
+Since DARIA's step 5 the capture also takes 2600 images (`DARIA_CORE.md`, "Image capture"). A file counts as an A78 only with "ATARI" at bytes 1–5, as `atari7800_pocket.sv` checks. Bytes 0–5 wait until byte 5 decides: for an A78 they are dropped, as before; for an image they go as three WRITEs. Everything below holds for an A78, whose message stream is unchanged bit for bit (lockstep against the step 4 modules, 0 differences). The receiver's image mode (`img_ready`, `img_size`, the window's port) is DARIA's.
 1. The declared size comes from header bytes 49–52, and the block starts at 128 + the declared size. This is copied from `bupchip_asset_ddr.sv:82-104` (MIT).
 2. Bytes are packed in pairs into halfword writes; an odd tail is written with UB/LB.
 3. `asset_size` is the number of bytes captured.
@@ -791,7 +793,7 @@ The firmware reads samples sequentially, one `ldrsb` per voice per frame, which 
 | `bup_status_osd.sv` | `BUP_DEBUG` only: the status word drawn over the picture's top-left corner, so a hardware test can read it (step 5; instantiated in `atari7800_pocket.sv`) |
 | `bup_load_probe.sv` | `BUP_DEBUG` only: counts and times what the loader delivers around the slot switches (bytes of another slot's address under a flag, bytes taken after a flag fell, bytes dropped, the gaps), for the overlay |
 
-**`bup_cpu` ports (S1, `bup_cpu.sv:145-203`).** The wrapper of step 4 connects these:
+**`bup_cpu` ports (S1, `bup_cpu.sv:175-248`).** The wrapper of step 4 connects these:
 
 | Group | Ports |
 |---|---|
@@ -855,8 +857,8 @@ Also:
 | `BUP_DEBUG` | Adds a status word (halt code and PC; shadow-counter flags for command overflow, PCM overflow and PCM underflow; fault code; lowest PCM level), the load probe (`bup_load_probe.sv`), a check of the firmware as written into the ROM (word count, order, and CRC-32 against `bupchip.bin`'s published `95b8b4f8`) and the throttle, and shows them on screen: `bup_status_osd.sv` draws thirteen rows of cells over the picture's top-left 96 × 104 pixels while a Souper cartridge is loaded (step 5; its header has the layout). Hardware test builds only; off in releases. |
 | `PCM_DEPTH`, `BUP_THROTTLE` | Parameters of `bupchip_pocket` |
 | `MODES` | Parameter of `bup_cpu`, default 0: the mode fixed at SVC, as described here. 1 is DARIA's: SVC, SYS and FIQ with their banked registers (`bup_cpu.sv:13-19`; `docs/DARIA_CORE.md`). The BupChip uses 0. |
-| `ALTERA_RESERVED_QIS` | Set by Quartus. The retire port is simulation-only, as in `cache_ram.v:31` (`bup_cpu.sv:185-202, 1315-1330`). |
-| `BUP_SIM_LATE_RF` | Simulation only: register-file writes land a clock late, with garbage in between, so that only the bypass keeps results right (`bup_cpu.sv:612-670`; `LATE_RF=1` in the scripts) |
+| `ALTERA_RESERVED_QIS` | Set by Quartus. The retire port is simulation-only, as in `cache_ram.v:31` (`bup_cpu.sv:230-247, 1476-1491`). |
+| `BUP_SIM_LATE_RF` | Simulation only: register-file writes land a clock late, with garbage in between, so that only the bypass keeps results right (`bup_cpu.sv:679-739`; `LATE_RF=1` in the scripts) |
 
 ## Verification plan
 
@@ -899,7 +901,7 @@ The harnesses came from the study. Step 1 brought them into `sim/bupchip/` (`ver
 Step 2 covered every item that concerns the S1 CPU alone, in `sim/bupchip/s1/directed/`, `sim/bupchip/s1/halt_tests.py` and `sim/bupchip/verif/directed/`. That includes the throttle with an MMIO access in W and the condition-failed MMIO read (`v_mmio`, and every lockstep run with `+throttle`), the register read after a hold (`regzero.S`; `tb_s1.sv`'s `+rehold`) and the wild store (`wild_store`). Step 4 covers the asset-miss, fill and pre-emption items in `sim/bupchip/s4/tb_cache.sv` (directed scenarios A1–G, `sim/bupchip/s4/README.md`) and `sim/bupchip/s4/stress/tb_cstress.sv`, and the real firmware exercises every one of them in the system runs. "An asset miss with a dependent MLA or a store in execute" cannot arise in S1, whose next instruction starts only after W; it waits for S3's forwarding (step 7). E and W writing one register in one clock waits for the second write port (step 6).
 
 **Lockstep retire port.** The record is `{pc, insn, the register writes from ports E and W, NZCV}`, in program order.
-- The core marks the first clock of each instruction with `rt_start`, condition-failed ones included and never while frozen, and its last with `rt_valid`, which carries `rt_pc`, `rt_insn` and `rt_nzcv`. Register writes come as `rt_e_*` and `rt_w_*` on the clock they land (`bup_cpu.sv:185-202, 1315-1330`). S1 has one write port; it reports load data as W and every other write as E.
+- The core marks the first clock of each instruction with `rt_start`, condition-failed ones included and never while frozen, and its last with `rt_valid`, which carries `rt_pc`, `rt_insn` and `rt_nzcv`. Register writes come as `rt_e_*` and `rt_w_*` on the clock they land (`bup_cpu.sv:230-247, 1476-1491`). S1 has one write port; it reports load data as W and every other write as E.
 - Loads complete one clock after their execute clock, so the testbench applies each record to a shadow state. It closes an instruction's record at the next `rt_start`, so load data that lands with the next instruction's first clock still counts with the load.
 - It does not snapshot the live register file.
 - The rules are in `sim/bupchip/verif/README.md`, "The retire port".
@@ -1066,7 +1068,7 @@ Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/`
 | # | Risk or question | Impact | Mitigation or check |
 |---|---|---|---|
 | 1 | Asynchronous-read MLAB inference on Cyclone V. No MLAB is used today (`fit.rpt:5025`). | +700 ALMs net as flip-flops (too much for either gate), or one more pipeline stage with an M10K register file (CPI 1.014) | **Confirmed for 16 × 32 banks with one write port** (step 3): S1's two banks are MLAB with an unregistered read address and output, 2 MLABs each, and the critical path runs through the MLAB read [probe]. Still open: S3's six-bank 2W/3R file (step 3 re-run); MLAB write timing, which is still unverified and which the bypass covers (if next-clock reads turn out to be safe, the bypass, about 100 ALMs, could be dropped); and whether the full build finds memory-capable LABs for the MLABs, which today hold logic: it does, 4 memory LABs in step 5's build. |
-| 2 | Single-clock execute timing on a C8 part at about 80% fill. Estimates: S3 25–27 ns [E]. S1, measured in an empty device: 27.263 ns of data delay at 14 levels, 62% of it interconnect; setup slack +5.916 ns at slow 0 °C and +6.323 ns at slow 85 °C at 28.636 MHz [probe]. | Lower clock or less forwarding | S1's critical path is the one-clock-store decision: ROM `q` → decode → register-file read select → MLAB read → bypass → shifter → operand mux → adder → region decode → one-clock store or not → `rom_addr` or `ram_we`. Its shifter leg is functionally false, because a one-clock store needs an immediate offset. **Fixed in DARIA's step 3 (2026-10-05):** the store is decided from Rn ± the immediate on an adder of its own (`bup_cpu.sv:896-898, 1056`), which equals the sum's region wherever a store can take one clock. `daria/thumb/aria_equiv.sh` proves ARIA unchanged by it, and the worst path no longer runs through the decision (`docs/DARIA_CORE.md`, "Step 3 work"). Other options: the 46.56 ns period at 21.477 MHz; reduced-forwarding variants. A LogicLock region is not available: Quartus Lite removes every region (Critical Warning 140003; tried on the probe). Steps 3, 5 and 8. In the full build (step 5) the same path gives +8.08 ns at 28.636 MHz (slow 0 °C). |
+| 2 | Single-clock execute timing on a C8 part at about 80% fill. Estimates: S3 25–27 ns [E]. S1, measured in an empty device: 27.263 ns of data delay at 14 levels, 62% of it interconnect; setup slack +5.916 ns at slow 0 °C and +6.323 ns at slow 85 °C at 28.636 MHz [probe]. | Lower clock or less forwarding | S1's critical path is the one-clock-store decision: ROM `q` → decode → register-file read select → MLAB read → bypass → shifter → operand mux → adder → region decode → one-clock store or not → `rom_addr` or `ram_we`. Its shifter leg is functionally false, because a one-clock store needs an immediate offset. **Fixed in DARIA's step 3 (2026-10-05):** the store is decided from Rn ± the immediate on an adder of its own (`bup_cpu.sv:978-980, 1158`), which equals the sum's region wherever a store can take one clock. `daria/thumb/aria_equiv.sh` proves ARIA unchanged by it, and the worst path no longer runs through the decision (`docs/DARIA_CORE.md`, "Step 3 work"). Other options: the 46.56 ns period at 21.477 MHz; reduced-forwarding variants. A LogicLock region is not available: Quartus Lite removes every region (Critical Warning 140003; tried on the probe). Steps 3, 5 and 8. In the full build (step 5) the same path gives +8.08 ns at 28.636 MHz (slow 0 °C). |
 | 3 | PSRAM: 1.8 V I/O with no I/O constraints; tCEM and page mode unverified; `FAST_INPUT_REGISTER` needs DQ captured straight into the I/O register (agg23 samples DQ in fabric). `psram.sv` breaks at `CLOCK_SPEED` = 21.477/21.281. | Slower fills; no fills at all if misconfigured | `CLOCK_SPEED` fixed at 28.636364 (5 clocks per halfword), checked in step 4. Cache stall is 0.13%; 13.7 ms of FIFO margin; even uncached, the core manages 23.8 MIPS at 28.636 MHz [model]. Hardware CRC readback of the ARSC. |
 | 4 | S2 and S3 figures come from the cycle model | CPI higher than planned | The model agrees with the RTL to 0.3% on the study's sketch and to 0.1% on the S1 core (1.377 against 1.3772). Steps 6 and 7 measure RTL. Fall back to S1 or S2 at 28.636 MHz. |
 | 5 | Congestion: `clk_sdram` has +1.32 ns of slack today; only 199 LABs are untouched against 194–263 needed | `clk_sdram` timing failure; a fit that relies on denser packing | No BupChip logic on `clk_sdram`; slack, ALM and LAB checks in steps 3, 5 and 9; S1 fallback. LogicLock is not available in Quartus Lite (risk 2). **Seen in step 5:** with S1 in, 95% of LABs are used, and `clk_sdram`'s worst path (MARIA / 2600 mapper address into `sram_ctrl`'s pad registers, no BupChip logic) gave +0.15 ns with the default seed. A fitter-only over-constraint and seed 3 give +1.26 ns; another seed may be needed after any change. A lasting fix would shorten that path in `sram_ctrl` (step 5). **2.1.1:** +0.44 ns with seed 2; the worst path runs through the 2600 mappers (DPC+'s decode first) and `sram_ctrl`'s 2600 address compare, and two fixes are written up in `SRAM_TIMING.md`: leave the ARM schemes' 6507-side front ends out with the ARM (about 1,750 ALMs), and give the 2600 request its own registered path (needed before DARIA). |
