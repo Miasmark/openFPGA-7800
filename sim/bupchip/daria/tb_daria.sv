@@ -31,6 +31,10 @@
 //   snap_*.ppm  frames for checking the game got past its title screen
 //   dtrace.txt  with +dtrace=1 (game-derived: sim/work only)
 //   mmio.csv    with +mmiolog=1: every MMIO access
+//   fp.csv      with +fp=1: a fingerprint of every frame, to compare this
+//               core with another build of it frame by frame (fp_compare.py):
+//               its length in clk_sys and FNV-1a 64 hashes of the RIOT RAM,
+//               the visible pixels and the sound ("Frame fingerprint" below)
 //
 // Plusargs:
 //   +rom=FILE      2600 image (.bin)                         (required)
@@ -57,6 +61,8 @@
 //                  frame, the instructions retired and clk_arm edges
 //                  since the call started, clk_arm edges since time 0,
 //                  and the data written or read           (default 0)
+//   +fp=1          also write fp.csv: one fingerprint line per frame,
+//                  beside its frames.csv line             (default 0)
 //
 // Cache model: direct-mapped, 1/2/4/8/16 KiB, 16 and 32 byte lines, cold at
 // power-up and warm across calls. Stream I is the retired-PC stream in
@@ -179,13 +185,14 @@ module tb_daria;
 	// ---------------------------------------------------------- the core
 	wire  [7:0] R, G, B;
 	wire        HSync, VSync, HBlank, VBlank, ce_pix;
+	wire [15:0] AUDIO_L, AUDIO_R;
 
 	Atari7800 dut (
 		.fw_hsc_load(1'b0), .fw_ar_load(1'b0), .fw_wr(1'b0), .fw_addr(12'd0), .fw_data(8'd0),
 		.clk_sys, .reset, .pause(1'b0),
 		.RED(R), .GREEN(G), .BLUE(B), .HSync, .VSync, .HBlank, .VBlank, .VBlank_orig(),
 		.ce_pix, .PAL(1'b0), .pal_temp(2'd0), .hsc_en(1'b0), .hsc_ram_cs(),
-		.hsc_ram_dout(8'd0), .dout(), .cpu_ce(), .AUDIO_R(), .AUDIO_L(),
+		.hsc_ram_dout(8'd0), .dout(), .cpu_ce(), .AUDIO_R, .AUDIO_L,
 		.show_border(1'b1), .show_overscan(1'b0), .bypass_bios(1'b1), .cart_present(1'b1),
 		.tia_mode, .cpu_driver(1'b1),
 		.cart_xm(8'd0), .cart_read(), .cart_out(cart_download ? ioctl_dout : cart_q),
@@ -627,6 +634,30 @@ module tb_daria;
 	logic [15:0] op_pc = 0, poll_pc = 0;
 	always @(posedge clk_sys) if (c_sync) op_pc <= dut.cpu_AB;
 
+	// ------------------------------------------------ frame fingerprint
+	// +fp=1 writes fp.csv, one line per frame beside its frames.csv line:
+	// len_sys as there, then three FNV-1a 64 hashes. riot is the RIOT's 128
+	// RAM bytes, address 0 first, read at the boundary. video is the frame's
+	// visible pixels in time order: R, G, B on every clk_sys with ce_pix and
+	// neither blank. audio is the frame's sequence of distinct {AUDIO_L,
+	// AUDIO_R} values: on every clk_sys where it differs from the last value
+	// folded, its four bytes, low byte first. That last value carries across
+	// frames and starts at 0. The boundary is the rising edge of the TIA's
+	// VSYNC bit, as for frames.csv, and the clk_sys that sees it belongs to
+	// the new frame, as in len_sys: the line is written and both hashes
+	// restart before that clock's pixel and sound are folded. fp_compare.py
+	// compares two fp.csv files; a bench for another build of the core
+	// writes the same columns the same way.
+	localparam logic [63:0] FNV_OFFSET = 64'hcbf29ce484222325;
+	localparam logic [63:0] FNV_PRIME  = 64'h00000100000001b3;
+	int          fp_on = 0, fd_fp = 0;
+	logic [63:0] fp_video = FNV_OFFSET, fp_audio = FNV_OFFSET;
+	logic [31:0] fp_last = 0;
+	wire  [31:0] fp_snd = {AUDIO_L, AUDIO_R};
+	function automatic logic [63:0] fnv(input logic [63:0] h, input logic [7:0] b);
+		return (h ^ {56'd0, b}) * FNV_PRIME;
+	endfunction
+
 	always @(posedge clk_sys) begin
 		now++;
 		if (!running) begin
@@ -728,9 +759,27 @@ module tb_daria;
 					$fwrite(fd_frames, "%0d,%0d,%0d,%.2f,%0d,%0d,%0d,%0d,%0d,%0d\n", frame, t_vs,
 						now - t_vs, real'(now - t_vs) / SYS_PER_LINE, f_calls, f_instr, f_armcyc,
 						f_stall, f_dma, f_max_instr);
+				if (fp_on != 0) begin
+					logic [63:0] h;
+					h = FNV_OFFSET;
+					for (int i = 0; i < 128; i++) h = fnv(h, dut.riot_inst.riot_ram.mem_q[i]);
+					if (frame > 0)
+						$fwrite(fd_fp, "%0d,%0d,%016x,%016x,%016x\n", frame, now - t_vs, h,
+							fp_video, fp_audio);
+					fp_video = FNV_OFFSET;
+					fp_audio = FNV_OFFSET;
+				end
 				frame++;
 				t_vs = now;
 				f_calls = 0; f_instr = 0; f_armcyc = 0; f_stall = 0; f_dma = 0; f_max_instr = 0;
+			end
+			// ---- fingerprint: this clock's pixel and sound
+			if (fp_on != 0) begin
+				if (ce_pix && !HBlank && !VBlank) fp_video = fnv(fnv(fnv(fp_video, R), G), B);
+				if (fp_snd != fp_last) begin
+					for (int i = 0; i < 4; i++) fp_audio = fnv(fp_audio, fp_snd[i*8 +: 8]);
+					fp_last = fp_snd;
+				end
 			end
 		end
 	end
@@ -816,6 +865,7 @@ module tb_daria;
 		void'($value$plusargs("arm_div=%d", arm_div));
 		void'($value$plusargs("dtrace=%d", dtrace));
 		void'($value$plusargs("mmiolog=%d", mmiolog));
+		void'($value$plusargs("fp=%d", fp_on));
 		if (arm_div > 1) begin
 			force dut.arm_host.ce = arm_ce_run;
 			force dut.cart2600.mem_ce = arm_ce_run;
@@ -868,6 +918,10 @@ module tb_daria;
 			$fwrite(fd_mm, "call,frame,call_instr,call_arm_cyc,t_arm,rw,addr,data,size\n");
 		end
 		$fwrite(fd_frames, "frame,t_sys,len_sys,lines,calls,instr,arm_cyc,stall_sys,dma_sys,max_call_instr\n");
+		if (fp_on != 0) begin
+			fd_fp = $fopen({out, "fp.csv"}, "w");
+			$fwrite(fd_fp, "frame,len_sys,riot,video,audio\n");
+		end
 
 		// Power-up, then the download as the MiSTer loader streams it, paced
 		// by the ARM mapper's load_wait (MiSTer's ioctl_wait).
@@ -907,6 +961,7 @@ module tb_daria;
 		$fclose(fd_zero);
 		if (dtrace != 0) $fclose(fd_dt);
 		if (mmiolog != 0) $fclose(fd_mm);
+		if (fp_on != 0) $fclose(fd_fp);
 		$finish;
 	end
 
