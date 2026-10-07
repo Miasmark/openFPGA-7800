@@ -35,6 +35,7 @@ These carry over from ARIA:
 5. **`bupchip.bin` stays resident.** The CPU's ROM gets 16 KB beside the image window, and the profile picks the firmware or the image with one address bit set at load. A 2600 ARM game then never overwrites the firmware, and a Souper game loaded after one does not depend on the Pocket reloading `bupchip.bin` (16 M10K).
 6. **No BUS.** BUS cartridges show the bad-game screen, as BUS0 already does upstream and every ARM scheme does in 2.1.x. No released game uses BUS. AtariAge will not sell BUS games because the scheme fails on a number of consoles, mostly the 2600 Junior and the 7800, and nothing has come of it since 2020.
 7. **S1 with Thumb at 38.18 MHz (VCO ÷ 18); no S3** (2026-10-05, after step 3). DARIA is late only on Spiders' 16 calls at the start of play, the same calls upstream misses. S3 would end them in time too, but it costs a new pipeline and 150–560 ALMs. The owner takes the better 80% for the work: S3 stays a later revision ("Step 3 work", decisions).
+8. **A 64 KB image window** (2026-10-07, step 5), not 128 KB. The small-window runs showed the cache over the PSRAM serving the image beyond 48 and 32 KB windows with no late call. Every image's code ends below 0xB30A, so 64 KB leaves about 19 KB of headroom for a larger CDFJ+ game's code. It frees 64 M10K for later improvements, and the fetch mux becomes 2:1. Code beyond the window halts with FETCH (open item 5). The owner kept 48 KB, closer to what the cart traditionally shows at once, as the tighter option.
 
 ## Requirements
 
@@ -440,7 +441,7 @@ Paused by the owner on 2026-10-05 with the pieces built and tested on their own 
 
 1. **The wrapper:** done; `s4/check.sh` on it at 38.18 MHz (`DARIA=1 ARM38=1 PSRAM_CS=50.0`) is running.
 2. **The shadow on the other 19 images** at 1,500 frames (`run_all.sh` with `SHADOW=1`), each about 2.3 hours on a loaded machine.
-3. **Small-window runs:** done (above). The window could shrink to 64 KB (64 M10K freed, a 2:1 fetch mux) or 48 KB (80 freed): every image's code fits (it ends at 0xB30A at most), and the cache serves the rest with no late call. The owner decides; the window's size is a parameter of the CPU and of `daria_mem`.
+3. **Small-window runs:** done (above). They led to decision 8, a 64 KB window. `daria_mem` builds it as two 8K × 32 RAMs (`WIN_KB`, any size up to 128 KB for test builds). Synthesis confirms it: block memory falls from 1,781,312 to 1,257,024 bits (64 M10K) and the logic by 26 ALMs. Through the wrapper at 64 KB, Mappy matches on all its calls, and the call suite (`WIN_KB=64`) passes 81 of 81 runs, with a new test that a fetch at the window's end halts. Turbo, the one image larger than 64 KB, is running at 64 KB for 1,500 frames.
 4. **Open item 8:** settled (above).
 5. **`s4/check.sh`'s tally:** fixed. Each job writes its own exit code, so a run of several hours no longer loses a finished job's status to `wait` (3 of 28 jobs had read FAIL with PASS in their logs).
 6. This section's results go into "Steps", "Open items" and the design sections when step 5 closes.
