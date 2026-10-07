@@ -9,8 +9,10 @@ or a clean return to parked. docs/DARIA_CORE.md, "The memory system", 4 and
   run_call.py [NAME ...]        (default: every test; also with +await,
                                  +throttle and LATE_RF builds, see VARIANTS)
 
-Environment: WORK (default sim/work/bupchip/daria/call), CORE_SV (another
-bup_cpu.sv), VARIANTS ("plain,await,laterf" by default).
+Environment: WORK (default sim/work/bupchip/daria/call, or call_w<WIN_KB>),
+CORE_SV (another bup_cpu.sv), VARIANTS ("plain,await,laterf" by default),
+WIN_KB (the core's window, default 128: the beyond-window tests follow it,
+and the sources see it as the symbol WIN).
 SPDX-License-Identifier: MIT
 """
 import os
@@ -20,7 +22,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "../../../.."))
-WORK = os.environ.get("WORK", os.path.join(ROOT, "sim/work/bupchip/daria/call"))
+WIN_KB = int(os.environ.get("WIN_KB", "128"))
+WIN = WIN_KB * 1024
+WORK = os.environ.get("WORK", os.path.join(ROOT, "sim/work/bupchip/daria/call" +
+                                           ("" if WIN_KB == 128 else "_w%d" % WIN_KB)))
 os.makedirs(WORK, exist_ok=True)
 
 S0, SEED0, FREQ0 = 0x40001F00, 0x1000, 0x2000
@@ -233,7 +238,7 @@ test("map_beyond_window", """
 	.org 0x20
 	.thumb
 	ldr r3, =0x40000000
-	ldr r1, =0x20000
+	ldr r1, =WIN
 	ldr r0, [r1]
 	str r0, [r3]
 	ldrh r0, [r1, #6]
@@ -243,24 +248,31 @@ test("map_beyond_window", """
 	movs r2, #13
 	ldrsb r0, [r1, r2]
 	str r0, [r3, #12]
-	ldr r1, =0x27FFC
+	ldr r1, =WIN + 0x7FFC
 	ldr r0, [r1]
 	str r0, [r3, #16]
-	ldr r1, =0x28000
+	ldr r1, =WIN + 0x8000
 fault:	ldr r0, [r1]
 	.ltorg
-""", img_size=0x28000, pattern=True, dump=8,
-     ram={0x40000000: bw(0x20000, 4), 0x40000004: bw(0x20006, 2), 0x40000008: bw(0x2000B, 1),
-          0x4000000C: (bw(0x2000D, 1) | (0xFFFFFF00 if bw(0x2000D, 1) & 0x80 else 0)),
-          0x40000010: bw(0x27FFC, 4)},
+""", img_size=WIN + 0x8000, pattern=True, dump=8,
+     ram={0x40000000: bw(WIN, 4), 0x40000004: bw(WIN + 6, 2), 0x40000008: bw(WIN + 0xB, 1),
+          0x4000000C: (bw(WIN + 0xD, 1) | (0xFFFFFF00 if bw(WIN + 0xD, 1) & 0x80 else 0)),
+          0x40000010: bw(WIN + 0x7FFC, 4)},
      halt=(5, "fault"))
 test("map_ldm_beyond", """
 	.org 0x20
 	.thumb
-	ldr r1, =0x20000
+	ldr r1, =WIN
 fault:	ldmia r1!, {r0, r2}
 	.ltorg
-""", img_size=0x28000, pattern=True, halt=(7, "fault"))
+""", img_size=WIN + 0x8000, pattern=True, halt=(7, "fault"))
+test("map_fetch_window", """
+	.org 0x20
+	.thumb
+	ldr r0, =WIN + 1
+fault:	bx r0
+	.ltorg
+""", img_size=WIN + 0x8000, pattern=True, halt=(4, "fault"))
 test("map_str_rom", """
 	.org 0x20
 	.thumb
@@ -372,7 +384,7 @@ def build_image(name, t):
     if t.get("start_arm"):
         src = src.replace("\t.word 0xE7F0DE1F\n", "", 1)   # the BupChip profile runs from 0
     open(s, "w").write(src)
-    subprocess.run(["arm-none-eabi-as", "-mcpu=arm7tdmi", "-o", o, s], check=True)
+    subprocess.run(["arm-none-eabi-as", "-mcpu=arm7tdmi", "--defsym", "WIN=%d" % WIN, "-o", o, s], check=True)
     subprocess.run(["arm-none-eabi-ld", "-Ttext=0", "-e", "0", "--no-warn-rwx-segments", "-o", e, o], check=True)
     subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", e, b], check=True)
     syms = {}
@@ -387,7 +399,7 @@ def build_image(name, t):
         size = len(img)
     img += bytes(size - len(img))
     if t.get("pattern"):
-        for i in range(0x20000, size):
+        for i in range(WIN, size):
             img[i] = big_pattern(i)
     open(b, "wb").write(img)
     return b, size

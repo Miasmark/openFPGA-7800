@@ -4,6 +4,7 @@
 # $WORK/obj_call/vtb, rebuilt when a source is newer or the sources change.
 # WORK defaults to sim/work/bupchip/daria/call. CORE_SV builds another copy of
 # bup_cpu.sv (a mutated one, for checking that the tests catch a fault).
+# WIN_KB (default 128) builds the core with another window size.
 # SPDX-License-Identifier: MIT
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -16,6 +17,7 @@ WORK="$(cd "$WORK" && pwd)"
 OBJ="${OBJ:-$WORK/obj_call}"
 DEFS=()
 [ "${LATE_RF:-0}" = 0 ] || { OBJ="${OBJ}_laterf"; DEFS+=(-DBUP_SIM_LATE_RF); }
+[ "${WIN_KB:-128}" = 128 ] || { OBJ="${OBJ}_w${WIN_KB}"; DEFS+=(-DWIN_KB="$WIN_KB"); }
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "${CORE_SV:-$CORE/bup_cpu.sv}" "$HERE/tb_call.sv")
 ARGS="${SRCS[*]} ${DEFS[*]}"
 if [ -x "$OBJ/vtb" ] && [ "$(cat "$OBJ/args" 2>/dev/null)" = "$ARGS" ] && \

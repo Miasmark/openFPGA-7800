@@ -5,7 +5,8 @@
 //
 //   - window: cache_ram_dp, 32,768 words, the first 128 KB of +img; port A
 //     fetches, port B data (in the BupChip profile, +prof26=0, the same RAM
-//     stands for the 16 KB firmware ROM)
+//     stands for the 16 KB firmware ROM). The core's window is WIN_KB
+//     (-DWIN_KB, default 128): above it the image comes from the asset port
 //   - cart RAM: cache_ram_tdp_dc_be, 8,192 words (32 KB), port A
 //   - the image beyond the window: a behavioural memory on the asset port,
 //     w_wait at random (+await)
@@ -57,7 +58,10 @@ module tb_call;
 	wire         ram_we, w_asset, reg_sel, reg_write, halted, w_wait, parked, returned, ro_valid;
 	logic [31:0] asset_q, reg_rdata;
 
-	bup_cpu #(.MODES(1'b1), .THUMB(1'b1), .CODE_AW(15)) cpu (
+`ifndef WIN_KB
+`define WIN_KB 128
+`endif
+	bup_cpu #(.MODES(1'b1), .THUMB(1'b1), .CODE_AW(15), .WIN_KB(`WIN_KB)) cpu (
 		.clk, .rst, .freeze, .w_wait, .arm_only(!prof26),
 		.prof26, .img_size, .ram32, .call_go, .clr_wd, .clr_pc,
 		.clr_e, .parked, .returned, .ro_valid, .ro_idx, .ro_data,
