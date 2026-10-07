@@ -65,7 +65,7 @@ module tb_fe_guard_lane #(
 ) (
 	input wire clk_sys
 );
-	localparam longint SYS0 = 1_000_000;     // clk_sys's first rising edge
+	localparam longint SYS0 = 2_000_000;     // clk_sys's first rising edge
 	localparam longint TS   = 69840;         // clk_sys period
 	localparam int     PB   = 17460;         // phase B: 12 VCO steps after a clk_arm edge
 
@@ -112,7 +112,7 @@ module tb_fe_guard_lane #(
 		repeat (8) void'(rnd());
 		a0_cur = SYS0 + OFS;
 		a0_old = a0_cur;
-		tn     = a0_cur - 20 * longint'(PER);
+		tn     = a0_cur - 20 * longint'(PER);        // >= 0: SYS0 > 20 periods of the slowest clk_arm
 		t_res  = tn;
 		next_move = SYS0 + (100 + rnd() % 2000) * TS;
 		forever begin
@@ -125,6 +125,7 @@ module tb_fe_guard_lane #(
 			if (((tn + d - SYS0) % TS) == 0) d = (d < DMAX) ? d + 1 : d - 1;   // never on an edge
 			if (d < dmin_seen) dmin_seen = d;
 			if (d > dmax_seen) dmax_seen = d;
+			if (tn + d <= $time) $fatal(1, "%s: clk_arm edge in the past", NAME);
 			#(tn + d - $time);
 			clk_arm = 1'b1;
 			arr     = arr + 1;
@@ -234,7 +235,10 @@ module tb_fe_guard_lane #(
 				end
 				if (want_lock && lock_from < 0 && Ti >= t_res) lock_from = i;
 				if (!settled) begin
-					if (lk) begin stale_cur++; if (stale_cur > stale_max) stale_max = stale_cur; end
+					// a stale lock: locked on the new lattice with phb_next at the wrong edge
+					if (lk && Ti >= t_res && phb_next != sh) begin
+						stale_cur++; if (stale_cur > stale_max) stale_max = stale_cur;
+					end
 				end else begin
 					n_settled++;
 					if (sh) n_shared++;
@@ -277,20 +281,26 @@ module tb_fe_guard_lane #(
 
 	// errors that fail the run (the negative control is judged by the top)
 	function automatic longint errors();
-		if (KIND == 2) return e_ps + e_fly + e_gd + e_evu;
-		return e_ps + e_fly + e_gd + e_evu + e_lat + e_phb + e_lock + e_unl + n_locked_never;
+		longint e;
+		e = e_ps + e_fly + e_gd + e_evu;
+		// clk_arm ran at its rate: about TS / PER toggles per clk_sys edge
+		if (arr * PER < (n - 1) * TS - 40 * longint'(PER) * TS) begin
+			$display("%s: clk_arm too slow (%0d toggles in %0d clocks)", NAME, arr, n - 1); e++;
+		end
+		if (KIND == 2) return e;
+		return e + e_lat + e_phb + e_lock + e_unl + n_locked_never;
 	endfunction
 
 	task automatic report();
-		$display("%-8s clocks %0d  delay %0d..%0d ps  ps %0d fly %0d gd %0d evu %0d | settled %0d shared %0d phb %0d lat %0d phbE %0d | lock@%0d moves %0d relocks %0d max %0d stale %0d unlockE %0d lockE %0d | unlocks %0d locked %0d guard_on %0d longest %0d%s",
-			NAME, n - 1, dmin_seen, dmax_seen, e_ps, e_fly, e_gd, e_evu, n_settled, n_shared, n_phb, e_lat, e_phb,
+		$display("%-8s clocks %0d  toggles %0d  delay %0d..%0d ps  ps %0d fly %0d gd %0d evu %0d | settled %0d shared %0d phb %0d lat %0d phbE %0d | lock@%0d moves %0d relocks %0d max %0d stale %0d unlockE %0d lockE %0d | unlocks %0d locked %0d guard_on %0d longest %0d%s",
+			NAME, n - 1, arr, dmin_seen, dmax_seen, e_ps, e_fly, e_gd, e_evu, n_settled, n_shared, n_phb, e_lat, e_phb,
 			first_lock, nmove, relock_n, relock_max, stale_max, e_unl, e_lock, n_unlock, n_lockedcl, g_ev, maxrun,
 			(KIND == 1) ? $sformatf("  NEVER-LOCK violations %0d", n_locked_never) : "");
 	endtask
 endmodule
 
 module tb_fe_guard;
-	localparam longint SYS0 = 1_000_000;
+	localparam longint SYS0 = 2_000_000;
 	localparam longint TS   = 69840;
 	logic   clk_sys = 1'b0;
 	longint edges   = 1_000_000;
