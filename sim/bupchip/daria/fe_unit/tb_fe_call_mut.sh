@@ -24,6 +24,7 @@ CALL_RUNS=(
 	"+seed=32 +clocks=300000 +epoch=30000 +stall_up=1 +gap=0 +k_rst=100"
 	"+seed=33 +clocks=200000 +epoch=200000 +only=1 +k_cs=400 +pg_mode=all"
 	"+seed=8 +clocks=300000 +epoch=50000 +stall_up=1 +gap=0 +pg_mode=all +k_rst=300"
+	"+seed=9 +clocks=1000000 +epoch=1000000 +only=1 +k_short=900 +pg_mode=all +gap=0"
 )
 COPY_RUNS=(
 	"+seed=31 +loads=8 +run_clk=30000"
