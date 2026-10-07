@@ -93,6 +93,12 @@ for t in iverilog python3 arm-none-eabi-gcc arm-none-eabi-objcopy; do
 done
 T0=$SECONDS
 
+# The retune job's hold must land while psram.sv is mid-access: 2 clk_arm
+# after the trigger at 28.64 MHz, 3 at 38.18 MHz (ARM38=1, where a read takes
+# a clock more with PSRAM_CS=50.0).
+HOLD_MID=2
+[ "${ARM38:-0}" = 0 ] || HOLD_MID=3
+
 # ---- the job pool -------------------------------------------------------------------------
 NAMES=(); PIDS=(); LOGS=()
 job() {         # job NAME LOG command...
@@ -188,7 +194,7 @@ if [ -n "$GAME" ]; then
 		S4 song13_reloads 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=2 HOLDLAND=1 HOLDMID=1 -- \
 		+reload=300 +reloads=3 +rom3="$WORK/noarsc.a78" +holdfill +holdstep=2
 	job "song 13 after a PAL retune, hold during a fill" "$WORK/song13_retune.out" \
-		S4 song13_retune 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=1 HOLDMID=1 -- +retune=500 +holdfill +holddelay=2
+		S4 song13_retune 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=1 HOLDMID=1 -- +retune=500 +holdfill +holddelay="$HOLD_MID"
 	job "song 14 at 21.281 MHz (1.5 x clk_sys, PAL)" "$WORK/song14_arm15pal.out" \
 		S4 song14_arm15pal 14 "$SECS" "$GAME" REF="$REFDIR/song14.pcm" -- +arm15 +pal
 	job "song 13, loader 174.6-250 ns per byte" "$WORK/song13_jit.out" \
