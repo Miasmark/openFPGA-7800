@@ -1301,6 +1301,11 @@ A CALLFN committed while `call_busy` sets `pend2`, once.
 - **Both.**
   - Upstream's one-clock dip of the stall between the calls is not reproduced: `rmw_call` (stall shape, hardware and mode B; in mode A the stall is upstream's).
   - `pend_up` (tap only) reproduces upstream's `call_pending`: set at the second commit, cleared at X+1. C1/C2 can therefore compare `call_pending` directly.
+- **Corrections from lane C** (`docs/daria_fe/lanes/C_call_copy.md` 1.3; the RTL follows them, unit-verified against upstream):
+  - **C-1.** A CALLFN committed in REL is posted from REL at once. As first written, REL ignored `pend2`: the call was lost, and the next call was followed by a phantom second one.
+  - **C-2.** A DPC+ CALLFN committed in the X clock itself is posted at X.
+  - **C-3.** A CALLFN committed after X is upstream's new call after its merge, not an RMW: it does not take the pre-merge payload at M_fe; DARIA captures it at M_fe+2 (M+2 with the hook). Its seeds can differ if a tick falls between upstream's accept (C2+1) and that capture: counted `rmw_call`.
+  - A third CALLFN in (M, M_fe] of a CDF RMW is dropped by the one-deep `pend2`, where upstream queues it. Real 6507 code cannot do this (a CALLFN takes at least one more instruction), only artificial bench streams.
 
 ### 6.5 Reset
 
@@ -1603,7 +1608,7 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | `pause_lane` | A grant edge with `pause` high and the capture clock low | one sample byte | A (directed), B |
 | `pre_lock` | Refreshes with a grant before `tia_en` (BIOS path; upstream reads the 7800 path's RAM address, AUD 12.6) | AMPLITUDE until the first refresh after `tia_en` | A |
 | `tbl_alias` | A CDFJ+ DSWRITE byte address in [$098, $1B0) (pointer and increment words) | that stream's pointer and data, until the ARM rewrites the word; C3 excludes that stream | A, B |
-| `rmw_call` | A CALLFN while `call_busy` | the stall shape (no dip); CDF call-2 seeds iff a tick lands exactly on M | A (value), B |
+| `rmw_call` | A CALLFN while `call_busy`, or committed after X (C-3) | the stall shape (no dip); CDF call-2 seeds iff a tick lands exactly on M, or (C-3) between upstream's accept and DARIA's capture at M_fe+2 | A (value), B |
 | `rmw_svc` | A taken 1/2 while a service is pending or running | the stall shape | B |
 | `short_image` | A DPC+ image shorter than $8000 bytes, after a larger one | RAM bytes copied from beyond the file | A |
 | `live_override` | Scheme override changed without a reload or reset | DPC+ fetchers in state RAM keep their values (upstream: flip-flops reset); F6 family stays latched | A, B |

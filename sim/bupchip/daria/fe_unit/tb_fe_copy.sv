@@ -30,10 +30,11 @@
 //   2  F6 starts exactly at the cart_win fall (+1) or 8 clocks after a
 //      rising cart_reset with an ARM image and no init; never on a fall, a
 //      rise while init_busy (cart_reset dipped and risen inside F6), a
-//      non-ARM image; load_start aborts F6 and a running service
+//      non-ARM image; load_start aborts F6 and a running service (run low
+//      in the next clock), and wins over a take in its own clock
 //   3  init_busy: rises at load_start and at an accepted rise (upstream's
 //      edges), never dips until F6's end, falls at L+1 for a non-ARM image
-//      (upstream's edge)
+//      (upstream's edge); rst_quiet = cart_reset high in the last 8 clocks
 //   4  each service: every engine byte inside [dst, dst + count), written
 //      once, equal to upstream's result, all count bytes written; count by
 //      upstream's min(), the source bound $8000, count 0 (run for one clock:
@@ -45,7 +46,8 @@
 //
 // Plusargs: +seed +loads +run_clk +only (0 any, 1 DPC+, 2 CDF) +k_svc +k_rst
 // +k_abort +k_glitch +k_guard +k_aud +k_fix +k_p32 +k_wb +k_look +k_auda
-// +max_err +trace_from +trace_to, and fe_phase_gen's.
+// +k_takeab (a load_start in the clock a latched service would be taken)
+// +max_err +trace_from +trace_to +watch=<word>, and fe_phase_gen's.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------

@@ -26,6 +26,7 @@ c_modea_all~call~+seed=8 +clocks=4000000 +epoch=50000 +stall_up=1 +gap=0 +pg_mod
 c_dpc~call~+seed=3 +clocks=3000000 +epoch=300000 +only=1 +k_cs=400 +pg_mode=all~calls_dpc rmw_dpc post_denied releases flip_wait_clocks accept_balance_checks
 c_cdf_hw~call~+seed=4 +clocks=3000000 +epoch=100000 +only=2 +hook=0 +ready=0 +k_rst=300 +fault_k=600~calls_cdf rmw_cdf applies fault_resets ret_unasked reset_in_3 reset_in_4 reset_in_5 reset_in_6 reset_in_8 flip_wait_clocks tick_M+6 tick_M+7 rmw_call_value
 c_rmwx~call~+seed=9 +clocks=3000000 +epoch=300000 +only=1 +k_short=900 +pg_mode=all +gap=0~pend2_at_x rmw_dpc rel_go_callfn accept_balance_checks
+c_dense~call~+seed=10 +clocks=3000000 +epoch=100000 +k_short=900 +gap=0 +k_cf=400 +k_rmw=200 +stall_up=1 +pg_mode=all~callfn_while_upstream_pending_at_m pend2_at_x late_pend2 rel_go_late_pend2 rel_go_callfn callfn_dropped_m_mfe rmw_dpc rmw_cdf rmw_cdf_hook accept_balance_checks
 c_hook~call~+seed=5 +clocks=2000000 +epoch=100000 +only=2 +hook=1 +k_rst=300~calls_cdf_hook rmw_cdf_hook reset_in_7 releases
 c_5x~call~+seed=6 +clocks=3000000 +arm_div=5 +arm_ofs=3100 +ready=1~calls_dpc calls_cdf applies releases tick_M+7
 c_ofs~call~+seed=7 +clocks=3000000 +arm_ofs=7 +pg_mode=all~calls_dpc calls_cdf applies releases

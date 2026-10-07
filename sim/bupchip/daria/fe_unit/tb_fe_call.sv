@@ -36,7 +36,8 @@
 //   item 3       arm_call_busy falls only at, and at the first, edge with
 //                REL & rel_ok & cpu_ready
 //   item 4       pend2 (both schemes, hook), pend_up against U's
-//                call_pending, the second call's payload
+//                call_pending, the second call's payload; one DARIA post
+//                per upstream accept (checked at quiet points)
 //   item 5       cart_reset aimed at every state: IDLE, busy 0, pend2 0,
 //                call_tog kept, ret_seen re-synced; a late ret_tog
 //                (a stand-in that keeps running through the reset) gives
@@ -47,7 +48,8 @@
 // ps with 5) +stall_up +gap (filler reads after a CALLFN instruction) +only
 // (0 all, 1 DPC+, 2 CDF) +hook (-1 random per epoch) +ready (-1 random,
 // 0 hardware: parked & img_ready, 1 mode A: steady) +k_cs +k_rst +k_drop
-// +fault_k +k_short (per mille of calls that run 0-23 clk_arm) +max_err
+// +fault_k +k_short (per mille of calls that run 0-23 clk_arm) +k_cf +k_rmw
+// (per mille of instructions: CALLFN stores, RMW pairs) +max_err
 // +trace=N (print N clocks) and the fe_phase_gen ones.
 //
 // SPDX-License-Identifier: MIT
@@ -78,6 +80,8 @@ module tb_fe_call;
 	int          k_dep   = 4;                // per mille per quiet clock: counters/frequencies deposited
 	int          fault_k = 250;              // per mille of resets aimed at RUN that keep the CPU running
 	int          k_short = 150;              // per mille of calls that run 0-23 clk_arm (X close to an RMW's 2nd write)
+	int          k_cf    = 70;               // per mille of instructions: a CALLFN store
+	int          k_rmw   = 40;               // per mille of instructions: an RMW on the register
 	int          max_err = 20;
 	longint      trace   = 0;
 	int          hs_sys, hs_arm, ofs_arm;
@@ -99,6 +103,8 @@ module tb_fe_call;
 		void'($value$plusargs("k_dep=%d", k_dep));
 		void'($value$plusargs("fault_k=%d", fault_k));
 		void'($value$plusargs("k_short=%d", k_short));
+		void'($value$plusargs("k_cf=%d", k_cf));
+		void'($value$plusargs("k_rmw=%d", k_rmw));
 		void'($value$plusargs("max_err=%d", max_err));
 		void'($value$plusargs("trace=%d", trace));
 		hs_sys  = 24 * VCO;
@@ -218,11 +224,11 @@ module tb_fe_call;
 		logic [12:0] ca;
 		ca = {1'b1, cf_lo};
 		r = rnd(1000);
-		if (r < 70) begin                                    // a CALLFN write
+		if (r < k_cf) begin                                  // a CALLFN write
 			bq_push(ca, 1'b1, rnd(2) ? 8'hFF : 8'hFE);
 			repeat (gap) bq_push(rd_addr(), 1'b0, 8'(rnd(256)));
 			inc("prog_callfn");
-		end else if (r < 110) begin                          // INC/DEC on the register: an RMW pair
+		end else if (r < k_cf + k_rmw) begin                 // INC/DEC on the register: an RMW pair
 			int k;
 			logic [7:0] d1, d2;
 			k = rnd(4);
@@ -237,7 +243,7 @@ module tb_fe_call;
 			bq_push(ca, 1'b1, d2);                           // the new value (not held: it follows a write)
 			repeat (gap) bq_push(rd_addr(), 1'b0, 8'(rnd(256)));
 			inc("prog_rmw");
-		end else if (r < 220) begin                          // another write
+		end else if (r < k_cf + k_rmw + 110) begin           // another write
 			logic [12:0] a;
 			logic [7:0] d;
 			a = rd_addr();
