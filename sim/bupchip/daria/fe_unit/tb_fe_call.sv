@@ -47,7 +47,8 @@
 // ps with 5) +stall_up +gap (filler reads after a CALLFN instruction) +only
 // (0 all, 1 DPC+, 2 CDF) +hook (-1 random per epoch) +ready (-1 random,
 // 0 hardware: parked & img_ready, 1 mode A: steady) +k_cs +k_rst +k_drop
-// +fault_k +max_err +trace=N (print N clocks) and the fe_phase_gen ones.
+// +fault_k +k_short (per mille of calls that run 0-23 clk_arm) +max_err
+// +trace=N (print N clocks) and the fe_phase_gen ones.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -76,6 +77,7 @@ module tb_fe_call;
 	int          k_drop  = 3;                // per mille per clock: the ready source drops
 	int          k_dep   = 4;                // per mille per quiet clock: counters/frequencies deposited
 	int          fault_k = 250;              // per mille of resets aimed at RUN that keep the CPU running
+	int          k_short = 150;              // per mille of calls that run 0-23 clk_arm (X close to an RMW's 2nd write)
 	int          max_err = 20;
 	longint      trace   = 0;
 	int          hs_sys, hs_arm, ofs_arm;
@@ -96,6 +98,7 @@ module tb_fe_call;
 		void'($value$plusargs("k_drop=%d", k_drop));
 		void'($value$plusargs("k_dep=%d", k_dep));
 		void'($value$plusargs("fault_k=%d", fault_k));
+		void'($value$plusargs("k_short=%d", k_short));
 		void'($value$plusargs("max_err=%d", max_err));
 		void'($value$plusargs("trace=%d", trace));
 		hs_sys  = 24 * VCO;
@@ -366,7 +369,8 @@ module tb_fe_call;
 					clr_e <= clr_e + 5'd1;
 					if (clr_e == 5'd21) begin
 						cst  <= C_RUN;
-						ccnt <= (rnda(10) == 0) ? int'(rnda(1500)) : int'(rnda(260));
+						ccnt <= (rnda(1000) < k_short) ? int'(rnda(24)) :
+						        (rnda(10) == 0) ? int'(rnda(1500)) : int'(rnda(260));
 						n_launch++;
 						// the launch registers (P1) against the block posted for the last flip
 						if (clr_pc != lch_blk[0]) fail("launch", $sformatf("entry %08x, posted %08x", clr_pc, lch_blk[0]));
@@ -390,12 +394,17 @@ module tb_fe_call;
 					end
 				end
 				default: begin                          // C_RO
-					rocnt <= rocnt + 3'd1;
-					if (rocnt == 3'd5) begin
-						cst <= C_IDLE;
-						if (fault_keep) stale_set <= stale_set + 1;
-						fault_keep <= 1'b0;
-						n_ret++;
+					// a CPU kept running through a reset waits it out here too: daria_call
+					// flips ret_tog only for a `returned` outside its reset
+					if (fault_keep && arm_rst) inc("ro_held_in_reset");
+					else begin
+						rocnt <= rocnt + 3'd1;
+						if (rocnt == 3'd5) begin
+							cst <= C_IDLE;
+							if (fault_keep) stale_set <= stale_set + 1;
+							fault_keep <= 1'b0;
+							n_ret++;
+						end
 					end
 				end
 			endcase
@@ -579,6 +588,8 @@ module tb_fe_call;
 	int          pk = 0, jx = -1;
 	logic        k_dpc = 1'b0, k_hk = 1'b0;    // the returning call's kind
 	logic        flip_q = 1'b0, tog_q1 = 1'b0, rst_q1 = 1'b0, rs2_q1 = 1'b0;
+	int          acc_diff = 0;                  // upstream's accepts less DARIA's POST entries
+	logic        post_q1 = 1'b0, acc_mark = 1'b0;
 	logic  [7:0] cnum_q1 = 8'h00;
 	logic        need_rs = 1'b0;                 // D and U compared again only after a resync
 	longint      x_last = -100, l_last = -100, tick_e1 = -100;
@@ -693,6 +704,20 @@ module tb_fe_call;
 			fail("ev", $sformatf("ev_ret_unasked %b (bnew %b outst %b)", u_call.ev_ret_unasked, bnew, outst));
 		if (u_call.ev_ret_unasked) inc("ret_unasked");
 		if (cf & arm_call_busy) inc("rmw_call_events");
+
+		// one DARIA call per upstream accept: every call upstream accepts is posted (POST
+		// entered), and no other; compared at quiet points (both idle, nothing pending),
+		// since the two start at different edges (C and C+1, X and M, M_fe and M)
+		if (cart_reset) acc_diff <= 0;
+		else begin
+			if (u_call.st[0] && !up_pend && !up_busy && !cf) begin
+				if (acc_diff != 0) fail("accepts", $sformatf("upstream accepted %0d more calls than DARIA posted", acc_diff));
+				else if (acc_mark) inc("accept_balance_checks");
+			end
+			acc_diff <= acc_diff + ((up_pend && !up_busy) ? 1 : 0) - ((u_call.st[1] && !post_q1) ? 1 : 0);
+		end
+		acc_mark <= (u_call.st[0] && !up_pend && !up_busy && !cf) ? 1'b0 : 1'b1;
+		post_q1  <= u_call.st[1];
 
 		// pend_up against upstream's call_pending (masked in the accept clock and after a late CALLFN)
 		if (!(up_pend & !up_busy & up_fresh) && !cart_reset) begin
@@ -812,10 +837,10 @@ module tb_fe_call;
 	assign rst_hit = (rst_tgt >= 0) && (rst_left == 0) && (rst_dly == 0) && u_call.st[rst_tgt] &&
 	                 (!fault_pick || cst == C_RUN);
 	always @(posedge clk_sys) begin
-		if (e > 0 && (e % epoch) == 0) begin
+		// a new epoch: the reset rises first; the scheme and the rest change in its second
+		// clock (as a load changes force_bs only while the console is held in reset)
+		if (e > 1 && (e % epoch) == 1) begin
 			int k;
-			rst_left <= 40 + int'(rnd(40));
-			rst_tgt <= -1;
 			k = (only == 1) ? 0 : (only == 2) ? 1 : int'(rnd(2));
 			is_dpc <= k == 0;
 			is_cdf <= k == 1;
@@ -826,6 +851,10 @@ module tb_fe_call;
 			cdfj_entry <= rnd32() & 32'hFFFF_FFFE;
 			cdfj_stack <= rnd32();
 			inc("epochs");
+		end
+		if (e > 0 && (e % epoch) == 0) begin
+			rst_left <= 40 + int'(rnd(40));
+			rst_tgt <= -1;
 		end else if (rst_hit) begin
 			rst_left  <= rst_len - 1;
 			rst_tgt   <= -1;

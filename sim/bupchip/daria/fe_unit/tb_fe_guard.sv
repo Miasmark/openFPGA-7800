@@ -21,6 +21,9 @@
 //                clocks clk_arm stops for 0-5 clk_sys periods (none in a
 //                quarter of the moves) and resumes on a random one of the
 //                three offsets (the same one in a third of them)
+//   d18_stop     /18 with long stops: every 2,000-22,000 clocks clk_arm
+//                stops for 20-400 clk_sys periods, then resumes on a random
+//                offset (the unlock rule: nothing to lock on without clk_arm)
 //   d19_*        /19 (the fallback, 19 steps = 27,645 ps) at five offsets
 //   x5_*         clk_arm = 5 x clk_sys (mode A's upstream clk_arm), two offsets
 //   x1           clk_arm = clk_sys (coincident)
@@ -48,10 +51,17 @@
 //         and, once locked after the last move, in every such clock
 //   lock  the first lock within 24 clocks of the run's start, and of every
 //         resume after a move; no unlock in a settled regime once locked
-// and in the /19, 5x and 1x lanes: never locked (the longest run of
-// consistent edges is reported).
+//   dead  while clk_arm is stopped: unlocked from the fourth clock after its
+//         last toggle's arrival until it resumes (8.3: unlock on the first
+//         mismatch, and no lock without the toggle pattern)
+// and in the /19, 5x and 1x lanes: never locked and guard_on never high
+// (8.3, D4: unlocked, guard_on = 0; the longest run of consistent edges is
+// reported).
 //
-// +seed=N (default 1), +edges=N (default 1000000), +verbose=1.
+// +seed=N (default 1), +edges=N (default 1000000), +verbose=1; +restate=0
+// fails only on the physical checks (lat, phb, lock, never locked), counting
+// the restatement checks (ps, fly, gd, evu) without failing on them (used by
+// tb_fe_arb_mut.sh to show which mutants the acceptance checks alone catch).
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -67,6 +77,8 @@ module tb_fe_guard_lane #(
 	parameter int    OFS   = 0,          // clk_arm lattice offset from clk_sys's, ps
 	parameter bit    MOVES = 1'b0,       // phase moves (PLL relock)
 	parameter int    DMAX  = 6000,       // largest per-launch delay, ps
+	parameter int    GMIN  = 0,          // a move's stop of clk_arm: GMIN .. GMAX clk_sys periods
+	parameter int    GMAX  = 5,          //   (GMIN 0: none in a quarter of the moves)
 	parameter int    IDX   = 0           // seed offset
 ) (
 	input wire clk_sys
@@ -104,6 +116,7 @@ module tb_fe_guard_lane #(
 	longint t_res_p = 0,  t_stop_p = -1;     // the one before
 	int     nmove   = 0;
 	int     verbose = 0;
+	int     restate = 1;                     // 0: the restatement checks (ps, fly, gd, evu) are counted, not failed
 	int     dmin_seen = 1 << 30, dmax_seen = 0;
 
 	initial begin : gen
@@ -113,6 +126,7 @@ module tb_fe_guard_lane #(
 		seed = 1;
 		void'($value$plusargs("seed=%d", seed));
 		void'($value$plusargs("verbose=%d", verbose));
+		void'($value$plusargs("restate=%d", restate));
 		rs = seed * 32'h9E37_79B9 + IDX * 32'h85EB_CA6B + 32'h1234_5677;
 		if (rs == 0) rs = 1;
 		repeat (8) void'(rnd());
@@ -140,7 +154,8 @@ module tb_fe_guard_lane #(
 			tnext = tn + PER;
 			if (MOVES && tnext >= next_move) begin
 				// clk_arm stops for g ps and resumes on one of the three /18 offsets
-				g = (rnd() % 4 == 0) ? 0 : int'(rnd() % (5 * TS + 1));   // 0: a pure phase jump (or none)
+				g = (rnd() % 4 == 0 && GMIN == 0) ? 0 :                   // 0: a pure phase jump (or none)
+				    GMIN * int'(TS) + int'(rnd() % ((GMAX - GMIN) * TS + 1));
 				t_stop_p = t_stop;  t_res_p = t_res;  a0_old = a0_cur;
 				t_stop   = tn;
 				a0_cur   = SYS0 + (rnd() % 3) * 8730 + (rnd() % 4) * longint'(PER);
@@ -172,6 +187,8 @@ module tb_fe_guard_lane #(
 	longint e_lat = 0, e_phb = 0, e_lock = 0, e_unl = 0;  // /18 lanes, settled clocks
 	longint n_settled = 0, n_phb = 0, n_shared = 0, n_lockedcl = 0, n_unlock = 0;
 	longint n_locked_never = 0;               // never-lock lanes: clocks with locked
+	longint e_gnever = 0;                     // never-lock lanes: clocks with guard_on
+	longint n_dead = 0, e_dead = 0;           // clocks checked while clk_arm is stopped; locked there
 	int     maxrun = 0;                       // longest run of consistent clocks
 	int     first_lock = -1;                  // clocks from E_0 to the first locked clock
 	int     relock_max = 0, relock_n = 0;     // clocks from a resume to a correct lock
@@ -213,23 +230,23 @@ module tb_fe_guard_lane #(
 			lk = locked;
 			// ps: the receiver pair against the arrivals
 			ps_ref = ((c1 - c2) % 2) == 0;
-			if (ps != ps_ref) begin e_ps++; err("pd_same vs arrivals", i); end
+			if (ps != ps_ref) begin e_ps++; if (restate) err("pd_same vs arrivals", i); end
 			// fly: the flywheel against its restatement
 			run    = int'(i - lm);
 			ph_r   = run % 3;
 			good_r = (run - 1 > 12) ? 12 : run - 1;
 			if (u_guard.ph != 2'(ph_r) || u_guard.good != 4'(good_r) || lk != (run >= 14)) begin
-				e_fly++; err($sformatf("flywheel (ref ph %0d good %0d locked %0d)", ph_r, good_r, run >= 14), i);
+				e_fly++; if (restate) err($sformatf("flywheel (ref ph %0d good %0d locked %0d)", ph_r, good_r, run >= 14), i);
 			end
 			// phb_next comes from the flywheel register (8.1), never from the receiver
-			if (phb_next != ((run >= 14) && ph_r == 0)) begin e_fly++; err("phb_next != locked & ph == 0", i); end
+			if (phb_next != ((run >= 14) && ph_r == 0)) begin e_fly++; if (restate) err("phb_next != locked & ph == 0", i); end
 			mism = ps != (ph_r == 0);
 			if (lm >= 0 && run > maxrun) maxrun = run;   // after the first mismatch (power-up's anchor is arbitrary)
 			if (mism) lm = i;
 			// gd: guard_on and ev_unlock
-			if (guard_on != (lk & (call_win | !cpu_ready))) begin e_gd++; err("guard_on", i); end
+			if (guard_on != (lk & (call_win | !cpu_ready))) begin e_gd++; if (restate) err("guard_on", i); end
 			if (guard_on) g_ev++;
-			if (i >= 1 && evu_p != (lk_p & !lk)) begin e_evu++; err("ev_unlock", i); end
+			if (i >= 1 && evu_p != (lk_p & !lk)) begin e_evu++; if (restate) err("ev_unlock", i); end
 			if (lk_p & !lk) n_unlock++;
 			if (lk) n_lockedcl++;
 			// the /18 lattice
@@ -238,6 +255,12 @@ module tb_fe_guard_lane #(
 				settled = (i >= 1) && !hits(Ti - TS - PER - 11000, Ti, t_stop, t_res) &&
 				          !hits(Ti - TS - PER - 11000, Ti, t_stop_p, t_res_p);
 				sh = pmod(Ti - a0, PER) == 0;
+				// dead: clk_arm stopped since t_stop (its last arrival <= t_stop + DMAX); from the
+				// fourth clock on pd_same is 1 in every clock, so the flywheel must have unlocked
+				if (MOVES && t_stop >= 0 && Ti > t_stop + DMAX + 4 * TS && Ti < t_res) begin
+					n_dead++;
+					if (lk) begin e_dead++; if (KIND == 0) err("locked while clk_arm is stopped", i); end
+				end
 				if (nmove != seen_move) begin             // a move: wait for the relock
 					seen_move = nmove;  want_lock = 1'b1;  lock_from = -1;  stale_cur = 0;
 				end
@@ -278,6 +301,7 @@ module tb_fe_guard_lane #(
 				end
 			end else begin
 				if (lk) begin n_locked_never++; if (KIND == 1) err("locked", i); end
+				if (guard_on) begin e_gnever++; if (KIND == 1) err("guard_on while never locked", i); end
 			end
 			lk_p  = lk;
 			evu_p = u_guard.ev_unlock;
@@ -290,20 +314,20 @@ module tb_fe_guard_lane #(
 	// errors that fail the run (the negative control is judged by the top)
 	function automatic longint errors();
 		longint e;
-		e = e_ps + e_fly + e_gd + e_evu;
+		e = restate ? e_ps + e_fly + e_gd + e_evu : 0;
 		// clk_arm ran at its rate: about TS / PER toggles per clk_sys edge
 		if (arr * PER < (n - 1) * TS - 40 * longint'(PER) * TS) begin
 			$display("%s: clk_arm too slow (%0d toggles in %0d clocks)", NAME, arr, n - 1); e++;
 		end
 		if (KIND >= 2) return e;
-		return e + e_lat + e_phb + e_lock + e_unl + n_locked_never;
+		return e + e_lat + e_phb + e_lock + e_unl + e_dead + n_locked_never + e_gnever;
 	endfunction
 
 	task automatic report();
-		$display("%-8s clocks %0d  toggles %0d  delay %0d..%0d ps  ps %0d fly %0d gd %0d evu %0d | settled %0d shared %0d phb %0d lat %0d phbE %0d | lock@%0d moves %0d relocks %0d max %0d stale %0d unlockE %0d lockE %0d | unlocks %0d locked %0d guard_on %0d longest %0d%s",
+		$display("%-8s clocks %0d  toggles %0d  delay %0d..%0d ps  ps %0d fly %0d gd %0d evu %0d | settled %0d shared %0d phb %0d lat %0d phbE %0d | lock@%0d moves %0d relocks %0d max %0d stale %0d unlockE %0d lockE %0d dead %0d deadE %0d | unlocks %0d locked %0d guard_on %0d longest %0d%s",
 			NAME, n - 1, arr, dmin_seen, dmax_seen, e_ps, e_fly, e_gd, e_evu, n_settled, n_shared, n_phb, e_lat, e_phb,
-			first_lock, nmove, relock_n, relock_max, stale_max, e_unl, e_lock, n_unlock, n_lockedcl, g_ev, maxrun,
-			(KIND == 1) ? $sformatf("  NEVER-LOCK violations %0d", n_locked_never) :
+			first_lock, nmove, relock_n, relock_max, stale_max, e_unl, e_lock, n_dead, e_dead, n_unlock, n_lockedcl, g_ev, maxrun,
+			(KIND == 1) ? $sformatf("  NEVER-LOCK violations %0d (guard_on %0d)", n_locked_never, e_gnever) :
 			(KIND == 3) ? $sformatf("  (information: locked clocks %0d)", n_locked_never) : "");
 	endtask
 endmodule
@@ -339,6 +363,9 @@ module tb_fe_guard;
 	// [1, 6] ns window, so the per-launch delay decides each edge's count (see the report)
 	tb_fe_guard_lane #(.NAME("x5_amb"),  .KIND(3), .PER(13968), .OFS(10968), .MOVES(0), .DMAX(6000),  .IDX(14)) l14 (.clk_sys);
 	tb_fe_guard_lane #(.NAME("x1_amb"),  .KIND(3), .PER(69840), .OFS(66840), .MOVES(0), .DMAX(6000),  .IDX(15)) l15 (.clk_sys);
+	// /18 with long stops of clk_arm (20-400 clk_sys) between the moves: the unlock rule
+	tb_fe_guard_lane #(.NAME("d18_stop"), .KIND(0), .PER(26190), .OFS(0),    .MOVES(1), .DMAX(6000),  .IDX(16),
+	                   .GMIN(20), .GMAX(400)) l16 (.clk_sys);
 
 	always @(posedge clk_sys) nedge <= nedge + 1;
 
@@ -350,21 +377,25 @@ module tb_fe_guard;
 		l0.report();  l1.report();  l2.report();  l3.report();  l4.report();
 		l5.report();  l6.report();  l7.report();  l8.report();  l9.report();
 		l10.report(); l11.report(); l12.report(); l13.report(); l14.report(); l15.report();
+		l16.report();
 		e = l0.errors() + l1.errors() + l2.errors() + l3.errors() + l4.errors() + l5.errors() + l6.errors()
 		  + l7.errors() + l8.errors() + l9.errors() + l10.errors() + l11.errors() + l12.errors() + l13.errors()
-		  + l14.errors() + l15.errors();
+		  + l14.errors() + l15.errors() + l16.errors();
 		// coverage: the /18 lanes locked, phase B seen, moves and relocks happened, the guard was on
 		if (l0.first_lock < 0 || l1.first_lock < 0 || l2.first_lock < 0) begin
 			$display("tb_fe_guard: a /18 lane never locked"); e++;
 		end
-		if (l3.relock_n < 10 || l4.relock_n < 10) begin
-			$display("tb_fe_guard: too few relocks (%0d, %0d)", l3.relock_n, l4.relock_n); e++;
+		if (l3.relock_n < 10 || l4.relock_n < 10 || l16.relock_n < 10) begin
+			$display("tb_fe_guard: too few relocks (%0d, %0d, %0d)", l3.relock_n, l4.relock_n, l16.relock_n); e++;
+		end
+		if (edges >= 1_000_000 && l16.n_dead < 1000) begin
+			$display("tb_fe_guard: too few clocks with clk_arm stopped (%0d)", l16.n_dead); e++;
 		end
 		if (l0.g_ev == 0 || l0.n_phb == 0) begin $display("tb_fe_guard: no guard_on / phb_next seen"); e++; end
 		// the negative control must see lattice errors (the check is not blind)
 		if (l13.e_lat == 0) begin $display("tb_fe_guard: negative control d18_bad saw no lattice error"); e++; end
 		if (e != 0) $fatal(1, "tb_fe_guard: FAIL (%0d errors)", e);
-		$display("tb_fe_guard: PASS (%0d clk_sys edges per lane, 16 lanes)", edges);
+		$display("tb_fe_guard: PASS (%0d clk_sys edges per lane, 17 lanes)", edges);
 		$finish;
 	end
 endmodule

@@ -7,8 +7,9 @@
 # is changed.
 #   ./tb_fe_arb_mut.sh [ID ...]        (default: every mutant)
 # CYCLES (tb_fe_arb, default 300000), EDGES (tb_fe_guard, default 200000),
-# POISON=1, VERILATOR as run_unit.sh. Prints one line per mutant and
-# "caught N of M"; exits 1 if a mutant survives.
+# GPLUS (more tb_fe_guard plusargs, e.g. +restate=0: only the physical
+# checks fail the run), POISON=1, VERILATOR as run_unit.sh. Prints one line
+# per mutant and "caught N of M"; exits 1 if a mutant survives.
 # SPDX-License-Identifier: MIT
 set -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -56,6 +57,14 @@ a33#arb#assign a_wb_late      = wb_v & k[1];#assign a_wb_late      = wb_v & k[2]
 a34#arb#assign ev_grant_steal = aud_issue & !sel_up & fix_eff;#assign ev_grant_steal = aud_issue & fix_eff;#steal counted inside upstream's select
 a35#arb#| ({4{cl_gnt}} & 4'hF);#| ({4{cl_gnt}} & 4'hE);#call port's byte 0 lost
 a36#arb#wire r_quiet = !guard_on & !f6_act;#wire r_quiet = !f6_act;#P32, pointer write and copy under the guard
+a37#arb#| ({4{fix_eff}} & cr_fix_be)#| ({4{fix_eff}} & 4'hF)#core fixed byte write as a word write
+a38#arb#| ({4{cs_gnt}} & cs_be)#| ({4{cs_gnt}} & 4'hF)#core S partial write as a word write
+a39#arb#assign a_collide      = ev_grant_steal & !sh_c;#assign a_collide      = ev_grant_steal & !sh_q;#a_collide ignores this clock's ev_short and the k[0] restart
+a40#arb#wire  sh_c  = ev_short     | (sh_q  & !k[0]);#wire  sh_c  = ev_short     | (sh_q  & !k[1]);#a_collide's cycle starts one clock late
+a41#arb#| ({13{fix_eff}}  & cr_fix_a)#| ({13{cr_fix}}  & cr_fix_a)#suppressed core address not parked
+a42#arb#| (fix_eff & cr_fix_we) | wb_gnt;#| (cr_fix & cr_fix_we) | wb_gnt;#suppressed core write still written
+a43#arb#use_q <= (fix_eff & cr_fix_use) | p32_gnt | aud_take;#use_q <= (fix_eff & cr_fix_use) | p32_gnt | aud_issue;#crb_use on an audio request not granted
+a44#arb#wire cs_gnt = cs_req & !cz_req;#wire cs_gnt = cs_req;#core S beside the F6 clear
 g1#guard#assign pd_same = pd_rx == pd_rx1;#assign pd_same = pd_rx != pd_rx1;#detector inverted
 g2#guard#assign phb_next = lk & (ph == 2'd0);#assign phb_next = lk & pd_same;#phb_next from the receiver
 g3#guard#if (mism | (good == 4'd12)) lk   <= !mism;#if (mism | (good == 4'd11)) lk   <= !mism;#locks after 12 matches, not 13
@@ -68,6 +77,8 @@ g9#guard#assign ev_unlock = lk & mism;#assign ev_unlock = mism;#ev_unlock while 
 g10#guard#pd_rx1 <= pd_rx;#pd_rx1 <= pd_tog;#receiver pair skips a stage
 g11#guard#good <= mism ? 4'd0 : good + 4'd1;#good <= good + 4'd1;#good not cleared on a mismatch
 g12#guard#always_ff @(posedge clk_arm) pd_tog#always_ff @(posedge clk_sys) pd_tog#toggle on the wrong clock
+g13#guard#assign phb_next = lk & (ph == 2'd0);#assign phb_next = lk & (ph == 2'd1);#phb_next one clock late (the edge after phase B)
+g14#guard#if (mism | (good != 4'd12)) good#if (good != 4'd12) good#good not cleared by a mismatch once saturated
 EOF
 
 want=("$@")
@@ -99,7 +110,8 @@ PY
 		top=tb_fe_arb; plus=("+cycles=${CYCLES:-300000}")
 	else
 		srcs=("$d/daria_fe_guard.sv" "$HERE/tb_fe_guard.sv")
-		top=tb_fe_guard; plus=("+edges=${EDGES:-200000}")
+		# shellcheck disable=SC2206
+		top=tb_fe_guard; plus=("+edges=${EDGES:-200000}" $GPLUS)
 	fi
 	if ! nice -n 10 "$VERILATOR" --binary --timing -j 2 -O1 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
 			-Wno-MULTIDRIVEN "-I$HERE" --top-module "$top" "${DEFS[@]}" -Mdir "$d/obj" -o vtb "${srcs[@]}" \

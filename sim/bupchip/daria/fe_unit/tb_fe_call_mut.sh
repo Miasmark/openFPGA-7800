@@ -28,6 +28,7 @@ CALL_RUNS=(
 COPY_RUNS=(
 	"+seed=31 +loads=8 +run_clk=30000"
 	"+seed=32 +loads=6 +run_clk=40000 +only=1 +k_svc=300 +pg_mode=all"
+	"+seed=33 +loads=10 +run_clk=20000 +k_abort=600 +k_takeab=40 +k_glitch=500"
 )
 
 # ID~bench~python find~python replace~what it breaks
@@ -84,8 +85,20 @@ k21~copy~		else if (dma_busy & !svc_hold & !run & rel_ok)      dma_busy <= 1'b0;
 k22~copy~(f6_i == (f6_dpc ? 13'h02FF : 13'h01FF))~(f6_i == (f6_dpc ? 13'h01FF : 13'h01FF))~DPC+ fill of 2 KB
 k23~copy~		ld1 <= load_end & loading;~		ld1 <= load_start;~family latched at load_start
 k24~copy~			f6_r32 <= ram32;~			f6_r32 <= 1'b0;~CDFJ+ RAM size not latched
-k25~copy~	wire win_fall = cw_q & !cart_win & fe_loaded;                // c_close~	wire win_fall = !cart_win & fe_loaded & ib_q & !f6_q & (rdl == 4'd0);~F6 starts while the window is low before the close
+k25~copy~	wire win_fall = cw_q & !cart_win & fe_loaded;                // c_close~	wire win_fall = !cw_q & cart_win & fe_loaded;                // c_close~F6 on the window's rise, not its fall
 k26~copy~	assign fbe[0] = d == 2'd0;~	assign fbe[0] = 1'b1;~fill writes byte 0 of the first word
+m29~call~	wire rel_end = s_rel & !pend2 & !callfn & rel_ok & cpu_ready;~	wire rel_end = s_rel & !pend2 & rel_ok & cpu_ready;~a CALLFN in REL released and posted at once
+m30~call~		if (cart_reset | (ret_new & (!s_run | leave)))~		if (cart_reset | (ret_new & !s_run))~ret_seen not updated at X
+m31~call~	wire nxt_rd  = leave & !is_dpc & !hk_en;~	wire nxt_rd  = leave & is_cdf & !hk_en & !jplus;~CDFJ+ returns not read
+m33~call~	wire p2_now  = pend2 | p2_set;               // pending at X (DPC+ leaves RUN in this clock)~	wire p2_now  = pend2;                        // pending at X (DPC+ leaves RUN in this clock)~a DPC+ CALLFN in the X clock lost (design 6.1 as written)
+m32~call~	assign call_win      = s_run | s_rd | s_rdw | s_apply | s_hkw;~	assign call_win      = s_run | s_rd | s_rdw | s_hkw;~call_win ends before the merge
+k27~copy~	wire       take  = svc_pend & !run & !ib_q & !f6_q & !load_start & !cart_reset;~	wire       take  = svc_pend & !run & !ib_q & !f6_q & !cart_reset;~a service taken in the load_start clock
+k28~copy~		if (cart_reset | load_start)  run <= 1'b0;~		if (cart_reset)               run <= 1'b0;~load_start does not stop the engine
+k29~copy~	wire f6_done = ph_end & !f6_v;~	wire f6_done = ph_end;~F6 ends with the last copy write
+k30~copy~		quiet_q <= cart_reset & (qcnt == 3'd7);~		quiet_q <= cart_reset & (qcnt == 3'd3);~rst_quiet after 4 reset clocks
+k31~copy~	wire win_fall = cw_q & !cart_win & fe_loaded;                // c_close~	wire win_fall = cw_q & !cart_win;                            // c_close~F6 after a non-ARM load
+k32~copy~	wire       e_wr  = cp_gnt & (e_fl | e_cp);       // the engine's write registers at this edge~	wire       e_wr  = cp_req & (e_fl | e_cp);       // the engine's write registers at this edge~engine advances without its grant
+k33~copy~		if (ld1) begin~		if (ld1 & 1'b0) begin~family not latched at load end
 EOF
 
 ids=("$@")

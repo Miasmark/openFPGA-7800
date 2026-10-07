@@ -74,6 +74,7 @@ module tb_fe_copy;
 	int          k_wb     = 60;
 	int          k_look   = 150;
 	int          k_auda   = 100;
+	int          k_takeab = 6;                // per mille per 100 run clocks (DPC+): load_start in a take clock
 	int          max_err  = 20;
 	longint      trace_from = 0, trace_to = 0;
 
@@ -93,6 +94,7 @@ module tb_fe_copy;
 		void'($value$plusargs("k_wb=%d", k_wb));
 		void'($value$plusargs("k_look=%d", k_look));
 		void'($value$plusargs("k_auda=%d", k_auda));
+		void'($value$plusargs("k_takeab=%d", k_takeab));
 		void'($value$plusargs("max_err=%d", max_err));
 		void'($value$plusargs("trace_from=%d", trace_from));
 		void'($value$plusargs("trace_to=%d", trace_to));
@@ -170,7 +172,8 @@ module tb_fe_copy;
 	always @(posedge clk_sys) begin
 		old_dl <= cart_download;
 		rst_wr <= cart_download | old_dl | init_busy | button;      // atari7800_pocket.sv:166-172
-		if (rst_wr) hold_left <= int'(rndq(8));                       // top.sv's reset_hold tail
+		if (rst_wr) hold_left <= 1 + int'(rndq(8));                   // top.sv's reset_hold tail (>= 1: set
+		                                                              // at the edge reset is seen, top.sv:266-269)
 		else if (hold_left > 0) hold_left <= hold_left - 1;
 	end
 
@@ -220,9 +223,16 @@ module tb_fe_copy;
 		bq[(bq_h + bq_n) % QN] = {a, !w, d};
 		bq_n++;
 	endfunction
+	logic svc_off = 1'b0;                     // the sequencer's quiet time: no service writes generated
+	function automatic bit bq_has_svc();
+		for (int i = 0; i < bq_n; i++)
+			if (bq[(bq_h + i) % QN][21:9] == 13'h105A && !bq[(bq_h + i) % QN][8]) return 1'b1;
+		return 1'b0;
+	endfunction
 	task automatic gen_instr();
 		int r;
 		r = int'(rndq(1000));
+		if (svc_off) r = 1000;                                       // quiet: reads only
 		if (r < k_svc) begin
 			bq_push(13'h105A, 1'b1, 8'(1 + rndq(2)));                // CALLFUNCTION 1 (copy) / 2 (fill)
 			repeat (3) bq_push({1'b1, 12'(rndq(4096))}, 1'b0, 8'(rndq(256)));
@@ -466,6 +476,9 @@ module tb_fe_copy;
 	logic        glitch_q = 1'b0;
 	int          gl_age = 100;                   // clocks since cart_reset was last forced low
 	logic        ld1_q = 1'b0, rise_q = 1'b0;
+	logic        ls_q = 1'b0;                    // load_start in the last clock
+	int          rlen = 0;                       // clocks cart_reset has been high before this one
+	logic        q_exp = 1'b0;                   // rst_quiet expected: cart_reset high in the last 8 clocks
 
 	always @(posedge clk_sys) begin
 		logic        rise, f6_go_b, exp_cz, exp_cp, exp_ca, w_ok;
@@ -533,6 +546,11 @@ module tb_fe_copy;
 			if (cz_req || u_copy.f6_ph != 4'd0) fail("f6", "F6 requests outside F6");
 		end
 
+		// -- rst_quiet: cart_reset high in each of the last 8 clocks -----------------------------------
+		if (rst_quiet !== q_exp) fail("rst_quiet", $sformatf("rst_quiet %b, expected %b (reset high for %0d clocks)", rst_quiet, q_exp, rlen));
+		q_exp <= cart_reset && (rlen + 1 >= 8);
+		rlen  <= cart_reset ? rlen + 1 : 0;
+
 		// -- init_busy (D6) ---------------------------------------------------------------------------
 		if (init_busy !== ib_b) fail("init_busy", $sformatf("init_busy %b, expected %b", init_busy, ib_b));
 		// upstream's busy: high whenever its loading flag is, and on the edges ours rises
@@ -565,6 +583,10 @@ module tb_fe_copy;
 		if (cp_req && !cp_gnt && !f6_act) inc("engine_denied");
 		if (cp_req && !cp_gnt && !f6_act && guard_on) inc("engine_denied_guard");
 		if (ca_req && !ca_gnt && !f6_act) inc("copy_src_denied");
+		// load_start aborts the engine: no run after it, and a latched service is not taken in its
+		// clock (interfaces.md 10 item 5)
+		if (ls_q && u_copy.run) fail("engine", "run high in the clock after load_start");
+		if (load_start && svc_pend && !u_copy.run && !init_busy && !f6_act && !cart_reset) inc("load_start_in_take_clock");
 		if (run_q && !u_copy.run) begin                              // the engine stopped
 			if (cart_reset || load_start || rq_b) inc("svc_abandoned");
 			else begin
@@ -659,6 +681,7 @@ module tb_fe_copy;
 		glitch_q <= glitch;
 		gl_age   <= glitch ? 0 : (gl_age < 100 ? gl_age + 1 : 100);
 		ld1_q    <= ld1_b & !load_start;
+		ls_q     <= load_start;
 		rise_q   <= rise && arm_ld && !ib_b && !load_start && !ri_busy && gl_age >= 100;
 		e <= e + 1;
 	end
@@ -682,6 +705,32 @@ module tb_fe_copy;
 				if (bad <= 8) fail("state_ram", $sformatf("%s: word %02x %08x", why, w, u_mem.state_ram.mem_q[w]));
 			end
 		if (bad == 0) inc("images_equal");
+	endtask
+	// the engine and the latch go idle within 100,000 clocks
+	task automatic drain_engine(input int ld);
+		int to;
+		to = 0;
+		while ((u_copy.run || svc_pend || defer) && to < 100000) begin
+			@(posedge clk_sys);
+			to++;
+		end
+		if (to >= 100000) begin
+			fail("timeout", $sformatf("load %0d: the engine never finished", ld));
+			$fatal(1, "tb_fe_copy: the engine never finished");
+		end
+	endtask
+	// F6 starts within 100,000 clocks
+	task automatic wait_for_f6(input string why);
+		int to;
+		to = 0;
+		do begin
+			@(posedge clk_sys);
+			to++;
+		end while (!f6_act && to < 100000);
+		if (!f6_act) begin
+			fail("timeout", $sformatf("%s: F6 never started", why));
+			$fatal(1, "tb_fe_copy: F6 never started");
+		end
 	endtask
 	// both inits done; a cart_reset dip inside F6 at random
 	task automatic wait_inits(input string why);
@@ -766,7 +815,7 @@ module tb_fe_copy;
 			download(size, late, sch, r);
 			if (abort && sch != 0) begin
 				// a new download while F6 runs: load_start aborts it
-				do @(posedge clk_sys); while (!f6_act);
+				wait_for_f6($sformatf("abort in load %0d", ld));
 				wait_clk(int'(rnd(1500)));
 				inc("abort_loads");
 				download(32768, 0, sch, r);
@@ -783,16 +832,37 @@ module tb_fe_copy;
 					inc("console_resets");
 					wait_inits($sformatf("reset in load %0d", ld));
 				end
+				if (sch == 1 && rnd(1000) < k_takeab) begin
+					// a download whose load_start falls in the clock a latched service would be taken
+					// (the latch is up, the engine idle): load_start wins, nothing runs
+					int to;
+					to = 0;
+					do begin
+						@(negedge clk_sys);
+						to++;
+					end while (!(svc_pend && !u_copy.run && !init_busy && !f6_act && !cart_reset && !cart_download) && to < 20000);
+					if (to < 20000) begin
+						inc("abort_on_take");
+						download(32768, int'(rnd(5)), sch, r);
+						wait_inits($sformatf("take-clock reload in load %0d", ld));
+					end
+				end
 				if (sch == 1 && u_copy.run && rnd(1000) < 3) begin
 					inc("abort_service_load");
 					download(32768, int'(rnd(5)), sch, r);
 					wait_inits($sformatf("reload in load %0d", ld));
 				end
 			end
-			// let the engine finish, then compare
-			while (u_copy.run || svc_pend || defer) @(posedge clk_sys);
+			// stop generating services, let the queued ones and the engine finish, then compare
+			svc_off = 1'b1;
+			for (int pass = 0; pass < 2; pass++)
+				do begin
+					wait_clk(400);
+					drain_engine(ld);
+				end while (bq_has_svc());
 			wait_clk(5);
 			compare_image($sformatf("end of load %0d", ld));
+			svc_off = 1'b0;
 		end
 		wait_clk(10);
 		$display("tb_fe_copy: %0d clocks, %0d upstream DMAs", e, ri_dmas);
