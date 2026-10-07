@@ -177,3 +177,7 @@ At slow 85 °C (the hold column is the worst corner, which is fast 0 °C; the fi
 - **The worst paths.** At 40.43 MHz without them, they ran through the BL suffix's sum into the window's per-slice read-enable decode. With them, and at ÷18, the worst path is S1's execute path into the register file.
 
 `docs/DARIA_CORE.md`, "Step 3 work", has what follows from these: S1 with Thumb at ÷18.
+
+## DARIA's front end: `daria_fe_map.sh`
+
+`daria_fe_map.sh [TOP] [--synth | --fit]` compiles `daria_fe` (`src/fpga/core/bupchip/daria_fe*.sv`), or one of its blocks alone (`daria_fe_seq`, `_dec`, `_core`, `_audio`, `_call`, `_copy`, `_arb`, `_guard`), on the 5CEBA4F23C8 with `ap_core.qsf`'s settings and every port but `clk_sys`/`clk_arm` a virtual pin, in `sim/work/bupchip/qfe/<TOP>-<mode>/`. The default is Analysis & Elaboration; `--synth` adds the resource counts of Analysis & Synthesis; `--fit` runs the Fitter and Timing Analyzer as `docs/daria_fe/design.md` 10.3's probes do, and prints ALMs placed less those recoverable by dense packing. `docs/daria_fe/interfaces.md`, section 8, has the options and the results on the step-0 stubs.

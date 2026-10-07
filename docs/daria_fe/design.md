@@ -10,6 +10,8 @@ This is the front end that DARIA builds and verifies. It is the 6507 side of DPC
 
 BUS and ELF stay bad-game screens (D2).
 
+**Frozen interfaces.** `docs/daria_fe/interfaces.md` records the ports as built at step 0. Where it differs from 1.3, 1.4, 1.7 or 4.1 below (`dec_t` is 38 bits, `rdl` 4 bits, a few added ports), it is authoritative (its 11.4).
+
 **How it was made.** It is design C, "simple" (`docs/daria_fe/alternatives/simple.md`), taken as the base. Every fatal flaw and defect the three judges found in simple is fixed, and grafts from "exact" and "lean" are added where they add no risk. Appendix A traces every finding and every graft.
 
 **Decisions.** D1-D10 are the owner's and lead's decisions, quoted where used. AMPLITUDE and NOTE are **exact** (the D1 option). The cost and risk of that choice are argued in 5.1 and 10.

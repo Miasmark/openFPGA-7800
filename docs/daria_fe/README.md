@@ -9,6 +9,7 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 | File | What it is |
 |---|---|
 | `design.md` | **The micro-architecture to build.** Modules and ports, cycle contracts, timing per access, port arbitration and the shared-edge guard, state map, audio engine, call side, F6 and copy/fill, phase detector with its SDC lines, quirks and counted differences, area, risks, implementation plan |
+| `interfaces.md` | **The interfaces as frozen at step 0** (`design.md` 12.2): every port of `daria_fe` and its submodules as the stubs in `src/fpga/core/bupchip/daria_fe*.sv` have them, the bench tap names and encodings, each decision taken where the design was ambiguous (S0-1 … S0-20), the lint and Quartus results on the stubs, and the shared unit-bench infrastructure (`sim/bupchip/daria/fe_unit/`: `run_unit.sh`, `phase_gen.svh`, `DARIA_RAM_POISON`) |
 | `spec/dpcplus.md`, `spec/cdf.md`, `spec/audio.md`, `spec/glue.md`, `spec/bus.md` | Cycle-exact specifications of upstream's front ends: `mapper_dpcplus`; `mapper_cdf` with its tables and fast-jump map; `arm_mapper_audio` and the controller's audio half; RAM init, the call controller and `cart2600`/`detect2600` glue; the 6507 bus and stall timing. Each was written from the RTL, then checked line by line by a second reader |
 | `spec/design_inputs.md` | What DARIA's built RTL and design already fix for the front end (ports, call block, clocks, open requirements R1-R16) |
 | `spec/bench.md` | The plan for the cycle-by-cycle shadow in `tb_daria` (mode A: beside upstream's front ends; mode B: with DARIA's CPU) |
@@ -21,6 +22,7 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 
 - Specs, design and stage-0 bench: done.
 - **The owner chose the exact audio** (2026-10-07; `docs/DARIA_CORE.md`, decision 9): `design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate. This is meant as the front end's last major revision. If it causes trouble later, the lean audio (`daria_fe_audio_lean`, the same ports, about 250 ALMs less, AMPLITUDE may lag one tick, counted) is the way back.
-- Next: freeze the module interfaces as stubs, then build the modules and their unit benches, then mode A on three images, then all 21 (`design.md` 12).
+- Step 0 of `design.md` 12.2 (the interfaces frozen as stubs, `interfaces.md`): done, and independently reviewed (`interfaces.md` section 11: fixes R-1 … R-4, questions L-1 … L-6 for the lead). Any port change from here needs the lead's sign-off.
+- Next: build the modules and their unit benches (five lanes), then mode A on three images, then all 21 (`design.md` 12).
 
 The specs mention a few files that lived only in the session scratchpad and were not kept: a copy of MiSTer's `Atari7800.sv` wrapper, two throwaway stall benches, and a Stella `CartCDF.cxx` used for behaviour notes only.

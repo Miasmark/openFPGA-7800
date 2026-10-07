@@ -27,6 +27,9 @@
 // enables, maximum_depth 8,192 so Quartus slices it 8K x 1 and needs no output
 // decoder of its own. Mixed-port reads of a word written in the same clock are
 // undefined on the device; the users order such accesses by toggles.
+// Simulation with DARIA_RAM_POISON defined makes both undefined reads visible
+// (the model at the end of daria_ram; docs/daria_fe/design.md 12.1). Without
+// it the behavioural model is the one every existing bench was run with.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -87,6 +90,7 @@ module daria_ram #(
 	logic [DW-1:0] mem_q [0:WORDS-1];
 	logic [DW-1:0] qa = '0, qb = '0;
 	initial for (int i = 0; i < WORDS; i++) mem_q[i] = '0;
+`ifndef DARIA_RAM_POISON
 	always @(posedge clk_a) begin
 		logic [DW-1:0] w;
 		w = mem_q[addr_a];
@@ -107,6 +111,69 @@ module daria_ram #(
 	end
 	assign q_a = qa;
 	assign q_b = qb;
+`else
+	// The poisoned model (simulation only; docs/daria_fe/design.md 12.1, 1.5
+	// rule 3). It makes visible the two reads the device leaves undefined:
+	//  (a) after a write with a partial byte enable, the next clock's q of
+	//      that port shows $A5 in the bytes not enabled
+	//      (NEW_DATA_NO_NBE_READ: "don't care");
+	//  (b) a read on one port of a word the other port writes at the same
+	//      time step returns $A5A5A5A5 (mixed-port read during write).
+	// (b) does not depend on the order in which the two ports' blocks run in
+	// a time step: whichever runs second sees the other's record. Each
+	// variable has one writer. Time steps are told apart by $realtime, not
+	// $time: this file has no `timescale, so $time counts whole units of
+	// whatever unit it inherits (1 ns in the benches), and two edges 0.3 ns
+	// apart would read as one time step (docs/daria_fe/interfaces.md,
+	// "Review", R-1). -1.0 is "no edge yet", -2.0 "never".
+	localparam logic [DW-1:0] POISON = {NB{8'hA5}};
+	realtime       rt_a = -1.0, rt_b = -1.0;                // each port's last edge
+	logic [AW-1:0] ra_a = '0, ra_b = '0;                    // and its address
+	realtime       wt_a = -1.0, wt_b = -1.0;                // each port's last write
+	logic [AW-1:0] wa_a = '0, wa_b = '0;
+	realtime       hit_a = -2.0, hit_b = -2.0;              // q_x poisoned by the other port's later write
+	logic          pz_a = 1'b0, pz_b = 1'b0;                // q_x poisoned by the other port's earlier write
+	always @(posedge clk_a) begin
+		logic [DW-1:0] w, r;
+		w = mem_q[addr_a];
+		r = w;
+		if (we_a) begin
+			for (int b = 0; b < NB; b++) begin
+				if (be_a[b]) w[b*8 +: 8] = wd_a[b*8 +: 8];
+				r[b*8 +: 8] = be_a[b] ? wd_a[b*8 +: 8] : 8'hA5;
+			end
+			mem_q[addr_a] <= w;
+			if (rt_b == $realtime && ra_b == addr_a) hit_b = $realtime;   // port B read it at this time step, before us
+			wt_a = $realtime;
+			wa_a = addr_a;
+		end
+		pz_a <= (wt_b == $realtime && wa_b == addr_a);              // port B wrote it at this time step, before us
+		rt_a = $realtime;
+		ra_a = addr_a;
+		qa <= r;
+	end
+	always @(posedge clk_b) begin
+		logic [DW-1:0] w, r;
+		w = mem_q[addr_b];
+		r = w;
+		if (we_b) begin
+			for (int b = 0; b < NB; b++) begin
+				if (be_b[b]) w[b*8 +: 8] = wd_b[b*8 +: 8];
+				r[b*8 +: 8] = be_b[b] ? wd_b[b*8 +: 8] : 8'hA5;
+			end
+			mem_q[addr_b] <= w;
+			if (rt_a == $realtime && ra_a == addr_b) hit_a = $realtime;
+			wt_b = $realtime;
+			wa_b = addr_b;
+		end
+		pz_b <= (wt_a == $realtime && wa_a == addr_b);
+		rt_b = $realtime;
+		ra_b = addr_b;
+		qb <= r;
+	end
+	assign q_a = (pz_a || hit_a == rt_a) ? POISON : qa;
+	assign q_b = (pz_b || hit_b == rt_b) ? POISON : qb;
+`endif
 `endif
 endmodule
 
