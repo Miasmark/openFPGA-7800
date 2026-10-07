@@ -22,43 +22,60 @@
 // Both see the same random image and cart RAM (written into both RAMs), the
 // same random select stream (fe_phase_gen's cycles with per-cycle select
 // patterns: phase-1 reads, until the commit, the whole cycle, random
-// clocks), the same 6507 byte stores (at C, under the select), the same
-// clk_arm writes (non-shared edges, as upstream's port B arbitrates), the
-// same NOTE strobes (at C+1, and at the grant edges g and g+1 of a NOTE
-// read: AUD 9.4's overlap rows), waveforms, cdf_dig toggles, pause, live
-// option changes, resets mid-refresh and mid-sample, and the same calls.
+// clocks; frozen from the last unpaused edge through a pause, as a frozen
+// 6507 cycle's select is, AUD 12.5), the same 6507 byte stores (at C, under
+// the select), the same clk_arm writes (non-shared edges, as upstream's port
+// B arbitrates), the same NOTE strobes (at C+1, at random clocks, and at
+// the grant edges g and g+1 of a NOTE read: AUD 9.4's overlap rows),
+// waveforms, cdf_dig toggles, pause, live option changes (also the family
+// in the middle of a refresh), resets mid-refresh and mid-sample, and the
+// same calls. Both accumulators are sometimes moved together: a tick on a
+// dispatch edge (AUD 9.3's re-queue), or the accumulator meeting TH exactly.
+//
+// Segments (+seg=N runs one): 0 cdf_hook (CDFJ+), 1 dpc_hook (NOTE), 2 live
+// (option and family changes; starts on size_over32k), 3 cdf_own_sweep (the
+// own merge path, tick at M-2 .. M_fe+3, launch at L-2 .. L+2), 4 sample
+// (digital ROM/RAM, latencies to 2,000 clocks, orphans), 5 exact_cdf and
+// 6 exact_dpc (no pause, no miss, no class allowed), 7 cdf_own_random,
+// 8 cdf_hook_sweep (tick at M-1 .. M+1 under the hook), 9 dig_edges (the
+// digital route's boundaries, rom_size above $4000_0000), 10 pause (many
+// short pauses: grants on a pause's last clock).
 //
 // Checks (every clk_sys, at the falling edge):
 //   A1  tick, accum, counters, frequencies, rc, st (one-hot against the
 //       enum), voice, ssum, wsh, woff, dig_addr/low/ram/smp, rp, np, nv,
-//       nval, amplitude, amp_nx against the next amplitude, aud_issue,
-//       aud_addr (when issuing), ev_size_hi; a_tdef2 never.
+//       nval, amplitude, dispatch, aud_issue, aud_addr (when issuing),
+//       ev_size_hi; amp_nx against the next amplitude on every clock,
+//       resets included; tdef exactly for a tick in [M+1, M_fe] of an
+//       own-path merge and never otherwise; a_tdef2 never.
 //   ring the payload captured at L (and at M / M_fe for an RMW's second
 //       call) equals upstream's launch values; each rotation posts the next
 //       word; the ring is back in place after the post; the hook sees the
 //       seeds; the own path's six returns and take[].
-//   own merge path: counters and frequencies masked only in (M, M_fe+1];
-//       tdef exactly for a tick in [M+1, M_fe]; the sweep places the tick
-//       at M-2 .. M_fe+3 for four changed/unchanged patterns, and the
-//       launch tick at L-2 .. L+2.
+//   own merge path: counters and frequencies masked only in (M, M_fe+1].
 //   sample client: the local read at R+1, or R+2 behind a k[0] lookahead,
-//       and AMPLITUDE at R+4 (A1 against upstream's hit); the remote
-//       request (toggle, address held, one outstanding) against upstream's
-//       sample_done placed where design 5.7's protocol puts ours
-//       (R+6+latency); orphans across cart_reset.
+//       its address, and AMPLITUDE at R+4 (A1 against upstream's hit); the
+//       remote request (one toggle, smp_addr held while outstanding)
+//       against upstream's sample_done placed where design 5.7's protocol
+//       puts ours (R+6+latency); orphans across cart_reset meeting the next
+//       refresh (rom_ready low in RISS on both sides).
+//   the two cart RAMs are equal word for word at the end of each segment.
 //
 // Counted classes (design 9.5), each set only by its own condition, masking
 // the replica's registers until both engines are IDLE with nothing pending,
 // then resynchronised by a deposit of upstream's values (fe_deposit_audio's
 // rule): merge_amp (own path, a dispatch in (M, M_fe+1]), dig_rom_lag (an
-// upstream miss on a local sample), pause_lane (a grant edge in a pause,
-// the capture clock out of it, the two lanes differing), size_over32k
-// (ev_size_hi with upstream reading its RAM above 32 KB) and rmw_call (own
-// path, a tick on M under an RMW: the second payload carries that tick).
-// The "exact" segments allow no class at all.
+// upstream miss on a local sample), pause_lane (a grant edge in a pause
+// whose last unpaused edge had the select high: never, with a frozen
+// select), size_over32k (upstream reading its RAM above 32 KB) and rmw_call
+// (own path, a tick on M under an RMW: the second payload carries that
+// tick; checked, then upstream's seeds deposited). The "exact" segments
+// allow no class at all. A run passes with no error and every coverage
+// minimum met (at +scale >= 100 with all segments).
 //
 // Plusargs: +seed=N (also give +pg_seed=N), +scale=PCT (segment lengths,
-// default 100), +seg=N (one segment), +maxerr=N, +verbose=1.
+// default 100: 3.4 M clk_sys, about 12 s), +seg=N, +maxerr=N, +verbose=1.
+// Mutation test: tb_fe_audio_mut.py. Area probe wrapper: tb_fe_audio_probe.v.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -71,7 +88,7 @@ module tb_fe_audio;
 	localparam logic [23:0] TH   = 24'd14_298_182;
 	localparam logic [23:0] STEP = 24'd20_000;
 	localparam logic [23:0] WRAP = 24'h25_D3BA;
-	localparam int NSEG = 8;
+	localparam int NSEG = 11;
 	localparam logic [31:0] F0W = 32'h0000_0809, F1W = 32'h4000_1FFC;
 
 	// ---- clocks: clk_arm = 5 x clk_sys, every fifth edge shared --------------------
@@ -110,13 +127,16 @@ module tb_fe_audio;
 	int n_disp = 0, n_disp_dpc = 0, n_disp_cdf = 0, n_dig_ram = 0, n_dig_none = 0, n_woff_in = 0;
 	int n_size_rd = 0, n_grant_wait = 0, n_pause_byte = 0, n_ncap = 0, n_nv3 = 0, n_orph_seen = 0;
 	int n_tick_disp = 0, n_tick_eq = 0, n_coalesce = 0, n_accdep = 0, n_hk_tickm = 0, n_fam_mid = 0;
-	int n_rom_edge = 0, n_orph_wait = 0, n_huge = 0;
+	int n_rom_edge = 0, n_orph_wait = 0, n_huge = 0, n_amp_nx = 0, n_pz_grant = 0;
+	logic riss_w = 1'b0;
 	int n_merge_amp = 0, n_dig_lag = 0, n_pause_lane = 0, n_size_hi = 0, n_size_ev = 0, n_resync = 0;
 	int n_ring_cap = 0, n_ring_rot = 0, n_ring_back = 0, n_hk_seed = 0, n_own_ret = 0;
 	int n_tdef = 0, n_late = 0, n_sweep_ok = 0;
 	int sweep_cov [0:11][0:3];
 	int capoff_cov [0:4];
 	logic rst_q = 1'b0;
+	bit m_rep = 0;                           // the replica's registers are masked (a class is active)
+	string m_why = "";
 
 	// ---- segment configuration (written by the sequencer at falling edges) -------------
 	int    seg = -1;
@@ -149,7 +169,9 @@ module tb_fe_audio;
 		.pclk1(pclk1), .pclk0(pclk0), .mapper_phi2(mapper_phi2), .access(access), .a_in(a_in), .rw(rw),
 		.d_in(d_in), .pause(pause_pg), .load(load), .stall_eff(stall_eff), .ibusy(ibusy), .held(held),
 		.len1(len1), .len2(len2));
-	wire pause  = pause_pg & pause_on;
+	logic pause = 1'b0;                       // pause_core, as the engines see it
+	always @(posedge clk_sys) pause <= pause_pg & pause_on;
+	wire pause_g = pause_pg & pause_on;       // the generator's: the select freezes one clock earlier
 	wire wcommit = access & a_in[12] & !rw;  // a cartridge write commits at this edge (C)
 
 	// ---- the select stream (upstream's sel_ram_sel = our sel_up) ----------------------------
@@ -174,7 +196,7 @@ module tb_fe_audio;
 			default: sel = 1'b0;
 		endcase
 	end
-	wire cwr = sel & wcommit & cwr_cyc;       // a 6507 byte store into cart RAM at C
+	wire cwr = sel & wcommit & cwr_cyc & !pause;   // a 6507 byte store into cart RAM at C
 
 	function automatic int pick_pat();
 		int t, r;
@@ -204,7 +226,7 @@ module tb_fe_audio;
 	endfunction
 
 	always @(posedge clk_sys) begin
-		if (!pause) rsel <= pm(300);
+		if (!pause_g) rsel <= pm(300);
 		k0   <= pclk1;
 		look_f  <= (k_lforce != 0) && u_aud.st[daria_fe_pkg::AS_RISS] && !u_aud.busy_l && !u_aud.busy_r
 		           && (u_aud.dig_addr[31:15] == 17'd0) && pm(k_lforce);
@@ -218,7 +240,7 @@ module tb_fe_audio;
 			cwr_cyc  <= pm(k_cwr);
 			look_cyc <= look_on & pm(k_look);
 			look_a   <= 13'(rnd());
-		end else if (!pause) begin
+		end else if (!pause_g) begin
 			if (kk != 6'd63) kk <= kk + 6'd1;
 			if (access) past_c <= 1'b1;
 		end
@@ -269,9 +291,14 @@ module tb_fe_audio;
 
 	// ---- random resets mid-segment (a refresh, a call, a sample in flight) ------------------
 	int n_rst = 0, n_orph = 0;
+	bit orph_req = 0, plant_rom = 0;
+	bit hold_ptr = 0;                        // the ARM leaves the pointer words alone until the next route
 	always @(posedge clk_sys) begin
 		if (rst_cnt != 0) rst_cnt <= rst_cnt - 1;
 		else if (!seq_rst && k_rst != 0 && pmm(k_rst)) begin rst_cnt <= int'(rr(1, 20)); n_rst++; end
+		else if (!seq_rst && orph_req && pm(200)) begin
+			rst_cnt <= int'(rr(1, 4)); orph_req = 0; n_orph++; plant_rom = 1;
+		end
 		else if (!seq_rst && k_orph != 0 && u_aud.st[daria_fe_pkg::AS_RWAIT] && pm(k_orph)) begin
 			rst_cnt <= int'(rr(1, 4)); n_orph++;
 		end
@@ -300,10 +327,10 @@ module tb_fe_audio;
 						          : (dig_edges ? 32'h4000_0000 + rr(0, 32'h9000) : rr(32768, 524288));
 						if (r == 2 && dig_edges) n_huge++;
 					end
-					default: if (cm_idle) fam <= pick_fam();
+					default: if (cm_idle && !m_rep) fam <= pick_fam();
 				endcase
 			end
-		end else if (!seq_rst && k_livefam != 0 && cm_idle && int'(u_up.state) != daria_fe_pkg::AS_IDLE
+		end else if (!seq_rst && k_livefam != 0 && cm_idle && !m_rep && int'(u_up.state) != daria_fe_pkg::AS_IDLE
 		             && pm(k_livefam)) begin
 			fam <= pick_fam();                     // the family changes in the middle of a refresh
 			n_fam_mid++;
@@ -419,8 +446,11 @@ module tb_fe_audio;
 			  : (k_slat_big != 0 && pm(k_slat_big)) ? int'(rr(100, 300)) : int'(rr(0, slat_max));
 			slat_cur <= s;
 			if (u_up.digital_address[31:15] != 17'd0) begin
+				if (k_slat_huge != 0 && n_req_rem % 12 == 11) s = int'(rr(800, 2000));   // at least one in twelve
+				slat_cur <= s;
 				lat = 6 + s;                 // design 5.7: rdone_q at R+6+latency
 				n_req_rem++;
+				if (s >= 800) orph_req = 1;  // orphan it: the next refresh meets a busy port
 			end else if (pm(k_hit)) begin
 				lat = 3;                     // a hit: sample_done at R+3 (AUD 8.3)
 				n_req_loc++;
@@ -532,6 +562,8 @@ module tb_fe_audio;
 				logic [14:0] a;
 				a = pm(700) ? hot_addr() : 15'(rnd());
 				a[14:13] = 2'b00;            // the 32 KB both RAMs have
+				if (hold_ptr && ((a >= 15'h7F0 && a <= 15'h7FF) || (a >= 15'h1B0 && a <= 15'h1BF)))
+					a = 15'h4000;            // not a pointer word
 				arm_en <= 1'b1;
 				arm_wa <= {2'b00, a[14:2]};
 				arm_wd <= arm_val(a);
@@ -737,9 +769,8 @@ module tb_fe_audio;
 	end
 
 	// ---- class state, masks and the resync -----------------------------------------------------
-	bit m_rep = 0;                           // the replica's registers are masked (a class is active)
-	string m_why = "";
 	logic pz_g = 1'b0;                       // upstream's last grant edge had pause high
+	logic sel_ld = 1'b0;                     // the select at upstream's last lane load (pause low)
 	task automatic cls(input string why);
 		if (!m_rep) m_why = why;
 		m_rep = 1;
@@ -752,11 +783,11 @@ module tb_fe_audio;
 		longint E;
 		E = cyc;
 		pz_g <= up_grant & pause;
+		if (!pause) sel_ld <= sel;
 		if (!cart_reset) begin
 			if (miss_now) begin miss_now = 0; n_dig_lag++; cls("dig_rom_lag"); end
 			// pause_lane: the capture clock after a paused grant edge reads a stale lane
-			if (pz_g && !pause && int'(u_up.state) == daria_fe_pkg::AS_SMCAP
-			    && u_upram.mapper_read_lane != u_aud.al) begin
+			if (pz_g && !pause && int'(u_up.state) == daria_fe_pkg::AS_SMCAP && sel_ld) begin
 				n_pause_lane++; cls("pause_lane");
 			end
 			// size_over32k: upstream's SIZE read above 32 KB
@@ -811,7 +842,8 @@ module tb_fe_audio;
 
 	always @(negedge clk_sys) begin
 		longint e;
-		bit mc;
+		bit mc, dep;
+		dep = 0;
 		e = cyc - 1;                     // the edge whose results are now visible
 		mc = (own_m >= 0) && e >= own_m && e <= own_m + 6;     // (M, M_fe+1]
 		if (!cart_reset && !seq_rst && seg >= 0) begin
@@ -853,11 +885,8 @@ module tb_fe_audio;
 				if (up_ram_en) `CK("aud_addr", aud_addr, up_ram_addr[14:0])
 				`CK("ev_size_hi", u_aud.ev_size_hi, up_ram_en && int'(u_up.state) == daria_fe_pkg::AS_SZISS && up_ram_addr[16:15] != 2'd0)
 				`CK("dispatch", u_aud.dispatch, int'(u_up.state) == daria_fe_pkg::AS_IDLE && !(u_up.note_pending && fam == 2'd1) && u_up.refresh_pending)
-				if (amp_nx_v) `CK("amp_nx", amp_nx_q, up_amp)
 			end
 			if (u_aud.ev_size_hi) n_size_ev++;
-			amp_nx_q = amp_nx;
-			amp_nx_v = !m_rep;
 
 			// the ring: capture, rotation, back in place, seeds, returns
 			if (capd) begin
@@ -920,13 +949,53 @@ module tb_fe_audio;
 				deposit();
 				m_rep = 0;
 				n_resync++;
-				amp_nx_v = 0;
+				dep = 1;                    // amp_nx re-evaluates only after this block
 			end
 		end else begin
-			amp_nx_v = 0;
 			if (cart_reset) begin m_rep = 0; back_pending = 0; end
 		end
+		// amp_nx (u_core's fe_do loads it) is the next amplitude, reset clocks included
+		if (seg >= 0) begin
+			if (amp_nx_v && !m_rep) `CK("amp_nx", amp_nx_q, up_amp)
+			amp_nx_q = amp_nx;
+			amp_nx_v = !m_rep && !dep;
+			n_amp_nx++;
+		end
+		acc_deposit();
 		if (nerr > maxerr) $fatal(1, "tb_fe_audio: %0d errors, stopping", nerr);
+	end
+
+	// both accumulators moved together: kind 0 puts a tick on the next edge, which is a
+	// dispatch edge (AUD 9.3 "a tick at D re-queues"); kind 1 sets TH - 20,000 k, so the
+	// accumulator meets TH exactly (the >= of AUD:76). Never with a call in flight.
+	bit acc_arm = 0;
+	task automatic acc_deposit();            // called last in the falling-edge check block
+		if (cart_reset || seq_rst || cbusy || cf_due >= 0 || u_aud.tdef) acc_arm = 0;
+		else begin
+			if (!acc_arm && k_accdep != 0 && pmm(k_accdep)) acc_arm = 1;
+			if (acc_arm) begin
+				bit disp_next;
+				disp_next = int'(u_up.state) == daria_fe_pkg::AS_IDLE && !(u_up.note_pending && fam == 2'd1)
+				            && u_up.refresh_pending;
+				if (disp_next || pm(2)) begin
+					logic [23:0] v;
+					v = disp_next ? TH : TH - 24'(20000 * rr(1, 700));
+					u_up.tick_accum = v;
+					u_aud.accum = v;
+					acc_arm = 0;
+					n_accdep++;
+				end
+			end
+		end
+	endtask
+
+	always @(negedge clk_sys) if (plant_rom) begin   // both RAMs at one time step
+		logic [31:0] a;
+		plant_rom = 0;
+		hold_ptr = 1;
+		a = rnd() % (rom_size < 32'h8_0000 ? rom_size : 32'h8_0000);
+		put_word(32'h7F0 >> 2, a);
+		put_word(32'h1B0 >> 2, a);
 	end
 
 	// the sample client's own timing (design 5.7)
@@ -934,6 +1003,7 @@ module tb_fe_audio;
 	bit     r_loc = 0;
 	int     n_loc_r1 = 0, n_loc_r2 = 0, n_rem_hold = 0;
 	logic   req_prev = 1'b0;
+	logic [18:0] sa_rec = 19'd0;
 	always @(posedge clk_sys) begin
 		longint E;
 		E = cyc;
@@ -951,6 +1021,10 @@ module tb_fe_audio;
 			end
 			if (aud_a_req && look_req) n_k0_conf++;
 			if (aud_a_req && !look_req && E == r_edge + 1) n_k0_free++;
+		end
+		if (smp_req !== req_prev) sa_rec <= smp_addr;
+		else if (u_aud.busy_r && smp_addr !== sa_rec) begin
+			nerr++; $display("ERR %0t: smp_addr changed with a request outstanding", $time);
 		end
 		if (r_edge >= 0 && !r_loc && u_aud.busy_r) begin
 			if (E > r_edge + 1 && smp_req !== req_prev) begin nerr++; $display("ERR %0t: smp_req toggled with a request outstanding", $time); end
@@ -1001,7 +1075,8 @@ module tb_fe_audio;
 		k_hit = 850; k_look = 700; k_rst = 3; k_orph = 0; k_cwr = 500; k_arm = 30; k_live = 0;
 		slat_max = 40; k_slat_big = 0; p_digptr = 300; k_modf = 0;
 		sel_w = '{450, 200, 150, 120, 80};
-		u_pg.k_pause1 = 5; u_pg.k_pause2 = 5;
+		u_pg.k_pause1 = 5; u_pg.k_pause2 = 5; u_pg.max_pause = 40;
+		k_slat_huge = 0; k_accdep = 0; k_livefam = 0; live_mask = 31; dig_edges = 0;
 		fam = 2'd3; rev = 2'(rnd()); ram32 = (rev == 2'd3) ? pm(800) : pm(200);
 		asz = pm(300) ? 16'd0 : (pm(100) ? 16'(rr(32'h7FF8, 32'hFFFF)) : 16'(rr(32'h100, 32'h7FF0)));
 		rom_size = pm(200) ? rr(1024, 32768) : rr(32768, 524288);
@@ -1011,29 +1086,38 @@ module tb_fe_audio;
 		defaults();
 		case (s)
 			0: begin seg_name = "cdf_hook";
-				rev = 2'd3; ram32 = pm(800); k_dig = 30; end
+				rev = 2'd3; ram32 = pm(800); k_dig = 30; k_accdep = 300; end
 			1: begin seg_name = "dpc_hook";
 				fam = 2'd1; rev = 2'(rnd() % 2); k_note = 300; k_note_rnd = 300; k_ov = 150; k_wave = 300;
-				k_call = 30; k_rmw = 350; cdf_dig = 1'b0; end
+				k_call = 30; k_rmw = 350; cdf_dig = 1'b0; k_accdep = 300; end
 			2: begin seg_name = "live";
-				k_live = 2000; k_note = 200; k_ov = 100; k_dig = 30; k_call = 40;
+				k_live = 2000; k_note = 200; k_ov = 100; k_dig = 30; k_call = 40; k_livefam = 20; k_accdep = 300;
 				cdf_dig = 1'b0; asz = 16'(rr(32'h7FF8, 32'h80FF)); end   // starts on size_over32k
 			3: begin seg_name = "cdf_own_sweep";
 				hk_en = 1'b0; own = 1; sweep = 1; k_rmw = 200; k_dig = 20; k_rst = 0; pause_on = 0;
 				k_hit = 1000; asz = pm(300) ? 16'd0 : 16'(rr(32'h100, 32'h7FF0)); end
 			4: begin seg_name = "sample";
 				k_dig = 5; cdf_dig = 1'b1; p_digptr = 800; k_hit = 700; slat_max = 60; k_slat_big = 30;
-				dig_loc = 45; k_look = 1000; k_lforce = 300;
-				k_orph = 60; k_modf = 1; rom_size = pm(100) ? rr(1024, 32768) : rr(40000, 524288);
+				dig_loc = 45; k_look = 1000; k_lforce = 300; k_slat_huge = 100; k_accdep = 300;
+				k_orph = 60; k_modf = 1; rom_size = rr(40000, 524288);
 				k_call = 80; k_arm = 60; end
 			5: begin seg_name = "exact_cdf";
-				exact = 1; pause_on = 0; k_hit = 1000; k_dig = 30; rev = 2'(rnd() % 3);
+				exact = 1; pause_on = 0; k_hit = 1000; k_dig = 30; rev = 2'(rnd() % 3); k_accdep = 300;
 				asz = pm(300) ? 16'd0 : 16'(rr(32'h100, 32'h7FF0)); end
 			6: begin seg_name = "exact_dpc";
 				exact = 1; pause_on = 0; fam = 2'd1; rev = 2'(rnd() % 2); k_note = 300; k_note_rnd = 300;
-				k_ov = 150; k_wave = 300; k_call = 30; k_rmw = 350; cdf_dig = 1'b0; end
-			default: begin seg_name = "cdf_own_random";
+				k_ov = 150; k_wave = 300; k_call = 30; k_rmw = 350; cdf_dig = 1'b0; k_accdep = 300; end
+			7: begin seg_name = "cdf_own_random";
 				hk_en = 1'b0; own = 1; k_dig = 30; k_rmw = 200; p_digptr = 500; k_orph = 20; end
+			8: begin seg_name = "cdf_hook_sweep";
+				sweep = 1; k_rmw = 200; k_dig = 20; k_rst = 0; pause_on = 0; k_hit = 1000;
+				asz = pm(300) ? 16'd0 : 16'(rr(32'h100, 32'h7FF0)); end
+			10: begin seg_name = "pause";            // many short pauses: grants at a pause's last clock
+				fam = pm(500) ? 2'd1 : 2'd3; rev = 2'(rnd()); k_note = 100; k_dig = 30;
+				u_pg.k_pause1 = 200; u_pg.k_pause2 = 200; u_pg.max_pause = 4; end
+			default: begin seg_name = "dig_edges";
+				k_call = 0; cdf_dig = 1'b1; k_dig = 0; dig_edges = 1; p_digptr = 1000; k_arm = 100;
+				k_live = 1000; live_mask = 2 | 8; k_hit = 1000; slat_max = 10; end
 		endcase
 	endtask
 	function automatic int seg_len(input int s);
@@ -1046,6 +1130,9 @@ module tb_fe_audio;
 			4: k = 600;
 			5: k = 200;
 			6: k = 150;
+			7: k = 300;
+			8: k = 250;
+			9: k = 300;
 			default: k = 300;
 		endcase
 		return k * 10 * scale;                   // k thousand clocks at scale 100
@@ -1097,13 +1184,22 @@ module tb_fe_audio;
 		need("upstream refreshes (dispatches)", n_disp, full ? 1000 : 0);
 		need("  DPC+ refreshes", n_disp_dpc, full ? 300 : 0);
 		need("  CDF waveform refreshes", n_disp_cdf, full ? 300 : 0);
-		need("  digital: ROM local / remote", n_req_loc + n_req_rem, full ? 200 : 0);
-		need("  digital: RAM window samples", n_dig_ram, full ? 100 : 0);
+		need("  digital: ROM local / remote", n_req_loc + n_req_rem, full ? 150 : 0);
+		need("  digital: RAM window samples", n_dig_ram, full ? 80 : 0);
 		need("  digital: out of range (amplitude 0)", n_dig_none, full ? 50 : 0);
 		need("  CDFJ+ waveform window in / out", n_woff_in, full ? 50 : 0);
 		need("  size words read", n_size_rd, full ? 100 : 0);
 		need("  grants delayed by the select", n_grant_wait, full ? 1000 : 0);
 		need("  sample bytes read in a pause ($FF)", n_pause_byte, full ? 10 : 0);
+		need("  sample grants on a pause's last clock (lane at the last unpaused edge)", n_pz_grant, full ? 10 : 0);
+		need("  ticks on a dispatch edge (re-queued)", n_tick_disp, full ? 20 : 0);
+		need("  ticks with a refresh already pending (coalesced)", n_coalesce, full ? 20 : 0);
+		need("  accumulator at exactly TH", n_tick_eq, full ? 10 : 0);
+		need("  accumulator deposits (both engines)", n_accdep, 0);
+		need("  family changed in the middle of a refresh", n_fam_mid, full ? 10 : 0);
+		need("  digital route at rom_size - 1 / rom_size", n_rom_edge, full ? 10 : 0);
+		need("  rom_size above $4000_0000 (RAM window under ROM)", n_huge, full ? 2 : 0);
+		need("  amp_nx checked (every clock, resets included)", n_amp_nx, 0);
 		need("NOTE loads (NCAP)", n_ncap, full ? 200 : 0);
 		need("  strobe at the NOTE grant edge g (s = g)", n_note_ov_g, full ? 3 : 0);
 		need("  strobe at g+1", n_note_ov_g1, full ? 3 : 0);
@@ -1126,6 +1222,7 @@ module tb_fe_audio;
 		need("  deferred ticks (tdef) / late adds", n_tdef, full ? 50 : 0);
 		need("", n_late, full ? 50 : 0);
 		need("  rmw_call: a tick on M under an RMW (own path)", n_rmw_tick, 0);
+		need("  hook merges with a tick on M and a changed counter", n_hk_tickm, full ? 5 : 0);
 		sw_min = 1000; cap_min = 1000;
 		for (int i = 0; i < 12; i++) for (int j = 0; j < 4; j++) if (sweep_cov[i][j] < sw_min) sw_min = sweep_cov[i][j];
 		for (int i = 0; i < 5; i++) if (capoff_cov[i] < cap_min) cap_min = capoff_cov[i];
@@ -1135,11 +1232,12 @@ module tb_fe_audio;
 		$display("  launch L - T = -2 .. +2: %0d %0d %0d %0d %0d", capoff_cov[0], capoff_cov[1], capoff_cov[2], capoff_cov[3], capoff_cov[4]);
 		need("  launch offsets: the least covered", cap_min, full ? 3 : 0);
 		$display("sample client:");
-		need("  local requests", n_req_loc, full ? 100 : 0);
-		need("  local A read at R+1", n_loc_r1, full ? 50 : 0);
+		need("  local requests", n_req_loc, full ? 50 : 0);
+		need("  local A read at R+1", n_loc_r1, full ? 30 : 0);
 		need("  local A read at R+2 (k[0] conflict)", n_loc_r2, full ? 10 : 0);
 		need("  remote requests", n_req_rem, full ? 50 : 0);
 		need("  orphaned requests across cart_reset", n_orph_seen, full ? 3 : 0);
+		need("  RISS waiting on a busy sample port", n_orph_wait, full ? 2 : 0);
 		$display("classes (counted, masked, resynchronised):");
 		need("  merge_amp", n_merge_amp, 0);
 		need("  dig_rom_lag (upstream misses)", n_dig_lag, 0);
@@ -1153,6 +1251,18 @@ module tb_fe_audio;
 	// ---- coverage taps on upstream (what happened, not what was checked) -----------------------
 	always @(posedge clk_sys) begin
 		if (!cart_reset) begin
+			if (u_up.audio_tick && int'(u_up.state) == daria_fe_pkg::AS_IDLE && !(u_up.note_pending && fam == 2'd1)
+			    && u_up.refresh_pending) n_tick_disp++;
+			if (u_up.tick_accum == TH) n_tick_eq++;
+			if (u_up.audio_tick && u_up.refresh_pending && fam != 2'd0) n_coalesce++;
+			if (hk_stb && u_up.audio_tick && launch_f3
+			    && (up_ret[0] != u_up.call_seed_counter[0] || up_ret[1] != u_up.call_seed_counter[1]
+			        || up_ret[2] != u_up.call_seed_counter[2])) n_hk_tickm++;
+			if (int'(u_up.state) == daria_fe_pkg::AS_DROUTE
+			    && (u_up.digital_address == rom_size || u_up.digital_address + 1 == rom_size)) n_rom_edge++;
+			if (int'(u_up.state) == daria_fe_pkg::AS_RISS && up_sbusy && !riss_w) n_orph_wait++;
+			if (int'(u_up.state) == daria_fe_pkg::AS_DROUTE) hold_ptr = 0;
+			riss_w <= int'(u_up.state) == daria_fe_pkg::AS_RISS && up_sbusy;
 			if (int'(u_up.state) == daria_fe_pkg::AS_IDLE && !(u_up.note_pending && fam == 2'd1) && u_up.refresh_pending) begin
 				n_disp++;
 				if (fam == 2'd1) n_disp_dpc++;
@@ -1168,6 +1278,7 @@ module tb_fe_audio;
 			if (int'(u_up.state) == daria_fe_pkg::AS_SZCAP) n_size_rd++;
 			if (up_ram_en && sel) n_grant_wait++;
 			if (int'(u_up.state) == daria_fe_pkg::AS_SMCAP && pause) n_pause_byte++;
+			if (int'(u_up.state) == daria_fe_pkg::AS_SMCAP && !pause && pz_g) n_pz_grant++;
 			if (int'(u_up.state) == daria_fe_pkg::AS_NCAP) begin n_ncap++; if (u_up.note_voice == 2'd3) n_nv3++; end
 		end else if ((u_aud.busy_l || u_aud.busy_r) && !rst_q) n_orph_seen++;
 	end

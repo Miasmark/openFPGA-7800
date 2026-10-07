@@ -29,12 +29,13 @@
 //             (smp_req toggle, smp_addr, smp_ack toggle, smp_data held);
 //             neither busy flag is reset by cart_reset (5.7, G7)
 //
-// Upstream's conditions are kept where design 5.3 restates them more
-// narrowly and the two differ only for a family the top cannot present
-// (docs/daria_fe/lanes/B_audio.md, "Deviations"): the pointer window of
-// woff uses revision == 3 (AUD:281), the waveform base is $7F4 outside CDF
-// (AUD:100-102), and the merge, the seeds and the hook use family >= 2
-// (AUD:207, 213), all as upstream for fam = 0, 1 or 3.
+// Where design 5.3/5.5 restate an upstream condition more narrowly, the
+// upstream condition is kept (docs/daria_fe/lanes/B_audio.md, 1.3): the
+// pointer window of woff uses revision == 3 (AUD:281), the waveform base is
+// $7F4 outside CDF (AUD:100-102), the RAM route of DIGITAL_ROUTE comes after
+// the ROM compare (AUD:336-343), and the merge, the seeds and the hook use
+// family >= 2 (AUD:207, 213). The byte lane al loads at every unpaused edge,
+// as upstream's lane register does (B-1), not only on a grant.
 //
 // Reset: cart_reset only (never rst_fe); the sample client's busy flags,
 // its toggle and address are not reset at all.
@@ -210,7 +211,7 @@ module daria_fe_audio (
 	wire  [1:0] nv_eff = (nv == 2'd3) ? 2'd2 : nv;    // AUD:249-253: default writes frequency2
 	genvar v;
 	generate for (v = 0; v < 3; v = v + 1) begin : g_voice
-		localparam logic [1:0] VN = v;
+		localparam int VI = v;
 		wire [31:0] hk_c = hk_ret[32*v +: 32];
 		wire [31:0] hk_f = hk_ret[96 + 32*v +: 32];
 		wire        hk_take  = hk_apply & (hk_c != ring[v]);
@@ -225,7 +226,7 @@ module daria_fe_audio (
 			else if (tick_eff | take_eff)   counter[v] <= c_a + c_b;
 		end
 		// NOTE's load wins over a merge on the same edge (AUD:213-252 order)
-		wire        ncap = st[S_NCAP] & (nv_eff == VN);
+		wire        ncap = st[S_NCAP] & (nv_eff == VI[1:0]);
 		wire [31:0] f_d  = ({32{ncap}}                          & crb_q)
 		                 | ({32{!ncap & hk_apply}}              & hk_f)
 		                 | ({32{!ncap & !hk_apply}}             & ring[3+v]);

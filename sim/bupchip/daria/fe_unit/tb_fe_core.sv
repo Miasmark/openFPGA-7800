@@ -336,7 +336,10 @@ module tb_fe_core;
 	end
 	wire        up_grant = aud_issue & !up_sel;                                        // audio_ram_grant
 	wire [14:0] cr_addr  = up_sel ? up_sa : aud_addr;
-	wire        cr_wr    = up_sel & !up_srw & !pclk1 & !achg & !acc_taken & driver_run;  // forwarded with tia_en
+	// forwarded only while the 6507 runs (tia_en, not in reset) and the bench checks: a
+	// stopped (or not yet restarted) bench bus would otherwise re-strobe the frozen
+	// PUSH/WRITE address of an epoch's last cycle once access_taken clears at an E0
+	wire        cr_wr    = up_sel & !up_srw & !pclk1 & !achg & !acc_taken & driver_run & pg_run & !cart_reset & checking;
 	logic [31:0] up_word = 32'd0;
 	logic  [1:0] up_lane = 2'd0;
 	assign up_ram_byte = pause ? 8'hFF : up_word[8*up_lane +: 8];
@@ -397,7 +400,10 @@ module tb_fe_core;
 	// classified (information)
 	longint c_short = 0, c_dout_short = 0, c_steal = 0, c_q26 = 0, c_q26_rep = 0, c_alias = 0;
 	longint c_noacc = 0, c_aud_cls = 0, c_switch = 0, c_reset = 0, c_7800 = 0, c_other = 0, c_rst_skip = 0;
-	longint c_p32_rst = 0;               // a_p32_late's formula true after a reset inside a DSWRITE cycle
+	longint c_p32_rst = 0;
+	longint v_cmp_state = 0, n_hold = 0;
+	bit     hold_on = 1'b0;              // fe_do must hold the latched byte (C ... the next E0+2)
+	logic [7:0] hold_v = 8'h00;               // a_p32_late's formula true after a reset inside a DSWRITE cycle
 	// coverage
 	longint v_latch = 0, v_hidden = 0, v_commit = 0, v_rd = 0, v_wr = 0, v_held = 0, v_aud = 0, v_wbn = 0;
 	longint v_land1 = 0, v_land2 = 0, v_land_s = 0, v_jok1 = 0, v_jokk = 0, v_full = 0, v_p32_k2 = 0;
@@ -421,6 +427,7 @@ module tb_fe_core;
 	logic [12:0] last_a = 13'h1000;
 	int          fresh = 0;              // forced arming writes at an epoch's start
 	int          burst = 0;              // writes left in a write burst (RMW, pushes)
+	logic [11:0] arm_off [0:2][0:7];     // the planted arming opcode before each window's hotspots
 	logic [12:0] burst_a = 13'h1000;
 
 	task automatic gen_next();
@@ -489,8 +496,11 @@ module tb_fe_core;
 				if (rnd(10) == 0) a = 13'h1FF0 + 13'(rnd(16));
 				w = rnd(10) < 4;
 			end else if (r < 840) begin                  // a jump: the next bytes come from elsewhere
+				int q;
 				pc = {1'b1, 12'(rnd(4096))};
-				if (rnd(10) < 3) pc = {1'b1, 12'hFF0 | 12'(rnd(16))};
+				q = int'(rnd(10));
+				if (q < 3) pc = {1'b1, 12'hFF0 | 12'(rnd(16))};
+				else if (q == 3) pc = {1'b1, arm_off[is_dpc ? 0 : (jplus ? 2 : 1)][u_core.bank]};   // onto the hotspots
 				a = pc;
 				pc = pc + 13'd1;
 			end else if (r < 870) begin                  // the same address again (RMW, dummy reads)
@@ -661,7 +671,7 @@ module tb_fe_core;
 			// 1: A2 and the grant
 			if (sel_up !== up_sel) begin n_a2++; fail("a2", "sel_up", sel_up, up_sel); end
 			if (aud_take !== up_grant) begin
-				if (aud_issue && !sel_up && fix_eff && cyc_short) c_steal++;
+				if (aud_issue && !sel_up && fix_eff && (cyc_short || cyc_rst)) c_steal++;
 				else begin n_grant++; fail("a2", "aud_take", aud_take, up_grant); end
 			end
 			if (aud_take) v_aud++;
@@ -704,7 +714,7 @@ module tb_fe_core;
 			else if (note_stb && (note_v !== dpc_nv || note_val !== dpc_nval)) begin n_note++; fail("note", "note_v/val", {note_v, note_val}, {dpc_nv, dpc_nval}); end
 			if (note_stb) v_note++;
 			if (is_dpc && (wave0 !== dpc_w0 || wave1 !== dpc_w1 || wave2 !== dpc_w2)) begin n_wave++; fail("wave", "wave", {wave0, wave1, wave2}, {dpc_w0, dpc_w1, dpc_w2}); end
-			if (cdf_dig !== (is_cdf & cdf_digital)) begin n_dig++; fail("dig", "cdf_dig", cdf_dig, cdf_digital); end
+			if (cdf_dig !== cdf_digital) begin n_dig++; fail("dig", "cdf_dig", cdf_dig, cdf_digital); end   // reset mode = $FF
 			if (cdf_dig) v_dig++;
 			// 7: dma_set and callfn one clock before upstream's pending rises
 			if (is_dpc && ((up_dpc.service_pending && !sp_prev) !== prev_dma)) begin n_dma++; fail("svc", "dma_set", prev_dma, up_dpc.service_pending); end
@@ -745,6 +755,10 @@ module tb_fe_core;
 				end
 			end
 			if (pclk0 && e0n < 5) cyc_short = 1'b1;
+			// fe_do holds the latched byte through phase 2 and k[0], k[1] (2.4: ph1_open)
+			if (hold_on && !rst_fe && fe_do !== hold_v) begin n_hold++; fail("dout", "fe_do changed after the latch", fe_do, hold_v); end
+			if (k[1] || rst_fe) hold_on = 1'b0;
+			if (pclk0) begin hold_on = 1'b1; hold_v = fe_do; end
 			// 4: DARIA's audio read returns upstream's word
 			if (aud_cap) begin
 				if (crb_q !== up_word) begin
@@ -824,7 +838,7 @@ module tb_fe_core;
 			if (pclk1) begin
 				// 3: the scheme state the cycle left (by the scheme it ran: a switch is in this clock)
 				if (cyc_rst) c_rst_skip++;
-				else cmp_state(scheme_q);
+				else begin cmp_state(scheme_q); v_cmp_state++; end
 				if (cur_alias != cur_dalias && !cyc_short) begin n_alias_bad++; fail("misc", "tbl_alias: one side only", cur_dalias, cur_alias); end
 				// 4: the words written in this cycle
 				if (cur_alias) tab_sync_q = 1'b1;
@@ -839,7 +853,12 @@ module tb_fe_core;
 				up_wr_words.delete();
 				if (cyc_n % 2048 == 2047) begin
 					v_full++;
-					for (int w = 0; w < 8192; w++) cmp_word(w, 1'b0, "full");
+					for (int w = 0; w < 8192; w++) begin
+						bit q;
+						q = 1'b0;
+						foreach (repair_words[i]) if (repair_words[i] == w) q = 1'b1;   // repaired at the negedge
+						if (!q) cmp_word(w, 1'b0, "full");
+					end
 				end
 				cyc_n++;
 				ep_cyc++;
@@ -869,7 +888,7 @@ module tb_fe_core;
 		ti_prev   = cdf_ti;
 		if (pclk1) e0n = 0;
 		else if (e0n < 15) e0n++;
-		if (!checking) aud_cap = 1'b0;
+		if (!checking) begin aud_cap = 1'b0; hold_on = 1'b0; end
 		if (pclk1 && pg_run && checking && !load) v_held_cyc++;
 		if (pclk1 && pg_run) begin
 			if (len1 == 2) v_l1_2++;
@@ -976,9 +995,13 @@ module tb_fe_core;
 			base = (lay == 0) ? 12'hC00 : ((lay == 1) ? 12'h000 : 12'h800);
 			for (int b = 0; b < 8; b++) begin
 				int p;
-				p = (int'(base) + b * 4096 + 'hFF3 + int'(rnd(8))) & 32767;
+				int q;
+				arm_off[lay][b] = 12'hFF3 + 12'(rnd(8));
+				p = (int'(base) + b * 4096 + int'(arm_off[lay][b])) & 32767;
 				img[p] = (rnd(4) == 0) ? 8'hA2 : 8'hA9;
-				img[(p + 1) & 32767] = (rnd(2) == 0) ? 8'(rnd(42)) : ((foff_en ? foff : 8'h00) + 8'(rnd(36)));
+				q = int'(rnd(4));
+				img[(p + 1) & 32767] = (q == 0) ? (8'h27 + 8'(rnd(2))) : (q == 1) ? 8'(rnd(42))
+				                     : ((foff_en ? foff : 8'h00) + 8'(rnd(36)));
 			end
 		end
 		// $4C at bank ends ($xFFD-$xFFF of every 4 KB window of every layout)
@@ -1163,9 +1186,11 @@ module tb_fe_core;
 		endcase
 		done = ep_cyc;
 		if (done < n) run_cycles(n - done);
-		// the epoch's end: every word
+		// the epoch's end: the last cycle's pclk1 checks run (and queue their repairs),
+		// the bus stops in k[0] of the next cycle, then every word
 		@(negedge clk);
 		while (!pclk1) @(negedge clk);
+		@(negedge clk);
 		checking = 1'b0;
 		pg_run   = 1'b0;
 		repeat (16) @(negedge clk);
@@ -1223,8 +1248,9 @@ module tb_fe_core;
 			v_rst_cr, v_rst_sw, v_rst_oth, n_rst, c_reset, c_switch, c_7800, c_other, c_rst_skip);
 		$display("  classified: short_phase1 cycles %0d (dout %0d, grant_steal %0d, audio %0d), q26 %0d (words repaired %0d), tbl_alias %0d, ram_wr_noaccess %0d; a_p32_late's formula under a reset %0d",
 			c_short, c_dout_short, c_steal, c_aud_cls, c_q26, c_q26_rep, c_alias, c_noacc, c_p32_rst);
-		$display("  bad: a2 %0d grant %0d dout %0d dout_hidden %0d state %0d ram %0d land %0d aud %0d jok %0d jmap %0d fix %0d assert %0d svc %0d dma %0d call %0d note %0d wave %0d dig %0d src %0d alias %0d misc %0d (total %0d)",
-			n_a2, n_grant, n_dout, n_dout_hidden, n_state, n_ram, n_land, n_aud, n_jok, n_jmap, n_fix, n_assert, n_svc, n_dma,
+		$display("  state compares %0d", v_cmp_state);
+		$display("  bad: hold %0d a2 %0d grant %0d dout %0d dout_hidden %0d state %0d ram %0d land %0d aud %0d jok %0d jmap %0d fix %0d assert %0d svc %0d dma %0d call %0d note %0d wave %0d dig %0d src %0d alias %0d misc %0d (total %0d)",
+			n_hold, n_a2, n_grant, n_dout, n_dout_hidden, n_state, n_ram, n_land, n_aud, n_jok, n_jmap, n_fix, n_assert, n_svc, n_dma,
 			n_call, n_note, n_wave, n_dig, n_src, n_alias_bad, n_misc, bad);
 		// coverage minimums, scaled to the run
 		feat = 1;
@@ -1232,7 +1258,7 @@ module tb_fe_core;
 		if (n_cycles >= 100000) begin
 			if (v_sch[0] + v_sch[1] > 0 && (v_cls[12] < 100 || v_cls[9] < 50 || v_cls[10] < 100 || v_cls[11] < 20 || v_cls[14] < 50 || v_cls[13] < 10)) feat = 0;
 			if (v_sch[2] + v_sch[3] + v_sch[4] + v_sch[5] > 0 && (v_cls[5] < 100 || v_cls[4] < 20 || v_cls[3] < 50 || v_cls[2] < 50 || v_aud < 1000 || v_jok1 < 10)) feat = 0;
-			if (v_held_cyc < 100 || v_hidden < 100) feat = 0;
+			if (pg.k_busy > 0 && (v_held_cyc < 100 || v_hidden < 100)) feat = 0;   // no stalls in "nominal"
 		end
 		if (feat == 0) $display("tb_fe_core: a coverage minimum was not met");
 		if (bad != 0 || feat == 0) $fatal(1, "tb_fe_core: FAIL (%0d bad)", bad);

@@ -70,7 +70,8 @@ MUTANTS = [
     ('CDFJ+ mask ignores ram_size',        [('rmask = ', "ram32 ? 15'h7FFF : 15'h1FFF", "15'h7FFF")]),
     ('13-bit sample offset',               [('', "{3'b0, sos[11:0]}", "{2'b0, sos[12:0]}")]),
     ('pause does not mask bytes',          [('byte_d = ', "pause ? 8'hFF : lane_b", 'lane_b')]),
-    ('lane loads in a pause',              [('else if (', 'aud_take & !pause', 'aud_take')]),
+    ('lane loads in a pause',              [('else if (', '!pause', "1'b1")]),
+    ('lane only on grants (design 5.3)',   [(': (', '!pause', 'aud_take & !pause')]),
     ('local sample at R+3',                [('rom_done  = ', '(lcnt[3] & busy_l) | rdone_q', '(lcnt[2] & busy_l) | rdone_q')]),
     ('local read not retried',             [('aud_a_req = ', '(lcnt[0] | lcnt[1]) & !a_done', 'lcnt[0] & !a_done')]),
     ('local read address [15:3]',          [('aud_a_a   = ', 'dig_addr[14:2]', 'dig_addr[15:3]')]),
@@ -97,6 +98,12 @@ MUTANTS = [
     ('lane from the address bits [2:1]',   [('al <= ', 'a_d[1:0]', 'a_d[2:1]')]),
     ('remote request not toggled',         [('req_q   <= ', '~req_q', 'req_q')]),
 ]
+
+
+# Mutants that no legal stimulus can tell apart (by name): u_call raises cp_apply only for
+# CDF (design 6.1, cp_apply = st.APPLY & is_cdf), so dropping the family test from the
+# own-path merge changes nothing a front end can produce.
+EQUIVALENT = {'merge with family 1 too'}
 
 
 def die(msg):
@@ -185,12 +192,15 @@ def main():
             continue
         rc, t, first = run(n)
         caught = rc != 0
-        if not caught:
+        if not caught and name not in EQUIVALENT:
             missed.append(n)
-        print('%2d %-42s %s (%3d s)  %s' % (n, name, 'caught' if caught else 'MISSED', t, first[:120]))
-    total = len(only) if only else len(MUTANTS)
-    print('tb_fe_audio_mut: %d of %d mutants caught%s' % (total - len(missed), total,
-                                                        (', missed: ' + ', '.join(map(str, missed))) if missed else ''))
+        verdict = 'caught' if caught else ('equivalent' if name in EQUIVALENT else 'MISSED')
+        print('%2d %-42s %s (%3d s)  %s' % (n, name, verdict, t, first[:120]))
+    names = [m[0] for i, m in enumerate(MUTANTS, 1) if not only or i in only]
+    neq = sum(1 for nm in names if nm in EQUIVALENT)
+    print('tb_fe_audio_mut: %d of %d mutants caught (%d equivalent)%s' % (
+        len(names) - neq - len(missed), len(names) - neq, neq,
+        (', missed: ' + ', '.join(map(str, missed))) if missed else ''))
     sys.exit(1 if missed else 0)
 
 
