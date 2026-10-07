@@ -156,6 +156,7 @@ module daria_mem #(
 	output wire  [31:0] crb_q,
 	input  wire   [7:0] stb_addr,       // state RAM port B
 	input  wire         stb_we,
+	input  wire   [3:0] stb_be,
 	input  wire  [31:0] stb_wd,
 	output wire  [31:0] stb_q
 );
@@ -199,7 +200,7 @@ module daria_mem #(
 	// ---- state RAM -----------------------------------------------------------------------
 	daria_ram #(.AW(8), .MAX_DEPTH(256)) state_ram (
 		.clk_a(clk_arm), .addr_a(sta_addr), .we_a(sta_we), .be_a(4'hF), .wd_a(sta_wd), .q_a(sta_q),
-		.clk_b(clk_sys), .addr_b(stb_addr), .we_b(stb_we), .be_b(4'hF), .wd_b(stb_wd), .q_b(stb_q));
+		.clk_b(clk_sys), .addr_b(stb_addr), .we_b(stb_we), .be_b(stb_be), .wd_b(stb_wd), .q_b(stb_q));
 endmodule
 
 `default_nettype wire

@@ -40,14 +40,14 @@ module daria_call (
 	input  wire         clk,            // clk_arm
 	input  wire         rst,            // the CPU held, or a mapper reset (clk_arm)
 	input  wire         call_tog,       // from the front ends (clk_sys)
-	output logic        ret_tog = 1'b0, // to the front ends
+	output wire         ret_tog,        // to the front ends
 
 	// bup_cpu.
 	input  wire         parked,
 	output logic        call_go,
 	input  wire   [4:0] clr_e,
 	output logic [31:0] clr_wd,
-	output logic [31:0] clr_pc = 32'd0,
+	output wire  [31:0] clr_pc,
 	input  wire         ro_valid,
 	input  wire   [2:0] ro_idx,
 	input  wire  [31:0] ro_data,
@@ -60,6 +60,13 @@ module daria_call (
 	input  wire  [31:0] sta_q
 );
 	localparam logic [7:0] CB = 8'hF0;	// the call block
+
+	// Power-up values on internal registers, not on the output ports, which
+	// Quartus 21.1 ignores (docs/DEVELOPING.md, "Power-up values").
+	logic        ret_q = 1'b0;
+	logic [31:0] pc_q = 32'd0;
+	assign ret_tog = ret_q;
+	assign clr_pc = pc_q;
 
 	logic [1:0] tog_s = 2'b00;
 	logic       call_seen = 1'b0;
@@ -102,7 +109,7 @@ module daria_call (
 			launching <= 1'b0;
 		end else begin
 			if (loading) begin
-				clr_pc <= sta_q;			// the entry, read at CB last clock
+				pc_q <= sta_q;			// the entry, read at CB last clock
 				call_go <= 1'b1;
 				loading <= 1'b0;
 				launching <= 1'b1;
@@ -111,7 +118,7 @@ module daria_call (
 				loading <= 1'b1;
 			end
 			if (launching && clr_e == 5'd21) launching <= 1'b0;
-			if (returned) ret_tog <= ~ret_tog;
+			if (returned) ret_q <= ~ret_q;
 		end
 	end
 endmodule

@@ -174,6 +174,7 @@ module bupchip_pocket #(
 	output logic       daria_halted,    // the CPU halted, two clk_sys flops
 	input  wire  [7:0] daria_stb_addr,  // state RAM port B
 	input  wire        daria_stb_we,
+	input  wire  [3:0] daria_stb_be,
 	input  wire [31:0] daria_stb_wd,
 	output wire [31:0] daria_stb_q,
 	input  wire [12:0] daria_crb_addr,  // cart RAM port B
@@ -356,7 +357,7 @@ module bupchip_pocket #(
 		.fea_addr(daria_fea_addr), .fea_q(daria_fea_q), .feb_addr(daria_feb_addr), .feb_q(daria_feb_q),
 		.crb_addr(daria_crb_addr), .crb_we(daria_crb_we), .crb_be(daria_crb_be), .crb_wd(daria_crb_wd),
 		.crb_q(daria_crb_q),
-		.stb_addr(daria_stb_addr), .stb_we(daria_stb_we), .stb_wd(daria_stb_wd), .stb_q(daria_stb_q));
+		.stb_addr(daria_stb_addr), .stb_we(daria_stb_we), .stb_be(daria_stb_be), .stb_wd(daria_stb_wd), .stb_q(daria_stb_q));
 	assign rom_q  = prof26 ? win_qa : fw_q;
 	assign rom_dq = prof26 ? win_qb : fw_dq;
 

@@ -88,7 +88,7 @@
 		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
 		.daria_profile(1'b1), .daria_ram32(d_ram32), .daria_pal(1'b0), .daria_mreset(1'b0),
 		.daria_call_tog(d_call_tog), .daria_ret_tog(d_ret_tog), .daria_ready(d_ready), .daria_halted(),
-		.daria_stb_addr(d_stb_addr), .daria_stb_we(d_stb_we), .daria_stb_wd(d_stb_wd), .daria_stb_q(d_stb_q),
+		.daria_stb_addr(d_stb_addr), .daria_stb_we(d_stb_we), .daria_stb_be(4'hF), .daria_stb_wd(d_stb_wd), .daria_stb_q(d_stb_q),
 		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
 		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q());
 
@@ -186,7 +186,7 @@
 		.sta_addr(d_sta_addr), .sta_we(d_sta_we), .sta_wd(d_sta_wd), .sta_q(d_sta_q),
 		.cap_we(1'b0), .cap_addr(15'd0), .cap_data(8'd0), .fea_addr(13'd0), .fea_q(),
 		.feb_addr(13'd0), .feb_q(), .crb_addr(13'd0), .crb_we(1'b0), .crb_be(4'd0), .crb_wd(32'd0), .crb_q(),
-		.stb_addr(d_stb_addr), .stb_we(d_stb_we), .stb_wd(d_stb_wd), .stb_q(d_stb_q));
+		.stb_addr(d_stb_addr), .stb_we(d_stb_we), .stb_be(4'hF), .stb_wd(d_stb_wd), .stb_q(d_stb_q));
 
 	logic d_call_tog = 0;
 	wire  d_ret_tog;

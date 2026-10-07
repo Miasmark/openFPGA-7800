@@ -213,7 +213,7 @@ module tb_s4;
 		// The BupChip profile only: the 2600 side is idle.
 		.daria_profile(1'b0), .daria_ram32(1'b0), .daria_pal(1'b0), .daria_mreset(1'b0),
 		.daria_call_tog(1'b0), .daria_ret_tog(), .daria_ready(), .daria_halted(),
-		.daria_stb_addr(8'd0), .daria_stb_we(1'b0), .daria_stb_wd(32'd0), .daria_stb_q(),
+		.daria_stb_addr(8'd0), .daria_stb_we(1'b0), .daria_stb_be(4'd0), .daria_stb_wd(32'd0), .daria_stb_q(),
 		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
 		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q(),
 `endif
