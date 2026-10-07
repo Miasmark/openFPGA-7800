@@ -20,7 +20,7 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 ## Status (2026-10-07)
 
 - Specs, design and stage-0 bench: done.
-- **Open for the owner:** exact audio (`design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate) or the lean audio (`daria_fe_audio_lean`, about 250 ALMs less, AMPLITUDE may lag one tick, counted). The design keeps both behind the same ports.
+- **The owner chose the exact audio** (2026-10-07; `docs/DARIA_CORE.md`, decision 9): `design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate. This is meant as the front end's last major revision. If it causes trouble later, the lean audio (`daria_fe_audio_lean`, the same ports, about 250 ALMs less, AMPLITUDE may lag one tick, counted) is the way back.
 - Next: freeze the module interfaces as stubs, then build the modules and their unit benches, then mode A on three images, then all 21 (`design.md` 12).
 
 The specs mention a few files that lived only in the session scratchpad and were not kept: a copy of MiSTer's `Atari7800.sv` wrapper, two throwaway stall benches, and a Stella `CartCDF.cxx` used for behaviour notes only.
