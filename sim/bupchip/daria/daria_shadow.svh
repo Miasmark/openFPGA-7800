@@ -21,7 +21,8 @@
 //     against upstream's audio_*_result), every RAM write each CPU makes
 //     (word address, byte lanes, data on those lanes), and every MMIO access
 //     in order: writes and reads by value, except T1TC (0xE0008008) reads,
-//     within +/- MMIO_TOL counts (open item 17).
+//     within +/- MMIO_TOL counts (open item 17); the final report gives
+//     the range of DARIA's reading less upstream's.
 //   - daria.csv, one line per compared call: call, frame, DARIA's clk_arm
 //     from call_go to returned and the microseconds that is, the clk_sys from
 //     the post to the last return word read (what a front end waits, less
@@ -291,6 +292,7 @@
 	int          shadow_calls = 0, shadow_bad = 0, shadow_skip = 0, shadow_stop = 20, fd_dar = 0;
 	longint      shadow_writes = 0, shadow_io = 0;
 	int          MMIO_TOL = 200;
+	int          tc_n = 0, tc_lo = 0, tc_hi = 0;     // T1TC reads compared, DARIA - upstream
 	always @(posedge clk_sys) begin
 		d_post_s <= {d_post_s[1:0], up_post};
 		d_ret_s <= {d_ret_s[1:0], d_ret_tog};
@@ -412,7 +414,12 @@
 					a.io ? (a.rd ? "io rd" : "io wr") : "ram wr", a.addr, a.be,
 					b.io ? (b.rd ? "io rd" : "io wr") : "ram wr", b.addr, b.be);
 			else if (a.io && a.rd && a.addr == 32'hE000_8008) begin
-				if (int'(a.data - b.data) > MMIO_TOL || int'(b.data - a.data) > MMIO_TOL)
+				int dt;
+				dt = int'(a.data - b.data);
+				tc_lo = (tc_n == 0 || dt < tc_lo) ? dt : tc_lo;
+				tc_hi = (tc_n == 0 || dt > tc_hi) ? dt : tc_hi;
+				tc_n++;
+				if (dt > MMIO_TOL || -dt > MMIO_TOL)
 					why = $sformatf("access %0d: T1TC %0d, upstream %0d", i, a.data, b.data);
 			end else if ((a.data & m) != (b.data & m))
 				why = $sformatf("access %0d, %s %08x: %08x, upstream %08x", i,
@@ -453,6 +460,8 @@
 		$display("DARIA shadow: %0d calls compared, %0d differ or halted, %0d skipped (DARIA busy)%s; %0d RAM writes and %0d MMIO accesses compared",
 			shadow_calls, shadow_bad, shadow_skip, stopped, shadow_writes, shadow_io);
 		$display("DARIA collisions: upstream %0d, DARIA %0d, in %0d console-side cart RAM reads", coll_up, coll_d, fe_reads);
+		if (tc_n > 0)
+			$display("DARIA T1TC: %0d reads compared, DARIA - upstream %0d to %0d counts (bound %0d)", tc_n, tc_lo, tc_hi, MMIO_TOL);
 `ifdef DARIA_WRAPPER
 		$display("DARIA cache: %0d demand misses, %0d prefetches, %0d clocks W waited; PSRAM model: %0d timing violations",
 			d_miss, d_pf, d_stall, dchip.n_viol);
