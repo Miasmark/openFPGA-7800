@@ -25,12 +25,16 @@ import numpy as np
 
 RATE = 8192
 # Length factor on every sound and pause (--stretch). The manual's lengths
-# played as given sounded rushed; 1.5 is closer by ear.
-STRETCH = 1.5
+# played as given sounded rushed against Juno First's title, but that phrase
+# uses a customised voice. Stratovox phrases with known codes at default
+# settings ("Game over" 1.05 s real vs 0.96 s; "Help me" 540 vs 560 ms)
+# match the manual's lengths, so the default is 1.0.
+STRETCH = 1.0
 # The voice's envelope wave (register 8 bits 1:0): 0 saw, 1 sine, 2 triangle,
-# 3 square. A recording of the real chip ("Juno First") shows a few clean
-# harmonic bands, as a sine gives; a saw spreads buzz to 4 kHz.
-ENV_WAVE = 1
+# 3 square. Juno First's clean bands came from its customised voice; the
+# default voice (the alphabet demo, Stratovox's "Game over") shows the dense,
+# full-height buzz of a saw.
+ENV_WAVE = 0
 # Hiss (oscillators 4 and 5) against the vowels: the recording's are much
 # quieter than the first tables had them.
 NOISE_LEVEL = 0.5
@@ -78,7 +82,7 @@ st("DE", 45, 3500, True, (250, 1800, 2700)); st("DO", 45, 3200, True, (250, 1400
 st("ED", 10, 3500, True, (250, 1800, 2700)); st("OD", 10, 3200, True, (250, 1400, 2600))
 st("GE", 55, 2200, True, (250, 2200, 2800)); st("GO", 55, 1500, True, (250, 1200, 2300))
 st("EG", 55, 2200, True, (250, 2200, 2800)); st("OG", 55, 1500, True, (250, 1200, 2300))
-fr("CH", 70, 2600, 20, 160); fr("HE", 70, 1800, 8, 255); fr("HO", 70, 1100, 8, 255)
+fr("CH", 70, 2600, 20, 160); fr("HE", 35, 1800, 4, 255); fr("HO", 35, 1100, 4, 255)  # H: barely audible on the real chip ("Help me")
 fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 6, 255); fr("SE", 40, 3950, 22, 120)
 fr("SO", 40, 3700, 22, 120); fr("SH", 50, 2500, 22, 160); fr("TH", 40, 3800, 5, 255)
 st("TT", 50, 3800, False, (250, 1800, 2700)); st("TU", 70, 3800, False, (250, 1800, 2700))
