@@ -503,6 +503,11 @@
 		logic [12:0] a;
 		logic  [7:0] din, up_do, up_oe, rf_do, rf_oe;
 		logic  [2:0] up_bank, rf_bank;
+`ifndef FE_STAGE0
+		logic  [7:0] fu_do;		// stage 1: daria_fe's fe_do, fe_oe, bank, arm_call_busy, arm_dma_busy
+		logic        fu_oe, fu_cb, fu_db;
+		logic  [2:0] fu_bank;
+`endif
 	} fe_ring_t;
 	fe_ring_t fe_ring [64];
 	int       fe_ring_wp = 0;
@@ -538,13 +543,23 @@
 	endfunction
 
 	task automatic fe_dump_ring();
+`ifdef FE_STAGE0
 		$fwrite(fd_fe_err, "  clk_sys    p1 p0 phi2 acc rw a_in d_in up_do/oe ref_do/oe up_bank ref_bank stall dma tick\n");
+`else
+		$fwrite(fd_fe_err, "  clk_sys    p1 p0 phi2 acc rw a_in d_in up_do/oe ref_do/oe up_bank ref_bank stall dma tick | fe_do/oe fe_bank fe_cbusy fe_dbusy\n");
+`endif
 		for (int k = 0; k < 64; k++) begin
 			fe_ring_t r;
 			r = fe_ring[(fe_ring_wp + k) % 64];
+`ifdef FE_STAGE0
 			$fwrite(fd_fe_err, "  %10d %0d  %0d  %0d    %0d   %0d  %04x %02x   %02x/%02x    %02x/%02x     %0d       %0d        %0d     %0d   %0d\n",
 				r.t, r.p1, r.p0, r.phi2, r.acc, r.rw, r.a, r.din, r.up_do, r.up_oe, r.rf_do, r.rf_oe,
 				r.up_bank, r.rf_bank, r.stall, r.dma, r.tick);
+`else
+			$fwrite(fd_fe_err, "  %10d %0d  %0d  %0d    %0d   %0d  %04x %02x   %02x/%02x    %02x/%02x     %0d       %0d        %0d     %0d   %0d    | %02x/%0d    %0d       %0d        %0d\n",
+				r.t, r.p1, r.p0, r.phi2, r.acc, r.rw, r.a, r.din, r.up_do, r.up_oe, r.rf_do, r.rf_oe,
+				r.up_bank, r.rf_bank, r.stall, r.dma, r.tick, r.fu_do, r.fu_oe, r.fu_bank, r.fu_cb, r.fu_db);
+`endif
 		end
 	endtask
 
@@ -611,7 +626,12 @@
 				acc: fe_access, rw: fe_rw, stall: dut.arm_call_stall, dma: dut.arm_dma_busy,
 				tick: dut.cart2600.mapper_audio.audio_tick, a: fe_a_in, din: fe_d_in,
 				up_do: fe_up_do, up_oe: fe_up_oe, rf_do: fe_do, rf_oe: fe_oe,
-				up_bank: fe_up_bank, rf_bank: fe_rf_bank};
+				up_bank: fe_up_bank, rf_bank: fe_rf_bank
+`ifndef FE_STAGE0
+				, fu_do: u_fe.fe_do, fu_oe: u_fe.fe_oe, fu_cb: u_fe.arm_call_busy, fu_db: u_fe.arm_dma_busy,
+				fu_bank: u_fe.u_core.bank
+`endif
+				};
 			fe_ring_wp = (fe_ring_wp + 1) % 64;
 		end
 
@@ -907,7 +927,11 @@
 			$display("FE self-test: fault injection +fe_flip=%0d (ofs %0d, bit %0d, hidden %0d) +fe_bank=%0d (writes only %0d) +fe_bank_spur=%0d +fe_cnt=%0d +fe_fpstuck=%0d",
 				fe_flip, fe_flip_ofs, fe_flip_bit, fe_flip_hidden, fe_bank, fe_bank_wr, fe_bank_spur, fe_cnt, fe_fpstuck);
 		#1;
+`ifdef FE_STAGE0
 		fd_fe = $fopen({out, "fe.csv"}, "w");
+`else
+		fd_fe = $fopen({out, "fe_ref.csv"}, "w");	// stage 1: the reference's columns; fe.csv is daria_fe's
+`endif
 		$fwrite(fd_fe, "frame,latches,commits,dout_bad,dout_hidden,state_bad,reads,writes,hidden,cycles,port_bad,rom_bad,l3_bad,e0_latch_min,e0_latch_max,e0_short,ram_bad,pointer_bad,cart_reads,ram_reads,amp_reads,hidden_last,hidden_last_bad\n");
 		fd_fe_err = $fopen({out, "fe_err.txt"}, "w");
 	end
@@ -939,11 +963,24 @@
 				hi = b;
 			end
 		rng = lo < 0 ? "none" : $sformatf("%0d..%0d", lo, hi);
+`ifndef FE_STAGE0
+		f1_report();			// stage 1: daria_fe's lines first ("FE shadow:", ...)
+`endif
 		if (!fe_is_dpc && !fe_is_cdf)
+`ifdef FE_STAGE0
 			$display("FE shadow: %s not shadowed", fe_scheme_name());
+`else
+			$display("FE reference: %s not shadowed", fe_scheme_name());
+`endif
 		else begin
+`ifdef FE_STAGE0
 			$display("FE shadow: %s %0d latches, %0d commits; dout %0d, state %0d bad; E0->latch %s",
 				fe_scheme_name(), fe_tot[FC_LATCH], fe_tot[FC_COMMIT], fe_tot[FC_DOUT], fe_tot[FC_STATE], rng);
+`else
+			// The stage-0 reference instance beside daria_fe (design 12.4): its own line.
+			$display("FE reference: %s %0d latches, %0d commits; dout %0d, state %0d bad; E0->latch %s",
+				fe_scheme_name(), fe_tot[FC_LATCH], fe_tot[FC_COMMIT], fe_tot[FC_DOUT], fe_tot[FC_STATE], rng);
+`endif
 			$display("FE detail: %0d read latches compared, %0d hidden pclk0 (%0d differ, information), %0d write latches (oe differs %0d, information); %0d cycles compared (%s); port %0d, rom %0d, ram %0d, pointer %0d, jump map %0d, L3 %0d bad; %0d failures logged; checks from clk_sys %0d (frame %0d)",
 				fe_tot[FC_READ], fe_tot[FC_HIDDEN], fe_tot[FC_HID_BAD], fe_tot[FC_WRITE], fe_tot[FC_OE_WR],
 				fe_tot[FC_CYCLE], fe_is_dpc ? "C1" : "C2", fe_tot[FC_PORT], fe_tot[FC_ROM], fe_tot[FC_RAMTAP],
@@ -975,7 +1012,11 @@
 				fe_resets, fe_nlive, fe_handoffs);
 		end
 		if (fd_fe_err != 0) begin
+`ifdef FE_STAGE0
 			if (fe_nfail == 0) $fwrite(fd_fe_err, "no failures\n");
+`else
+			if (fe_nfail == 0 && f1_nfail == 0) $fwrite(fd_fe_err, "no failures\n");
+`endif
 			$fclose(fd_fe_err);
 		end
 		if (fd_fe != 0) $fclose(fd_fe);

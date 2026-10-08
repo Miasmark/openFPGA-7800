@@ -97,7 +97,6 @@ def check(run, meta):
         else:
             v = cov.get(b, 0)
         ok = {'>=': v >= n, '==': v == n, '<=': v <= n, '>': v > n}[op]
-        got.append('%s=%d' % (b, v))
         if not ok:
             reasons.append('%s %d, needs %s %d' % (b, v, op, n))
     checked = sum(bads.values()) if bads else 0
@@ -110,9 +109,11 @@ def main():
     reasons, bads, got, cov = check(run, meta)
     name = os.path.basename(os.path.normpath(run))
     verdict = 'PASS' if not reasons else 'FAIL'
-    print('%s %-16s bad[%s] bins[%s]%s' % (
-        verdict, name, ' '.join('%s=%d' % kv for kv in sorted(bads.items())) or '-',
-        ' '.join(got), ('  << ' + '; '.join(reasons)) if reasons else ''))
+    nb = len(meta['need'])
+    print('%s %-16s %s; bad counts all 0: %s; bins met %d/%d%s' % (
+        verdict, name, 'FE checked %d latches' % cov.get('_latches', 0) if False else '',
+        'yes' if not any(bads.values()) else 'NO', nb - sum(1 for r in reasons if ', needs ' in r), nb,
+        ('  << ' + '; '.join(reasons)) if reasons else ''))
     sys.exit(0 if verdict == 'PASS' else 1)
 
 

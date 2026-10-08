@@ -279,8 +279,22 @@ class Img:
             return (ram_off << 16) | (frac & 0xFFFF)
         return (ram_off << 20) | (frac & 0xFFFFF)
 
+    def dpc_data(self, display=None, freqs=None):
+        """DPC+ display data ($6C00-$7BFF, RAM $0C00-$1BFF at init) and the NOTE
+        frequency table ($7C00-$7FFF, RAM $1C00). Defaults: a byte pattern and
+        256 distinct non-zero frequencies."""
+        if display is None:
+            display = bytes(((i * 37 + 11) ^ (i >> 5)) & 0xFF for i in range(0x1000))
+        self.put(0x6C00, display, 'display')
+        if freqs is None:
+            freqs = [((k + 1) * 0x00A3D70B) & 0xFFFFFFFF for k in range(256)]
+        for k, f in enumerate(freqs):
+            self.put32(0x7C00 + 4 * k, f, 'freq')
+
     def build(self):
         self._driver()
+        if self.kind == 'dpc' and 0x6C00 not in self.used:
+            self.dpc_data()
         return bytes(self.rom)
 
 

@@ -69,6 +69,7 @@ module fe_dir_mon;
 	// ---- plusargs
 	int rst_mode = 0, rst_n = 1, rst_dly = 20, rst_len = 1000;
 	int pz_mode = 0, pz_n = 2000, pz_dly = 3, pz_len = 200, pz_rep = 0;
+	longint tr_from = -1, tr_n = 0;   // +dir_trace=N [+dir_trace_from=CLK]: print N commits
 	string out = "./";
 	initial begin
 		void'($value$plusargs("out=%s", out));
@@ -81,6 +82,8 @@ module fe_dir_mon;
 		void'($value$plusargs("dir_pause_dly=%d", pz_dly));
 		void'($value$plusargs("dir_pause_len=%d", pz_len));
 		void'($value$plusargs("dir_pause_rep=%d", pz_rep));
+		void'($value$plusargs("dir_trace=%d", tr_n));
+		void'($value$plusargs("dir_trace_from=%d", tr_from));
 	end
 
 	// ---- clocks since things, phase tracking
@@ -177,6 +180,16 @@ module fe_dir_mon;
 				t_p0 = clk_n;
 			end
 			if (commit && clk_n - t_e0 < 6) inc($sformatf("commit_short_%0d", clk_n - t_e0));
+			if (commit && tr_n > 0 && clk_n >= tr_from) begin
+				tr_n--;
+				$display("DIR trace %0d: E0+%0d a %04x %s d_in %02x d_out %02x oe %02x sync %0d pc %04x | dpc cnt %03x frac %05x ffp %0d | cdf fp %0d jr %0d ti %0d bank %0d/%0d",
+					clk_n, clk_n - t_e0, a_in, rw ? "rd" : "WR", d_in, tb_daria.dut.cart2600.d_out, tb_daria.dut.cart2600.oe,
+					sync, tb_daria.op_pc,
+					tb_daria.dut.cart2600.dpcplus.counter[a_in[2:0]], tb_daria.dut.cart2600.dpcplus.fractional[a_in[2:0]],
+					tb_daria.dut.cart2600.dpcplus.fast_pending,
+					tb_daria.dut.cart2600.cdf.fast_pending, tb_daria.dut.cart2600.cdf.jump_remaining,
+					tb_daria.dut.cart2600.cdf.table_index, tb_daria.dut.cart2600.dpcplus.bank, tb_daria.dut.cart2600.cdf.bank);
+			end
 			if (tb_daria.dut.tia_inst.rsync) inc("tia_rsync_clk");
 
 			// ------------------------------------------------------ calls, DMA, audio

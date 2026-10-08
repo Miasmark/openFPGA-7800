@@ -11,6 +11,11 @@
 #            sim/work/bupchip/daria/fe_dir/<FLAVOR>/ holds img/, obj_fe/ and
 #            runs/fe/<test>/. Every other variable (FE_STAGE0, ...) passes
 #            through to run_daria.sh, so one FLAVOR per kind of FE build.
+#            FLAVOR=s0 builds the stage-0 bench as committed at STAGE0_REV
+#            (default d729ba7: tb_daria.sv, fe_shadow.svh, daria_shadow.svh
+#            from git, in <work>/snap/), whatever the tree holds now: the
+#            reference front end only, against which every test must show 0.
+#            Any other FLAVOR builds the bench in the tree (stage 1: daria_fe).
 #   JOBS     parallel simulations (default 2)
 #   REBUILD=1  rebuild the binary; NORUN=1 only build
 #   TMO      seconds per simulation (default 1800)
@@ -24,13 +29,21 @@ FLAVOR="${FLAVOR:-s0}"
 W="$(mkdir -p "$D/../../work/bupchip/daria/fe_dir/$FLAVOR" && cd "$D/../../work/bupchip/daria/fe_dir/$FLAVOR" && pwd)"
 export VERILATOR_REAL="${VERILATOR_REAL:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
 
+if [ "$FLAVOR" = s0 ]; then
+	export FE_DIR_SNAP="$W/snap"
+	mkdir -p "$FE_DIR_SNAP"
+	for f in tb_daria.sv fe_shadow.svh daria_shadow.svh; do
+		git -C "$D" show "${STAGE0_REV:-d729ba7}:sim/bupchip/daria/$f" > "$FE_DIR_SNAP/$f.new"
+		cmp -s "$FE_DIR_SNAP/$f.new" "$FE_DIR_SNAP/$f" && rm "$FE_DIR_SNAP/$f.new" || mv "$FE_DIR_SNAP/$f.new" "$FE_DIR_SNAP/$f"
+	done
+fi
 python3 "$HERE/mkimg.py" "$W/img" "$@" > "$W/mkimg.log"
 cat "$W/mkimg.log"
 TESTS=("$@")
 [ ${#TESTS[@]} -gt 0 ] || mapfile -t TESTS < <(cd "$W/img" && ls *.meta | sed 's/\.meta$//')
 
 BIN="$W/obj_fe/vtb"
-if [ -x "$BIN" ] && { [ -n "$REBUILD" ] || [ -n "$(find "$HERE/fe_dir_mon.sv" "$HERE/vwrap.sh" -newer "$BIN")" ]; }; then
+if [ -x "$BIN" ] && { [ -n "$REBUILD" ] || [ -n "$(find "$HERE/fe_dir_mon.sv" "$HERE/vwrap.sh" ${FE_DIR_SNAP:+"$FE_DIR_SNAP"} -newer "$BIN")" ]; }; then
 	rm -f "$BIN"
 fi
 WORK="$W" FE=1 VERILATOR="$HERE/vwrap.sh" "$D/run_daria.sh" --build-only
