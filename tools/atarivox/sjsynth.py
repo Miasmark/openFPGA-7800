@@ -24,6 +24,9 @@ import wave
 import numpy as np
 
 RATE = 8192
+# Length factor on every sound and pause (--stretch). The manual's lengths
+# played as given sound rushed; tune this by ear.
+STRETCH = 1.0
 
 # ---------------------------------------------------------------- tables
 # name: (type, ms, [F1, F2, F3], [A1, A2, A3], noise_hz, noise_vol, dist)
@@ -159,7 +162,7 @@ class SpeakJet:
         return fs, list(a) + [noise_vol, noise_vol // 2]
 
     def dur(self, ms):
-        r = ms * 114 / max(1, self.speed) * self.next_rate
+        r = ms * STRETCH * 114 / max(1, self.speed) * self.next_rate
         return r
 
     def allophone(self, name):
@@ -183,7 +186,7 @@ class SpeakJet:
         elif typ in ("S", "P"):
             # closure (silent, or a low voice bar), burst, then aspiration
             bar = [8, 0, 0] if typ == "S" else [0, 0, 0]
-            self.run(30 * 114 / max(1, self.speed), self.voice(f, bar), 10)
+            self.run(30 * STRETCH * 114 / max(1, self.speed), self.voice(f, bar), 10)
             self.run(max(8, d * 0.3), self.voice(f, [0, 0, 0], nhz, 24, dist), 3)
             asp = 10 if typ == "P" else 0
             self.run(d * 0.7, self.voice(f, [6, 4, 2] if typ == "S" else [0, 0, 0],
@@ -222,7 +225,7 @@ class SpeakJet:
 
     def pause(self, ms):
         f, v = self.s.freq[1:6], [0] * 5
-        self.run(max(ms, 10) if ms else 10, (f, v), 10)
+        self.run(max(ms * STRETCH, 10) if ms else 10, (f, v), 10)
 
     def play(self, codes):
         it = iter(codes)
@@ -251,6 +254,9 @@ class SpeakJet:
 
 
 def main():
+    global STRETCH
+    if len(sys.argv) > 2 and sys.argv[1] == "--stretch":
+        STRETCH = float(sys.argv[2]); del sys.argv[1:3]
     out = sys.argv[1]
     if len(sys.argv) > 3 and sys.argv[2] == "--log":
         codes = [int(m.group(1)) for m in re.finditer(r"VOX [\d.]+ ms:\s+(\d+)", open(sys.argv[3], errors="replace").read())]
