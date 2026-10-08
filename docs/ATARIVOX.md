@@ -143,10 +143,14 @@ list (activated, basic, correct, ... x-ray). Aligning 20 of those words with
 our render of their codes, 118 sounds in all, gives real / manual length:
 vowels 1.41, nasals and liquids 1.33, hiss 1.25, glides 1.22, stops 0.85.
 With these the 20 words come to 1.03 of the real total (0.83-1.15 per
-word; one overall factor gave 0.86-1.45). Open: the speed control. Phrases
-that change it all the time come out long (Juno First's title 17%, "Foolish
-human" 8%), so the chip probably speeds up more sharply towards 127 than
-114 / speed, the model's assumption.
+word; one overall factor gave 0.86-1.45). Two more rules, from
+phrases that hold vowels and change speed: a sound that repeats the one
+before keeps the manual's length (no transition to make), and speed scales
+length by about 2% a step, exp(-0.02 (speed - 114)), so speed 80 is about
+twice as long as 114. Fitted to rubyQ's title (speed 80, bend 0) with Juno
+First's phrases (90-127). All five reference phrases now come within about
+7%: Juno First 1.42 / 1.40 s, "Foolish human" 1.22 / 1.26, Stratovox's "Game
+over" 0.98 / 1.05, rubyQ's "Ru-" and "-by" 0.38 / ~0.41 and 0.32 / ~0.30.
 
 The alphabet recording loses everything above about 1.6 kHz, so it gives
 only F1 and a low F2: no reading of `IY`, `IH` or other high-F2 vowels.

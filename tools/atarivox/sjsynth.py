@@ -33,6 +33,15 @@ STRETCH = 1.0
 # Words as a whole: 1.24 (11.82 s against 9.54 s), in line with game phrases
 # (Juno First, Stratovox: 1.09-1.24).
 LEN_VOWEL, LEN_LIQUID, LEN_FRIC, LEN_GLIDE, LEN_STOP = 1.41, 1.33, 1.25, 1.22, 0.85
+# Speed: length x exp(-SPEED_K x (speed - 114)), about 2% a step (0: the
+# plain 114 / speed). Fitted to rubyQ's title at speed 80 ("Ru-", "-by":
+# real ~0.41 / ~0.30 s, ours 0.38 / 0.32), with Juno First (speeds 90-127).
+SPEED_K = 0.02
+# A sound that repeats the one before it gets no transition time, so it
+# keeps the manual's length: Juno First holds its vowels with OW x8, RR x5
+# ("Foolish human": UX x6); with this, those phrases come to 1.42 s and
+# 1.22 s against the real 1.40 s and 1.26 s.
+REPEAT_PLAIN = 1
 LIQUIDS = {"LE", "LO", "WW", "RR"}
 # The voice's envelope wave (register 8 bits 1:0): 0 saw, 1 sine, 2 triangle,
 # 3 square. Juno First's clean bands came from its customised voice; the
@@ -169,6 +178,7 @@ class SpeakJet:
         self.reset()
 
     def reset(self):
+        self.last = None
         self.volume, self.speed, self.pitch, self.bend = 96, 114, 88, 5
         self.next_rate, self.next_stress = 1.0, 0
 
@@ -198,8 +208,14 @@ class SpeakJet:
         nv = int(noise_vol * NOISE_LEVEL)
         return fs, list(a) + [nv, nv // 2]
 
+    def speed_factor(self):
+        # Length against the default speed (114). SPEED_K = 0: 114 / speed.
+        if SPEED_K:
+            return math.exp(-SPEED_K * (self.speed - 114))
+        return 114 / max(1, self.speed)
+
     def dur(self, ms):
-        r = ms * STRETCH * 114 / max(1, self.speed) * self.next_rate
+        r = ms * STRETCH * self.speed_factor() * self.next_rate
         return r
 
     def allophone(self, name):
@@ -217,6 +233,10 @@ class SpeakJet:
             f = [x + (y - x) * 0.25 for x, y in zip(f, tgt)]
         d = self.dur(ms) * (LEN_STOP if typ in ("S", "P") else LEN_FRIC if typ in ("F", "Z")
                             else LEN_LIQUID if typ == "N" or name in LIQUIDS else LEN_VOWEL)
+        if name == self.last and REPEAT_PLAIN:
+            # The same sound again has no transition to make: the manual's length.
+            d = self.dur(ms)
+        self.last = name
         if typ in ("V", "N"):
             self.run(d, self.voice(f, a), 30)
         elif typ in ("F", "Z"):
@@ -224,7 +244,7 @@ class SpeakJet:
         elif typ in ("S", "P"):
             # closure (silent, or a low voice bar), burst, then aspiration
             bar = [8, 0, 0] if typ == "S" else [0, 0, 0]
-            self.run(30 * STRETCH * LEN_STOP * 114 / max(1, self.speed), self.voice(f, bar), 10)
+            self.run(30 * STRETCH * LEN_STOP * self.speed_factor(), self.voice(f, bar), 10)
             self.run(max(8, d * 0.3), self.voice(f, [0, 0, 0], nhz, 24, dist), 3)
             asp = 10 if typ == "P" else 0
             self.run(d * 0.7, self.voice(f, [6, 4, 2] if typ == "S" else [0, 0, 0],
