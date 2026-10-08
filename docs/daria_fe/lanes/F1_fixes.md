@@ -5,7 +5,7 @@ Three decisions of the lead, on `E3_rtl_issues.md` (issue 1, note 1) and `E2_dir
 | # | Decision | Result |
 |---|---|---|
 | 1 | Drop a stranded post action at `pclk1` (E3 issue 1, option (a), refined) | Done. +4 ALMs, +0 registers |
-| 2 | Make `al` follow upstream's lane register exactly, and `pause_lane` must-be-0 (E3 note 1) | **Not done**: no exact equivalent exists. The near-exact form costs about 12 ALMs. `pause_lane` stays counted |
+| 2 | Make `al` follow upstream's lane register exactly, and `pause_lane` must-be-0 (E3 note 1) | **Not done**: no exact equivalent exists. The near-exact form costs about 12 ALMs. `pause_lane` stays counted. It cannot occur on the Pocket, which never pauses the core; the near-exact form is kept as a patch for a MiSTer port (2, last part) |
 | 3 | Accept `cdf_jump_ffe`'s exposure and count it as `obus_ffe` (E2 6.1, option (a)) | Done (bench only). 0 ALMs |
 
 ## 1. A post action stranded by a reset release
@@ -72,6 +72,23 @@ The decision's own rule (its item 6) applies: no exact equivalent exists, and th
 ### Why lane B saw 0
 
 `tb_fe_audio` freezes its select stream one clock before the engines see `pause` (`pause` is `pause_pg` registered; the stream stops on `pause_pg`). So the select at the engines' last unpaused edge always holds through the pause, and the case cannot arise there. B-1's "unreachable" (B_audio.md 1.3) is a property of that model, not of upstream. Making the unit bench reach it would need the select to change at the engines' last unpaused edge: the next cycle's pattern after a `pclk1`, the post-commit pattern after a commit.
+
+### On the Pocket, and for a MiSTer port
+
+**The Pocket never pauses the core.** `core_top.v:883` ties `pause_core` to 0. The Pocket reports its menu as `osnotify_inmenu`, and nothing uses that signal. `daria_fe`'s `pause` input is therefore always low on the Pocket, so `pause_lane` cannot occur there. Neither can `pause_call` (design 9.5), the paused cycles' $FF sample bytes, or anything else that needs `pause`. The owner decided (2026-10-08) that nothing is fixed here for the Pocket. The benches still drive `pause`, because upstream has it and `daria_fe` is compared with upstream.
+
+**Where it matters.** On a core that is paused while it runs: upstream MiSTer pauses with its OSD menu open, and the Pocket would if `osnotify_inmenu` were ever wired to `pause_core`. There, `pause_lane` is one audio sample byte, read from another byte lane of the same word, in the first refresh after a pause that started on the wrong edge (E3 note 1).
+
+**The patch.** `F1_pause_lane_mister.patch`, in this directory, is the near-exact form above as a diff against this commit's RTL (20 lines in `daria_fe_core.sv`, `daria_fe_audio.sv` and `daria_fe.sv`):
+- `u_core` drives `cpu_lane`: upstream's `sel_ram_a[1:0]`. The pre-commit lanes are `cl`, `ba[1:0]`, or DSWRITE's `W` lane; the post-commit lanes are `W[1:0]`, `W[9:8]`, or PUSH's `W[1:0] - 1`. A one-flop "committed in this cycle" flag `cm` chooses between them.
+- `u_audio`'s `al` loads `sel_up ? cpu_lane : a_d[1:0]` at every unpaused edge.
+
+It applies cleanly and passes the lint of `interfaces.md` section 2, and its synthesis was the 1,683-ALM figure above. **It has not been simulated.** A port that applies it must verify it:
+- the unit benches;
+- a `tb_fe_audio` scenario whose select changes at the engines' last unpaused edge (see "Why lane B saw 0");
+- the mode-A shadow with pauses.
+
+With it, `pause_lane` still counts the two transients of the table's last two rows, and nothing else. The patch adds a port to `daria_fe_audio` (`sel_up`, `cpu_lane`) and one to `daria_fe_core` (`cpu_lane`), so `interfaces.md` needs the entry that decision 2 would have made.
 
 ### Documents
 

@@ -1,0 +1,82 @@
+diff --git a/src/fpga/core/bupchip/daria_fe.sv b/src/fpga/core/bupchip/daria_fe.sv
+index 1b9d5a3..e044fa7 100644
+--- a/src/fpga/core/bupchip/daria_fe.sv
++++ b/src/fpga/core/bupchip/daria_fe.sv
+@@ -107,6 +107,7 @@ module daria_fe (
+ 
+ 	// ---- u_core outputs ---------------------------------------------------------------
+ 	logic        sel_up;
++	logic  [1:0] cpu_lane;
+ 	logic        cr_fix, cr_fix_we, cr_fix_use;
+ 	logic [12:0] cr_fix_a;
+ 	logic  [3:0] cr_fix_be;
+@@ -230,6 +231,7 @@ module daria_fe (
+ 		.call_busy    (arm_call_busy),
+ 		.fe_do        (fe_do),
+ 		.sel_up       (sel_up),
++		.cpu_lane     (cpu_lane),
+ 		.feb_addr     (feb_addr),
+ 		.cr_fix       (cr_fix),
+ 		.cr_fix_a     (cr_fix_a),
+@@ -276,6 +278,8 @@ module daria_fe (
+ 		.clk_sys    (clk_sys),
+ 		.cart_reset (cart_reset),
+ 		.pause      (pause),
++		.sel_up     (sel_up),
++		.cpu_lane   (cpu_lane),
+ 		.fam        (fam),
+ 		.rev        (revision[1:0]),
+ 		.rom_size   (rom_size),
+diff --git a/src/fpga/core/bupchip/daria_fe_audio.sv b/src/fpga/core/bupchip/daria_fe_audio.sv
+index fb16922..579e82b 100644
+--- a/src/fpga/core/bupchip/daria_fe_audio.sv
++++ b/src/fpga/core/bupchip/daria_fe_audio.sv
+@@ -49,6 +49,8 @@ module daria_fe_audio (
+ 	input  wire          clk_sys,
+ 	input  wire          cart_reset,
+ 	input  wire          pause,        // pause_core
++	input  wire          sel_up,
++	input  wire    [1:0] cpu_lane,
+ 	input  wire    [1:0] fam,          // 1 DPC+, 3 CDF, 0 otherwise (live)
+ 	input  wire    [1:0] rev,          // revision[1:0]
+ 	input  wire   [31:0] rom_size,
+@@ -404,7 +406,7 @@ module daria_fe_audio (
+ 	// (docs/daria_fe/lanes/B_audio.md, "Deviations": pause_lane).
+ 	always_ff @(posedge clk_sys) begin
+ 		if (cart_reset)  al <= 2'd0;
+-		else if (!pause) al <= a_d[1:0];
++		else if (!pause) al <= sel_up ? cpu_lane : a_d[1:0];
+ 	end
+ 
+ 	// ---- the sample client (5.7) -------------------------------------------------------
+diff --git a/src/fpga/core/bupchip/daria_fe_core.sv b/src/fpga/core/bupchip/daria_fe_core.sv
+index 089bac1..7fa0d8a 100644
+--- a/src/fpga/core/bupchip/daria_fe_core.sv
++++ b/src/fpga/core/bupchip/daria_fe_core.sv
+@@ -93,6 +93,7 @@ module daria_fe_core (
+ 	output logic  [7:0] fe_do,        // reg
+ 	// out, decode
+ 	output logic        sel_up,       // comb (u_dec)
++	output logic  [1:0] cpu_lane,     // comb: upstream's sel_ram_a[1:0] (prototype)
+ 	output logic [12:0] feb_addr,     // comb: rom_a[14:2]
+ 	// out, R fixed
+ 	output logic        cr_fix,       // comb
+@@ -615,6 +616,18 @@ module daria_fe_core (
+ 			       | ({8{use_amp}} & amp_nx);
+ 	end
+ 
++	// ---- prototype: upstream's 6507-side RAM byte lane ----
++	logic cm;
++	always_ff @(posedge clk_sys) begin
++		if (rst_fe | pclk1) cm <= 1'b0;
++		else if (commit)    cm <= 1'b1;
++	end
++	wire [1:0] pre_l  = ({2{o_rdat | o_cfet | o_cjmp}} & cl) | ({2{o_dpw}} & ba[1:0])
++	                  | ({2{o_ds}} & (jplus ? W[17:16] : W[21:20]));
++	wire [1:0] post_l = ({2{o_rdat & (op_r.fn == 3'd3)}} & W[9:8])
++	                  | ({2{(o_rdat & (op_r.fn != 3'd3)) | (o_dpw & !o_push)}} & W[1:0])
++	                  | ({2{o_dpw & o_push}} & (W[1:0] - 2'd1));
++	assign cpu_lane = cm ? post_l : pre_l;
+ 	// ---- events and assertions (1.7, 9.6) --------------------------------------------------------
+ 	// rcyc: this 6507 cycle ran some of its k reads under rst_fe. Set while rst_fe
+ 	// is high, cleared at the first pclk1 with rst_fe low. Only a_pend_late reads

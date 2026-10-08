@@ -1189,7 +1189,7 @@ rom_done = (lcnt[3] & busy_l) | rdone_q;      // amplitude one edge after rdat
 - Sample bytes read $FF; words read true data (top.sv:934-936).
 - The 6507 bus freezes, and `sel_up` is evaluated on the frozen bus, so a frozen selecting cycle blocks grants for the whole pause, as upstream's (AUD 12.5).
 - The select can still change right after the last unpaused edge: at a `pclk1` the next cycle's address appears, and at a commit the state changes. Upstream's lane register then holds the 6507's byte lane while grants run in the pause; `al` holds the engine's.
-- Counted: `pause_lane` (a capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high). `al` cannot follow upstream's lane at every such edge (lanes/F1_fixes.md 2). In mode B and on hardware, DARIA's CPU also runs through a pause (`pause_call`).
+- Counted: `pause_lane` (a capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high). `al` cannot follow upstream's lane at every such edge (lanes/F1_fixes.md 2). In mode B, DARIA's CPU also runs through a pause (`pause_call`). **The Pocket never pauses** (`core_top.v:883` ties `pause_core` to 0), so neither class occurs on hardware. They matter only for a port to a core that pauses, such as MiSTer with its OSD menu; `lanes/F1_pause_lane_mister.patch` is the near-exact `al` for that case (unsimulated; F1_fixes.md 2).
 
 ### 5.9 Exactness argument
 
@@ -1606,7 +1606,7 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | `merge_race` | Only with `ret_late`: counters/frequencies differ by the rule of BEN 7.6 | per-tick counters and frequencies (resync) | A |
 | `dig_rom_lag` | Digital ROM sample: upstream's `sample_done` later than R+3 (a DDR miss), or `dig_addr ≥ $8000` | the AMPLITUDE edge; replica offset until IDLE (resync) | A, B |
 | `svc_audio_race` | An audio grant reads a word in a running copy/fill's destination range (either side) | that refresh's value | A, B |
-| `pause_lane` | A capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high | one sample byte | A (directed), B |
+| `pause_lane` | A capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high. Not on the Pocket, which never pauses (F1_fixes.md 2) | one sample byte | A (directed), B |
 | `pre_lock` | Refreshes with a grant before `tia_en` (BIOS path; upstream reads the 7800 path's RAM address, AUD 12.6) | AMPLITUDE until the first refresh after `tia_en` | A |
 | `tbl_alias` | A CDFJ+ DSWRITE byte address in [$098, $1B0) (pointer and increment words) | that stream's pointer and data, until the ARM rewrites the word; C3 excludes that stream | A, B |
 | `rmw_call` | A CALLFN while `call_busy`, or committed after X (C-3) | the stall shape (no dip); CDF call-2 seeds iff a tick lands exactly on M, or (C-3) between upstream's accept and DARIA's capture at M_fe+2 | A (value), B |
@@ -1617,7 +1617,7 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | `drift_fe` | O1: `fe_do` holds the committed byte after the latch | information; `obus_exposed` must be 0 | A |
 | `obus_ffe` | O1: a read at $0000 right after a substituted read at $1FFF (a fast JMP or `LDA #` at $1FFE; the 13-bit address wraps) | that read's undriven bits: `fe_do` holds the substituted byte, upstream's `d_out` has fallen back to ROM[$1FFF]. On hardware the undriven bits most likely keep the cartridge's last driven byte, as `daria_fe`'s do. No game does it | A |
 | `refresh_overlap` | Only if lever 1 (drop `rc`) is taken: a tick or merge during a refresh | that refresh's value | A, B |
-| hardware and mode B only | `call_len`, `dma_len`, `f6_len` (durations); `release_dup` (removed duplicate commit); `guard_shift` (grants moved to phase B); `pause_call` (DARIA's CPU runs during pause); `reset_in_call`; `det_unlock_active` | timing only | B |
+| hardware and mode B only | `call_len`, `dma_len`, `f6_len` (durations); `release_dup` (removed duplicate commit); `guard_shift` (grants moved to phase B); `pause_call` (DARIA's CPU runs during pause; mode B only, since the Pocket never pauses); `reset_in_call`; `det_unlock_active` | timing only | B |
 
 ### 9.6 Must be 0
 
