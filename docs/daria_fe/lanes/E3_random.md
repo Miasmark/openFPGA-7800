@@ -372,7 +372,7 @@ Items 25-27 came from the verification review of this lane, not from a failure: 
 3. Note 3: should design 4 drop "no R use" for the held fetch, or add a class for a DPC+ fast fetch armed by an RMW's own read?
 4. `merge_race` now also covers R1 payload differences inside a `ret_late` window (2,000 clocks). That window could hide a real payload error right after a late return; a tighter rule (only the call pending at X) would need the bench to know which post is the pending one. Worth it?
 5. Mode A cannot see DARIA's stall release differentially (mutant s2). The bench now checks the edge rule itself (`rel_e0`), which catches s2; is lane E1's stage 2 going to cover the release against a 6507 held by DARIA alone?
-6. `collide_reset` and `p32_reset` (3.1; E3_rtl_issues.md note 4, lane A O-1): `a_collide` and `a_p32_late` fire in a clock or cycle with `rst_fe` high, harmlessly. Design 9.6 lists both as must-be-0 with no exception for a reset. Record the exception in 9.6 (the bench counts both today), or gate the assertions, which needs a reset input on `u_arb`, a frozen port?
+6. `collide_reset` and `p32_reset` (3.1; E3_rtl_issues.md note 4, lane A O-1): `a_collide` and `a_p32_late` fire in a clock or cycle with `rst_fe` high, harmlessly. Design 9.6 lists both as must-be-0 with no exception for a reset. Record the exception in 9.6 (the bench counts both today), or gate the assertions, which needs a reset input on `u_arb`, a frozen port? [Decided: the exception is recorded in design 9.6; E3_rtl_issues.md note 4.]
 
 ### 10.1 Documents to update (not this lane's files)
 

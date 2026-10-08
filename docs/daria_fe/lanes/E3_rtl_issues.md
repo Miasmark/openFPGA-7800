@@ -72,6 +72,8 @@ Real code reaches it only with `$A9` in ROM at the RMW's register address and an
 
 ## Note 4: `a_collide` fires under `rst_fe` (the bench's `collide_reset`)
 
+[Decided by the lead (2026-10-08): the first option. Design 9.6 now records the reset exception for `a_collide` and for `a_p32_late`; no port changes.]
+
 **Files:** `src/fpga/core/bupchip/daria_fe_arb.sv` (`ev_grant_steal = aud_issue & !sel_up & fix_eff`, `a_collide = ev_grant_steal & !sh_c`, lines 265-266; `u_arb` has no reset input), `daria_fe.sv` line 97 (`rst_fe`). Design 9.6 lists `a_collide` as must-be-0 outside `short_phase1`, with no exception for a reset.
 
 **What happens.** This is E3_random.md section 7, item 18. It was found in seed 105 of group `mix` on an earlier bench and RTL, one clock into an epoch's download reset, with the scheme going from DPC+ to CDFJ. The bench sets the new scheme while the console reset is already high. In that clock `rst_fe` is high. `u_core`'s fixed request, decoded under the new scheme, takes the R port (`fix_eff`), because nothing in `u_arb` gates it with `rst_fe`. Upstream's engine still has its last audio grant in that clock (`aud_issue & !sel_up`). So `ev_grant_steal` is true in a cycle with no `ev_short`, and `a_collide` fires. Both engines reset at the next edge, and nothing differed afterwards.

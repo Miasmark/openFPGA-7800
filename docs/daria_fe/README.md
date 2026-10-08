@@ -32,7 +32,8 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
   | `daria_fe_probe` (hook tied 0, as the core will) | 1,667 | 1,490 | 1,728 | 1,099 | 0 | +54.6 / +22.2 ns |
 
   The hook costs about 70 ALMs in synthesis, but single fits of a block this size vary by more than that in the fitter's packing measure, so the front end is about 1,400-1,500 ALMs against the design's 1,255-1,445. Step 7's full-core fit decides.
-- Next: lane E (the stage-1 shadow, directed tests, the random differential bench), then mode A on three images, then all 21 and the nine new ARM images (`design.md` 12).
+- Lane E (2026-10-08): done and verified. The stage-1 shadow (`lanes/E1_shadow.md`), 51 directed tests (`lanes/E2_directed.md`), and the random differential bench at 105 M cycles with 0 failures outside the classes (`lanes/E3_random.md`). Issues and decisions: `lanes/E3_rtl_issues.md`, `lanes/F1_fixes.md`.
+- Next (`design.md` 12.2 steps 6-8): mode A on the 21 images and the nine new ARM images, 1,500 frames each (in progress); `+hard_reset_at`, `use_bios` and pause runs; mode B with DARIA's CPU and the guard.
 - F1 (2026-10-08): lane E's findings decided; `lanes/F1_fixes.md`.
 
 The specs mention a few files that lived only in the session scratchpad and were not kept: a copy of MiSTer's `Atari7800.sv` wrapper, two throwaway stall benches, and a Stella `CartCDF.cxx` used for behaviour notes only.
