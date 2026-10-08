@@ -892,10 +892,15 @@ module tb_fe_rand;
 		logic [12:0] a;
 		logic w;
 		logic [7:0] d;
+		logic armed;
 		d = rnd8();
 		w = 1'b0;
 		fresh_now = 1'b0;
-		if (fresh > 0) begin
+		// the mapper took the last read for an arming opcode ($A9 and the like) or a fast jump:
+		// fast-fetch code always follows it with its operand (DPC+ substitutes the next read at
+		// any address, CDF the next one at the expected address)
+		armed = is_dpc ? u_up.dpcplus.fast_pending : (is_cdf && (u_up.cdf.fast_pending || u_up.cdf.jump_remaining != 2'd0));
+		if (fresh > 0 && !armed) begin
 			fresh--;
 			fresh_now = 1'b1;
 			if (is_dpc) begin a = 13'h1058; w = 1'b1; d = 8'h00; end
@@ -914,6 +919,12 @@ module tb_fe_rand;
 			if (pc[12:7] == 6'b100000) pc = pc + 13'h080;  // operand an arming opcode read before the
 			a = pc;                                      // store expects, and never in $1000-$107F
 			pc = pc + 13'd1;                             // (code does not run in the register area)
+			// still armed (an RMW whose read returned $A9): no cartridge read here, or the held
+			// fetch after a service write would be a data-fetcher read (design 4: no R use)
+			if (armed) a = {1'b0, 4'h1, 8'(rnd(256))};
+		end else if (armed) begin                       // the operand of an arming read
+			a = pc;
+			pc = pc + 13'd1;
 		end else if (rnd(1000) < 15) begin
 			int q;
 			burst = 2 + int'(rnd(3));
@@ -1028,7 +1039,7 @@ module tb_fe_rand;
 		I_RMW_SVC, I_SIZE_HI, I_P32_RESET, I_RESYNC, I_DEP_CF, I_CALLS_UP, I_CALLS_B, I_SVCS_UP, I_SVCS_B,
 		I_R3, I_INITS, I_FULL, I_K1, I_TICKS, I_MERGES, I_HK_MERGES, I_PTR_N, I_RAM_N, I_AMP_READS,
 		I_AMP_CLASS, I_DROP_UP, I_DROP_B, I_GRANTS, I_PZ_GRANTS, I_DIG_LOCAL, I_DIG_REMOTE, I_DIG_RAM, I_DIG_NONE,
-		I_NOTES, I_HELD, I_PAUSE_CLK, I_HOT, I_PU, I_CRB_USE, I_WB_P32, I_YIELD3, I_PAUSE_LANE, I_COLL_RST,
+		I_NOTES, I_HELD, I_PAUSE_CLK, I_HOT, I_PU, I_CRB_USE, I_WB_P32, I_YIELD3, I_PAUSE_LANE, I_COLL_RST, I_HELD_SVC,
 		C_N
 	} cnt_t;
 	string  nm [C_N];
@@ -1060,7 +1071,7 @@ module tb_fe_rand;
 		nm[I_DIG_REMOTE] = "dig_remote"; nm[I_DIG_RAM] = "dig_ram"; nm[I_DIG_NONE] = "dig_none";
 		nm[I_NOTES] = "notes"; nm[I_HELD] = "held_cycles"; nm[I_PAUSE_CLK] = "pause_clocks";
 		nm[I_HOT] = "hotspot_switches"; nm[I_PU] = "pointer_updates";
-		nm[I_WB_P32] = "wb_and_p32_requested"; nm[I_YIELD3] = "three_r_requests"; nm[I_PAUSE_LANE] = "pause_lane"; nm[I_COLL_RST] = "collide_reset";
+		nm[I_WB_P32] = "wb_and_p32_requested"; nm[I_YIELD3] = "three_r_requests"; nm[I_PAUSE_LANE] = "pause_lane"; nm[I_COLL_RST] = "collide_reset"; nm[I_HELD_SVC] = "held_svc_race";
 		nm[I_CRB_USE] = "crb_use";
 		for (int c = 0; c < C_N; c++) cnt[c] = 0;
 	end
@@ -1497,6 +1508,12 @@ module tb_fe_rand;
 					if (bad) begin
 						if ((cyc_short || e0n < 5) && strict == 0) cnt[I_SHORT_DOUT]++;
 						else if (aread && (m_rep || mw != 0)) cnt[I_AMP_CLASS]++;
+						// held_svc_race: a cartridge RAM read (the held fetch after a service write,
+						// made a DPC+ data-fetcher read by a fast fetch the RMW's own read armed) while
+						// a service burst runs: the two copy engines fill the RAM at different times
+						else if (u_up.sel_ram_sel && strict == 0 && (up_dma_busy || b_svc_run || b_svc_hold ||
+								u_up.dpcplus.service_pending || r3_d.size() != 0 || sq_up.size() != 0 || sq_b.size() != 0))
+							cnt[I_HELD_SVC]++;
 						else if (aread) fail(B_AMP, $sformatf("amp_lag: AMPLITUDE read, side B %02x, upstream %02x, no class", bd, ud));
 						else fail(B_DOUT, $sformatf("L1 dout: side B %02x/%02x, upstream %02x/%02x (d/oe), a_in %04x", bd, bo, ud, uo, a_in));
 					end
