@@ -80,6 +80,27 @@ escape. A receiver has to recognise it, at least so as not to speak it.
 **Not published:** the "MSA" database, the oscillator settings and
 movements behind each allophone and effect. Ours will be written by ear.
 
+## What games send: Stratovox
+
+The Stratovox demo ROM (Champ Games, 2024; its AtariVox output disabled)
+still holds the full game's phrase table (bank 5 from `$5D93`, "Game over"
+in bank 4 at `$4C8C`):
+
+- **Every phrase starts with the defaults:** `VOL=96 SPEED=114 PITCH=88
+  BEND=5`, then allophones with `FAST` and `SLOW`, ending `$FF`. "Help me" is
+  `HE EHLL PO MM IY IY`; "Save me" `SE FAST EYIY FAST IY SLOW VV MM IY IY`;
+  "Hurry" `HO AXRR IY`; "Game over" steps the pitch between 68 and 86.
+- **Before each phrase it sends `\0RX`:** serial control mode, clear the
+  buffer, exit. A new phrase cuts off the one playing.
+- **`\0RVX`** makes the chip say "Ready" in its own built-in phrase (the `V`
+  acknowledge command). That is the "Ready." at the start of the game. In a
+  clean recording it lasts 370 ms at a flat 69 Hz.
+- One entry plays alarm A5 five times: `RESET REPEAT=5 A5`.
+
+So the receiver must handle serial control mode at least for `R` (clear the
+64-byte buffer and stop), `V` (say "Ready") and `X`, and must never speak
+the escape bytes.
+
 ## Measured from recordings of the real chip
 
 A demonstration recording (effects, then the alphabet; no music behind it)
