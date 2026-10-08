@@ -35,9 +35,9 @@ STRETCH = 1.2
 # default voice (the alphabet demo, Stratovox's "Game over") shows the dense,
 # full-height buzz of a saw.
 ENV_WAVE = 0
-# Hiss (oscillators 4 and 5) against the vowels: the recording's are much
-# quieter than the first tables had them.
-NOISE_LEVEL = 0.5
+# Hiss (oscillators 4 and 5) against the vowels. Juno First's title: the
+# real hiss sits 20 dB under its vowels; at 0.5 ours was 13.4 dB under.
+NOISE_LEVEL = 0.25
 # The SpeakJet's PWM output goes through a two-pole low-pass (the manual's
 # Figure 1), which the AtariVox board has too. Fitted to a clean recording of
 # the real chip reciting the alphabet at default settings (87 Hz voice): one
@@ -88,7 +88,7 @@ st("ED", 10, 3500, True, (250, 1800, 2700)); st("OD", 10, 3200, True, (250, 1400
 st("GE", 55, 2200, True, (250, 2200, 2800)); st("GO", 55, 1500, True, (250, 1200, 2300))
 st("EG", 55, 2200, True, (250, 2200, 2800)); st("OG", 55, 1500, True, (250, 1200, 2300))
 fr("CH", 70, 2600, 20, 160); fr("HE", 35, 1800, 4, 255); fr("HO", 35, 1100, 4, 255)  # H: barely audible on the real chip ("Help me")
-fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 6, 255); fr("SE", 40, 3950, 22, 120)
+fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 3, 255)  # F: almost silent on the real chip (Juno First); fr("SE", 40, 3950, 22, 120)
 fr("SO", 40, 3700, 22, 120); fr("SH", 50, 2500, 22, 160); fr("TH", 40, 3800, 5, 255)
 st("TT", 50, 3800, False, (250, 1800, 2700)); st("TU", 70, 3800, False, (250, 1800, 2700))
 T["TS"] = ("P", 170, [250, 1800, 2700], [0, 0, 0], 3950, 22, 120)
