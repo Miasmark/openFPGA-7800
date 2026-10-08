@@ -909,9 +909,11 @@ module tb_fe_rand;
 				a = burst_a;
 				d = (burst_n == 1) ? burst_d : burst_d + 8'd1;
 			end
-		end else if (prev_w) begin                      // the opcode fetch after a store
-			a = pc;
-			pc = pc + 13'd1;
+		end else if (prev_w) begin                      // the opcode fetch after a store: past the
+			pc = pc + 13'd1;                             // store's last operand byte, so never the
+			if (pc[12:7] == 6'b100000) pc = pc + 13'h080;  // operand an arming opcode read before the
+			a = pc;                                      // store expects, and never in $1000-$107F
+			pc = pc + 13'd1;                             // (code does not run in the register area)
 		end else if (rnd(1000) < 15) begin
 			int q;
 			burst = 2 + int'(rnd(3));
@@ -2013,14 +2015,19 @@ module tb_fe_rand;
 			fail(B_BENCH, "the console never left reset after a load or reset");
 		end
 	endtask
+	// no call or service in flight, latched or pending on either side
+	function automatic logic busy_any();
+		return up_call_busy || up_dma_busy || b_dma_busy || u_up.dpcplus.service_pending ||
+			u_up.dpcplus.call_pending || u_up.cdf.call_pending
+`ifndef SELF
+			|| fe_call_busy || b_svc_pend
+`endif
+			;
+	endfunction
 	task automatic wait_idle(input int max);
 		int g;
 		g = 0;
-		while ((up_call_busy || up_dma_busy || b_dma_busy || u_up.dpcplus.service_pending
-`ifndef SELF
-			|| fe_call_busy
-`endif
-			) && g < max) begin
+		while (busy_any() && g < max) begin
 			@(posedge clk_sys);
 			g++;
 		end
@@ -2056,7 +2063,7 @@ module tb_fe_rand;
 				wait_idle(100000);                      // or service in flight: the 2600 is not running)
 				@(negedge clk_sys);
 				// as the scheme switch: not while a pointer check or repair is still to come
-				while (pu_pend || u_up.cdf.pointer_update || alias_pending()) @(negedge clk_sys);
+				while (pu_pend || u_up.cdf.pointer_update || alias_pending() || busy_any()) @(negedge clk_sys);
 				tia_req = 1'b0;
 				repeat (20 + rnd(3000)) @(negedge clk_sys);
 				tia_req = 1'b1;
@@ -2066,7 +2073,9 @@ module tb_fe_rand;
 				@(negedge clk_sys);
 				// in the pclk1 clock (where a switch is exact for daria_fe, lane A O-3) of a cycle
 				// with no pointer check or repair still to come: the switch skips that pclk1's checks
-				while (!pclk1 || pu_pend || u_up.cdf.pointer_update || alias_pending()) @(negedge clk_sys);
+				// and still with nothing in flight: a call running through the switch would have the
+				// ARM write the cart RAM while upstream's table copy ignores it (the family is 0)
+				while (!pclk1 || pu_pend || u_up.cdf.pointer_update || alias_pending() || busy_any()) @(negedge clk_sys);
 				scheme = 6'd0;
 				repeat (20 + rnd(2000)) @(negedge clk_sys);
 				while (!pclk1 || alias_pending()) @(negedge clk_sys);
