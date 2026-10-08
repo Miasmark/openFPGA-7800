@@ -101,7 +101,7 @@ st("ED", 10, 3500, True, (250, 1800, 2700)); st("OD", 10, 3200, True, (250, 1400
 st("GE", 55, 2200, True, (250, 2200, 2800)); st("GO", 55, 1500, True, (250, 1200, 2300))
 st("EG", 55, 2200, True, (250, 2200, 2800)); st("OG", 55, 1500, True, (250, 1200, 2300))
 fr("CH", 70, 2600, 20, 160); fr("HE", 35, 1800, 4, 255); fr("HO", 35, 1100, 4, 255)  # H: barely audible on the real chip ("Help me")
-fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 3, 255); fr("SE", 40, 3950, 22, 120)  # FF: almost silent on the real chip (Juno First)
+fr("WH", 70, 900, 8, 255); fr("FF", 70, 1800, 6, 255); fr("SE", 40, 3950, 22, 120)  # FF: quiet, mostly below 1.5 kHz (Gorf's "Gorf": ~22 dB under the vowel)
 fr("SO", 40, 3700, 22, 120); fr("SH", 50, 2500, 22, 160); fr("TH", 40, 3800, 5, 255)
 st("TT", 50, 3800, False, (250, 1800, 2700)); st("TU", 70, 3800, False, (250, 1800, 2700))
 T["TS"] = ("P", 170, [250, 1800, 2700], [0, 0, 0], 3950, 22, 120)
@@ -233,12 +233,16 @@ class SpeakJet:
             f = [x + (y - x) * 0.25 for x, y in zip(f, tgt)]
         d = self.dur(ms) * (LEN_STOP if typ in ("S", "P") else LEN_FRIC if typ in ("F", "Z")
                             else LEN_LIQUID if typ == "N" or name in LIQUIDS else LEN_VOWEL)
+        self.prev_type, self.cur_type = getattr(self, "cur_type", None), typ
         if name == self.last and REPEAT_PLAIN:
             # The same sound again has no transition to make: the manual's length.
             d = self.dur(ms)
         self.last = name
         if typ in ("V", "N"):
-            self.run(d, self.voice(f, a), 30)
+            # After a voiced stop the voice fades in over ~60 ms (Gorf's "Gorf":
+            # about 120 ms from 16 dB under to full); otherwise 30 ms.
+            after_stop = self.prev_type == "S"
+            self.run(d, self.voice(f, a), 60 if after_stop else 30)
         elif typ in ("F", "Z"):
             self.run(d, self.voice(f, a, nhz, nvol, dist, half_env=(typ == "Z")), 15)
         elif typ in ("S", "P"):

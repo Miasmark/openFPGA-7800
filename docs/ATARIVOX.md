@@ -156,8 +156,9 @@ The alphabet recording loses everything above about 1.6 kHz, so it gives
 only F1 and a low F2: no reading of `IY`, `IH` or other high-F2 vowels.
 Its letters start about every 0.3-0.35 s from 6.05 s (A), E at 7.43 s.
 
-Also: the hiss sits about 20 dB under the vowels, and F is almost silent
-("Juno First"); the voice is periodic at exactly the commanded pitch, so the
+Also: the hiss sits about 20 dB under the vowels; F is quiet (22-32 dB under
+the vowel in "Gorf" and "Juno First") and mostly below 1.5 kHz; after a
+voiced stop the voice fades in over about 100 ms ("Gorf"); the voice is periodic at exactly the commanded pitch, so the
 tone oscillators restart every pitch period; phrases run about 1.2 times
 the manual's lengths. `tools/atarivox/sjsynth.py` has all of these.
 
