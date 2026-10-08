@@ -24,12 +24,16 @@ import wave
 import numpy as np
 
 RATE = 8192
-# Length factor on every sound and pause (--stretch). Measured on voiced
-# speech against phrases with known codes (pitch tracks lined up): Juno
-# First's title 1.40 s real vs 1.22 s at the manual's lengths, its "Foolish
-# human" 1.26 vs 1.02, Stratovox's "Game over" 1.05 vs 0.96: 1.09-1.24, so
-# 1.2 (probably the transitions the manual describes, a little per sound).
-STRETCH = 1.2
+# Length factor on every sound and pause, on top of the per-type factors
+# below (--stretch).
+STRETCH = 1.0
+# Real length / the manual's length, by type of sound: 20 words of the
+# AtariVox demo's A-Z list (codes from Magnevation's Phrase-A-Lator
+# dictionary), each aligned to our render of its codes, 118 sounds in all.
+# Words as a whole: 1.24 (11.82 s against 9.54 s), in line with game phrases
+# (Juno First, Stratovox: 1.09-1.24).
+LEN_VOWEL, LEN_LIQUID, LEN_FRIC, LEN_GLIDE, LEN_STOP = 1.41, 1.33, 1.25, 1.22, 0.85
+LIQUIDS = {"LE", "LO", "WW", "RR"}
 # The voice's envelope wave (register 8 bits 1:0): 0 saw, 1 sine, 2 triangle,
 # 3 square. Juno First's clean bands came from its customised voice; the
 # default voice (the alphabet demo, Stratovox's "Game over") shows the dense,
@@ -201,7 +205,7 @@ class SpeakJet:
     def allophone(self, name):
         if name in GLIDES:
             a, b, ms = GLIDES[name]
-            d = self.dur(ms)
+            d = self.dur(ms) * LEN_GLIDE
             ta, tb = T[a], T[b]
             self.run(d * 0.4, self.voice(ta[2], ta[3]), 25)
             self.run(d * 0.6, self.voice(tb[2], tb[3]), d * 0.5)
@@ -211,7 +215,8 @@ class SpeakJet:
             # STRESS pulls formants towards IY, RELAX towards a central vowel
             tgt = T["IY"][2] if self.next_stress > 0 else T["AX"][2]
             f = [x + (y - x) * 0.25 for x, y in zip(f, tgt)]
-        d = self.dur(ms)
+        d = self.dur(ms) * (LEN_STOP if typ in ("S", "P") else LEN_FRIC if typ in ("F", "Z")
+                            else LEN_LIQUID if typ == "N" or name in LIQUIDS else LEN_VOWEL)
         if typ in ("V", "N"):
             self.run(d, self.voice(f, a), 30)
         elif typ in ("F", "Z"):
@@ -219,7 +224,7 @@ class SpeakJet:
         elif typ in ("S", "P"):
             # closure (silent, or a low voice bar), burst, then aspiration
             bar = [8, 0, 0] if typ == "S" else [0, 0, 0]
-            self.run(30 * STRETCH * 114 / max(1, self.speed), self.voice(f, bar), 10)
+            self.run(30 * STRETCH * LEN_STOP * 114 / max(1, self.speed), self.voice(f, bar), 10)
             self.run(max(8, d * 0.3), self.voice(f, [0, 0, 0], nhz, 24, dist), 3)
             asp = 10 if typ == "P" else 0
             self.run(d * 0.7, self.voice(f, [6, 4, 2] if typ == "S" else [0, 0, 0],

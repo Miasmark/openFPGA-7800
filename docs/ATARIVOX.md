@@ -137,6 +137,17 @@ high pitch the readings land on the voice's harmonics).
 | `EH` | 590 / 1,650 | the alphabet's F, L, M, N, S (identical in all five) | Set |
 | `AW` | 610 / 1,030 | the alphabet's R (`AWRR` start) | Set |
 
+**Lengths, by type of sound.** Magnevation's Phrase-A-Lator dictionary
+(1,452 words with exact codes) identifies the demo recording's A-Z word
+list (activated, basic, correct, ... x-ray). Aligning 20 of those words with
+our render of their codes, 118 sounds in all, gives real / manual length:
+vowels 1.41, nasals and liquids 1.33, hiss 1.25, glides 1.22, stops 0.85.
+With these the 20 words come to 1.03 of the real total (0.83-1.15 per
+word; one overall factor gave 0.86-1.45). Open: the speed control. Phrases
+that change it all the time come out long (Juno First's title 17%, "Foolish
+human" 8%), so the chip probably speeds up more sharply towards 127 than
+114 / speed, the model's assumption.
+
 The alphabet recording loses everything above about 1.6 kHz, so it gives
 only F1 and a low F2: no reading of `IY`, `IH` or other high-F2 vowels.
 Its letters start about every 0.3-0.35 s from 6.05 s (A), E at 7.43 s.
