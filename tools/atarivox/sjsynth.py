@@ -24,12 +24,12 @@ import wave
 import numpy as np
 
 RATE = 8192
-# Length factor on every sound and pause (--stretch). The manual's lengths
-# played as given sounded rushed against Juno First's title, but that phrase
-# uses a customised voice. Stratovox phrases with known codes at default
-# settings ("Game over" 1.05 s real vs 0.96 s; "Help me" 540 vs 560 ms)
-# match the manual's lengths, so the default is 1.0.
-STRETCH = 1.0
+# Length factor on every sound and pause (--stretch). Measured on voiced
+# speech against phrases with known codes (pitch tracks lined up): Juno
+# First's title 1.40 s real vs 1.22 s at the manual's lengths, its "Foolish
+# human" 1.26 vs 1.02, Stratovox's "Game over" 1.05 vs 0.96: 1.09-1.24, so
+# 1.2 (probably the transitions the manual describes, a little per sound).
+STRETCH = 1.2
 # The voice's envelope wave (register 8 bits 1:0): 0 saw, 1 sine, 2 triangle,
 # 3 square. Juno First's clean bands came from its customised voice; the
 # default voice (the alphabet demo, Stratovox's "Game over") shows the dense,
@@ -44,6 +44,11 @@ NOISE_LEVEL = 0.5
 # 2-pole low-pass at 2,200 Hz brings the long-term spectrum to within 3.4 dB
 # of it, against 13-14 dB without. 0 turns it off (--lpf).
 LPF_HZ = 2200
+# Restart oscillators 1-3 at every pitch period (--sync 0 to turn off). The
+# real chip's output is periodic at exactly the commanded pitch (Juno First:
+# 170, 91-165, 225, 110 Hz, as its codes ask); free-running oscillators
+# against the envelope are not, and track as nonsense.
+PITCH_SYNC = 1
 
 # ---------------------------------------------------------------- tables
 # name: (type, ms, [F1, F2, F3], [A1, A2, A3], noise_hz, noise_vol, dist)
@@ -130,7 +135,13 @@ class Synth:
             f = self.freq[i]
             if i in (4, 5) and self.dist:
                 f += (self.rng.random() - 0.5) * self.dist * 16
-            self.ph[i] = (self.ph[i] + f / RATE) % 1.0
+            nxt = self.ph[i] + f / RATE
+            if i == 0 and nxt >= 1.0 and PITCH_SYNC and self.env_ctl & 0x40:
+                # A new pitch period: restart the enveloped oscillators, so the
+                # output repeats exactly at the pitch, as the real chip's does.
+                for k in (1, 2, 3):
+                    self.ph[k] = 0.0
+            self.ph[i] = nxt % 1.0
             out[i] = math.sin(2 * math.pi * self.ph[i])
         m1 = sum(out[i] * self.vol[i] for i in (1, 2, 3)) / 63
         m2 = sum(out[i] * self.vol[i] for i in (4, 5)) / 62
@@ -275,9 +286,11 @@ def main():
     global STRETCH
     global ENV_WAVE
     global LPF_HZ
-    while len(sys.argv) > 2 and sys.argv[1] in ("--stretch", "--env", "--lpf"):
+    global PITCH_SYNC
+    while len(sys.argv) > 2 and sys.argv[1] in ("--stretch", "--env", "--lpf", "--sync"):
         if sys.argv[1] == "--stretch": STRETCH = float(sys.argv[2])
         elif sys.argv[1] == "--lpf": LPF_HZ = float(sys.argv[2])
+        elif sys.argv[1] == "--sync": PITCH_SYNC = int(sys.argv[2])
         else: ENV_WAVE = int(sys.argv[2])
         del sys.argv[1:3]
     out = sys.argv[1]
