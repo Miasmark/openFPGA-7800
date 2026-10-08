@@ -185,6 +185,24 @@ A clip of Juno First saying its title is clean too (the game silences
 everything else for that one phrase) but sounds quite different: its
 codes (above) hold and bend the vowels with repeats and pitch steps.
 
+## Which AtariVox games the core can run
+
+Several AtariVox games are ARM cartridges, which the Pocket build leaves out
+until DARIA (`NO_ARM_MAPPER`; they get the unsupported-cartridge screen):
+
+| Game (Champ Games demo ROMs) | Scheme | Runs today |
+|---|---|---|
+| Juno First | plain bank switching | Yes |
+| Stratovox | DPC+ | No: needs DARIA |
+| Wizard of Wor Arcade | CDFJ (detected as CDF) | No: needs DARIA |
+| Gorf Arcade | CDFJ | No: needs DARIA |
+| rubyQ | CDFJ (ELF) | No: needs DARIA |
+
+Their phrase tables can still be read from the ROMs (above), but their speech
+can't be logged in simulation until DARIA. So the AtariVox's usefulness on
+the Pocket depends on DARIA too, beyond homebrews on plain bank switching
+(Juno First, the speech testers).
+
 ## The plan
 
 | Step | What | FPGA cost |
