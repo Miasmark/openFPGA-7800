@@ -65,6 +65,10 @@ c25~core~core~jexp <= opc.c.cjmp ? (jexp + 13'd1) : (a_in + 13'd1);~jexp <= opc.
 c26~core~core~wire        s_par = opc.c.dpar & (pptr < 4'd4);~wire        s_par = opc.c.dpar & (pptr < 4'd8);~params 4-7 written into word $10
 c27~core~core~wire act_svc = (at_svc | (pend_c == PC_SVC)) & rdS_r;~wire act_svc = at_svc;~service latch takes stale clamps (F4)
 c28~core~core~if (k[2]) wf <= win;~if (k[3]) wf <= win;~window flag from the wrong word
+c29~core~core~else if (s_fire | pclk1)~else if (s_fire)~S post write not dropped at pclk1 (fires a cycle late after a release)
+c30~core~core~else if (act_dsw | act_dsp | act_svc | pclk1)~else if (act_dsw | act_dsp | act_svc)~DSWRITE/DSPTR/service not dropped at pclk1
+c31~core~core~else if (r_fire | pclk1)~else if (r_fire)~PUSH/WRITE byte not dropped at pclk1
+c32~core~core~assign a_pend_late  = pclk1 & !rcyc & ~assign a_pend_late  = pclk1 & ~a_pend_late without rcyc (fires in a release cycle)
 EOF
 
 ids=("$@")

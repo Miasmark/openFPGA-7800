@@ -22,7 +22,14 @@
 // increment tables included); the map built by cdf_fastjump_table from the
 // image through its load port; the state RAM cleared (F6). Inside an epoch:
 // a console reset (F6 emulated), a live scheme switch at an E0, a 7800-mode
-// interval (driver_run 0), a non-ARM scheme interval.
+// interval (driver_run 0), a non-ARM scheme interval. After them, one DPC+
+// and one CDF release epoch: +rrel console resets, each released in the
+// pclk0 clock of a cycle that commits a post action waiting for a read
+// (DFxDATA/DATAW/FRACDATA, PUSH, WRITE; DSWRITE, DSPTR), so that the action
+// is set with its ready flag at 0 (E3_rtl_issues.md issue 1). The release
+// cycle's latch and words are classified (rrel) and the DPC+ fetchers
+// resynced from upstream; the action must be dropped at pclk1, a_pend_late
+// stay 0 there (rcyc) and nothing fire later (docs/daria_fe/lanes/F1_fixes.md).
 //
 // The checks (design 12.3, items 1-8):
 //  1 a2       sel_up == sel_ram_sel on every clock; aud_take == upstream's
@@ -54,13 +61,16 @@
 // Classified and repaired (counted, never failed): q26, tbl_alias (a CDFJ+
 // DSWRITE into the tables: upstream's table cache is resynced from RAM),
 // ram_wr_noaccess (an upstream PUSH/WRITE strobe in a cycle without a
-// commit: DARIA's word is resynced).
+// commit: DARIA's word is resynced), rrel (a release epoch's release cycle:
+// its latch, its words, the DPC+ fetchers).
 //
 // Plusargs: +seed=N, +cycles=N (6507 cycles, default 200000), +epoch=N
 // (cycles per epoch, default 40000), +only=all|dpc|cdf|cdf0|cdf1|cdfj|cdfjp,
 // +stop=N (failures printed), +events=0 (no reset/switch/7800 events),
-// +pg_* (phase_gen.svh). Passes iff every bad count is 0 and the coverage
-// minimums are met; $fatal otherwise.
+// +rrel=N (releases per release epoch, default 8; 0: no release epochs),
+// +rrel_len=N (cycles per release epoch, default 10000), +rrel_log=1 (a line
+// per release), +pg_* (phase_gen.svh). Passes iff every bad count is 0 and
+// the coverage minimums are met; $fatal otherwise.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -85,6 +95,10 @@ module tb_fe_core;
 	int     stop_n    = 20;
 	int     events    = 1;
 	int     formula   = 1;               // 0: skip the checks that restate an RTL formula (mutation runs)
+	int     n_rrel    = 8;               // releases per release epoch (0: no release epochs)
+	int     rrel_len  = 10000;           // cycles per release epoch
+	int     rrel_mode = 0;               // the epoch being run: 0 normal, 1 DPC+ release, 2 CDF release
+	int     rrel_log  = 0;               // +rrel_log=1: a line per release
 
 	logic [31:0] rs = 32'h1234_5678;
 	function automatic int unsigned rnd(input int unsigned n);
@@ -389,6 +403,10 @@ module tb_fe_core;
 	int     aud_cap_w = 0;
 	bit     aud_cap_cls = 1'b0;
 	bit     cyc_rst = 1'b0;              // cart_reset (or a non-ARM scheme) in this cycle: no state compare
+	bit     cyc_rrel = 1'b0;             // cart_reset fell in this cycle's pclk0 clock (a release epoch)
+	bit     rrel_bias = 1'b0;            // the bus stream: post-action registers and ROM reads, alternating
+	bit     rrel_alt = 1'b0;
+	bit     rrel_sync_q = 1'b0;          // copy upstream's DPC+ fetchers into the state RAM at the negedge
 	bit     cur_dalias = 1'b0;           // DARIA's ev_tbl_alias in this cycle
 	longint cls_clk = -100;              // the last classified event (q26, repair, short commit)
 
@@ -401,6 +419,8 @@ module tb_fe_core;
 	longint c_short = 0, c_dout_short = 0, c_steal = 0, c_q26 = 0, c_q26_rep = 0, c_alias = 0;
 	longint c_noacc = 0, c_aud_cls = 0, c_switch = 0, c_reset = 0, c_7800 = 0, c_other = 0, c_rst_skip = 0;
 	longint c_p32_rst = 0;
+	longint c_rrel = 0, c_rrel_dout = 0, c_rrel_words = 0, v_rrel_drop = 0;
+	longint v_rrel_k [0:3] = '{0, 0, 0, 0};    // releases in DFxDATA-type reads, PUSH/WRITE, DSWRITE, DSPTR
 	longint v_cmp_state = 0, n_hold = 0;
 	bit     hold_on = 1'b0;              // fe_do must hold the latched byte (C ... the next E0+2)
 	logic [7:0] hold_v = 8'h00;               // a_p32_late's formula true after a reset inside a DSWRITE cycle
@@ -437,7 +457,21 @@ module tb_fe_core;
 		logic [7:0] d;
 		d = rnd8();
 		w = 1'b0;                            // 0: read
-		if (fresh > 0) begin
+		if (rrel_bias) begin                 // a release epoch's reset: every other access is one whose
+			rrel_alt = !rrel_alt;            // post action waits for a read (DFxDATA/DATAW/FRACDATA,
+			if (!rrel_alt)                   // PUSH, WRITE; DSWRITE, DSPTR), the others plain ROM reads,
+				a = {1'b1, 12'h100 + 12'(rnd(12'hE00))};       // so that a stranded action is not
+			else if (is_dpc) begin                              // repeated by the next cycle (no CALLFN)
+				if (rnd(2) == 0) a = 13'h1008 + 13'(rnd(24));
+				else begin
+					w = 1'b1;
+					a = (rnd(2) == 0) ? (13'h1060 + 13'(rnd(8))) : (13'h1078 + 13'(rnd(8)));
+				end
+			end else begin
+				w = 1'b1;
+				a = 13'h1FF0 + 13'(rnd(2));
+			end
+		end else if (fresh > 0) begin
 			fresh--;
 			if (is_dpc) begin a = 13'h1058; w = 1'b1; d = 8'h00; end
 			else begin a = 13'h1FF2; w = 1'b1; d = {rnd8() & 8'hF0}; end
@@ -686,6 +720,11 @@ module tb_fe_core;
 				else begin n_assert++; fail("assert", "a_p32_late", 1, 0); end
 			end
 			if (u_core.a_pend_late) begin n_assert++; fail("assert", "a_pend_late", 1, 0); end
+			// the post actions' set never meets their pclk1 clear (every set needs commit)
+			if (commit && pclk1) begin n_assert++; fail("assert", "commit in a pclk1 clock", 1, 0); end
+			// a release cycle's action dropped at pclk1 (rcyc masks a_pend_late there)
+			if (pclk1 && u_core.rcyc && !rst_fe && ((u_core.pend_c != PC_NONE) || u_core.pend_s || u_core.pend_r))
+				v_rrel_drop++;
 			if (u_core.a_fpjr) begin n_assert++; fail("assert", "a_fpjr", 1, 0); end
 			// the port formulas of 1.4/3.1 (restated; off in mutation runs)
 			if (formula) begin
@@ -750,6 +789,7 @@ module tb_fe_core;
 				if (!access) v_hidden++;
 				if (fe_do !== up_byte) begin
 					if (short_now) c_dout_short++;
+					else if (cyc_rrel) c_rrel_dout++;      // the release cycle read under rst_fe
 					else if (!access) begin n_dout_hidden++; fail("dout", "fe_do (hidden pclk0)", fe_do, up_byte); end
 					else begin n_dout++; fail("dout", "fe_do", fe_do, up_byte); end
 				end
@@ -842,10 +882,17 @@ module tb_fe_core;
 				if (cur_alias != cur_dalias && !cyc_short) begin n_alias_bad++; fail("misc", "tbl_alias: one side only", cur_dalias, cur_alias); end
 				// 4: the words written in this cycle
 				if (cur_alias) tab_sync_q = 1'b1;
-				foreach (touched[i]) cmp_word(touched[i], cur_q26 || (cyc_short && 0), cur_q26 ? "q26" : "written");
+				// a release cycle: upstream did the access, daria_fe dropped its post action
+				// (lanes/F1_fixes.md 1): its words are repaired, the DPC+ fetchers resynced
+				if (cyc_rrel) begin
+					foreach (touched[i]) if (dword(touched[i]) !== xword(touched[i])) c_rrel_words++;
+					foreach (up_wr_words[i]) if (dword(up_wr_words[i]) !== xword(up_wr_words[i])) c_rrel_words++;
+					if (is_dpc) rrel_sync_q = 1'b1;
+				end
+				foreach (touched[i]) cmp_word(touched[i], cur_q26 || cyc_rrel, cur_q26 ? "q26" : "written");
 				foreach (up_wr_words[i]) begin
 					if (!cyc_commit && dword(up_wr_words[i]) !== xword(up_wr_words[i])) c_noacc++;
-					cmp_word(up_wr_words[i], !cyc_commit, "upstream strobe");
+					cmp_word(up_wr_words[i], !cyc_commit || cyc_rrel, "upstream strobe");
 				end
 				if (wbq_v != 0) begin n_misc++; fail("misc", "writeback still due at E0", 1, 0); end
 				if (cur_q26) c_q26_rep += repair_words.size();
@@ -873,6 +920,7 @@ module tb_fe_core;
 				cur_alias  = 1'b0;
 				cur_dalias = 1'b0;
 				cyc_rst    = 1'b0;
+				cyc_rrel   = 1'b0;
 			end
 			if (cart_reset || !(is_dpc | is_cdf) || scheme != scheme_q) cyc_rst = 1'b1;
 		end
@@ -950,6 +998,24 @@ module tb_fe_core;
 				up_tab.increment_ram.mem_q[i] = xword(int'(ib_now()) + i);
 			end
 			tab_sync_q = 1'b0;
+		end
+		// after a DPC+ release cycle: upstream's fetchers and parameters into the state RAM
+		// (the fields cmp_state compares; the other bits stay)
+		if (rrel_sync_q) begin
+			for (int i = 0; i < 8; i++) begin
+				logic [31:0] w0, w1;
+				w0 = u_mem.state_ram.mem_q[2*i];
+				w1 = u_mem.state_ram.mem_q[2*i+1];
+				w0[11:0]  = up_dpc.counter[i];
+				w0[23:16] = up_dpc.top[i];
+				w0[31:24] = up_dpc.bottom[i];
+				w1[19:0]  = up_dpc.fractional[i];
+				w1[31:24] = up_dpc.increment[i];
+				u_mem.state_ram.mem_q[2*i]   = w0;
+				u_mem.state_ram.mem_q[2*i+1] = w1;
+			end
+			for (int b = 0; b < 4; b++) u_mem.state_ram.mem_q[16][8*b +: 8] = up_dpc.params[b];
+			rrel_sync_q = 1'b0;
 		end
 	end
 
@@ -1059,7 +1125,7 @@ module tb_fe_core;
 		int r;
 		string o;
 		int off;
-		o = only;
+		o = (rrel_mode == 1) ? "dpc" : ((rrel_mode == 2) ? "cdf" : only);
 		off = -1;
 		r = (epoch + seed) % 10;
 		if (o == "all") begin
@@ -1102,6 +1168,47 @@ module tb_fe_core;
 		while (ep_cyc < target) @(posedge clk);
 	endtask
 
+	// A console reset released inside a cycle that commits a post action whose data needs
+	// a read (E3_rtl_issues.md issue 1; lanes/F1_fixes.md 1). cart_reset rises at a k[2] with
+	// driver_run 0 (as event 0), the stream turns to post-action registers, driver_run comes
+	// back at a k[2], and cart_reset falls in the pclk0 clock of such a cycle at E0+5 or
+	// later: its k[1]-k[4] reads ran under rst_fe, so the commit at C sets an action whose
+	// ready flag stays 0. Upstream (out of reset at C) does the access. The cycle's latch
+	// and words are classified (rrel), the DPC+ fetchers resynced from upstream at the next
+	// negedge; a_pend_late must stay 0 (rcyc) and nothing may fire in a later cycle.
+	task automatic rrel_event();
+		int n;
+		@(negedge clk);
+		while (!k[2]) @(negedge clk);
+		driver_run = 1'b0;
+		cart_reset = 1'b1;
+		rrel_bias  = 1'b1;
+		repeat (10 + rnd(40)) @(negedge clk);
+		load_memories(1'b0);
+		repeat (2) @(negedge clk);
+		while (!k[2]) @(negedge clk);
+		driver_run = 1'b1;
+		n = 0;
+		forever begin
+			@(negedge clk);
+			if (pclk0 && access && a_in[12] && e0n >= 5 &&
+			    (is_dpc ? (u_core.opc.c.rdat | u_core.opc.c.dpw) : (u_core.opc.c.cdsw | u_core.opc.c.cdsp))) break;
+			n++;
+			if (n > 20000) $fatal(1, "tb_fe_core: no post-action cycle to release in");
+		end
+		cart_reset = 1'b0;
+		rrel_bias  = 1'b0;
+		cyc_rrel   = 1'b1;
+		cls_clk    = clk_n;
+		c_rrel++;
+		if (u_core.opc.c.rdat) v_rrel_k[0]++;
+		if (u_core.opc.c.dpw)  v_rrel_k[1]++;
+		if (u_core.opc.c.cdsw) v_rrel_k[2]++;
+		if (u_core.opc.c.cdsp) v_rrel_k[3]++;
+		if (rrel_log) $display("rrel: release at clk %0d, a_in %h rw %b e0n %0d", clk_n, a_in, rw, e0n);
+		fresh = 2;
+	endtask
+
 	// one epoch: reset, a new image and RAM, run, events
 	task automatic run_epoch(input longint n);
 		longint done, ev_at, ev_len;
@@ -1130,8 +1237,9 @@ module tb_fe_core;
 		cyc_rst = 1'b0; touched.delete(); up_wr_words.delete(); wb_pending = 1'b0;
 		checking = 1'b1;
 		ep_cyc = 0;
-		// events: one of reset, switch, 7800 mode, non-ARM scheme, somewhere in the epoch
-		ev = events ? ((epoch + seed) % 5) : 4;
+		// events: one of reset, switch, 7800 mode, non-ARM scheme, somewhere in the epoch;
+		// a release epoch runs only its releases
+		ev = (rrel_mode != 0) ? 5 : (events ? ((epoch + seed) % 5) : 4);
 		ev_at = longint'(rnd(32'(n / 2))) + n / 4;
 		ev_len = 20 + longint'(rnd(200));
 		run_cycles(ev_at);
@@ -1168,6 +1276,12 @@ module tb_fe_core;
 				@(negedge clk);
 				while (!k[2]) @(negedge clk);
 				driver_run = 1'b1;
+			end
+			5: begin                                     // releases inside a post-action cycle
+				for (int i = 0; i < n_rrel; i++) begin
+					rrel_event();
+					run_cycles(200 + longint'(rnd(400)));
+				end
 			end
 			3: begin                                     // a non-ARM scheme (CDF only: DPC+ fetchers would be live_override)
 				if (is_cdf) begin
@@ -1210,6 +1324,9 @@ module tb_fe_core;
 		void'($value$plusargs("stop=%d", stop_n));
 		void'($value$plusargs("events=%d", events));
 		void'($value$plusargs("formula=%d", formula));
+		void'($value$plusargs("rrel=%d", n_rrel));
+		void'($value$plusargs("rrel_len=%d", rrel_len));
+		void'($value$plusargs("rrel_log=%d", rrel_log));
 		rs = 32'h9E37_79B9 ^ (32'(seed) * 32'h85EB_CA6B);
 		if (rs == 0) rs = 32'd1;
 		for (int i = 0; i < 16; i++) v_cls[i] = 0;
@@ -1222,6 +1339,12 @@ module tb_fe_core;
 			n = (left < epoch_len) ? left : epoch_len;
 			run_epoch(n);
 			left -= n;
+		end
+		// after the rotation (so its streams are unchanged): one DPC+ and one CDF release epoch
+		if (n_rrel > 0) begin
+			rrel_mode = 1; run_epoch(rrel_len);
+			rrel_mode = 2; run_epoch(rrel_len);
+			rrel_mode = 0;
 		end
 		report();
 	end
@@ -1248,6 +1371,8 @@ module tb_fe_core;
 			v_rst_cr, v_rst_sw, v_rst_oth, n_rst, c_reset, c_switch, c_7800, c_other, c_rst_skip);
 		$display("  classified: short_phase1 cycles %0d (dout %0d, grant_steal %0d, audio %0d), q26 %0d (words repaired %0d), tbl_alias %0d, ram_wr_noaccess %0d; a_p32_late's formula under a reset %0d",
 			c_short, c_dout_short, c_steal, c_aud_cls, c_q26, c_q26_rep, c_alias, c_noacc, c_p32_rst);
+		$display("  releases inside a post-action cycle (rrel) %0d (DFx reads %0d, PUSH/WRITE %0d, DSWRITE %0d, DSPTR %0d): actions dropped at pclk1 %0d, latches classified %0d, words repaired %0d",
+			c_rrel, v_rrel_k[0], v_rrel_k[1], v_rrel_k[2], v_rrel_k[3], v_rrel_drop, c_rrel_dout, c_rrel_words);
 		$display("  state compares %0d", v_cmp_state);
 		$display("  bad: hold %0d a2 %0d grant %0d dout %0d dout_hidden %0d state %0d ram %0d land %0d aud %0d jok %0d jmap %0d fix %0d assert %0d svc %0d dma %0d call %0d note %0d wave %0d dig %0d src %0d alias %0d misc %0d (total %0d)",
 			n_hold, n_a2, n_grant, n_dout, n_dout_hidden, n_state, n_ram, n_land, n_aud, n_jok, n_jmap, n_fix, n_assert, n_svc, n_dma,
@@ -1260,6 +1385,7 @@ module tb_fe_core;
 			if (v_sch[2] + v_sch[3] + v_sch[4] + v_sch[5] > 0 && (v_cls[5] < 100 || v_cls[4] < 20 || v_cls[3] < 50 || v_cls[2] < 50 || v_aud < 1000 || v_jok1 < 10)) feat = 0;
 			if (pg.k_busy > 0 && (v_held_cyc < 100 || v_hidden < 100)) feat = 0;   // no stalls in "nominal"
 		end
+		if (n_rrel > 0 && (c_rrel != 2 * n_rrel || v_rrel_drop != c_rrel)) feat = 0;  // every release strands its action
 		if (feat == 0) $display("tb_fe_core: a coverage minimum was not met");
 		if (bad != 0 || feat == 0) $fatal(1, "tb_fe_core: FAIL (%0d bad)", bad);
 		$display("tb_fe_core: PASS");

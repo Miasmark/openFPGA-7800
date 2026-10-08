@@ -20,7 +20,8 @@
 //         service latch) if its data is ready, else in the first clock it
 //         is (pend_c); kind 3 (S and R post writes) from the clock after C
 //         once ready (pend_s, pend_r). The pointer buffer drains on wb_gnt
-//         once rdW.
+//         once rdW. A deferred action still pending at the next pclk1 is
+//         dropped there (only a cycle in which rst_fe falls can leave one).
 // Every rule is the design's 2.3/2.4; the register reference of 2.4 is the
 // table each always_ff block below follows (D10: one load enable and at most
 // four data sources per register, AND-OR one-hot selects).
@@ -286,6 +287,14 @@ module daria_fe_core (
 	wire [7:0] d_act = commit ? d_in : din;                       // din once deferred
 	assign rdS = rdS_r;
 
+	// The post actions (pend_c here, pend_s and pend_r below): reset first, then
+	// the set at C, then the clear when the action fires or at pclk1. Every set
+	// needs commit, and commit (a pclk0 clock) never shares a clock with pclk1,
+	// so the set's priority over the pclk1 clear never decides anything. Outside
+	// a reset every action has fired before pclk1 (a_pend_late), so the pclk1
+	// clear only drops an action whose cycle ran its reads under rst_fe, which
+	// would otherwise fire in a later cycle with that cycle's W
+	// (docs/daria_fe/lanes/F1_fixes.md, 1).
 	always_ff @(posedge clk_sys) begin
 		if (rst_fe)
 			pend_c <= PC_NONE;
@@ -295,7 +304,7 @@ module daria_fe_core (
 			pend_c <= PC_DSP;
 		else if (at_svc & !rdS_r)
 			pend_c <= PC_SVC;
-		else if (act_dsw | act_dsp | act_svc)
+		else if (act_dsw | act_dsp | act_svc | pclk1)
 			pend_c <= PC_NONE;
 	end
 
@@ -497,7 +506,7 @@ module daria_fe_core (
 			pend_s <= 1'b0;
 		else if (s_set)
 			pend_s <= 1'b1;
-		else if (s_fire)
+		else if (s_fire | pclk1)
 			pend_s <= 1'b0;
 		if (s_set) begin
 			sw_a  <= ({5{opc.c.rdat}} & {1'b0, opc.ix, opc.fn == 3'd3})
@@ -524,7 +533,7 @@ module daria_fe_core (
 			pend_r <= 1'b0;
 		else if (commit & opc.c.dpw)
 			pend_r <= 1'b1;
-		else if (r_fire)
+		else if (r_fire | pclk1)
 			pend_r <= 1'b0;
 	end
 
@@ -607,11 +616,20 @@ module daria_fe_core (
 	end
 
 	// ---- events and assertions (1.7, 9.6) --------------------------------------------------------
+	// rcyc: this 6507 cycle ran some of its k reads under rst_fe. Set while rst_fe
+	// is high, cleared at the first pclk1 with rst_fe low. Only a_pend_late reads
+	// it (synthesis removes both): the cycle in which rst_fe falls may commit an
+	// action whose ready flag was held at 0, and that action is dropped at pclk1.
+	logic       rcyc;
+	always_ff @(posedge clk_sys) begin
+		if (rst_fe)     rcyc <= 1'b1;
+		else if (pclk1) rcyc <= 1'b0;
+	end
 	assign ev_guard_sup = guard_on & (cr_fix | cr_p32);
 	assign ev_tbl_alias = act_dsw & jplus & (dsw_addr >= 15'h0098) & (dsw_addr < 15'h01B0);
 	assign ev_rmw_svc   = dma_set & dma_busy;
 	assign a_fpjr       = is_cdf & fpend & (jr != 2'd0);
-	assign a_pend_late  = pclk1 & ((pend_c != PC_NONE) | pend_s | pend_r);
+	assign a_pend_late  = pclk1 & !rcyc & ((pend_c != PC_NONE) | pend_s | pend_r);
 endmodule
 
 `default_nettype wire
