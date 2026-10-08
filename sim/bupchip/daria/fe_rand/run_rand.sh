@@ -11,6 +11,16 @@
 #   TAG=name   the run directory's prefix (default fe, self, fe_poison, ...)
 #   VFLAGS     more Verilator options (a separate object directory per set)
 #   MUT_DIR    a directory whose daria_*.sv files replace the tree's (mut_rand.sh)
+#   SKIP_DONE=1  skip a seed whose log already has a verdict on this build stamp
+#   STAMP_ONLY=1 print the build's name and stamp, and exit (nothing is built or run)
+#
+# The build stamp is a hash of the Verilator version, the options other than
+# paths (the defines, VFLAGS), the sources' file names and every source file's
+# content (the bench, the RTL or MUT_DIR's copies, phase_gen.svh). No path goes
+# into it, so the same sources give the same stamp in any checkout and WORK.
+# Each log starts with "run_rand: build <name> stamp <stamp>" and ends with
+# "run_rand: verdict PASS|FAIL (...) stamp <stamp> args <plusargs hash>", so a campaign never mixes
+# builds and a restarted one skips what it already has (SKIP_DONE=1).
 #
 # Builds go to $WORK/obj_<build>, runs to $WORK/runs/<TAG>_s<seed>.log, where
 # WORK defaults to sim/work/bupchip/daria/fe_rand. A run passes iff its binary
@@ -62,10 +72,21 @@ SRCS+=("$HERE/tb_fe_rand.sv")
 for f in "${SRCS[@]}"; do [ -f "$f" ] || { echo "run_rand.sh: missing $f" >&2; exit 2; }; done
 
 OBJ="$WORK/obj_$BUILD"
+# the options without paths (they and the sources' names and contents make the stamp)
 # shellcheck disable=SC2206
-ARGS=(--binary --timing -j 2 -O3 -MAKEFLAGS "OPT_FAST=-O2 OPT_GLOBAL=-O2" -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN
-	"-I$HERE" "-I$HERE/../fe_unit" --top-module tb_fe_rand "${DEFS[@]}" $VFLAGS -Mdir "$OBJ" -o vtb "${SRCS[@]}")
-SIG="$("$VERILATOR" --version) ${ARGS[*]}"
+OPTS=(--binary --timing -j 2 -O3 -MAKEFLAGS "OPT_FAST=-O2 OPT_GLOBAL=-O2" -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN
+	--top-module tb_fe_rand "${DEFS[@]}" $VFLAGS -o vtb)
+ARGS=("${OPTS[@]}" "-I$HERE" "-I$HERE/../fe_unit" -Mdir "$OBJ" "${SRCS[@]}")
+SIG="$("$VERILATOR" --version) ${ARGS[*]}"          # the rebuild test (paths included)
+NAMES=()
+for f in "${SRCS[@]}"; do NAMES+=("$(basename "$f")"); done
+STAMP="$( { "$VERILATOR" --version; echo "${OPTS[*]}"; echo "${NAMES[*]} phase_gen.svh";
+	cat "${SRCS[@]}" "$HERE/../fe_unit/phase_gen.svh"; } | md5sum | cut -c1-12)"
+if [ "${STAMP_ONLY:-0}" != 0 ]; then
+	echo "run_rand: build $BUILD stamp $STAMP"
+	exit 0
+fi
+AH="$(echo "${PLUS[*]}" | md5sum | cut -c1-6)"   # the plusargs: a verdict counts only for the same ones
 LOCK="$WORK/.build_$BUILD.lock"
 (
 	flock 9
@@ -85,16 +106,29 @@ LOCK="$WORK/.build_$BUILD.lock"
 ) 9> "$LOCK" || exit 3
 
 run_one() {
-	local s="$1" log="$WORK/runs/${TAG}_s$1.log" st t0
+	local s="$1" log="$WORK/runs/${TAG}_s$1.log" st t0 v
+	if [ "${SKIP_DONE:-0}" != 0 ] && [ -f "$log" ]; then
+		v=$(grep -E "^run_rand: verdict (PASS|FAIL) .* stamp $STAMP args $AH\$" "$log" | tail -1)
+		if [ -n "$v" ]; then
+			echo "SKIP $TAG seed $s (done on stamp $STAMP: $(echo "$v" | cut -d' ' -f3))"
+			grep -E "^tb_fe_rand: [0-9]+ epochs|^  bad:" "$log" | cut -c1-400 | sed 's/^/  /'
+			echo "$v" | grep -q "verdict PASS"
+			return $?
+		fi
+	fi
 	t0=$(date +%s)
-	timeout "${TIMEOUT:-1800}" nice -n 10 "$OBJ/vtb" +seed="$s" +pg_seed="$s" "${PLUS[@]}" > "$log" 2>&1
+	echo "run_rand: build $BUILD stamp $STAMP tag $TAG seed $s args ${PLUS[*]}" > "$log"
+	timeout "${TIMEOUT:-1800}" nice -n 10 "$OBJ/vtb" +seed="$s" +pg_seed="$s" "${PLUS[@]}" >> "$log" 2>&1
 	st=$?
 	if [ $st = 0 ]; then
 		echo "PASS $TAG seed $s ($(( $(date +%s) - t0 )) s)"
+		echo "run_rand: verdict PASS (exit 0, $(( $(date +%s) - t0 )) s) stamp $STAMP args $AH" >> "$log"
 	else
 		local why="exit $st"
 		[ $st = 124 ] && why="timeout"
 		echo "FAIL $TAG seed $s ($why, $(( $(date +%s) - t0 )) s, $log)"
+		# a timeout is no verdict: a restarted campaign runs the seed again
+		[ $st = 124 ] || echo "run_rand: verdict FAIL ($why, $(( $(date +%s) - t0 )) s) stamp $STAMP args $AH" >> "$log"
 	fi
 	grep -E "^tb_fe_rand: [0-9]+ epochs|^  bad:" "$log" | cut -c1-400 | sed 's/^/  /'
 	return $st
@@ -110,5 +144,5 @@ for s in "${SEEDS[@]}"; do
 	pids+=($!)
 done
 for p in "${pids[@]}"; do wait "$p" || fail=$((fail + 1)); done
-echo "run_rand: $(( ${#SEEDS[@]} - fail )) of ${#SEEDS[@]} passed ($TAG)"
+echo "run_rand: $(( ${#SEEDS[@]} - fail )) of ${#SEEDS[@]} passed ($TAG, build $BUILD stamp $STAMP)"
 [ $fail = 0 ]

@@ -58,20 +58,33 @@
 //         once both sides are quiet
 //   I1/I2 the cart RAM and the tables at the first edge both inits are done
 //   T1/T2 the tick on the same edge; counters and frequencies every clock
-//   A1    every audio register every clock, outside the class masks
+//   A1    every audio register every clock, outside the class masks; at each
+//         sample capture on an unpaused edge, the lane registers ("A1 lane":
+//         any difference outside pause_lane's exact form fails); after a
+//         dig_rom_lag mask alone, the sum and AMPLITUDE at the resync
+//         (dig_val_bad: that class allows timing, not a value)
+//   T4    each remote sample request's address
 //   A2    sel_up == sel_ram_sel every clock; A3 one owner per port, crb_use
+//   rcyc  u_core.rcyc against the bench's own model every clock (rcyc_bad)
+//   rel_e0  daria_fe's arm_dma_busy/arm_call_busy never fall at a pclk1 edge
+//   rst_release's two forms at every release cycle: design 9.5's edge form,
+//         from the bench's own rst_fe and the bus, against the observed form
+//         the class counts (ef_pred_only, ef_obs_only, ef_kind_bad)
 //   the RTL assertions of 9.6 and the upstream-side ones (wb_drop, over32k,
 //   ram_wr_noaccess), ret_unasked, commit_on_hidden, det_lock_a
 // Classes (design 9.5), counted and resynced: short_phase1 (short_dout, q26
 // repaired, grant_steal), merge_amp, ret_late / merge_race, dig_rom_lag,
 // svc_audio_race, tbl_alias (upstream's table copy resynced from its RAM, as
 // the ARM would rewrite it), rmw_call (rmw_seed, rmw_merge), rmw_svc,
-// size_over32k, p32_reset (a_p32_late under a console reset: lane A O-1),
-// pause_lane (F1_fixes.md 2: a capture right after a paused grant whose last unpaused edge
-// had the select high, each lane register holding what it loaded there; it masks the sum and
-// AMPLITUDE only; any other lane difference is audio_bad), rst_release (F1_fixes.md 1: rcyc at
-// a pclk1 with a post action pending; resynced from upstream: the fetcher word, the written
-// byte, P32, a dropped service's range).
+// size_over32k, pause_lane (F1_fixes.md 2: a capture right after a paused grant whose last
+// unpaused edge had the select high, each lane register holding what it loaded there; it
+// masks the sum and AMPLITUDE only; any other lane difference is audio_bad), rst_release
+// (F1_fixes.md 1: rcyc at a pclk1 with a post action pending; resynced from upstream: the
+// fetcher word, the written byte, P32, a dropped service's range).
+// Not design 9.5 classes, the bench's own classifications (E3_random.md 3.1): p32_reset
+// (a_p32_late in a cycle with a console reset: lane A O-1), collide_reset (a_collide with
+// rst_fe high, E3_rtl_issues.md note 4), held_svc_race (an L1 difference at a RAM read
+// during a service burst, E3_rtl_issues.md note 3; expected 0).
 //
 // Plusargs: +seed=N +cycles=N (6507 cycles, default 400000) +epoch=N (50000)
 // +only=all|dpc|cdf|dpc0|dpc1|cdf0|cdf1|cdfj|cdfjp +hook=0|1|2 (2: per epoch)
@@ -430,6 +443,9 @@ module tb_fe_rand;
 	function automatic logic b_sum_amp_eq();
 		return `BA.sample_sum[7:0] == `UA.sample_sum[7:0] && `BA.amplitude == `UA.amplitude;
 	endfunction
+	function automatic string b_sum_amp_str();
+		return $sformatf("%02x/%02x", `BA.sample_sum[7:0], `BA.amplitude);
+	endfunction
 	wire b_svc_pend = u_b.dpcplus.service_pending;
 	wire b_svc_run  = u_b.arm_dma_busy && !u_b.mapper_init_busy;
 	wire b_svc_hold = u_b.dpcplus.service_pending;
@@ -652,6 +668,9 @@ module tb_fe_rand;
 	endfunction
 	function automatic logic b_sum_amp_eq();
 		return u_fe.u_audio.ssum == `UA.sample_sum[7:0] && u_fe.u_audio.amplitude == `UA.amplitude;
+	endfunction
+	function automatic string b_sum_amp_str();
+		return $sformatf("%02x/%02x", u_fe.u_audio.ssum, u_fe.u_audio.amplitude);
 	endfunction
 	wire b_svc_pend = u_fe.u_core.svc_pend;
 	wire b_svc_run  = u_fe.u_copy.run;
@@ -884,7 +903,7 @@ module tb_fe_rand;
 			smp_left <= slat_min + int'(rnd(slat_max - slat_min + 1));
 		end else if (smp_left > 0) smp_left <= smp_left - 1;
 		else if (smp_left == 0) begin
-			smp_data <= img[smp_a[15:0]];
+			smp_data <= img[smp_a[15:0]] ^ ((inj == 7 && inj_done) ? 8'h11 : 8'h00);   // self-test fault 7
 			smp_ack <= ~smp_ack;
 			smp_left <= -1;
 		end
@@ -1131,7 +1150,8 @@ module tb_fe_rand;
 		// failures (must be 0)
 		B_DOUT, B_STATE, B_PTR, B_WBLAG, B_RAM, B_FULL, B_K1, B_CALL, B_SVC, B_SVC_RAM, B_INIT, B_TICK, B_AUDIO,
 		B_A2, B_A3, B_ASSERT, B_A_P32, B_RET_UNASKED, B_COMMIT_HID, B_DET_LOCK, B_WB_DROP, B_OVER32K,
-		B_NOACC, B_SEED_RACE, B_AMP, B_DIG, B_BENCH, B_INIT_NEVER, B_HID_LAST, B_RCYC,
+		B_NOACC, B_SEED_RACE, B_AMP, B_DIG, B_BENCH, B_INIT_NEVER, B_HID_LAST, B_RCYC, B_REL_E0,
+		B_EF_PRED, B_EF_OBS, B_EF_KIND, B_DIG_VAL,
 		// classes and information
 		I_CYCLES, I_COMMITS, I_LATCH, I_HIDDEN, I_DOUT_HID, I_SHORT, I_SHORT_DOUT, I_Q26, I_STEAL, I_MERGE_AMP,
 		I_RET_LATE, I_MERGE_RACE, I_DIG_LAG, I_SVC_RACE, I_TBL_ALIAS, I_RMW_CALL, I_RMW_SEED, I_RMW_MERGE,
@@ -1140,7 +1160,7 @@ module tb_fe_rand;
 		I_AMP_CLASS, I_DROP_UP, I_DROP_B, I_GRANTS, I_PZ_GRANTS, I_DIG_LOCAL, I_DIG_REMOTE, I_DIG_RAM, I_DIG_NONE,
 		I_NOTES, I_HELD, I_PAUSE_CLK, I_HOT, I_PU, I_CRB_USE, I_WB_P32, I_YIELD3, I_PAUSE_LANE, I_COLL_RST, I_HELD_SVC,
 		I_PZ_CAP, I_PZ_SEL, I_PL_LONG, I_REL_CYC, I_RST_REL, I_RR_DFX, I_RR_PW, I_RR_SVC, I_RR_DSW, I_RR_DSP, I_RR_EXTRA,
-		I_RR_AUD, I_RR_DOUT,
+		I_RR_AUD, I_RR_DOUT, I_EF_BOTH, I_EF_NONE, I_DIG_VAL_N, I_RR_RMW2, I_RR_NEXT0, I_PZ_SEL_EQ, I_LANE_MASKED,
 		C_N
 	} cnt_t;
 	string  nm [C_N];
@@ -1155,7 +1175,7 @@ module tb_fe_rand;
 		nm[B_DET_LOCK] = "det_lock_a"; nm[B_WB_DROP] = "wb_drop"; nm[B_OVER32K] = "over32k";
 		nm[B_NOACC] = "ram_wr_noaccess"; nm[B_SEED_RACE] = "seed_race"; nm[B_AMP] = "amp_lag";
 		nm[B_DIG] = "dig_bad"; nm[B_BENCH] = "bench_bad"; nm[B_INIT_NEVER] = "init_never_busy";
-		nm[B_HID_LAST] = "hidden_last_bad"; nm[B_RCYC] = "rcyc_bad";
+		nm[B_HID_LAST] = "hidden_last_bad"; nm[B_RCYC] = "rcyc_bad"; nm[B_REL_E0] = "rel_e0";
 		nm[I_CYCLES] = "cycles"; nm[I_COMMITS] = "commits"; nm[I_LATCH] = "latches"; nm[I_HIDDEN] = "hidden";
 		nm[I_DOUT_HID] = "dout_hidden"; nm[I_SHORT] = "short_phase1"; nm[I_SHORT_DOUT] = "short_dout";
 		nm[I_Q26] = "q26"; nm[I_STEAL] = "grant_steal"; nm[I_MERGE_AMP] = "merge_amp"; nm[I_RET_LATE] = "ret_late";
@@ -1178,6 +1198,10 @@ module tb_fe_rand;
 		nm[I_REL_CYC] = "release_cycles"; nm[I_RST_REL] = "rst_release"; nm[I_RR_DFX] = "rr_dfx"; nm[I_RR_PW] = "rr_push_write";
 		nm[I_RR_SVC] = "rr_callfunction"; nm[I_RR_DSW] = "rr_dswrite"; nm[I_RR_DSP] = "rr_dsptr"; nm[I_RR_EXTRA] = "rr_rmw_svc";
 		nm[I_RR_AUD] = "rr_audio"; nm[I_RR_DOUT] = "rr_dout";
+		nm[I_EF_BOTH] = "ef_both"; nm[B_EF_PRED] = "ef_pred_only"; nm[B_EF_OBS] = "ef_obs_only"; nm[I_EF_NONE] = "ef_none";
+		nm[B_EF_KIND] = "ef_kind_bad"; nm[B_DIG_VAL] = "dig_val_bad"; nm[I_DIG_VAL_N] = "dig_val_checks";
+		nm[I_RR_RMW2] = "rr_rmw2"; nm[I_RR_NEXT0] = "rr_next_idle"; nm[I_PZ_SEL_EQ] = "pz_captures_sel_equal";
+		nm[I_LANE_MASKED] = "lane_masked";
 		for (int c = 0; c < C_N; c++) cnt[c] = 0;
 	end
 
@@ -1235,6 +1259,10 @@ module tb_fe_rand;
 	// the audio classes' masks and the resync (design 9.5, 12.4; E1's rules)
 	// ======================================================================================
 	logic   m_rep = 1'b0, m_cf = 1'b0;
+	// m_val: a class that may change a value masked the replica too. dig_rom_lag alone allows
+	// only timing (design 9.5: the AMPLITUDE edge, the replica offset until IDLE), so a resync
+	// after it alone first requires the sum and AMPLITUDE to agree (dig_val_bad)
+	logic   m_val = 1'b0;
 	// pause_lane (F1_fixes.md 2): its own mask m_amp leaves the sum and AMPLITUDE out of the
 	// replica compare (and counts the 6507's AMPLITUDE reads as amp_class) until both agree
 	// again, which the next refresh brings about by itself: no resync. up_gr_pz: the last clock
@@ -1249,6 +1277,7 @@ module tb_fe_rand;
 		if (strict != 0) return;
 		m_rep = 1'b1;
 		if (cf) m_cf = 1'b1;
+		if (why != "dig_rom_lag") m_val = 1'b1;
 		m_why = why;
 	endfunction
 	int     mw = 0;                      // the own-path merge window: 1 after M up to M_fe, 2 at M_fe
@@ -1265,14 +1294,24 @@ module tb_fe_rand;
 				if (rst_negs >= 2) begin
 					m_rep = 1'b0;
 					m_cf = 1'b0;
+					m_val = 1'b0;
 				end
 			end else if (mw == 0 && b_aud_quiet()) begin
+				// only dig_rom_lag masked (and no pause_lane mask is open): the refresh it offset
+				// has ended on both sides, so its value must be upstream's before the deposit
+				if (!m_val && !m_cf && !m_amp) begin
+					cnt[I_DIG_VAL_N]++;
+					if (!b_sum_amp_eq())
+						fail(B_DIG_VAL, $sformatf("dig_val: after a dig_rom_lag mask, at the resync, sum/AMPLITUDE %s, upstream %02x/%02x",
+							b_sum_amp_str(), `UA.sample_sum[7:0], `UA.amplitude));
+				end
 				b_deposit(m_cf);
 				rs_clk = clk_n;
 				if (m_cf) cnt[I_DEP_CF]++;
 				cnt[I_RESYNC]++;
 				m_rep = 1'b0;
 				m_cf = 1'b0;
+				m_val = 1'b0;
 			end
 		end
 	endtask
@@ -1351,6 +1390,35 @@ module tb_fe_rand;
 	logic   [4:0] rr_sw_a = 5'd0;
 	int           rr_bytes [$], rr_rd [$], rr_rc [$];
 	logic         rcyc_m = 1'b0;         // the bench's own rcyc: some edge since the last pclk1 had rst_fe
+	logic         rel_cyc_m = 1'b0;      // this pclk1 ends a release cycle by the bench's own model
+	// The edge form of design 9.5, evaluated at every release cycle (a pclk1 with the bench's own
+	// rcyc and rst_fe low), from the bench's own rst_fe and the bus, never from daria_fe's state:
+	// the action is stranded iff the cycle commits an access that waits for a ready flag (ef_k,
+	// decoded at C from the bus and upstream's decode: a DPC+ DFxDATA/DATAW/FRACDATA read, PUSH,
+	// WRITE, a taken CALLFUNCTION 1/2; a CDF DSWRITE or DSPTR), rst_fe is low at C and at every
+	// later edge of the cycle (pclk1's included; a reset there clears the action), and rst_fe was
+	// high at an edge E0+j with thr <= j < C (thr 4 for rdW/rdS: DFx, PUSH/WRITE, CALLFUNCTION;
+	// 3 for rdP: DSWRITE, DSPTR), j counted from E0 (the pclk1 edge, j = 0, excluded as in
+	// rcyc). It is compared with the observed form, the one the class counts (rcyc at pclk1 with
+	// an action pending): ef_both and ef_none agree; ef_pred_only, ef_obs_only and ef_kind_bad
+	// (both strand, but not the same kind) are failures.
+	int           ef_j = 0, ef_hi = -1, ef_c = -1, ef_hic = -1, ef_k = -1;
+	logic         ef_crst = 1'b0, ef_after = 1'b0;
+	function automatic int ef_kind();      // at C: the access's waiting action (RR_*), else -1
+		if (is_dpc) begin
+			if (rw) return u_up.dpcplus.ram_register_read ? RR_DFX : -1;
+			if ((a_in >= 13'h1060 && a_in <= 13'h1067) || (a_in >= 13'h1078 && a_in <= 13'h107F)) return RR_PW;
+			if (a_in == 13'h105A && (d_in == 8'd1 || d_in == 8'd2) && !u_up.dpcplus.service_pending) return RR_SVC;
+		end else if (is_cdf && !rw) begin
+			if (a_in == 13'h1FF0) return RR_DSW;
+			if (a_in == 13'h1FF1) return RR_DSP;
+		end
+		return -1;
+	endfunction
+	// rel_e0 (design 2.1, rel_ok): daria_fe's own busy outputs never fall at an edge with pclk1
+	// high (an E0), outside a reset or an init. In mode A the 6507's hold is the OR of both
+	// sides' busies on one bus, so the differential checks cannot see this; it is checked as is.
+	logic         rq_dma = 1'b0, rq_call = 1'b0, rq_p1 = 1'b0, rq_rst = 1'b0;
 	function automatic logic rr_in_rng(input logic [12:0] wa);
 		foreach (rr_rd[i]) if ({wa, 2'b11} >= 15'(rr_rd[i]) && {wa, 2'b00} < 15'(rr_rd[i] + rr_rc[i])) return 1'b1;
 		return 1'b0;
@@ -1400,7 +1468,7 @@ module tb_fe_rand;
 	// ======================================================================================
 	always @(posedge clk_sys) begin
 		string       why;
-		logic        scheme_ok, hidden, bad, aread, up_disp, b_disp, gr;
+		logic        scheme_ok, hidden, bad, aread, up_disp, b_disp, gr, rst_m;
 		logic  [7:0] uo, ud, bo, bd;
 		logic [12:0] wa;
 		logic [255:0] pu, pb;
@@ -1461,14 +1529,29 @@ module tb_fe_rand;
 		`CHK(u_fe.u_guard.locked, B_DET_LOCK, "det_lock_a: the guard locked on mode A's 5x clk_arm")
 		// rcyc against its meaning (F1_fixes.md 1): the bench's own model, from its own rst_fe
 		// (cart_reset | no DPC+/CDF | a scheme change); rst_release is counted by rcyc
-		begin
-			logic rst_m;
-			rst_m = eff_reset || !scheme_ok || scheme != scheme_q;
-			`CHK(rst_m != u_fe.rst_fe, B_BENCH, $sformatf("the bench's rst_fe %0d, u_fe's %0d", rst_m, u_fe.rst_fe))
-			`CHK(u_fe.u_core.rcyc != rcyc_m, B_RCYC, $sformatf("rcyc %0d, the bench's model %0d", u_fe.u_core.rcyc, rcyc_m))
-			if (pclk1) rcyc_m = 1'b0;
-			else if (rst_m) rcyc_m = 1'b1;
+		rst_m = eff_reset || !scheme_ok || scheme != scheme_q;
+		`CHK(rst_m != u_fe.rst_fe, B_BENCH, $sformatf("the bench's rst_fe %0d, u_fe's %0d", rst_m, u_fe.rst_fe))
+		`CHK(u_fe.u_core.rcyc != rcyc_m, B_RCYC, $sformatf("rcyc %0d, the bench's model %0d", u_fe.u_core.rcyc, rcyc_m))
+		rel_cyc_m = pclk1 && rcyc_m && !rst_m;
+		if (pclk1) rcyc_m = 1'b0;
+		else if (rst_m) rcyc_m = 1'b1;
+		// the edge form's edges (from the bench's own rst_fe and commit: access & a_in[12])
+		if (!pclk1) begin
+			ef_j++;
+			if (access && a_in[12]) begin
+				ef_c = ef_j;
+				ef_crst = rst_m;
+				ef_hic = ef_hi;              // the last edge before C with rst_fe high
+				ef_k = ef_kind();
+			end else if (ef_c >= 0 && rst_m) ef_after = 1'b1;
+			if (rst_m) ef_hi = ef_j;
 		end
+		`CHK(rq_p1 && !rq_rst && ((rq_dma && !b_dma_busy) || (rq_call && !fe_call_busy)), B_REL_E0,
+			$sformatf("rel_e0: daria_fe's %s fell at a pclk1 edge", (rq_dma && !b_dma_busy) ? "arm_dma_busy" : "arm_call_busy"))
+		rq_dma  = b_dma_busy;
+		rq_call = fe_call_busy;
+		rq_p1   = pclk1;
+		rq_rst  = eff_reset || u_fe.u_copy.ib_q;
 		if (u_up.cartram_wr) begin
 			int ba;
 			logic dup;
@@ -1637,6 +1720,7 @@ module tb_fe_rand;
 			if (up_gr_pz) begin
 				cnt[I_PZ_CAP]++;                     // the lane check's exposure
 				if (pl_sel) cnt[I_PZ_SEL]++;
+				if (pl_sel && u_up.cart_ram.mapper_read_lane == u_fe.u_audio.al) cnt[I_PZ_SEL_EQ]++;
 			end
 			if (u_up.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
 				if (up_gr_pz && pl_sel && u_up.cart_ram.mapper_read_lane == pl_port && u_fe.u_audio.al == pl_eng &&
@@ -1648,7 +1732,7 @@ module tb_fe_rand;
 					fail(B_AUDIO, $sformatf("A1 lane: a sample capture reads lane %0d, upstream lane %0d (no pause_lane: grant clock paused %0d, select at the last unpaused edge %0d, lanes loaded there: port %0d, engine %0d)",
 						u_fe.u_audio.al, u_up.cart_ram.mapper_read_lane, up_gr_pz, pl_sel, pl_port, pl_eng));
 					mask(0, "audio_bad");
-				end
+				end else cnt[I_LANE_MASKED]++;       // the replica is masked: not judged (counted)
 			end
 		end
 		up_gr_pz = u_up.audio_ram_grant && pause;
@@ -1703,9 +1787,10 @@ module tb_fe_rand;
 						if ((cyc_short || e0n < 5) && strict == 0) cnt[I_SHORT_DOUT]++;
 						// (fe_do holds the AMPLITUDE it loaded before a resync deposit for a clock)
 						else if (aread && (m_rep || m_amp || mw != 0 || clk_n <= rs_clk + 2)) cnt[I_AMP_CLASS]++;
-						// rst_release: a cartridge RAM read while a dropped service's range waits for
-						// its resync (expected 0: the 6507 is held through the services)
-						else if (u_up.sel_ram_sel && strict == 0 && rr_svc_win) cnt[I_RR_DOUT]++;
+						// rst_release: a cartridge RAM read of a word in a dropped service's range
+						// while it waits for its resync (expected 0: the 6507 is held through the
+						// services); any other read falls through
+						else if (u_up.sel_ram_sel && strict == 0 && rr_svc_win && rr_in_rng(u_up.cartram_addr[14:2])) cnt[I_RR_DOUT]++;
 						// held_svc_race: a cartridge RAM read (the held fetch after a service write,
 						// made a DPC+ data-fetcher read by a fast fetch the RMW's own read armed) while
 						// a service burst runs: the two copy engines fill the RAM at different times
@@ -1941,7 +2026,31 @@ module tb_fe_rand;
 					cnt[I_RR_EXTRA]++;
 				end else fail(B_SVC, "rst_release: daria_fe latched a service after a dropped CALLFUNCTION 1/2, not for an RMW's second write");
 			end
+			// the cycle after a dropped CALLFUNCTION 1/2: an RMW's second write that both sides
+			// serviced (R2 pairs them), or a cycle in which neither side latched a service
+			if (rr_k1 == 1 && cyc_cf12 && cyc_b_svc > 0 && cyc_up_svc > 0) cnt[I_RR_RMW2]++;
+			if (rr_k1 == 1 && cyc_b_svc == 0 && cyc_up_svc == 0) cnt[I_RR_NEXT0]++;
 			if (rr_k1 > 0) rr_k1--;
+			// a release cycle (the bench's own rcyc, rst_fe low at this pclk1): the edge form of
+			// design 9.5 against the observed form; any disagreement is a failure
+			if (rel_cyc_m) begin
+				logic pred, obs;
+				int thr, ko;
+				thr = (ef_k == RR_DSW || ef_k == RR_DSP) ? 3 : 4;
+				pred = ef_k >= 0 && ef_c >= 0 && !ef_crst && !ef_after && ef_hic >= thr;
+				obs = u_fe.u_core.rcyc && !u_fe.rst_fe &&
+					(u_fe.u_core.pend_c != PC_NONE || u_fe.u_core.pend_s || u_fe.u_core.pend_r);
+				ko = (u_fe.u_core.pend_c == PC_DSW) ? RR_DSW : (u_fe.u_core.pend_c == PC_DSP) ? RR_DSP :
+				     (u_fe.u_core.pend_c == PC_SVC) ? RR_SVC : (u_fe.u_core.pend_r ? RR_PW : RR_DFX);
+				if (pred && obs) begin
+					cnt[I_EF_BOTH]++;
+					`CHK(ko != ef_k, B_EF_KIND, $sformatf("rst_release: the cycle commits kind %0d, daria_fe left kind %0d pending (pend_c %0d pend_s %0d pend_r %0d)",
+						ef_k, ko, u_fe.u_core.pend_c, u_fe.u_core.pend_s, u_fe.u_core.pend_r))
+				end else if (pred || obs)
+					fail(pred ? B_EF_PRED : B_EF_OBS, $sformatf("rst_release: edge form %0d (kind %0d, rst_fe last high before C at E0+%0d, C at E0+%0d, rst_fe at C %0d, after C %0d), observed form %0d (pend_c %0d pend_s %0d pend_r %0d)",
+						pred, ef_k, ef_hic, ef_c, ef_crst, ef_after, obs, u_fe.u_core.pend_c, u_fe.u_core.pend_s, u_fe.u_core.pend_r));
+				else cnt[I_EF_NONE]++;
+			end
 			if (u_fe.u_core.rcyc && !u_fe.rst_fe) begin
 				cnt[I_REL_CYC]++;
 				if (u_fe.u_core.pend_c != PC_NONE || u_fe.u_core.pend_s || u_fe.u_core.pend_r) begin
@@ -1954,6 +2063,9 @@ module tb_fe_rand;
 					`CHK(k == RR_PW && !u_fe.u_core.pend_s, B_BENCH, "rst_release: a PUSH/WRITE byte without its counter write")
 					`CHK((k == RR_PW || k == RR_DSW) != (cyc_ubytes.size() != 0), B_BENCH,
 						$sformatf("rst_release kind %0d: upstream's 6507 side wrote %0d bytes in the cycle", k, cyc_ubytes.size()))
+					if (clk_n >= tr_from && clk_n <= tr_to)
+						$display("TR %0d rst_release kind %0d: pend_c %0d pend_s %0d pend_r %0d sw_a %02x, upstream wrote %0d bytes, %0d services",
+							clk_n, k, u_fe.u_core.pend_c, u_fe.u_core.pend_s, u_fe.u_core.pend_r, u_fe.u_core.sw_a, cyc_ubytes.size(), cyc_up_svc);
 					rr_due = 1'b1;
 					rr_kind = k;
 					rr_sw_a = u_fe.u_core.sw_a;
@@ -1984,6 +2096,12 @@ module tb_fe_rand;
 					end
 				end
 			end
+			ef_j = 0;
+			ef_hi = -1;
+			ef_c = -1;
+			ef_hic = -1;
+			ef_k = -1;
+			ef_after = 1'b0;
 			cyc_ubytes.delete();
 			cyc_gwords.delete();
 			cyc_up_svc = 0;
@@ -2081,6 +2199,9 @@ module tb_fe_rand;
 	//   1 fe_do bit 0 flipped before a shown latch -> L1   2 counter[0] + 1 -> A1
 	//   3 bank + 1 -> C1/C2   4 cart RAM word $100 inverted -> full/K1   5 a posted word -> R1
 	//   6 (+rst_bus=1) the fetcher word an rst_release resync wrote, bit 0 flipped -> C1
+	//   7 from inj_at on, every byte the sample port gives daria_fe ^ $11 (the bench's model)
+	//   8 from inj_at on, every byte upstream's DDR model reads for a sample ^ $11 (fe_rand_up)
+	//     (7 and 8: remote samples and DDR misses, which dig_rom_lag masks -> dig_val_bad)
 	// ======================================================================================
 	logic inj_done = 1'b0;
 `ifndef SELF
@@ -2162,6 +2283,12 @@ module tb_fe_rand;
 				end
 				5: if (fe_call_tog != btog_q) begin
 					fe_mem.state_ram.mem_q[8'hF5] = fe_mem.state_ram.mem_q[8'hF5] ^ 32'h0000_0100;
+					inj_done = 1'b1;
+				end
+				6: ;                         // in neg_release, at an rst_release resync
+				7: inj_done = 1'b1;          // from here on, the sample port's bytes (side B)
+				8: begin                     // from here on, upstream's DDR sample bytes
+					u_up.inj_smp = 1'b1;
 					inj_done = 1'b1;
 				end
 				default: inj_done = 1'b1;
@@ -2539,12 +2666,16 @@ module tb_fe_rand;
 		$display("  ret_tog: %0d on upstream's edge, %0d late", ret_sync_n, ret_late_n);
 `endif
 		$display("  bus: held %0d, phase 1 of 2/4 seen in the generator's lengths; pause clocks %0d", cnt[I_HELD], cnt[I_PAUSE_CLK]);
-		$display("  pause_lane: %0d sample captures on an unpaused edge right after a paused grant, %0d with the select high at the last unpaused edge, %0d pause_lane, %0d masks ended by the 100,000-clock bound",
-			cnt[I_PZ_CAP], cnt[I_PZ_SEL], cnt[I_PAUSE_LANE], cnt[I_PL_LONG]);
+		$display("  pause_lane: %0d sample captures on an unpaused edge right after a paused grant, %0d with the select high at the last unpaused edge (%0d of them with equal lanes), %0d pause_lane, %0d masks ended by the 100,000-clock bound; %0d lane differences at a capture while the replica was masked (not judged)",
+			cnt[I_PZ_CAP], cnt[I_PZ_SEL], cnt[I_PZ_SEL_EQ], cnt[I_PAUSE_LANE], cnt[I_PL_LONG], cnt[I_LANE_MASKED]);
 		$display("  rst_release: planned (+rst_bus) dfx %0d push %0d write %0d callfunction %0d callfunction_rmw %0d dswrite %0d dsptr %0d (released %0d, aborted %0d); release cycles %0d, rst_release %0d: dfx %0d push_write %0d callfunction %0d dswrite %0d dsptr %0d; rmw_svc %0d, audio %0d, dout %0d",
 			n_rel_plan[RK_DFX], n_rel_plan[RK_PUSH], n_rel_plan[RK_WRITE], n_rel_plan[RK_CF], n_rel_plan[RK_CF_RMW], n_rel_plan[RK_DSW],
 			n_rel_plan[RK_DSP], n_rel_drop, n_rel_abort, cnt[I_REL_CYC], cnt[I_RST_REL], cnt[I_RR_DFX], cnt[I_RR_PW], cnt[I_RR_SVC],
 			cnt[I_RR_DSW], cnt[I_RR_DSP], cnt[I_RR_EXTRA], cnt[I_RR_AUD], cnt[I_RR_DOUT]);
+		$display("  rst_release forms (every release cycle): both %0d, edge form only %0d, observed only %0d, neither %0d, kinds differ %0d; after a dropped CALLFUNCTION 1/2: %0d RMW second writes serviced by both sides, %0d cycles with no service",
+			cnt[I_EF_BOTH], cnt[B_EF_PRED], cnt[B_EF_OBS], cnt[I_EF_NONE], cnt[B_EF_KIND], cnt[I_RR_RMW2], cnt[I_RR_NEXT0]);
+		$display("  dig_rom_lag: %0d resyncs after a dig_rom_lag mask alone, each with the sum and AMPLITUDE compared first (%0d differed)",
+			cnt[I_DIG_VAL_N], cnt[B_DIG_VAL]);
 	endtask
 
 `undef CHK

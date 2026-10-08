@@ -712,6 +712,7 @@ module fe_rand_up (
 	logic        sample_sync1, sample_sync2, sample_seen, sample_active_token;
 	logic [24:0] sample_active_addr;
 	logic        sample_cache_valid;
+	logic        inj_smp = 1'b0;              // tb_fe_rand's self-test fault 8: a DDR sample byte ^ $11
 	logic [21:0] sample_cache_tag;
 	logic [63:0] sample_cache_data;
 	logic        epoch_sync1, epoch_sync2, epoch_seen, end_sync1, end_sync2, end_seen;
@@ -829,7 +830,7 @@ module fe_rand_up (
 					sample_cache_data <= ddr_word(sample_active_addr);
 					sample_cache_tag <= sample_active_addr[24:3];
 					sample_cache_valid <= 1'b1;
-					sample_result <= get_byte(ddr_word(sample_active_addr), sample_active_addr[2:0]);
+					sample_result <= get_byte(ddr_word(sample_active_addr), sample_active_addr[2:0]) ^ (inj_smp ? 8'h11 : 8'h00);
 					sample_complete_toggle <= sample_active_token;
 					sample_state <= SAMPLE_IDLE;
 				end
