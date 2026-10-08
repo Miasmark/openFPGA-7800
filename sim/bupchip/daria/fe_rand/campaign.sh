@@ -61,7 +61,7 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "camp_*_s*.log"))):
     for k, v in re.findall(r" ([a-z_0-9]+) (\d+)", re.search(r"^  bad:(.*)$", txt, re.M).group(1)):
         if k != "total": bad[(tag, k)] += int(v)
     for k, v in re.findall(r" ([a-z_0-9]+) (\d+)", re.search(r"^  info:(.*)$", txt, re.M).group(1)):
-        tot[(tag, k)] += int(v)
+        if k != "cycles": tot[(tag, k)] += int(v)   # the summary line's count is the one kept
     if "tb_fe_rand: PASS" not in txt: fails.append((f, "FAIL"))
 tags = sorted(runs)
 allc = sum(tot[(t, "cycles")] for t in tags if not t.startswith("self"))

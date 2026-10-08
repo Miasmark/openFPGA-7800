@@ -96,6 +96,7 @@ An audio class masks the replica (and, where noted, the counters and frequencies
 | `rmw_svc` | `u_core.ev_rmw_svc` | information |
 | `size_over32k` | `u_audio.ev_size_hi`, or upstream's SIZE read above 32 KB | replica |
 | `p32_reset` | `a_p32_late` in a 6507 cycle with `cart_reset` or `rst_fe` | information |
+| `collide_reset` | `a_collide` in a clock with `rst_fe` high (a download's reset, the new scheme already set: section 7 item 18) | information |
 | `pause_lane` | upstream's byte capture on an unpaused edge after a grant edge in a pause, with `cart_ram_tdp`'s frozen read lane different from `u_audio.al` (the select was high at the last unpaused edge) | replica (one sample byte) |
 | not reachable here | `pre_lock` (no BIOS path), `short_image` (images are ≥ 32 KB), `live_override` (no override without a load; the non-ARM interval is CDF-only, where nothing changes), `refresh_overlap` (lever not taken), mode-B classes | |
 
