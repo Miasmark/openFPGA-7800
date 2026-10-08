@@ -38,6 +38,9 @@ def parse_meta(path):
             m['need'].append((b, op, int(n)))
         elif k == 'desc':
             m['desc'] = v
+        elif k == 'check':
+            lab, a = v.split()
+            m.setdefault('checks', {})[int(a)] = lab
     return m
 
 
@@ -91,6 +94,11 @@ def check(run, meta):
     else:
         reasons.append('no dir_cov.txt')
     got = []
+    if cov.get('dir_selfcheck_err', 0):
+        a = (cov.get('dir_res1', 0) << 8 | cov.get('dir_res0', 0)) - 2
+        lab = meta.get('checks', {}).get(a, '$%04X' % a)
+        reasons.append('6507 self-check failed %d times, last at %s, read $%02X' % (
+            cov['dir_selfcheck_err'], lab, cov.get('dir_res2', 0)))
     for b, op, n in meta['need']:
         if b.endswith('*'):
             v = sum(x for k, x in cov.items() if k.startswith(b[:-1]))

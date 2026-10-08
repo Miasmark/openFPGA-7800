@@ -135,6 +135,14 @@ fl_ln:  STA WSYNC
         BNE fl_ln
         INC M_FRAME
         JMP frame
+ckfail: STA M_RES+2
+        INC M_ERR
+        TSX
+        LDA $0101,X
+        STA M_RES
+        LDA $0102,X
+        STA M_RES+1
+        RTS
 """
 # (The kernel uses no immediate below $E0: in CDF fast mode an LDA # (and on
 # CDFJ+ with the options, LDX #/LDY #) with an operand in the stream range is
@@ -156,6 +164,7 @@ class Img:
         self.syms.update(MARK)
         self.syms.update(DPC if kind == 'dpc' else CDF)
         self.used = {}              # rom offset -> owner, to catch overlaps
+        self.labels = {}            # the self-check labels (ck_N_VV), for the .meta
         if kind == 'dpc':
             self.reset_bank = 5
             self.entry = 0x0C08
@@ -195,6 +204,7 @@ class Img:
         if syms:
             s.update(syms)
         code, labs = asm6502.assemble(text, s, org)
+        self.labels.update({k: v for k, v in labs.items() if k.startswith('ck_')})
         base = self.bank_base(bank)
         for a, v in code.items():
             assert 0x1000 <= a <= 0x1FFF, hex(a)
@@ -212,6 +222,34 @@ class Img:
         if reset:
             self.vector(bank, labs['start'])
         return labs
+
+    def nbanks(self):
+        return 6 if self.kind == 'dpc' else 7
+
+    def program_all(self, init, body, lines=8, extra='', syms=None, org=None, overrides=None):
+        """The standard program assembled identically into every bank (so a bank
+        switch never breaks the code flow), a bank id byte at $1BF0 (BANKID),
+        the reset vector in the reset bank, and per-bank byte overrides
+        {bank: {6507 address: [bytes]}}. Returns the labels."""
+        if org is None:
+            org = 0x1400 if self.kind == 'dpc' else 0x1100
+        text = ('.org $%04X\n' % org) + KERNEL_HEAD + init + FRAME.format(body=body, lines=lines) + extra
+        labs = None
+        for b in range(self.nbanks()):
+            s = dict(syms or {})
+            s['BANKID'] = 0x1BF0
+            labs = self.asm(b, text, syms=s)
+            self.put(self.bank_base(b) + 0xBF0, [b], 'bank%d' % b)
+        self.vector(self.reset_bank, labs['start'])
+        for b, ov in (overrides or {}).items():
+            for a, bs in ov.items():
+                self.put(self.bank_base(b) + (a & 0xFFF), bs, 'ov%d' % b)
+        return labs
+
+    def data_area(self):
+        """A ROM area no 6507 bank uses, for the call scripts' COPY sources."""
+        assert self.kind == 'cdf'
+        return (0x7800, 0x800) if self.jplus else (0x0C00, 0x400)
 
     def vector(self, bank, addr):
         base = self.bank_base(bank)
@@ -328,6 +366,7 @@ def main():
     names = sys.argv[2:] or list(tests.TESTS)
     os.makedirs(out, exist_ok=True)
     for n in names:
+        tests._chk[0] = 0
         img, meta = tests.TESTS[n]()
         rom = img.build()
         bs, rev = classify(rom)
@@ -343,6 +382,8 @@ def main():
             for k, op, v in meta.get('need', []):
                 f.write('need %s %s %d\n' % (k, op, v))
             f.write('desc %s\n' % meta.get('desc', ''))
+            for k, a in sorted(img.labels.items(), key=lambda kv: kv[1]):
+                f.write('check %s %d\n' % (k, a))
         print('%-14s %6d bytes  scheme %d rev %d' % (n, len(rom), bs, rev))
 
 

@@ -1089,6 +1089,7 @@
 		G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD, G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER,
 		G_READS, G_HIDDEN, G_CYCLES, G_PTR_N, G_RAM_N, G_K1, G_K2, G_INIT_N, G_SVC_FE, G_MERGES, G_HK_MERGES,
 		G_AMP_READS, G_AMP_CLASS, G_SHORT_DOUT, G_Q26, G_SHORT_IMAGE, G_RMW_SEED, G_DEPOSIT_CF,
+		G_DROP_UP, G_DROP_FE,
 		G_N
 	} f1_cnt_t;
 	string       f1_nm [G_N];
@@ -1614,6 +1615,20 @@
 		f1_obus = dut.cpu_DB_oe ? dut.physical_write_DB : f1_read_db();
 
 		// ---- R1: posts against accepts, in order ----------------------------------------------
+		// A console reset abandons a call on both sides: an accept or a post left
+		// unpaired at its rising edge is dropped (counted, information).
+		if (dut.effective_reset && !f1_erst_q) begin
+			f1_frm[G_DROP_UP] += f1_upq.size();
+			f1_tot[G_DROP_UP] += f1_upq.size();
+			f1_frm[G_DROP_FE] += f1_feq.size();
+			f1_tot[G_DROP_FE] += f1_feq.size();
+			f1_upq.delete();
+			f1_upt.delete();
+			f1_feq.delete();
+			f1_fet.delete();
+			f1_fer.delete();
+			f1_rmw_pend = 0;
+		end
 		if (call_req) begin
 			f1_upq.push_back(ft_payload());
 			f1_upt.push_back(f1_clk);
@@ -1730,6 +1745,71 @@
 		end
 	end
 
+	// ---- self-test: one fault injected into u_fe or fe_mem (+fe1_inj=K at checked
+	// cycle +fe1_inj_at=N, default 20000; off by default). Each must be caught:
+	//   1 fe_do bit 0 flipped in the clock before a shown cartridge read latch -> L1 dout
+	//   2 counter[0] + 1 (a quiet clock)                         -> A1 audio_bad, resync
+	//   3 u_core.fpend inverted in phase 2                       -> C1/C2 state
+	//   4 cart RAM word $100 of fe_mem inverted                  -> K2 (or K1) RAM
+	//   5 DPC+: fetcher 0's w0 counter + 1 / CDF: pointer of stream 0 + $100000 -> C1 / C3, L1
+	//   6 AMPLITUDE inverted in u_audio (a quiet clock)           -> A1 audio_bad (replica)
+	//   7 u_core.bank + 1                                         -> C1/C2 state, L1
+	//   8 u_copy.dma_busy forced 1 for 200 clk_sys (a DPC+ service only daria_fe
+	//     sees): the hold must stall the 6507 (forced arm_call_stall) and every
+	//     check must stay 0, H1 included
+	int     fe1_inj = 0, fe1_inj_at = 20000;
+	logic   f1_inj_done = 0;
+	longint f1_inj_rel = -1;
+	always @(negedge clk_sys) begin
+		if (f1_inj_rel >= 0 && f1_clk >= f1_inj_rel) begin
+			release u_fe.u_copy.dma_busy;			// holds 1 until its next rel_ok (7.4)
+			f1_inj_rel = -1;
+			$display("FE inject: arm_dma_busy released at clk_sys %0d", f1_clk);
+		end
+		if (fe1_inj != 0 && !f1_inj_done && f1_live && f1_tot[G_CYCLES] >= fe1_inj_at) begin
+			case (fe1_inj)
+				1: if (dut.pclk0 && dut.RW && dut.cart2600.a_in[12] && dut.mapper_phi2) begin
+					u_fe.u_core.fe_do = u_fe.u_core.fe_do ^ 8'h01;
+					f1_inj_done = 1;
+				end
+				2: if (!f1_m_cf && f1_w == 0 && ft_aud_quiet()) begin
+					u_fe.u_audio.counter[0] = u_fe.u_audio.counter[0] + 32'd1;
+					f1_inj_done = 1;
+				end
+				3: if (u_fe.u_seq.ph2 && !dut.pclk1) begin	// after the commit: the next E0 sees it
+					u_fe.u_core.fpend = !u_fe.u_core.fpend;
+					f1_inj_done = 1;
+				end
+				4: begin
+					fe_mem.cart_ram.mem_q[13'h100] = ~fe_mem.cart_ram.mem_q[13'h100];
+					f1_inj_done = 1;
+				end
+				5: begin
+					if (fe_is_dpc) fe_mem.state_ram.mem_q[0] = fe_mem.state_ram.mem_q[0] + 32'd1;
+					else fe_mem.cart_ram.mem_q[13'(ft_pb())] = fe_mem.cart_ram.mem_q[13'(ft_pb())] + 32'h0010_0000;
+					f1_inj_done = 1;
+				end
+				6: if (!f1_m_rep && ft_aud_quiet()) begin
+					u_fe.u_audio.amplitude = ~u_fe.u_audio.amplitude;
+					f1_inj_done = 1;
+				end
+				7: begin
+					u_fe.u_core.bank = u_fe.u_core.bank + 3'd1;
+					f1_inj_done = 1;
+				end
+				8: if (dut.tia_en && !dut.arm_call_busy && !dut.arm_dma_busy) begin
+					force u_fe.u_copy.dma_busy = 1'b1;		// released 200 clk_sys later
+					f1_inj_rel = f1_clk + 200;
+					f1_inj_done = 1;
+				end
+				default: f1_inj_done = 1;
+			endcase
+			if (f1_inj_done)
+				$display("FE inject: daria_fe fault %0d at clk_sys %0d (frame %0d, checked cycle %0d)", fe1_inj, f1_clk,
+					f1_frame, f1_tot[G_CYCLES]);
+		end
+	end
+
 	// ---- the resync (falling edge): upstream's audio state into u_fe at a quiet point -------
 	always @(negedge clk_sys) begin
 		if (f1_m_rep || f1_m_cf) begin
@@ -1772,7 +1852,7 @@
 				s = {s, sep, $sformatf("%s %0d", f1_nm[c], f1_tot[c])};
 			end
 		// posts and accepts that never found their pair
-		if (f1_tot[G_CALLS_UP] != f1_tot[G_CALLS_FE]) nbad++;
+		if (f1_tot[G_CALLS_UP] - f1_tot[G_DROP_UP] != f1_tot[G_CALLS_FE] - f1_tot[G_DROP_FE]) nbad++;
 		if (f1_tot[G_SVC] != f1_tot[G_SVC_FE]) nbad++;
 		ram = f1_tot[G_PTR] + f1_tot[G_RAM] + f1_tot[G_INIT_BAD] + f1_tot[G_RAM_CALL_BAD] + f1_tot[G_RAM_FRAME_BAD] +
 			f1_tot[G_SVC_RAM_BAD];
@@ -1854,6 +1934,7 @@
 		f1_nm[G_HK_MERGES] = "hook_merges";     f1_nm[G_AMP_READS] = "amp_reads";      f1_nm[G_AMP_CLASS] = "amp_class";
 		f1_nm[G_SHORT_DOUT] = "short_dout";     f1_nm[G_Q26] = "q26";                  f1_nm[G_SHORT_IMAGE] = "short_image";
 		f1_nm[G_RMW_SEED] = "rmw_seed";         f1_nm[G_DEPOSIT_CF] = "deposit_cf";
+		f1_nm[G_DROP_UP] = "drop_up";           f1_nm[G_DROP_FE] = "drop_fe";
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
 		foreach (f1_h_post[b]) begin
@@ -1876,6 +1957,8 @@
 		void'($value$plusargs("fe_full=%d", fe_full));
 		void'($value$plusargs("fe_ticks=%d", fe_ticks));
 		void'($value$plusargs("fe_pcm=%d", fe_pcm));
+		void'($value$plusargs("fe1_inj=%d", fe1_inj));
+		void'($value$plusargs("fe1_inj_at=%d", fe1_inj_at));
 		if (fe_slat < 0) fe_slat = 0;
 		$display("FE stage 1: daria_fe on fe_mem, mode A; +fe_merge_hook=%0d +fe_slat=%0d +fe_hold=%0d +fe_resync=%0d +fe_full=%0d",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full);

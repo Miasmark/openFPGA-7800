@@ -90,6 +90,8 @@ module fe_dir_mon;
 	longint clk_n = 0;
 	longint t_e0 = -100, t_p0 = -100, t_note = -1000, t_tick = -1000, t_call = -1000;
 	longint t_cf = -1000;            // last CALLFN commit
+	longint t_done = -1000;
+	longint dcf = 1000;              // clocks since the CALLFN commit before this one          // last call_done seen (= upstream's merge edge M)
 	int     note_cnt_since = 0;
 	logic   old_rst = 1, old_dma = 0, old_busy = 0, old_init = 0, old_tick_note = 0;
 	logic   live = 0;                // checks-style window: from a pclk1 with !effective_reset && tia_en
@@ -135,7 +137,9 @@ module fe_dir_mon;
 			if (dma_busy && !init_busy) inc("inj_pause_in_svc");
 		end
 		if (pz_end >= 0 && clk_n == pz_end) begin
-			release tb_daria.dut.pause;
+			// (release does not hand the port back to its constant driver in
+			// this simulator; forcing the driver value 0 does)
+			force tb_daria.dut.pause = 1'b0;
 			pz_on = 0;
 			pz_end = -1;
 		end
@@ -214,10 +218,12 @@ module fe_dir_mon;
 						inc("merge_freq_change");
 				end
 			end
-			// a tick on the merge edge (M = call_done + 1) or inside (M, M+6]
-			if (tick && t_call >= 0) begin
-				t_tick = clk_n;
-			end
+			// a tick relative to upstream's merge edge M (the edge that sees
+			// call_done high; arm_mapper_audio merges there): at M, in (M, M+6]
+			// (daria_fe's M_fe = M+6) and just before it
+			if (call_done) t_done = clk_n;
+			if (tick && clk_n - t_done >= 0 && clk_n - t_done <= 8)
+				inc($sformatf("tick_m+%0d", clk_n - t_done));
 			if (dma_busy && !old_dma && !init_busy) begin
 				inc("svc_dma");
 				ev_svcs++;
@@ -304,6 +310,7 @@ module fe_dir_mon;
 						if (ast != 0) inc("dpc_note_busy");
 					end
 					if (g == 6 && wi == 2) begin
+						dcf = clk_n - t_cf;
 						t_cf = clk_n;
 						if (call_busy) inc("dpc_cf_while_call_busy");
 						if (d_in == 8'd0) inc("dpc_cf_0");
@@ -329,7 +336,7 @@ module fe_dir_mon;
 									inc("dpc_svc_srcclamp");
 								if (cnt == 0) inc("dpc_svc_cnt0");
 								if (dma_busy) inc("dpc_svc_while_dma");
-								if (clk_n - t_cf <= 12 && clk_n != t_cf) inc("dpc_svc_rmw");
+								if (dcf <= 12) inc("dpc_svc_rmw");
 								svc_lo = 15'd3072 + {3'b0, tb_daria.dut.cart2600.dpcplus.counter[tb_daria.dut.cart2600.dpcplus.params[2][2:0]]};
 								svc_hi = svc_lo + {7'b0, cnt};
 								svc_win = 1;

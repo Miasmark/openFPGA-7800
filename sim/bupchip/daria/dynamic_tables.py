@@ -660,28 +660,51 @@ def sec_daria(runs, margin):
 
 
 def sec_fe(runs, margin):
-    """The front-end shadow (FE=1 runs, fe_shadow.svh): per run, the 6507 latches
-    and commits checked, the bad counts (all must be 0: dout is L1, state is
-    C1/C2, the tap checks are port, rom, ram, pointer, jump map and L3), the
-    read latches whose byte came from RAM (checked at the reference's own
-    address), the hidden pclk0 edges (information), the E0 -> latch range (S1)
-    and the console resets and handoffs. Not in the default list: --only fe."""
+    """The front-end shadow (FE=1 runs, fe_shadow.svh). Not in the default list: --only fe.
+
+    Stage 1 (daria_fe as u_fe, design 12.4): per run, the 6507 latches, commits,
+    calls, services and audio ticks compared; every must-be-0 count that is not
+    0 (bad, from the "FE bad:" line: L1 dout, C1/C2 state, C3/C4/I1/K1/K2/R3 RAM,
+    R1 call, R2 svc, T1 tick, A1 audio, the RTL assertions, A2/A3, the bench
+    assertions); the counted classes of design 9.5 that occurred; the stage-0
+    reference's dout/state beside it; the result.
+
+    Stage 0 (the reference alone, FE_STAGE0=1, and older runs): the latches and
+    commits checked, the bad counts (dout is L1, state is C1/C2, the tap checks
+    are port, rom, ram, pointer, jump map and L3), the read latches whose byte
+    came from RAM, the hidden pclk0 edges (information), the E0 -> latch range
+    (S1) and the console resets and handoffs."""
     import re
-    hdr = ["Demo", "Scheme", "Frames", "Latches", "Commits", "dout bad", "state bad",
-           "port/rom/ram/ptr/jump/L3 bad", "RAM reads", "Hidden pclk0 (differ)", "E0->latch",
-           "E0->latch < 6", "Resets/handoffs"]
-    rows = []
+    s1_hdr = ["Demo", "Scheme", "Hook", "Frames", "Latches", "Commits", "Calls", "Services", "Ticks",
+              "Bad (must be 0)", "Classes counted", "Reference dout/state", "Result"]
+    s0_hdr = ["Demo", "Scheme", "Frames", "Latches", "Commits", "dout bad", "state bad",
+              "port/rom/ram/ptr/jump/L3 bad", "RAM reads", "Hidden pclk0 (differ)", "E0->latch",
+              "E0->latch < 6", "Resets/handoffs"]
+    s1_rows, s0_rows = [], []
     for R in runs:
         if not os.path.exists(os.path.join(R.path, "fe.csv")):
             continue
         with open(os.path.join(R.path, "fe.csv")) as f:
             frames = sum(1 for _ in csv.DictReader(f))
         sh = det = rd = rs = short6 = None
+        st1 = bad = cls = ref = res = inp = None
         with open(os.path.join(R.path, "run.log")) as f:
             for line in f:
                 if line.startswith("FE shadow:"):
+                    st1 = re.match(r"FE shadow: (\S+) (\d+) latches, (\d+) commits, (\d+) calls, (\d+) services, "
+                                   r"(\d+) ticks compared", line)
                     sh = re.match(r"FE shadow: (\S+) (\d+) latches, (\d+) commits; dout (\d+), "
                                   r"state (\d+) bad; E0->latch (\S+)", line)
+                elif line.startswith("FE bad:"):
+                    bad = line[len("FE bad:"):].strip()
+                elif line.startswith("FE classes:"):
+                    cls = line[len("FE classes:"):].strip()
+                elif line.startswith("FE reference:"):
+                    ref = re.match(r"FE reference: \S+ \d+ latches, \d+ commits; dout (\d+), state (\d+) bad", line)
+                elif line.startswith("FE result:"):
+                    res = line[len("FE result:"):].strip()
+                elif line.startswith("FE inputs:"):
+                    inp = re.search(r"hook (\d+)", line)
                 elif line.startswith("FE detail:"):
                     # Older runs have no ram/pointer fields.
                     det = re.search(r"(?P<hid>\d+) hidden pclk0 \((?P<hbad>\d+) differ.*"
@@ -694,20 +717,42 @@ def sec_fe(runs, margin):
                     rs = re.match(r"FE resets: (\d+) console resets.*, (\d+) handoffs", line)
                 elif line.startswith("FE S1:") and "latches with" in line:
                     short6 = line.split()[2]
+        if st1:
+            def nonzero(text):
+                if not text:
+                    return "?"
+                text = text.split(";")[0]
+                items = [x.strip() for x in text.split(",")]
+                nz = [x for x in items if x and not x.endswith(" 0")]
+                return ", ".join(nz) if nz else "0"
+            tot = re.search(r"total (\d+)", bad or "")
+            badtxt = nonzero(bad)
+            if tot and badtxt == "0" and tot.group(1) != "0":
+                badtxt = "posts/accepts unpaired (%s)" % tot.group(1)
+            s1_rows.append([R.short, st1.group(1), inp.group(1) if inp else "?", frames, st1.group(2), st1.group(3),
+                            st1.group(4), st1.group(5), st1.group(6), badtxt,
+                            nonzero(cls) if cls else "?",
+                            "%s/%s" % (ref.group(1), ref.group(2)) if ref else "-", res or "?"])
+            continue
         if sh is None:
-            rows.append([R.short, "(no FE shadow line)"] + [""] * (len(hdr) - 2))
+            s0_rows.append([R.short, "(no FE shadow line)"] + [""] * (len(s0_hdr) - 2))
             continue
         if det:
             tap = "/".join(det.group(k) or "-" for k in ("port", "rom", "ram", "ptr", "jump", "l3"))
             hid = "%s (%s)" % (det.group("hid"), det.group("hbad"))
         else:
             tap = hid = "?"
-        rows.append([R.short, sh.group(1), frames, sh.group(2), sh.group(3), sh.group(4),
-                     sh.group(5), tap, rd.group(1) if rd else "-", hid, sh.group(6), short6 or "?",
-                     "%s/%s" % (rs.group(1), rs.group(2)) if rs else "-"])
-    if not rows:
+        s0_rows.append([R.short, sh.group(1), frames, sh.group(2), sh.group(3), sh.group(4),
+                        sh.group(5), tap, rd.group(1) if rd else "-", hid, sh.group(6), short6 or "?",
+                        "%s/%s" % (rs.group(1), rs.group(2)) if rs else "-"])
+    if not s1_rows and not s0_rows:
         return "No run has fe.csv (run_daria.sh with FE=1)."
-    return table(hdr, rows)
+    out = []
+    if s1_rows:
+        out.append("Stage 1 (daria_fe, mode A):\n\n" + table(s1_hdr, s1_rows))
+    if s0_rows:
+        out.append("Stage 0 (the reference front end):\n\n" + table(s0_hdr, s0_rows))
+    return "\n\n".join(out)
 
 
 def sec_harmony(runs, margin):
