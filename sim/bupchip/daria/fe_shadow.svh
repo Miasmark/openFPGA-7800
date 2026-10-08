@@ -891,6 +891,1011 @@
 		end
 	end
 
+`ifndef FE_STAGE0
+	// =================================================================================
+	// Stage 1 (design 12.4; bench.md 7.4-7.7): daria_fe as u_fe, on its own
+	// daria_mem (fe_mem), beside the reference above. Mode A: upstream's ARM runs
+	// the calls; u_fe's stall outputs never drive the 6507, except through the
+	// forced arm_call_stall of the hold (7.4.2).
+	// =================================================================================
+	int          fe_slat = 40, fe_merge_hook = 0, fe_hold = 1, fe_resync = 1, fe_full = 1;
+	int          fe_ticks = 0, fe_pcm = 0;
+
+	// ---- u_fe's inputs: continuous assigns of DUT signals, or NBA-updated bench state ----
+	wire         f1_load_start = ~old_cart_download && cart_download;
+	wire         f1_load_end   = old_cart_download && ~cart_download;
+	// cart_win: bup_capture's window (bup_capture.sv:141-164), on the tb's strobes
+	logic        f1_c_open = 1'b0;
+	logic  [6:0] f1_c_drain = 7'd0;
+	always @(posedge clk_sys) begin
+		if (f1_load_start) begin
+			f1_c_open <= 1'b1;
+			f1_c_drain <= 7'd0;
+		end else if (f1_load_end && f1_c_open) begin
+			f1_c_open <= 1'b0;
+			f1_c_drain <= 7'd64;
+		end else if (f1_c_drain != 7'd0)
+			f1_c_drain <= f1_c_drain - 7'd1;
+	end
+	wire         f1_cart_win = f1_load_start || f1_c_open || f1_c_drain > 7'd1;
+	// cpu_ready, design 6.6 (critic 8): upstream's call_ready without call_busy
+	wire         f1_cpu_ready = dut.cart2600.arm_mappers.call_controller.arm_online_sync2 &&
+		dut.cart2600.arm_mappers.call_controller.shadow_ready_sync2 && !dut.effective_reset;
+	// The ARM-write mirror (7.4.3): upstream's CPU writes into fe_mem's cart RAM
+	// port A at the clk_arm edge cart_ram_tdp takes them; the writeback and DMA
+	// writes (init, DPC+ service) are left out: daria_fe makes those itself.
+	wire  [31:0] f1_d_addr = {15'd0, dut.arm_ram_addr, 2'b00};
+	wire         f1_ram_we = dut.cart_ram.arm_allow && dut.arm_ram_write && !dut.cart2600.mapper_wb_en &&
+		!dut.cart2600.arm_mappers.memory.dma_ram_en;
+	// The returns (7.4.4): state RAM F8-FD at the clk_arm edges upstream's
+	// controller captures them (CTRL_CAPTURE_AUDIO = 8, arm_mapper_controller.sv:338-345).
+	wire         f1_cap_audio = ctl_state == 4'd8 && !dut.cart2600.arm_mappers.mapper_reset_arm && !arm_reset;
+	wire   [2:0] f1_rd_idx = dut.cart2600.arm_mappers.call_controller.audio_read_index;
+	wire   [7:0] f1_sta_addr = 8'hF8 + {5'd0, f1_rd_idx};
+	wire  [31:0] f1_sta_wd = dut.cart2600.arm_mappers.call_controller.state_rdata;
+	wire         f1_up_cmp = f1_cap_audio && f1_rd_idx == 3'd5;	// complete_toggle flips at this clk_arm edge
+	// The front-end ROM takes the cartridge's bytes as the wrapper does (bupchip_pocket.sv:354)
+	wire         f1_cap_we = ioctl_wr && cart_download && ioctl_addr[24:15] == 10'd0;
+	// The merge hook (+fe_merge_hook=1; design 6.6): upstream's call_done and returns
+	wire         f1_hk_en = fe_merge_hook != 0;
+	wire         f1_hk_stb = dut.cart2600.arm_call_done;
+	wire [191:0] f1_hk_ret = {dut.cart2600.arm_audio_frequency2_return, dut.cart2600.arm_audio_frequency1_return,
+		dut.cart2600.arm_audio_frequency0_return, dut.cart2600.arm_audio_counter2_return,
+		dut.cart2600.arm_audio_counter1_return, dut.cart2600.arm_audio_counter0_return};
+
+	// ret_tog per call number (6.6): it flips with upstream's complete_toggle, on
+	// the same clk_arm edge, once u_fe has flipped call_tog for that call; if
+	// u_fe's flip comes later, at the first clk_arm edge after it (ret_late).
+	// Upstream's flip is predicted from the controller's own condition, so the
+	// two toggles change on one edge; f1_ctog_model checks the prediction.
+	logic        f1_ret_tog = 1'b0, f1_tog_q = 1'b0, f1_ctog_model = 1'b0;
+	int          f1_up_done = 0, f1_ret_n = 0, f1_fe_flips = 0, f1_ret_late_n = 0, f1_ctog_bad = 0;
+	always @(posedge clk_sys) begin
+		f1_tog_q <= u_fe.call_tog;
+		if (dut.effective_reset) f1_fe_flips <= 0;
+		else if (u_fe.call_tog != f1_tog_q) f1_fe_flips <= f1_fe_flips + 1;
+	end
+	always @(posedge clk_arm) begin
+		int done, flipped;
+		if (dut.cart2600.arm_mappers.call_controller.complete_toggle != f1_ctog_model) f1_ctog_bad <= f1_ctog_bad + 1;
+		if (arm_reset) f1_ctog_model <= 1'b0;
+		else if (dut.cart2600.arm_mappers.mapper_reset_arm)
+			f1_ctog_model <= dut.cart2600.arm_mappers.call_controller.complete_ack_sync2;
+		else if (f1_up_cmp) f1_ctog_model <= ~f1_ctog_model;
+		if (dut.effective_reset || dut.cart2600.arm_mappers.mapper_reset_arm) begin
+			f1_up_done <= 0;			// a call cut by a console reset is abandoned on both sides
+			f1_ret_n <= 0;
+		end else begin
+			done = f1_up_done + (f1_up_cmp ? 1 : 0);
+			flipped = f1_fe_flips + ((u_fe.call_tog != f1_tog_q) ? 1 : 0);
+			f1_up_done <= done;
+			if (f1_ret_n < done && f1_ret_n < flipped) begin
+				f1_ret_tog <= ~f1_ret_tog;
+				f1_ret_n <= f1_ret_n + 1;
+				if (!(f1_up_cmp && f1_ret_n + 1 == done)) f1_ret_late_n <= f1_ret_late_n + 1;
+			end
+		end
+	end
+
+	// The digital-sample port (7.4.5): answer smp_req with img[smp_addr] after
+	// +fe_slat clk_sys, the byte held from the answer on.
+	logic        f1_smp_ack = 1'b0, f1_smp_rq = 1'b0;
+	logic  [7:0] f1_smp_data = 8'h00;
+	logic [18:0] f1_smp_a = 19'd0;
+	int          f1_smp_left = -1;
+	always @(posedge clk_sys) begin
+		f1_smp_rq <= u_fe.smp_req;
+		if (u_fe.smp_req != f1_smp_rq) begin
+			f1_smp_a <= u_fe.smp_addr;
+			f1_smp_left <= fe_slat;
+		end else if (f1_smp_left > 0)
+			f1_smp_left <= f1_smp_left - 1;
+		else if (f1_smp_left == 0) begin
+			f1_smp_data <= img[f1_smp_a];
+			f1_smp_ack <= ~f1_smp_ack;
+			f1_smp_left <= -1;
+		end
+	end
+
+	// ---- fe_mem and u_fe ----------------------------------------------------------------
+	wire  [12:0] fu_fea_addr, fu_feb_addr, fu_crb_addr;
+	wire  [31:0] fu_fea_q, fu_feb_q, fu_crb_q, fu_stb_q, fu_crb_wd, fu_stb_wd;
+	wire         fu_crb_we, fu_stb_we;
+	wire   [3:0] fu_crb_be, fu_stb_be;
+	wire   [7:0] fu_stb_addr;
+
+	daria_mem #(.WIN_KB(32)) fe_mem (
+		.clk_arm(clk_arm), .clk_sys(clk_sys),
+		.rom_addr(15'd0), .win_qa(), .d_addr(f1_d_addr), .win_qb(),
+		.ram_we(f1_ram_we), .ram_be(dut.arm_ram_wstrb), .ram_wdata(dut.arm_ram_wdata), .ram_q(),
+		.img_ready(1'b1), .win_we(1'b0), .win_wa(15'd0), .win_wd(32'd0), .win_be(4'd0),
+		.sta_addr(f1_sta_addr), .sta_we(f1_cap_audio), .sta_wd(f1_sta_wd), .sta_q(),
+		.cap_we(f1_cap_we), .cap_addr(ioctl_addr[14:0]), .cap_data(ioctl_dout),
+		.fea_addr(fu_fea_addr), .fea_q(fu_fea_q), .feb_addr(fu_feb_addr), .feb_q(fu_feb_q),
+		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
+		.stb_addr(fu_stb_addr), .stb_we(fu_stb_we), .stb_be(fu_stb_be), .stb_wd(fu_stb_wd), .stb_q(fu_stb_q));
+
+	daria_fe u_fe (
+		.clk_sys, .clk_arm,
+		.cart_reset(dut.effective_reset), .pause(dut.pause),
+		.a_in(dut.cart2600.a_in), .d_in(dut.write_DB), .rw(dut.RW),
+		.pclk1(dut.pclk1), .pclk0(dut.pclk0), .access(dut.cart2600.arm_access),
+		.scheme(force_bs), .revision(mapper_revision), .cdf_ldx, .cdf_ldy,
+		.fetch_off_en(cdf_fetch_offset_enable), .fetch_off(cdf_fetch_offset), .cdfj_entry, .cdfj_stack,
+		.audio_size_addr(arm_audio_size_addr), .rom_size(cart_size), .ram32(dut.mapper_ram_size == 16'd32768),
+		.load_start(f1_load_start), .load_end(f1_load_end), .cart_win(f1_cart_win),
+		.cpu_ready(f1_cpu_ready), .ret_tog(f1_ret_tog), .call_tog(),
+		.smp_req(), .smp_addr(), .smp_ack(f1_smp_ack), .smp_data(f1_smp_data),
+		.fe_do(), .fe_oe(), .arm_call_busy(), .arm_dma_busy(), .init_busy(),
+		.fea_addr(fu_fea_addr), .fea_q(fu_fea_q), .feb_addr(fu_feb_addr), .feb_q(fu_feb_q),
+		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
+		.stb_addr(fu_stb_addr), .stb_we(fu_stb_we), .stb_be(fu_stb_be), .stb_wd(fu_stb_wd), .stb_q(fu_stb_q),
+		.hk_en(f1_hk_en), .hk_stb(f1_hk_stb), .hk_ret(f1_hk_ret));
+
+`include "fe_taps.svh"
+
+	// ---- the hold (7.4.2): the console stays in reset until both inits are done ----------
+	// Sticky, so the reset never drops between upstream's init and daria_fe's F6:
+	// set at load_start and at a console reset edge, released once u_fe.init_busy
+	// was seen high and has fallen (or after 2^20 clk_sys: fe_init_never_busy).
+	logic        f1_seen_busy = 1'b0, f1_rst_q = 1'b0, f1_loaded = 1'b0;
+	int          f1_hold_cnt = 0, f1_never_busy = 0;
+	always @(posedge clk_sys) begin
+		f1_rst_q <= dut.effective_reset;
+		if (f1_load_end) f1_loaded <= 1'b1;
+		if (f1_load_start || (f1_loaded && dut.effective_reset && !f1_rst_q)) begin
+			fe_hold_reset <= fe_hold != 0;
+			f1_seen_busy <= 1'b0;
+			f1_hold_cnt <= 0;
+		end else if (fe_hold_reset) begin
+			f1_hold_cnt <= f1_hold_cnt + 1;
+			if (u_fe.init_busy) f1_seen_busy <= 1'b1;
+			else if (f1_seen_busy || f1_hold_cnt >= (1 << 20)) begin
+				fe_hold_reset <= 1'b0;
+				if (!f1_seen_busy) f1_never_busy <= f1_never_busy + 1;
+			end
+		end
+	end
+	// The forced stall, constant right-hand side, at the falling edge (7.4.2,
+	// question 3): top.sv's own assign covers upstream's busys; the force adds
+	// u_fe's DPC+ copy/fill (arm_dma_busy) while upstream's has fallen.
+	logic        f1_forced = 1'b0;
+	always @(negedge clk_sys) begin
+		if (fe_hold != 0 && dut.tia_en && !dut.mapper_init_busy && u_fe.arm_dma_busy) begin
+			if (!f1_forced) begin
+				force dut.arm_call_stall = 1'b1;
+				f1_forced = 1'b1;
+			end
+		end else if (f1_forced) begin
+			release dut.arm_call_stall;
+			f1_forced = 1'b0;
+		end
+	end
+
+	// ---- counters ---------------------------------------------------------------------
+	typedef enum int {
+		// bench.md 7.7's fe.csv columns, in its order
+		G_LATCH, G_COMMIT, G_DOUT, G_DOUT_HID, G_STATE, G_PTR, G_RAM, G_CALLS_UP, G_CALLS_FE, G_CALL_BAD,
+		G_SVC, G_SVC_BAD, G_TICKS, G_TICK_BAD, G_AUDIO_BAD, G_AMP_LAG, G_NOTE_RACE, G_MERGE_RACE,
+		G_SEED_RACE, G_RESYNC, G_DRIFT_UP, G_DRIFT_FE, G_OBUS, G_OVER32K, G_HOLD_BAD,
+		// design 12.4's additions
+		G_MERGE_AMP, G_RET_LATE, G_DIG_ROM_LAG, G_SVC_AUDIO_RACE, G_PAUSE_LANE, G_PRE_LOCK, G_TBL_ALIAS,
+		G_RMW_CALL, G_RMW_SVC, G_SHORT_PHASE1, G_GRANT_STEAL,
+		G_A_COLLIDE, G_A_WB_LATE, G_A_P32_LATE, G_A_GUARD_CORE, G_A_GUARD_WR, G_A_OWNER, G_A_FPJR,
+		G_A_PEND_LATE, G_A_TDEF2, G_A_F6_LIVE, G_CRB_USE,
+		// the rest of 9.5 / 9.6, the tap checks, and information
+		G_SVC_RAM_BAD, G_INIT_BAD, G_RAM_CALL_BAD, G_RAM_FRAME_BAD, G_HID_LAST, G_HID_LAST_BAD,
+		G_COMMIT_HIDDEN, G_RET_UNASKED, G_A2_BAD, G_A3_BAD, G_SIZE_OVER32K, G_P32_RESET, G_WB_DROP,
+		G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD, G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER,
+		G_READS, G_HIDDEN, G_CYCLES, G_PTR_N, G_RAM_N, G_K1, G_K2, G_INIT_N, G_SVC_FE, G_MERGES, G_HK_MERGES,
+		G_AMP_READS, G_AMP_CLASS, G_SHORT_DOUT, G_Q26, G_SHORT_IMAGE, G_RMW_SEED, G_DEPOSIT_CF,
+		G_N
+	} f1_cnt_t;
+	string       f1_nm [G_N];
+	logic        f1_bad [G_N];		// must be 0 (9.5's failures, 9.6)
+	longint      f1_tot [G_N], f1_frm [G_N];
+	function automatic void f1_inc(input f1_cnt_t c);
+		f1_tot[c]++;
+		f1_frm[c]++;
+	endfunction
+
+	longint      f1_clk = 0, f1_t_vs = 0, f1_t_e0 = -1;
+	int          f1_frame = 0, f1_nfail = 0, f1_emin = 99, f1_emax = -1;
+	logic        f1_old_vs = 0, f1_live = 0, f1_rst_seen = 0, f1_short = 0, f1_rst_cyc = 0;
+	int          fd_f1 = 0, fd_f1_ticks = 0, fd_amp_up = 0, fd_amp_fe = 0;
+
+	task automatic f1_fail(input string cls, input string what);
+		f1_nfail++;
+		if (f1_nfail <= fe_stop && fd_fe_err != 0) begin
+			$fwrite(fd_fe_err, "daria_fe %s at clk_sys %0d, frame %0d line %0d: pclk1 %0d pclk0 %0d phi2 %0d a_in %04x rw %0d d_in %02x, 6507 pc %04x: %s\n",
+				cls, f1_clk, f1_frame, int'((f1_clk - f1_t_vs) / SYS_PER_LINE), dut.pclk1, dut.pclk0,
+				dut.mapper_phi2, dut.cart2600.a_in, dut.RW, dut.write_DB, op_pc, what);
+			if (f1_nfail <= 2) fe_dump_ring();
+			if (f1_nfail == fe_stop) $fwrite(fd_fe_err, "(no more daria_fe lines: +fe_stop=%0d)\n", fe_stop);
+		end
+		if (fe_fatal != 0) begin
+			$display("FE stopped at the first daria_fe failure (+fe_fatal): %s, %s", cls, what);
+			$finish;
+		end
+	endtask
+	// A must-be-0 event: counted, the first five of each kind logged. A macro, so
+	// the message is formatted only when the condition holds.
+`define F1_CHK(cond, c, what) begin if (cond) begin f1_inc(c); if (f1_tot[c] <= 5) f1_fail(f1_nm[c], what); end end
+
+	// Histograms (FE latency lines): R1 post - accept; M_fe - M; busy fall fe - up;
+	// refresh length (dispatch to IDLE) up and fe; NOTE capture fe - up.
+	localparam int F1_HB = 64;
+	longint      f1_h_post [F1_HB], f1_h_merge [F1_HB], f1_h_busy [F1_HB], f1_h_rup [F1_HB], f1_h_rfe [F1_HB];
+	longint      f1_h_note [F1_HB];
+	function automatic int f1_bin(input longint d);
+		return d < 0 ? 0 : (d >= F1_HB - 1 ? F1_HB - 1 : int'(d));
+	endfunction
+	function automatic string f1_hist(input longint h [F1_HB]);
+		string s;
+		s = "";
+		for (int b = 0; b < F1_HB; b++)
+			if (h[b] != 0) begin
+				if (s.len() != 0) s = {s, " "};
+				if (b == F1_HB - 1) s = {s, $sformatf("%0d+:%0d", b, h[b])};
+				else s = {s, $sformatf("%0d:%0d", b, h[b])};
+			end
+		if (s.len() == 0) s = "-";
+		return s;
+	endfunction
+
+	// ---- the audio classes' masks (bench.md 7.6; design 9.5, 12.4) ------------------------
+	// rep: the replica's registers; cf: counters and frequencies. Set by a
+	// class's own condition (or an audio_bad), cleared by fe_deposit_audio at the
+	// next falling edge where both engines are quiet (resync).
+	logic        f1_m_rep = 0, f1_m_cf = 0;
+	string       f1_m_why = "";
+	// The merge window of a CDF call without the hook: f1_w 1 after M (upstream's
+	// merge, call_done in (X, X+1)) up to M_fe (cp_apply), 2 after M_fe, 0 after
+	// M_fe+1. Counters and frequencies are compared from M_fe+1 on (5.6).
+	int          f1_w = 0;
+	longint      f1_w_m = 0, f1_late_until = -1;
+	longint      f1_dig_chk = -1, f1_up_disp_t = -1, f1_fe_disp_t = -1, f1_up_ncap_t = -1;
+	logic        f1_up_busy_q = 0, f1_fe_busy_q = 0;
+	longint      f1_up_busy_fall = -1;
+	int          f1_ret_late_seen = 0, f1_ctog_seen = 0;
+	function automatic void f1_mask(input logic cf, input string why);
+		f1_m_rep = 1;
+		if (cf) f1_m_cf = 1;
+		f1_m_why = why;
+	endfunction
+
+	// ---- per-cycle bookkeeping ------------------------------------------------------------
+	logic        f1_pu_pend = 0, f1_pu_short = 0, f1_wr_pend = 0, f1_cyc_commit = 0, f1_hid_pend = 0;
+	logic        f1_hid_pend_bad = 0, f1_o1_pend = 0, f1_k2_arm = 0, f1_use_exp = 0, f1_rom_cmp = 0;
+	logic  [5:0] f1_pu_idx = 0;
+	logic [17:0] f1_wr_a = 0;
+	logic  [7:0] f1_o1_up = 0, f1_o1_fe = 0, f1_obus = 0;
+	logic [63:0] f1_alias = 0;		// CDFJ+ streams whose pointer word a DSWRITE hit (tbl_alias)
+
+	// R1: upstream's accepts and u_fe's posts, paired in order
+	logic [255:0] f1_upq [$], f1_feq [$];
+	longint       f1_upt [$], f1_fet [$];
+	logic         f1_fer [$];
+	int           f1_rmw_pend = 0;
+	logic         f1_tog2 = 0;
+	// R2/R3: services
+	logic  [51:0] f1_sq_up [$], f1_sq_fe [$];
+	logic  [31:0] f1_r3_d [$], f1_r3_c [$];
+	int           f1_svc_up_done = 0, f1_svc_fe_done = 0, f1_r3_n = 0;
+	logic         f1_sp_q = 0, f1_fsp_q = 0, f1_run_q = 0, f1_updma_q = 0;
+	logic  [14:0] f1_up_rng_d = 0, f1_fe_rng_d = 0;
+	logic   [7:0] f1_up_rng_c = 0, f1_fe_rng_c = 0;
+	// I1/I2
+	logic         f1_i_arm = 0, f1_i_up = 0, f1_i_fe = 0, f1_erst_q = 0, f1_rom_done = 0;
+
+	// ---- RAM compares (I1, K1, K2, R3) ---------------------------------------------------------
+	// Words [0, n) of upstream's cart RAM against fe_mem's (aliased CDFJ+ pointer
+	// words skipped); returns the number that differ and logs the first ones.
+	function automatic int f1_ram_cmp(input string what, input int n);
+		int bad;
+		logic [31:0] u, f;
+		bad = 0;
+		for (int w = 0; w < n; w++) begin
+			u = ft_uw(w);
+			f = ft_cw(w);
+			if (u != f && !(fe_is_cdf && w >= ft_pb() && w < ft_pb() + 64 && f1_alias[w - ft_pb()])) begin
+				bad++;
+				if (bad <= 16 && f1_nfail < fe_stop && fd_fe_err != 0)
+					$fwrite(fd_fe_err, "  %s: cart RAM word $%04x (byte $%05x): upstream %08x, daria_fe %08x\n",
+						what, w, 4 * w, u, f);
+			end
+		end
+		return bad;
+	endfunction
+	// The CDF tables: upstream's copies against the words in place
+	function automatic int f1_tbl_cmp(input string what);
+		int bad;
+		bad = 0;
+		if (!fe_is_cdf) return 0;
+		for (int i = 0; i < ft_streams(); i++) begin
+			if (dut.cart2600.stream_tables.pointer_ram.mem_q[i] != ft_cw(ft_pb() + i) && !f1_alias[i]) begin
+				bad++;
+				if (bad <= 8 && fd_fe_err != 0)
+					$fwrite(fd_fe_err, "  %s: pointer[%0d]: upstream's table %08x, daria_fe's word %08x\n", what, i,
+						dut.cart2600.stream_tables.pointer_ram.mem_q[i], ft_cw(ft_pb() + i));
+			end
+			if (dut.cart2600.stream_tables.increment_ram.mem_q[i] != ft_cw(ft_ib() + i)) begin
+				bad++;
+				if (bad <= 8 && fd_fe_err != 0)
+					$fwrite(fd_fe_err, "  %s: increment[%0d]: upstream's table %08x, daria_fe's word %08x\n", what, i,
+						dut.cart2600.stream_tables.increment_ram.mem_q[i], ft_cw(ft_ib() + i));
+			end
+		end
+		return bad;
+	endfunction
+	function automatic int f1_ram_words();
+		return dut.mapper_ram_size == 16'd32768 ? 8192 : 2048;
+	endfunction
+
+	// ---- O1: top.sv's read_DB (top.sv:379-395) with open_bus replaced by the
+	// shadow f1_obus and the cartridge's byte by u_fe's (obus_exposed) ----------------------
+	function automatic logic [7:0] f1_read_db();
+		logic [7:0] r, cd, co;
+		if (dut.tia_en) begin
+			cd = (fe_is_dpc || fe_is_cdf) ? u_fe.fe_do : dut.cart_2600_DB_out;
+			co = (fe_is_dpc || fe_is_cdf) ? {8{u_fe.fe_oe}} : dut.cart_2600_DB_oe;
+		end else begin
+			cd = dut.cart_7800_DB_out;
+			co = dut.cart_7800_DB_oe;
+		end
+		r = f1_obus;
+		if (dut.RW) begin
+			if (dut.cs_ram0)  r = dut.ram0_DB_out;
+			if (dut.cs_ram1)  r = dut.ram1_DB_out;
+			if (dut.cs_tia)   r = (dut.tia_DB_out & dut.tia_DB_oe) | (f1_obus & ~dut.tia_DB_oe);
+			if (dut.cs_riot)  r = (dut.riot_DB_out & dut.riot_DB_oe) | (f1_obus & ~dut.riot_DB_oe);
+			if (dut.cs_maria) r = (dut.maria_DB_out & dut.maria_DB_oe) | (f1_obus & ~dut.maria_DB_oe);
+			if (dut.cs_cart && (dut.cart_present || dut.bios_sel))
+				r = dut.bios_sel ? dut.bios_out : ((cd & co) | (f1_obus & ~co));
+		end
+		return r;
+	endfunction
+
+	// ---- the per-frame line of fe.csv ---------------------------------------------------------
+	task automatic f1_csv_line();
+		$fwrite(fd_f1, "%0d", f1_frame);
+		for (int c = 0; c < G_N; c++) $fwrite(fd_f1, ",%0d", f1_frm[c]);
+		$fwrite(fd_f1, "\n");
+	endtask
+
+	// ==== the checks, on clk_sys ==============================================================
+	always @(posedge clk_sys) begin
+		string       why;
+		logic        hidden, bad, scheme_ok, aread, up_disp, fe_disp, gr;
+		logic  [7:0] fo, fd, uo, ud;
+		logic [12:0] wa;
+		logic [255:0] pu, pf;
+		logic [51:0] su, sf;
+		longint      tu, tf;
+		int          d, n;
+		f1_clk++;
+		scheme_ok = fe_is_dpc || fe_is_cdf;
+
+		// ---- frames: tb_daria's rule; the clock that sees the VSYNC rise is the new frame's
+		if (running && vsync_raw && !f1_old_vs) begin
+			if (f1_frame > 0) f1_csv_line();
+			f1_frame++;
+			f1_t_vs = f1_clk;
+			foreach (f1_frm[c]) f1_frm[c] = 0;
+			if (fe_full > 0 && f1_frame % fe_full == 0) f1_k2_arm = 1;
+		end
+		f1_old_vs = vsync_raw;
+		if (f1_ctog_bad != f1_ctog_seen) begin			// the bench's own completion predictor
+			`F1_CHK(1, G_RET_MODEL_BAD, "complete_toggle differs from the bench's prediction (ret_tog emulation)")
+			f1_ctog_seen = f1_ctog_bad;
+		end
+		if (f1_ret_late_n != f1_ret_late_seen) begin
+			f1_inc(G_RET_LATE);
+			f1_ret_late_seen = f1_ret_late_n;
+			f1_late_until = f1_clk + 2000;		// merge_race is allowed only for that call
+		end
+
+		// ---- events, assertions, every-clock oracles (from time 0) --------------------------
+		if (u_fe.rst_fe) f1_rst_cyc = 1;
+		if (u_fe.u_seq.ev_short) f1_inc(G_SHORT_PHASE1);
+		if (u_fe.u_arb.ev_grant_steal) f1_inc(G_GRANT_STEAL);
+		if (u_fe.u_core.ev_rmw_svc) f1_inc(G_RMW_SVC);
+		if (u_fe.u_audio.ev_size_hi) f1_inc(G_SIZE_OVER32K);
+		if (u_fe.u_arb.crb_use) f1_inc(G_CRB_USE);
+		if (u_fe.u_call.ev_rmw_call) begin
+			f1_inc(G_RMW_CALL);
+			f1_rmw_pend++;
+		end
+		if (u_fe.u_core.ev_tbl_alias) begin
+			// the stream whose pointer word the DSWRITE byte hit (CDFJ+: pb = $026)
+			f1_inc(G_TBL_ALIAS);
+			n = int'(u_fe.u_core.dsw_addr[14:2]) - ft_pb();
+			if (n >= 0 && n < 64) f1_alias[n] = 1'b1;
+		end
+		`F1_CHK(u_fe.u_arb.a_collide, G_A_COLLIDE, "a_collide: grant_steal outside short_phase1")
+		`F1_CHK(u_fe.u_arb.a_wb_late, G_A_WB_LATE, "a_wb_late: the pointer buffer still full in k[1]")
+		if (u_fe.u_arb.a_p32_late) begin
+			// lane A O-1 / lane D O-1: rdP/p32_q cleared by rst_fe inside the cycle
+			if (f1_rst_cyc) f1_inc(G_P32_RESET);
+			else `F1_CHK(1, G_A_P32_LATE, "a_p32_late: DSWRITE/DSPTR without P32 in k[3]")
+		end
+		`F1_CHK(u_fe.u_arb.a_guard_core, G_A_GUARD_CORE, "a_guard_core")
+		`F1_CHK(u_fe.u_arb.a_guard_wr, G_A_GUARD_WR, "a_guard_wr")
+		`F1_CHK(u_fe.u_arb.a_owner, G_A_OWNER, "a_owner: two owners on one port")
+		`F1_CHK(u_fe.u_core.a_fpjr, G_A_FPJR, "a_fpjr: fpend with jr != 0")
+		`F1_CHK(u_fe.u_core.a_pend_late, G_A_PEND_LATE, "a_pend_late: a commit action pending at pclk1")
+		`F1_CHK(u_fe.u_audio.a_tdef2, G_A_TDEF2, "a_tdef2: a tick while one is deferred")
+		`F1_CHK(u_fe.u_copy.a_f6_live, G_A_F6_LIVE, "a_f6_live: F6 while the console runs")
+		`F1_CHK(u_fe.u_call.ev_ret_unasked, G_RET_UNASKED, "ret_unasked: a ret_tog change outside RUN")
+		`F1_CHK(u_fe.u_seq.commit && dut.pclk0 && !dut.mapper_phi2, G_COMMIT_HIDDEN, "commit_on_hidden")
+		if (u_fe.u_guard.locked) `F1_CHK(1, G_DET_LOCK_A, "det_lock_a: the guard locked on mode A's 5x clk_arm")
+		// A2: the replica of sel_ram_sel, every clock
+		if (scheme_ok)
+			`F1_CHK(u_fe.sel_up != dut.cart2600.sel_ram_sel, G_A2_BAD,
+				$sformatf("A2: sel_up %0d, sel_ram_sel %0d", u_fe.sel_up, dut.cart2600.sel_ram_sel))
+		// A3: one owner per port; crb_use marks exactly last clock's consumed read
+		`F1_CHK(!$onehot0(u_fe.u_arb.own_r) || !$onehot0(u_fe.u_arb.own_s) || !$onehot0(u_fe.u_arb.own_a) ||
+			u_fe.u_arb.crb_use != f1_use_exp, G_A3_BAD,
+			$sformatf("A3: own_r %06b own_s %03b own_a %04b, crb_use %0d expected %0d", u_fe.u_arb.own_r,
+				u_fe.u_arb.own_s, u_fe.u_arb.own_a, u_fe.u_arb.crb_use, f1_use_exp))
+		f1_use_exp = (u_fe.u_arb.own_r[1] && u_fe.cr_fix_use) || u_fe.u_arb.own_r[3] || u_fe.u_arb.own_r[2];
+		// W1: upstream's writeback never drops a payload (glue.md 9)
+		`F1_CHK(dut.cart2600.table_pointer_write && !dut.effective_reset &&
+			dut.cart2600.table_writeback.pointer_ack_sync2 != dut.cart2600.table_writeback.pointer_toggle,
+			G_WB_DROP, "wb_drop: upstream's writeback dropped a pointer")
+		// the mirror's ROM byte against the tb's cart_q, whenever both read the same byte
+		if (f1_rom_cmp)
+			`F1_CHK(u_fe.u_core.romb != cart_q, G_ROM_BAD,
+				$sformatf("rom: daria_fe's mirror byte %02x, tb cart_q %02x", u_fe.u_core.romb, cart_q))
+		f1_rom_cmp = running && dut.tia_en && cart_addr[18:15] == 4'd0 && cart_addr[14:0] == u_fe.u_core.rom_a;
+		// d_in = write_DB equals cart2600's d_in on every write latch
+		if (dut.pclk0 && !dut.RW)
+			`F1_CHK(dut.write_DB != dut.cart2600.d_in, G_DIN_BAD, "d_in: write_DB differs from cart2600.d_in")
+
+		// ---- H1, the hold's self-check (7.4.2), while running ---------------------------------
+		if (running) begin
+			logic exp;
+			exp = dut.tia_en && (dut.arm_call_busy || (!dut.mapper_init_busy && (dut.arm_dma_busy || u_fe.arm_dma_busy)));
+			`F1_CHK(dut.arm_call_stall != exp || (exp && dut.RDY) ||
+				dut.mapper_phi2 != (dut.pclk0 && (!exp || !dut.stall_cycle_taken)), G_HOLD_BAD,
+				$sformatf("H1: arm_call_stall %0d, expected %0d, RDY %0d, mapper_phi2 %0d", dut.arm_call_stall, exp,
+					dut.RDY, dut.mapper_phi2))
+		end
+
+		// ---- A1 and T1/T2 (every clock from the first reset): the state the last edge left ----
+		if (f1_rst_seen) begin
+			why = ft_a1_tick();
+			if (why != "") begin
+				`F1_CHK(1, G_TICK_BAD, {"T1/A1 ", why})
+				f1_mask(1, "tick_bad");
+			end
+			if (dut.cart2600.mapper_audio.audio_tick && !f1_m_cf && f1_w == 0) f1_inc(G_TICKS);
+			if (!f1_m_cf && f1_w == 0) begin
+				why = ft_a1_cf();
+				if (why != "") begin
+					if (f1_clk < f1_late_until) f1_inc(G_MERGE_RACE);	// only after a ret_late (7.6)
+					else `F1_CHK(1, G_AUDIO_BAD, {"A1 counters/frequencies: ", why})
+					f1_mask(1, "audio_bad");
+				end
+			end
+			if (!f1_m_rep) begin
+				why = ft_a1_rep();
+				if (why != "") begin
+					`F1_CHK(1, G_AUDIO_BAD, {"A1 replica: ", why})
+					f1_mask(0, "audio_bad");
+				end
+			end
+		end
+		if (dut.effective_reset) f1_rst_seen = 1;
+
+		// ---- the audio classes: their conditions at this edge set the masks -------------------
+		up_disp = ft_up_dispatch();
+		fe_disp = u_fe.u_audio.dispatch;
+		// merge_amp: a refresh dispatched at D in (M, M_fe+1] of a CDF call, no hook
+		if (f1_w != 0 && (up_disp || fe_disp)) begin
+			f1_inc(G_MERGE_AMP);
+			f1_mask(0, "merge_amp");
+		end
+		// the merge window
+		if (f1_w == 0) begin
+			if (dut.cart2600.arm_call_done && fe_is_cdf) begin
+				if (f1_hk_en) f1_inc(G_HK_MERGES);
+				else begin
+					f1_w = 1;
+					f1_w_m = f1_clk;
+					f1_inc(G_MERGES);
+				end
+			end
+		end else if (f1_w == 1) begin
+			if (u_fe.cp_apply) begin
+				f1_w = 2;
+				f1_h_merge[f1_bin(f1_clk - f1_w_m)]++;
+			end else if (f1_clk - f1_w_m > 64) begin
+				`F1_CHK(1, G_AUDIO_BAD, "merge: u_fe never applied the returns (cp_apply) within 64 clocks of M")
+				f1_w = 0;
+				f1_mask(1, "audio_bad");
+			end
+		end else
+			f1_w = 0;
+		if (f1_hk_en && dut.cart2600.arm_call_done && fe_is_cdf) f1_h_merge[0]++;
+		// grant_steal (short_phase1): the replica is a clock behind; NOTE loads may move
+		if (u_fe.u_arb.ev_grant_steal) f1_mask(1, "grant_steal");
+		// dig_rom_lag: upstream's ROM sample request R (rom_request includes rom_ready)
+		if (dut.cart2600.arm_sample_request) begin
+			if (dut.cart2600.mapper_audio.digital_address[31:15] != 17'd0) begin
+				f1_inc(G_DIG_ROM_LAG);			// beyond 32 KB: u_fe's port, +fe_slat
+				f1_mask(0, "dig_rom_lag");
+			end else
+				f1_dig_chk = f1_clk + 4;		// a hit: sample_done high pre-edge at R+4
+		end
+		if (f1_dig_chk == f1_clk) begin
+			f1_dig_chk = -1;
+			if (!dut.cart2600.arm_sample_done) begin
+				f1_inc(G_DIG_ROM_LAG);
+				f1_mask(0, "dig_rom_lag");
+			end
+		end
+		// T4: u_fe's remote sample request against upstream's address
+		if (u_fe.u_audio.r_go && !u_fe.u_audio.r_loc && !f1_m_rep)
+			`F1_CHK(u_fe.u_audio.dig_addr != dut.cart2600.mapper_audio.digital_address, G_DIG_BAD,
+				$sformatf("T4: sample address %08x, upstream %08x", u_fe.u_audio.dig_addr,
+					dut.cart2600.mapper_audio.digital_address))
+		// grants: svc_audio_race, pre_lock, pause_lane
+		gr = dut.cart2600.audio_ram_grant || u_fe.aud_take;
+		if (gr) begin
+			wa = dut.cart2600.audio_ram_grant ? dut.cart2600.audio_ram_addr[14:2] : u_fe.aud_addr[14:2];
+			if ((f1_updma_q && {wa, 2'b11} >= f1_up_rng_d && {wa, 2'b00} < f1_up_rng_d + {7'd0, f1_up_rng_c}) ||
+				(u_fe.u_copy.run && {wa, 2'b11} >= f1_fe_rng_d && {wa, 2'b00} < f1_fe_rng_d + {7'd0, f1_fe_rng_c})) begin
+				f1_inc(G_SVC_AUDIO_RACE);
+				f1_mask(0, "svc_audio_race");
+			end
+			if (!dut.tia_en && !dut.effective_reset) begin
+				f1_inc(G_PRE_LOCK);
+				f1_mask(0, "pre_lock");
+			end
+			if (dut.pause) begin
+				f1_inc(G_PAUSE_LANE);
+				f1_mask(0, "pause_lane");
+			end
+		end
+		if (u_fe.u_audio.ev_size_hi || (dut.cart2600.mapper_audio.state == 4'd5 &&
+				dut.cart2600.mapper_audio.ram_addr[16:15] != 2'd0))
+			f1_mask(0, "size_over32k");
+		// T3 and the NOTE-capture offset (histograms)
+		if (f1_up_disp_t >= 0 && dut.cart2600.mapper_audio.state == 4'd0) begin
+			f1_h_rup[f1_bin(f1_clk - f1_up_disp_t)]++;
+			f1_up_disp_t = -1;
+		end
+		if (f1_fe_disp_t >= 0 && u_fe.u_audio.st == 12'd1) begin
+			f1_h_rfe[f1_bin(f1_clk - f1_fe_disp_t)]++;
+			f1_fe_disp_t = -1;
+		end
+		if (up_disp) f1_up_disp_t = f1_clk;
+		if (fe_disp) f1_fe_disp_t = f1_clk;
+		if (dut.cart2600.mapper_audio.state == 4'd2) f1_up_ncap_t = f1_clk;	// AUDIO_NOTE_CAPTURE
+		if (u_fe.u_audio.st[2] && f1_up_ncap_t >= 0) begin
+			f1_h_note[f1_bin(f1_clk - f1_up_ncap_t)]++;
+			f1_up_ncap_t = -1;
+		end
+		if (fe_ticks != 0 && dut.cart2600.mapper_audio.audio_tick && fd_f1_ticks != 0)
+			$fwrite(fd_f1_ticks, "%0d,%0d,%0d,%0d,%s\n", f1_clk, dut.cart2600.mapper_audio.amplitude,
+				u_fe.u_audio.amplitude, f1_m_rep || f1_m_cf || f1_w != 0, f1_m_why);
+		if (fe_pcm != 0 && dut.cart2600.mapper_audio.audio_tick && fd_amp_up != 0) begin
+			$fwrite(fd_amp_up, "%c", dut.cart2600.mapper_audio.amplitude);
+			$fwrite(fd_amp_fe, "%c", u_fe.u_audio.amplitude);
+		end
+
+		// ---- E0 tracking and the checks while live ---------------------------------------------
+		if (dut.effective_reset) f1_live = 0;
+		if (dut.pclk0 && f1_t_e0 >= 0) begin
+			d = int'(f1_clk - f1_t_e0);
+			f1_short = d < 6;
+			if (f1_live) begin
+				if (d < f1_emin) f1_emin = d;
+				if (d > f1_emax) f1_emax = d;
+			end
+		end
+		if (f1_live && scheme_ok) begin
+			if (u_fe.u_seq.commit) f1_inc(G_COMMIT);
+			// C3/C4 bookkeeping inside the cycle
+			if (fe_is_cdf && dut.cart2600.cdf.pointer_update) begin
+				f1_pu_pend = 1;
+				f1_pu_idx = dut.cart2600.cdf.pointer_update_index;
+				f1_pu_short = f1_short;
+			end
+			if (dut.cartram_wr) begin
+				f1_wr_pend = 1;
+				f1_wr_a = dut.cartram_addr;
+				`F1_CHK(dut.cartram_addr[17:15] != 3'd0, G_OVER32K,
+					$sformatf("over32k: a 6507-side cart RAM write at $%05x", dut.cartram_addr))
+			end
+			if (dut.cart2600.arm_access && dut.cart2600.a_in[12]) f1_cyc_commit = 1;
+
+			// ---- L1 (and O1, obus), at every pclk0 ----
+			if (dut.pclk0) begin
+				f1_inc(G_LATCH);
+				hidden = !dut.mapper_phi2;
+				if (dut.RW) begin
+					uo = dut.cart2600.oe;
+					ud = dut.cart2600.d_out;
+					fo = {8{u_fe.fe_oe}};
+					fd = u_fe.fe_do;
+					bad = fo != uo || (fd & fo) != (ud & uo);
+					aread = fe_is_dpc ? (dut.cart2600.dpcplus.register_read && dut.cart2600.dpcplus.read_function == 3'd0 &&
+						dut.cart2600.dpcplus.read_index == 3'd5) : dut.cart2600.cdf.amplitude_fetch;
+					if (!hidden) begin
+						f1_inc(G_READS);
+						if (aread) f1_inc(G_AMP_READS);
+						if (bad) begin
+							if (f1_short) f1_inc(G_SHORT_DOUT);			// short_phase1: that cycle's fe_do
+							else if (aread && (f1_m_rep || f1_w != 0)) f1_inc(G_AMP_CLASS);	// under an audio class
+							else if (aread) `F1_CHK(1, G_AMP_LAG, $sformatf("amp_lag: AMPLITUDE read, daria_fe %02x, upstream %02x, no class",
+								fd, ud))
+							else if (fe_is_cdf && dut.cart2600.cdf.stream_substitute && f1_alias[dut.cart2600.cdf.table_index])
+								f1_inc(G_TBL_ALIAS);
+							else `F1_CHK(1, G_DOUT, $sformatf("L1 dout: daria_fe %02x/%02x, upstream %02x/%02x (d/oe)", fd, fo, ud, uo))
+						end
+						// obus_exposed: the open-bus leak reaching the CPU through a partial driver
+						if (!bad && f1_read_db() != dut.read_DB)
+							`F1_CHK(1, G_OBUS, $sformatf("obus_exposed: read_DB %02x, with daria_fe's bus %02x", dut.read_DB,
+								f1_read_db()))
+						if (dut.cart2600.a_in[12]) begin
+							f1_o1_pend = 1;
+							f1_o1_up = ud;
+							f1_o1_fe = fd;
+						end
+					end else begin
+						f1_inc(G_HIDDEN);
+						f1_hid_pend = 1;
+						f1_hid_pend_bad = bad;
+						if (bad) f1_inc(G_DOUT_HID);
+					end
+				end
+			end
+
+			// ---- at every pclk1: what the cycle before left ----
+			if (dut.pclk1) begin
+				f1_inc(G_CYCLES);
+				if (fe_is_dpc) why = ft_c1();
+				else why = ft_c2();
+				if (why != "") begin
+					if (fe_is_dpc) why = {"C1 state: ", why};
+					else why = {"C2 state: ", why};
+				end
+				`F1_CHK(why != "", G_STATE, why)
+				if (f1_pu_pend) begin
+					f1_inc(G_PTR_N);
+					why = ft_c3(f1_pu_idx);
+					if (why != "") begin
+						if (f1_pu_short) f1_inc(G_Q26);				// short_phase1: CDF Q26
+						else if (f1_alias[f1_pu_idx]) f1_inc(G_TBL_ALIAS);
+						else `F1_CHK(1, G_PTR, {"C3 ", why})
+					end
+				end
+				if (f1_wr_pend) begin
+					f1_inc(G_RAM_N);
+					`F1_CHK(fe_ram_byte(f1_wr_a[16:0]) != ft_cb(int'(f1_wr_a[14:0])), G_RAM,
+						$sformatf("C4: cart RAM byte $%05x: upstream %02x, daria_fe %02x", f1_wr_a,
+							fe_ram_byte(f1_wr_a[16:0]), ft_cb(int'(f1_wr_a[14:0]))))
+					`F1_CHK(!f1_cyc_commit, G_RAM_WR_NOACC, "ram_wr_noaccess: an upstream RAM strobe in a cycle with no commit")
+				end
+				if (f1_o1_pend) begin
+					if (dut.cart2600.d_out != f1_o1_up) f1_inc(G_DRIFT_UP);
+					if (u_fe.fe_do != f1_o1_fe) f1_inc(G_DRIFT_FE);
+				end
+				if (f1_hid_pend) begin
+					if (dut.RDY) begin
+						f1_inc(G_HID_LAST);
+						`F1_CHK(f1_hid_pend_bad, G_HID_LAST_BAD, "hidden_last_bad: the last hidden latch of a stall differs")
+					end
+				end
+				// K2: the whole cart RAM once a frame, at an E0 with the writeback idle
+				// and nothing of daria_fe's in flight
+				if (f1_k2_arm && dut.cart2600.mapper_wb_idle && !u_fe.u_core.wb_v && !u_fe.u_copy.run &&
+						!u_fe.u_core.svc_pend && !(dut.arm_dma_busy && !dut.mapper_init_busy)) begin
+					f1_k2_arm = 0;
+					f1_inc(G_K2);
+					n = f1_ram_cmp("K2", f1_ram_words()) + f1_tbl_cmp("K2");
+					`F1_CHK(n != 0, G_RAM_FRAME_BAD, $sformatf("K2: %0d cart RAM / table words differ", n))
+				end
+			end
+		end
+		if (dut.pclk1) begin
+			f1_pu_pend = 0;
+			f1_wr_pend = 0;
+			f1_cyc_commit = 0;
+			f1_o1_pend = 0;
+			f1_hid_pend = 0;
+			f1_t_e0 = f1_clk;
+			f1_short = 0;
+			if (!f1_live && !dut.effective_reset && dut.tia_en) f1_live = 1;
+		end
+		if (dut.pclk1) f1_rst_cyc = 0;			// the next clock starts a new 6507 cycle
+		f1_obus = dut.cpu_DB_oe ? dut.physical_write_DB : f1_read_db();
+
+		// ---- R1: posts against accepts, in order ----------------------------------------------
+		if (call_req) begin
+			f1_upq.push_back(ft_payload());
+			f1_upt.push_back(f1_clk);
+			f1_inc(G_CALLS_UP);
+		end
+		if (u_fe.call_tog != f1_tog2) begin			// flipped at the last edge: F0-F7 are in place
+			f1_feq.push_back(ft_posted());
+			f1_fet.push_back(f1_clk - 1);
+			f1_fer.push_back(f1_rmw_pend > 0);
+			if (f1_rmw_pend > 0) f1_rmw_pend--;
+			f1_inc(G_CALLS_FE);
+		end
+		f1_tog2 = u_fe.call_tog;
+		while (f1_upq.size() > 0 && f1_feq.size() > 0) begin
+			logic rmw;
+			pu = f1_upq.pop_front();
+			pf = f1_feq.pop_front();
+			tu = f1_upt.pop_front();
+			tf = f1_fet.pop_front();
+			rmw = f1_fer.pop_front();
+			f1_h_post[f1_bin(tf - tu)]++;
+			if (pu != pf) begin
+				logic one_tick;
+				one_tick = 1;
+				for (int v = 0; v < 3; v++)
+					if (pf[64 + 32 * v +: 32] != pu[64 + 32 * v +: 32] &&
+						pf[64 + 32 * v +: 32] != pu[64 + 32 * v +: 32] + pu[160 + 32 * v +: 32] &&
+						pu[64 + 32 * v +: 32] != pf[64 + 32 * v +: 32] + pu[160 + 32 * v +: 32]) one_tick = 0;
+				if (pu[63:0] != pf[63:0] || pu[255:160] != pf[255:160])
+					`F1_CHK(1, G_CALL_BAD, $sformatf("R1: call %0d posted %064x, upstream's payload %064x",
+						f1_tot[G_CALLS_FE] - f1_feq.size(), pf, pu))
+				else if (rmw) f1_inc(G_RMW_SEED);		// rmw_call: call 2's seeds (design 6.4, lane C C-3)
+				else if (one_tick) `F1_CHK(1, G_SEED_RACE, $sformatf("seed_race: posted seeds %024x, upstream %024x", pf[159:64], pu[159:64]))
+				else `F1_CHK(1, G_CALL_BAD, $sformatf("R1: seeds %024x, upstream %024x", pf[159:64], pu[159:64]))
+			end
+		end
+		// busy fall offset (u_fe - upstream) for the latency line
+		if (f1_up_busy_q && !dut.arm_call_busy) f1_up_busy_fall = f1_clk;
+		if (f1_fe_busy_q && !u_fe.arm_call_busy && f1_up_busy_fall >= 0) begin
+			f1_h_busy[f1_bin(f1_clk - f1_up_busy_fall)]++;
+			f1_up_busy_fall = -1;
+		end
+		f1_up_busy_q = dut.arm_call_busy;
+		f1_fe_busy_q = u_fe.arm_call_busy;
+
+		// ---- R2/R3: services ------------------------------------------------------------------
+		if (dut.cart2600.dpcplus.service_pending && !f1_sp_q && fe_is_dpc) begin
+			f1_sq_up.push_back(ft_svc_up());
+			f1_inc(G_SVC);
+		end
+		f1_sp_q = dut.cart2600.dpcplus.service_pending;
+		if (u_fe.u_core.svc_pend && !f1_fsp_q) begin
+			f1_sq_fe.push_back(ft_svc_fe());
+			f1_inc(G_SVC_FE);
+		end
+		f1_fsp_q = u_fe.u_core.svc_pend;
+		while (f1_sq_up.size() > 0 && f1_sq_fe.size() > 0) begin
+			su = f1_sq_up.pop_front();
+			sf = f1_sq_fe.pop_front();
+			`F1_CHK(su != sf, G_SVC_BAD, $sformatf("R2: service fill/src/dst/count/val %013x, upstream %013x", sf, su))
+			f1_r3_d.push_back({17'd0, su[30:16]});
+			f1_r3_c.push_back({24'd0, su[15:8]});
+		end
+		if (dut.arm_dma_busy && !dut.mapper_init_busy && !f1_updma_q) begin
+			f1_up_rng_d = dut.cart2600.dpcplus.service_dest;
+			f1_up_rng_c = dut.cart2600.dpcplus.service_count;
+		end
+		if (f1_updma_q && !(dut.arm_dma_busy && !dut.mapper_init_busy)) f1_svc_up_done++;
+		f1_updma_q = dut.arm_dma_busy && !dut.mapper_init_busy;
+		if (u_fe.svc_take) begin
+			sf = ft_svc_fe();
+			f1_fe_rng_d = sf[30:16];
+			f1_fe_rng_c = sf[15:8];
+		end
+		if (f1_run_q && !u_fe.u_copy.run) f1_svc_fe_done++;
+		f1_run_q = u_fe.u_copy.run;
+		while (f1_r3_d.size() > 0 && f1_svc_up_done > f1_r3_n && f1_svc_fe_done > f1_r3_n) begin
+			int dd, cc;
+			dd = int'(f1_r3_d.pop_front());
+			cc = int'(f1_r3_c.pop_front());
+			f1_r3_n++;
+			n = 0;
+			for (int a = dd; a < dd + cc; a++) if (fe_ram_byte(17'(a)) != ft_cb(a)) n++;
+			`F1_CHK(n != 0, G_SVC_RAM_BAD, $sformatf("R3: %0d of the %0d bytes at $%04x differ", n, cc, dd))
+		end
+
+		// ---- I1/I2 at the first edge both inits are done; the ROM check after the load --------
+		if (f1_load_end || (f1_loaded && dut.effective_reset && !f1_erst_q)) begin
+			f1_i_arm = 1;
+			f1_i_up = 0;
+			f1_i_fe = 0;
+		end
+		f1_erst_q = dut.effective_reset;
+		if (f1_i_arm) begin
+			if (dut.mapper_init_busy) f1_i_up = 1;
+			if (u_fe.init_busy) f1_i_fe = 1;
+			if (f1_i_up && f1_i_fe && !dut.mapper_init_busy && !u_fe.init_busy) begin
+				f1_i_arm = 0;
+				if (scheme_ok) begin
+					f1_inc(G_INIT_N);
+					n = f1_ram_cmp("I1", f1_ram_words()) + f1_tbl_cmp("I2");
+					`F1_CHK(n != 0, G_INIT_BAD, $sformatf("I1/I2: %0d cart RAM / table words differ after init", n))
+				end
+			end
+		end
+		if (running && !f1_rom_done) begin
+			f1_rom_done = 1;
+			n = 0;
+			for (int w = 0; w < (cart_size > 32768 ? 32768 : int'(cart_size)) / 4; w++)
+				if (ft_rom(w) != {img[4 * w + 3], img[4 * w + 2], img[4 * w + 1], img[4 * w]}) n++;
+			`F1_CHK(n != 0, G_ROM_BAD, $sformatf("the front-end ROM after the load: %0d words differ from the image", n))
+			if (fe_is_dpc && cart_size < 32768) f1_inc(G_SHORT_IMAGE);
+			if (f1_never_busy != 0) `F1_CHK(1, G_INIT_NEVER, "fe_init_never_busy: the hold timed out")
+		end
+	end
+
+	// ---- the resync (falling edge): upstream's audio state into u_fe at a quiet point -------
+	always @(negedge clk_sys) begin
+		if (f1_m_rep || f1_m_cf) begin
+			if (dut.effective_reset) begin
+				f1_m_rep = 0;				// both engines are in reset
+				f1_m_cf = 0;
+			end else if (fe_resync != 0 && f1_w == 0 && ft_aud_quiet()) begin
+				fe_deposit_audio(f1_m_cf);
+				if (f1_m_cf) f1_inc(G_DEPOSIT_CF);
+				f1_inc(G_RESYNC);
+				f1_m_rep = 0;
+				f1_m_cf = 0;
+			end
+		end
+	end
+
+	// ---- K1: the whole cart RAM at each upstream call start (clk_arm) ---------------------------
+	logic f1_run_arm_q = 0;
+	always @(posedge clk_arm) begin
+		int n;
+		f1_run_arm_q <= ctl_state == CTRL_RUNNING;
+		if (ctl_state == CTRL_RUNNING && !f1_run_arm_q && (fe_is_dpc || fe_is_cdf) && running) begin
+			f1_inc(G_K1);
+			n = f1_ram_cmp("K1", f1_ram_words());
+			`F1_CHK(n != 0, G_RAM_CALL_BAD, $sformatf("K1: %0d cart RAM words differ at a call start", n))
+		end
+	end
+
+	// ---- the report -------------------------------------------------------------------------
+	task automatic f1_report();
+		longint nbad, ram;
+		string s, cl, sep, rng, res, cn;
+		nbad = 0;
+		s = "";
+		for (int c = 0; c < G_N; c++)
+			if (f1_bad[c]) begin
+				nbad += f1_tot[c];
+				sep = ", ";
+				if (s.len() == 0) sep = "";
+				s = {s, sep, $sformatf("%s %0d", f1_nm[c], f1_tot[c])};
+			end
+		// posts and accepts that never found their pair
+		if (f1_tot[G_CALLS_UP] != f1_tot[G_CALLS_FE]) nbad++;
+		if (f1_tot[G_SVC] != f1_tot[G_SVC_FE]) nbad++;
+		ram = f1_tot[G_PTR] + f1_tot[G_RAM] + f1_tot[G_INIT_BAD] + f1_tot[G_RAM_CALL_BAD] + f1_tot[G_RAM_FRAME_BAD] +
+			f1_tot[G_SVC_RAM_BAD];
+		if (!fe_is_dpc && !fe_is_cdf) begin
+			$display("FE shadow: %s not shadowed", fe_scheme_name());
+			return;
+		end
+		rng = "none";
+		if (f1_emax >= 0) rng = $sformatf("%0d..%0d", f1_emin, f1_emax);
+		cn = "C2";
+		if (fe_is_dpc) cn = "C1";
+		res = "FAIL";
+		if (nbad == 0) res = "PASS";
+		$display("FE shadow: %s %0d latches, %0d commits, %0d calls, %0d services, %0d ticks compared; dout %0d, state %0d, ram %0d, call %0d, svc %0d, tick %0d, audio %0d bad; amp_lag %0d, races %0d/%0d/%0d, resync %0d, obus_exposed %0d, over32k %0d, wb_drop %0d, hold %0d; E0->latch %s",
+			fe_scheme_name(), f1_tot[G_LATCH], f1_tot[G_COMMIT], f1_tot[G_CALLS_UP], f1_tot[G_SVC], f1_tot[G_TICKS],
+			f1_tot[G_DOUT], f1_tot[G_STATE], ram, f1_tot[G_CALL_BAD], f1_tot[G_SVC_BAD], f1_tot[G_TICK_BAD],
+			f1_tot[G_AUDIO_BAD], f1_tot[G_AMP_LAG], f1_tot[G_NOTE_RACE], f1_tot[G_MERGE_RACE], f1_tot[G_SEED_RACE],
+			f1_tot[G_RESYNC], f1_tot[G_OBUS], f1_tot[G_OVER32K], f1_tot[G_WB_DROP], f1_tot[G_HOLD_BAD],
+			rng);
+		$display("FE bad: %s; calls up %0d / fe %0d, services up %0d / fe %0d; total %0d",
+			s, f1_tot[G_CALLS_UP], f1_tot[G_CALLS_FE], f1_tot[G_SVC], f1_tot[G_SVC_FE], nbad);
+		cl = "";
+		foreach (f1_nm[c])
+			if (c >= G_MERGE_AMP && c <= G_GRANT_STEAL || c == G_MERGE_RACE || c == G_SIZE_OVER32K ||
+				c == G_P32_RESET || c == G_SHORT_IMAGE || c == G_Q26 || c == G_SHORT_DOUT || c == G_AMP_CLASS ||
+				c == G_RMW_SEED || c == G_DRIFT_UP || c == G_DRIFT_FE || c == G_RESYNC || c == G_DEPOSIT_CF)
+				begin
+					sep = ", ";
+					if (cl.len() == 0) sep = "";
+					cl = {cl, sep, $sformatf("%s %0d", f1_nm[c], f1_tot[c])};
+				end
+		$display("FE classes: %s", cl);
+		$display("FE counts: %0d read latches compared (%0d AMPLITUDE), %0d hidden pclk0 (%0d differ, information; %0d the last of a stall), %0d cycles compared (%s), %0d pointer writes (C3), %0d 6507 RAM writes (C4), %0d inits (I1/I2), %0d call starts (K1), %0d frames (K2), %0d CDF merges own path / %0d through the hook, %0d crb_use clocks, mode A guard locked %0d clocks",
+			f1_tot[G_READS], f1_tot[G_AMP_READS], f1_tot[G_HIDDEN], f1_tot[G_DOUT_HID], f1_tot[G_HID_LAST],
+			f1_tot[G_CYCLES], cn, f1_tot[G_PTR_N], f1_tot[G_RAM_N], f1_tot[G_INIT_N],
+			f1_tot[G_K1], f1_tot[G_K2], f1_tot[G_MERGES], f1_tot[G_HK_MERGES], f1_tot[G_CRB_USE], f1_tot[G_DET_LOCK_A]);
+		$display("FE inputs: hook %0d, slat %0d, hold %0d, resync %0d, K2 every %0d frames; %0d daria_fe failures logged",
+			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full, f1_nfail);
+		$display("FE latency: post - accept {%s}; merge M_fe - M {%s}; busy fall fe - up {%s}; refresh up {%s}; refresh fe {%s}; NOTE capture fe - up {%s}",
+			f1_hist(f1_h_post), f1_hist(f1_h_merge), f1_hist(f1_h_busy), f1_hist(f1_h_rup), f1_hist(f1_h_rfe),
+			f1_hist(f1_h_note));
+		$display("FE result: %s (%0d bad)", res, nbad);
+		if (fd_f1 != 0) $fclose(fd_f1);
+		if (fd_f1_ticks != 0) $fclose(fd_f1_ticks);
+		if (fd_amp_up != 0) begin
+			$fclose(fd_amp_up);
+			$fclose(fd_amp_fe);
+		end
+	endtask
+
+	initial begin
+		// names (fe.csv's header) and which counters must stay 0
+		f1_nm[G_LATCH] = "latches";             f1_nm[G_COMMIT] = "commits";           f1_nm[G_DOUT] = "dout_bad";
+		f1_nm[G_DOUT_HID] = "dout_hidden";      f1_nm[G_STATE] = "state_bad";          f1_nm[G_PTR] = "ptr_bad";
+		f1_nm[G_RAM] = "ram_bad";               f1_nm[G_CALLS_UP] = "calls_up";        f1_nm[G_CALLS_FE] = "calls_fe";
+		f1_nm[G_CALL_BAD] = "call_bad";         f1_nm[G_SVC] = "svc";                  f1_nm[G_SVC_BAD] = "svc_bad";
+		f1_nm[G_TICKS] = "ticks";               f1_nm[G_TICK_BAD] = "tick_bad";        f1_nm[G_AUDIO_BAD] = "audio_bad";
+		f1_nm[G_AMP_LAG] = "amp_lag";           f1_nm[G_NOTE_RACE] = "note_race";      f1_nm[G_MERGE_RACE] = "merge_race";
+		f1_nm[G_SEED_RACE] = "seed_race";       f1_nm[G_RESYNC] = "resync";            f1_nm[G_DRIFT_UP] = "drift_up";
+		f1_nm[G_DRIFT_FE] = "drift_fe";         f1_nm[G_OBUS] = "obus_exposed";        f1_nm[G_OVER32K] = "over32k";
+		f1_nm[G_HOLD_BAD] = "hold_bad";         f1_nm[G_MERGE_AMP] = "merge_amp";      f1_nm[G_RET_LATE] = "ret_late";
+		f1_nm[G_DIG_ROM_LAG] = "dig_rom_lag";   f1_nm[G_SVC_AUDIO_RACE] = "svc_audio_race";
+		f1_nm[G_PAUSE_LANE] = "pause_lane";     f1_nm[G_PRE_LOCK] = "pre_lock";        f1_nm[G_TBL_ALIAS] = "tbl_alias";
+		f1_nm[G_RMW_CALL] = "rmw_call";         f1_nm[G_RMW_SVC] = "rmw_svc";          f1_nm[G_SHORT_PHASE1] = "short_phase1";
+		f1_nm[G_GRANT_STEAL] = "grant_steal";   f1_nm[G_A_COLLIDE] = "a_collide";      f1_nm[G_A_WB_LATE] = "a_wb_late";
+		f1_nm[G_A_P32_LATE] = "a_p32_late";     f1_nm[G_A_GUARD_CORE] = "a_guard_core"; f1_nm[G_A_GUARD_WR] = "a_guard_wr";
+		f1_nm[G_A_OWNER] = "a_owner";           f1_nm[G_A_FPJR] = "a_fpjr";            f1_nm[G_A_PEND_LATE] = "a_pend_late";
+		f1_nm[G_A_TDEF2] = "a_tdef2";           f1_nm[G_A_F6_LIVE] = "a_f6_live";      f1_nm[G_CRB_USE] = "crb_use";
+		f1_nm[G_SVC_RAM_BAD] = "svc_ram_bad";   f1_nm[G_INIT_BAD] = "init_bad";        f1_nm[G_RAM_CALL_BAD] = "ram_call_bad";
+		f1_nm[G_RAM_FRAME_BAD] = "ram_frame_bad"; f1_nm[G_HID_LAST] = "hidden_last";   f1_nm[G_HID_LAST_BAD] = "hidden_last_bad";
+		f1_nm[G_COMMIT_HIDDEN] = "commit_on_hidden"; f1_nm[G_RET_UNASKED] = "ret_unasked"; f1_nm[G_A2_BAD] = "a2_bad";
+		f1_nm[G_A3_BAD] = "a3_bad";             f1_nm[G_SIZE_OVER32K] = "size_over32k"; f1_nm[G_P32_RESET] = "p32_reset";
+		f1_nm[G_WB_DROP] = "wb_drop";           f1_nm[G_RAM_WR_NOACC] = "ram_wr_noaccess"; f1_nm[G_DET_LOCK_A] = "det_lock_a";
+		f1_nm[G_DIG_BAD] = "dig_bad";           f1_nm[G_ROM_BAD] = "rom_bad";          f1_nm[G_DIN_BAD] = "din_bad";
+		f1_nm[G_RET_MODEL_BAD] = "ret_model_bad"; f1_nm[G_INIT_NEVER] = "init_never_busy"; f1_nm[G_READS] = "reads";
+		f1_nm[G_HIDDEN] = "hidden";             f1_nm[G_CYCLES] = "cycles";            f1_nm[G_PTR_N] = "ptr_writes";
+		f1_nm[G_RAM_N] = "ram_writes";          f1_nm[G_K1] = "k1_calls";              f1_nm[G_K2] = "k2_frames";
+		f1_nm[G_INIT_N] = "inits";              f1_nm[G_SVC_FE] = "svc_fe";            f1_nm[G_MERGES] = "merges";
+		f1_nm[G_HK_MERGES] = "hook_merges";     f1_nm[G_AMP_READS] = "amp_reads";      f1_nm[G_AMP_CLASS] = "amp_class";
+		f1_nm[G_SHORT_DOUT] = "short_dout";     f1_nm[G_Q26] = "q26";                  f1_nm[G_SHORT_IMAGE] = "short_image";
+		f1_nm[G_RMW_SEED] = "rmw_seed";         f1_nm[G_DEPOSIT_CF] = "deposit_cf";
+		foreach (f1_bad[c]) f1_bad[c] = 0;
+		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
+		foreach (f1_h_post[b]) begin
+			f1_h_post[b] = 0; f1_h_merge[b] = 0; f1_h_busy[b] = 0; f1_h_rup[b] = 0; f1_h_rfe[b] = 0; f1_h_note[b] = 0;
+		end
+		foreach (f1_bad[c])
+			case (c)
+				G_DOUT, G_STATE, G_PTR, G_RAM, G_CALL_BAD, G_SVC_BAD, G_TICK_BAD, G_AUDIO_BAD, G_AMP_LAG,
+				G_NOTE_RACE, G_SEED_RACE, G_OBUS, G_OVER32K, G_HOLD_BAD, G_A_COLLIDE, G_A_WB_LATE, G_A_P32_LATE,
+				G_A_GUARD_CORE, G_A_GUARD_WR, G_A_OWNER, G_A_FPJR, G_A_PEND_LATE, G_A_TDEF2, G_A_F6_LIVE,
+				G_SVC_RAM_BAD, G_INIT_BAD, G_RAM_CALL_BAD, G_RAM_FRAME_BAD, G_HID_LAST_BAD, G_COMMIT_HIDDEN,
+				G_RET_UNASKED, G_A2_BAD, G_A3_BAD, G_WB_DROP, G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD,
+				G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER: f1_bad[c] = 1;
+				default: ;
+			endcase
+		void'($value$plusargs("fe_slat=%d", fe_slat));
+		void'($value$plusargs("fe_merge_hook=%d", fe_merge_hook));
+		void'($value$plusargs("fe_hold=%d", fe_hold));
+		void'($value$plusargs("fe_resync=%d", fe_resync));
+		void'($value$plusargs("fe_full=%d", fe_full));
+		void'($value$plusargs("fe_ticks=%d", fe_ticks));
+		void'($value$plusargs("fe_pcm=%d", fe_pcm));
+		if (fe_slat < 0) fe_slat = 0;
+		$display("FE stage 1: daria_fe on fe_mem, mode A; +fe_merge_hook=%0d +fe_slat=%0d +fe_hold=%0d +fe_resync=%0d +fe_full=%0d",
+			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full);
+		#1;
+		fd_f1 = $fopen({out, "fe.csv"}, "w");
+		$fwrite(fd_f1, "frame");
+		for (int c = 0; c < G_N; c++) $fwrite(fd_f1, ",%s", f1_nm[c]);
+		$fwrite(fd_f1, "\n");
+		if (fe_ticks != 0) begin
+			fd_f1_ticks = $fopen({out, "fe_ticks.csv"}, "w");
+			$fwrite(fd_f1_ticks, "clk_sys,amp_up,amp_fe,masked,class\n");
+		end
+		if (fe_pcm != 0) begin
+			fd_amp_up = $fopen({out, "amp_up.pcm"}, "wb");
+			fd_amp_fe = $fopen({out, "amp_fe.pcm"}, "wb");
+		end
+	end
+`undef F1_CHK
+`endif
+
 	initial begin
 		foreach (fe_tot[c]) begin fe_tot[c] = 0; fe_frm[c] = 0; end
 		foreach (fe_cov[c]) fe_cov[c] = 0;

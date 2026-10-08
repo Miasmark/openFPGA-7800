@@ -91,13 +91,13 @@ module tb_daria;
 	logic [24:0] ioctl_addr = 0;
 	logic  [7:0] ioctl_dout = 0;
 	logic        tia_mode = 0;
-	logic        reset = 1;
+	logic        reset = 1; `ifdef FE_SHADOW logic fe_hold_reset = 0; /* fe_shadow.svh: the sticky hold (bench.md 7.4.2) */ `endif
 	wire         mapper_load_wait, mapper_init_busy;
 	wire  [31:0] cart_size;
 
 	always @(posedge clk_sys) begin
 		old_cart_download <= cart_download;
-		reset <= reset_in | cart_download | old_cart_download | mapper_init_busy;
+		reset <= reset_in | cart_download | old_cart_download | mapper_init_busy `ifdef FE_SHADOW | fe_hold_reset `endif;
 	end
 
 	a78_cart_extent cart_extent (

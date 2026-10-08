@@ -148,13 +148,12 @@ def _dpc_regs(sf):
     # 3. wraps: DF5 counter 0 -> PUSH writes $FFF; DF6 $FFF -> WRITE wraps; DF7 $FFF
     #    -> DATA read wraps; DF4 fractional near $FFFFF -> FRACDATA wraps
     body += dpc_set(5, low=0x00, hi=0x00) + sta(0x1065, 0x77)          # PUSH at counter-1 = $FFF
+    body += '        LDA $100D\n' + chk(0x77)                            # DF5 now $FFF: DATA reads it
     body += dpc_set(6, low=0xFF, hi=0x0F) + sta(0x107E, 0x66)          # WRITE at $FFF, counter -> 0
     body += sta(0x107E, 0x67)                                          # WRITE at 0
     body += dpc_set(7, low=0xFF, hi=0x0F) + '        LDA $100F\n        LDA $100F\n'   # DATA wrap
     body += dpc_set(4, fracinc=0xFF, fraclow=0xFF, frachi=0x0F)
     body += '        LDA $101C\n' * 4                                  # FRACDATA wrap
-    # read back: DF5 now $FFF: DATA reads $77 (the PUSH byte at $FFF)
-    body += '        LDA $100D\n' + chk(0x77)
     # DF6 back to $FFF: DATA reads $66, then (wrapped) $67
     body += dpc_set(6, low=0xFF, hi=0x0F) + '        LDA $100E\n' + chk(0x66) + '        LDA $100E\n' + chk(0x67)
     # 4. window flags: DF0 top $40 bottom $20: counters $30 (in), $50 (out), $40, $20

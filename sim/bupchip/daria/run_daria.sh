@@ -23,6 +23,11 @@
 # fe_err.txt and the "FE ..." lines of run.log. It combines with the others:
 # the object directory gets _fe (obj_fe, obj_shadow<WIN_KB>_fe, ...), the
 # runs go to runs/fe/ (runs/shadow<WIN_KB>_fe/, runs/wrap<WIN_KB>_fe/).
+# FE=1 builds stage 1 (docs/daria_fe/design.md 12.4): daria_fe (BUP/daria_fe*.sv)
+# on its own daria_mem beside the stage-0 reference, with fe_taps.svh.
+# FE_STAGE0=1 builds the reference alone (-DFE_STAGE0, no daria_fe sources):
+# obj..._fe_s0, runs/..._fe_s0/. FE_POISON=1 adds -DDARIA_RAM_POISON (the
+# poisoned daria_ram model): obj..._fe_poison, runs/..._fe_poison/.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -86,10 +91,26 @@ if [ "${SHADOW:-0}" != 0 ]; then
 fi
 
 INCS=("$HERE/daria_shadow.svh")
+FE_SUF=""
 if [ "${FE:-0}" != 0 ]; then
 	OBJ="${OBJ}_fe"
 	DEFS+=(-DFE_SHADOW "-I$HERE")
 	INCS+=("$HERE/fe_shadow.svh")
+	if [ "${FE_STAGE0:-0}" != 0 ]; then
+		FE_SUF="_s0"
+		DEFS+=(-DFE_STAGE0)
+	else
+		# Stage 1: daria_fe's sources (the package first) and its daria_mem (fe_mem)
+		BUP="$FPGA/core/bupchip"
+		SRCS+=("$BUP/daria_fe_pkg.sv" "$BUP"/daria_fe_{seq,dec,core,audio,call,copy,arb,guard}.sv "$BUP/daria_fe.sv")
+		[ "${SHADOW:-0}" != 0 ] || SRCS+=("$BUP/daria_mem.sv")
+		INCS+=("$HERE/fe_taps.svh")
+		if [ "${FE_POISON:-0}" != 0 ]; then
+			FE_SUF="_poison"
+			DEFS+=(-DDARIA_RAM_POISON)
+		fi
+	fi
+	OBJ="${OBJ}${FE_SUF}"
 fi
 
 BIN="$OBJ/vtb"
@@ -108,7 +129,7 @@ fi
 PREFIX=""
 [ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
 [ "${SHADOW:-0}" = 0 ] || [ "${WRAPPER:-0}" = 0 ] || PREFIX="wrap${WIN_KB:-128}/"
-[ "${FE:-0}" = 0 ] || { PREFIX="${PREFIX%/}"; PREFIX="${PREFIX:+${PREFIX}_}fe/"; }
+[ "${FE:-0}" = 0 ] || { PREFIX="${PREFIX%/}"; PREFIX="${PREFIX:+${PREFIX}_}fe${FE_SUF}/"; }
 NAME="${NAME:-$PREFIX$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"
