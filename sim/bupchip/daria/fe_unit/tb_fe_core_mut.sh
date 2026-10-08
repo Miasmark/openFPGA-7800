@@ -69,6 +69,7 @@ c29~core~core~else if (s_fire | pclk1)~else if (s_fire)~S post write not dropped
 c30~core~core~else if (act_dsw | act_dsp | act_svc | pclk1)~else if (act_dsw | act_dsp | act_svc)~DSWRITE/DSPTR/service not dropped at pclk1
 c31~core~core~else if (r_fire | pclk1)~else if (r_fire)~PUSH/WRITE byte not dropped at pclk1
 c32~core~core~assign a_pend_late  = pclk1 & !rcyc & ~assign a_pend_late  = pclk1 & ~a_pend_late without rcyc (fires in a release cycle)
+c33~core~core~if (pclk1)       rcyc <= 1'b0;~if (1'b0)       rcyc <= 1'b0;~rcyc never cleared (a_pend_late off for the whole run)
 EOF
 
 ids=("$@")

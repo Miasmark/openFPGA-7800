@@ -35,8 +35,11 @@
 // dma_cover, mask_stuck, the "FE masks:" line; pause_lane narrowed to lane
 // B's condition; rmw_seed/rmw_merge bounded to one tick / k ticks. Added by
 // the lead's decisions (docs/daria_fe/lanes/F1_fixes.md): obus_ffe, a counted
-// class for the one obus_exposed case accepted (a read at $0000 right after a
-// substituted read at $1FFF).
+// class for the one obus_exposed case accepted (the TIA read at $0000 right
+// after a CDF fast JMP's low operand at $1FFF, with the values that case
+// leaves on both sides); commit_pclk1 (must be 0: a commit in a pclk1 clock);
+// pause_lane narrowed to a capture whose lanes differ, masking only the sum
+// and AMPLITUDE, and any other lane difference at a capture audio_bad.
 //
 // STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
 // daria_fe existed; the text below):
@@ -1143,8 +1146,8 @@
 		G_DIG_LOCAL, G_DIG_REMOTE, G_DIG_RAM, G_DIG_NONE,
 		// added by the lane's verification (E1_shadow.md, "Verification")
 		G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK, G_MASKED, G_DIG_VAL_BAD, G_DIG_VAL_N, G_DIG_VAL_MRG,
-		// the lead's decision F1-3 (docs/daria_fe/lanes/F1_fixes.md 3)
-		G_OBUS_FFE,
+		// the lead's decisions (docs/daria_fe/lanes/F1_fixes.md): F1-3, and F1-1's system check
+		G_OBUS_FFE, G_COMMIT_PCLK1,
 		G_N
 	} f1_cnt_t;
 	string       f1_nm [G_N];
@@ -1225,6 +1228,13 @@
 	// leave A1 blind for the rest of the run (mask_stuck, +fe_mask_max clk_sys).
 	int          fe_mask_max = 20000;
 	logic        f1_sel_unp = 0, f1_up_inw = 0, f1_fe_inw = 0;	// pause_lane; T5's merge-window flags
+	// pause_lane's own mask (F1_fixes.md 2): the one wrong sample byte reaches only the sum
+	// and AMPLITUDE (and the 6507's AMPLITUDE reads). f1_m_amp leaves those two out of the
+	// replica compare until both agree again, which the next refresh brings about by itself
+	// (it clears the sum and writes AMPLITUDE): no resync. f1_upgr_pz: the last clock was an
+	// upstream grant clock with pause high.
+	logic        f1_m_amp = 0, f1_upgr_pz = 0;
+	longint      f1_pz_cap = 0, f1_pz_sel = 0;	// captures right after a paused grant; of them, select high
 	logic [40:0] f1_rq_up [$], f1_rq_fe [$];			// T5: ROM-sample amplitudes in order
 	longint      f1_mask_t0 = -1, f1_mask_long = 0;
 	logic        f1_mask_stk = 0;
@@ -1260,7 +1270,8 @@
 	logic  [5:0] f1_pu_idx = 0;
 	logic [17:0] f1_wr_a = 0;
 	logic  [7:0] f1_o1_up = 0, f1_o1_fe = 0, f1_obus = 0;
-	logic        f1_ffe_prev = 0;	// obus_ffe: the last latch was a substituted read at $1FFF
+	logic        f1_ffe_prev = 0;	// obus_ffe: the last latch was a CDF fast JMP's low operand at $1FFF
+	logic  [7:0] f1_ffe_fe = 0, f1_ffe_rom = 0;	// that latch's byte from u_fe, and ROM[$1FFF] (bank in use)
 	logic [63:0] f1_alias = 0;		// CDFJ+ streams whose pointer word a DSWRITE hit (tbl_alias)
 
 	// R1: upstream's accepts and u_fe's posts, paired in order
@@ -1423,6 +1434,12 @@
 		`F1_CHK(u_fe.u_copy.a_f6_live, G_A_F6_LIVE, "a_f6_live: F6 while the console runs")
 		`F1_CHK(u_fe.u_call.ev_ret_unasked, G_RET_UNASKED, "ret_unasked: a ret_tog change outside RUN")
 		`F1_CHK(u_fe.u_seq.commit && dut.pclk0 && !dut.mapper_phi2, G_COMMIT_HIDDEN, "commit_on_hidden")
+		// commit_pclk1 (F1_fixes.md 1): a commit never shares a clock with pclk1, so the post
+		// actions' set at C never meets their pclk1 clear. top.sv proves it: mapper_phi2 =
+		// pclk0 && ... (327); pclk1 and pclk0 are M6502C's phi1_ce and phi2_ce (716-717), i.e.
+		// pclk1 & ~in_phase2 and pclk0 & in_phase2 (1421-1422, 1434-1435), never both. This
+		// checks it on the system's own phases, pause, stall and reset included.
+		`F1_CHK(u_fe.u_seq.commit && dut.pclk1, G_COMMIT_PCLK1, "commit_pclk1: a commit in a pclk1 clock")
 		if (u_fe.u_guard.locked) `F1_CHK(1, G_DET_LOCK_A, "det_lock_a: the guard locked on mode A's 5x clk_arm")
 		// A2: the replica of sel_ram_sel, every clock
 		if (scheme_ok)
@@ -1487,8 +1504,13 @@
 				end
 			end
 			f1_rmw_chk = 0;
+			// pause_lane's mask ends once the sum and AMPLITUDE agree again (a different byte
+			// leaves a fixed nonzero difference in both until they are rewritten from new bytes)
+			if (f1_m_amp && u_fe.u_audio.ssum == dut.cart2600.mapper_audio.sample_sum[7:0] &&
+					u_fe.u_audio.amplitude == dut.cart2600.mapper_audio.amplitude)
+				f1_m_amp = 0;
 			if (!f1_m_rep) begin
-				why = ft_a1_rep();
+				why = ft_a1_rep(f1_m_amp);
 				if (why != "") begin
 					`F1_CHK(1, G_AUDIO_BAD, {"A1 replica: ", why})
 					f1_mask(0, "audio_bad");
@@ -1496,8 +1518,9 @@
 			end
 		end
 		if (dut.effective_reset) f1_rst_seen = 1;
-		// how long A1 is masked (the resync clears a mask at a falling edge)
-		if (f1_m_rep || f1_m_cf) begin
+		// how long A1 is masked (the resync clears a mask at a falling edge; pause_lane's
+		// f1_m_amp clears when the sum and AMPLITUDE agree again)
+		if (f1_m_rep || f1_m_cf || f1_m_amp) begin
 			f1_inc(G_MASKED);
 			if (f1_mask_t0 < 0) f1_mask_t0 = f1_clk;
 			else if (fe_resync != 0 && !f1_mask_stk && f1_clk - f1_mask_t0 > fe_mask_max) begin
@@ -1629,15 +1652,32 @@
 				f1_inc(G_PRE_LOCK);
 				f1_mask(0, "pre_lock");
 			end
-			// pause_lane (lane B, B-1): only a paused grant whose last unpaused edge
-			// had sel_ram_sel high, so upstream's lane register holds the 6507
-			// port's lane. Any other paused grant reads the engine's lane on both
-			// sides and stays compared.
-			if (dut.pause && f1_sel_unp) begin
+		end
+		// pause_lane (F1_fixes.md 2; design 9.5), and only then: a sample capture on an unpaused
+		// edge (AUDIO_SAMPLE_CAPTURE, pause low: the byte is read, not $FF) right after an
+		// upstream grant edge in a pause, whose last unpaused edge had sel_ram_sel high
+		// (f1_sel_unp), with the two lane registers differing: upstream's mapper_read_lane
+		// still holds the 6507 port's lane from that edge, u_fe's al the engine's (B-1). It
+		// masks only what that byte writes (f1_m_amp). Any other lane difference at an unpaused
+		// capture, the replica in step, is audio_bad.
+		if (f1_rst_seen && dut.cart2600.mapper_audio.state == 4'd8 && !dut.pause && f1_upgr_pz) begin
+			f1_pz_cap++;						// the lane check's exposure (FE masks: line)
+			if (f1_sel_unp) f1_pz_sel++;
+		end
+		if (f1_rst_seen && dut.cart2600.mapper_audio.state == 4'd8 && !dut.pause &&	// AUDIO_SAMPLE_CAPTURE
+				u_fe.u_audio.st == 12'd1 << daria_fe_pkg::AS_SMCAP &&
+				dut.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
+			if (f1_upgr_pz && f1_sel_unp) begin
 				f1_inc(G_PAUSE_LANE);
-				f1_mask(0, "pause_lane");
+				if (!f1_m_rep && !f1_m_cf && !f1_m_amp) f1_m_why = "pause_lane";
+				f1_m_amp = 1;
+			end else if (!f1_m_rep) begin
+				`F1_CHK(1, G_AUDIO_BAD, $sformatf("A1 lane: a sample capture reads lane %0d, upstream lane %0d (no pause_lane: grant edge paused %0d, select at the last unpaused edge %0d)",
+					u_fe.u_audio.al, dut.cart_ram.mapper_read_lane, f1_upgr_pz, f1_sel_unp))
+				f1_mask(0, "audio_bad");
 			end
 		end
+		f1_upgr_pz = dut.cart2600.audio_ram_grant && dut.pause;
 		if (!dut.pause) f1_sel_unp = dut.cart2600.sel_ram_sel;
 		if (u_fe.u_audio.ev_size_hi || (dut.cart2600.mapper_audio.state == 4'd5 &&
 				dut.cart2600.mapper_audio.ram_addr[16:15] != 2'd0))
@@ -1660,7 +1700,7 @@
 		end
 		if (fe_ticks != 0 && dut.cart2600.mapper_audio.audio_tick && fd_f1_ticks != 0)
 			$fwrite(fd_f1_ticks, "%0d,%0d,%0d,%0d,%s\n", f1_clk, dut.cart2600.mapper_audio.amplitude,
-				u_fe.u_audio.amplitude, f1_m_rep || f1_m_cf || f1_w != 0, f1_m_why);
+				u_fe.u_audio.amplitude, f1_m_rep || f1_m_cf || f1_m_amp || f1_w != 0, f1_m_why);
 		if (fe_pcm != 0 && dut.cart2600.mapper_audio.audio_tick && fd_amp_up != 0) begin
 			$fwrite(fd_amp_up, "%c", dut.cart2600.mapper_audio.amplitude);
 			$fwrite(fd_amp_fe, "%c", u_fe.u_audio.amplitude);
@@ -1668,6 +1708,7 @@
 
 		// ---- E0 tracking and the checks while live ---------------------------------------------
 		if (dut.effective_reset) f1_live = 0;
+		if (!f1_live) f1_ffe_prev = 0;			// "the immediately preceding latch" of a live run
 		if (dut.pclk0 && f1_t_e0 >= 0) begin
 			d = int'(f1_clk - f1_t_e0);
 			f1_short = d < 6;
@@ -1709,7 +1750,7 @@
 						if (aread) f1_inc(G_AMP_READS);
 						if (bad) begin
 							if (f1_short) f1_inc(G_SHORT_DOUT);			// short_phase1: that cycle's fe_do
-							else if (aread && f1_m_rep) f1_inc(G_AMP_CLASS);	// under an audio class
+							else if (aread && (f1_m_rep || f1_m_amp)) f1_inc(G_AMP_CLASS);	// under an audio class
 							else if (aread) `F1_CHK(1, G_AMP_LAG, $sformatf("amp_lag: AMPLITUDE read, daria_fe %02x, upstream %02x, no class",
 								fd, ud))
 							else if (fe_is_cdf && dut.cart2600.cdf.stream_substitute && f1_alias[dut.cart2600.cdf.table_index])
@@ -1717,12 +1758,18 @@
 							else `F1_CHK(1, G_DOUT, $sformatf("L1 dout: daria_fe %02x/%02x, upstream %02x/%02x (d/oe)", fd, fo, ud, uo))
 						end
 						// obus_exposed: the open-bus leak reaching the CPU through a partial driver.
-						// Counted instead as obus_ffe (F1_fixes.md 3), and only then: the read at
-						// $0000 that follows a substituted read at $1FFF (the 13-bit address wraps;
-						// a fast JMP or LDA # at $1FFE). fe_do holds the substituted byte there,
-						// upstream's d_out has fallen back to ROM[$1FFF].
+						// Counted instead as obus_ffe (F1_fixes.md 3), and only then: the TIA read
+						// at $0000 right after the low operand of a CDF fast JMP whose opcode is at
+						// $1FFE (the 13-bit address wraps: the high operand comes from the TIA,
+						// whose D5-D0 are undriven), with the undriven bits holding, on u_fe's
+						// side, the substituted byte u_fe latched at $1FFF (fe_do holds it) and,
+						// on upstream's, ROM[$1FFF] (its d_out has fallen back to the ROM after
+						// the commit). Anything else, values included, is obus_exposed.
 						if (!bad && f1_read_db() != dut.read_DB) begin
-							if (f1_ffe_prev && dut.cart2600.a_in == 13'h0000) f1_inc(G_OBUS_FFE);
+							if (f1_ffe_prev && dut.cart2600.a_in == 13'h0000 && dut.cs_tia &&
+									(f1_read_db() & ~dut.tia_DB_oe) == (f1_ffe_fe & ~dut.tia_DB_oe) &&
+									(dut.read_DB & ~dut.tia_DB_oe) == (f1_ffe_rom & ~dut.tia_DB_oe))
+								f1_inc(G_OBUS_FFE);
 							else `F1_CHK(1, G_OBUS, $sformatf("obus_exposed: read_DB %02x, with daria_fe's bus %02x", dut.read_DB,
 								f1_read_db()))
 						end
@@ -1738,10 +1785,18 @@
 						if (bad) f1_inc(G_DOUT_HID);
 					end
 				end
-				// obus_ffe's condition for the next latch: this one is a shown, substituted
-				// cartridge read at $1FFF (CDF fetch or jump; DPC+ fast fetch)
-				f1_ffe_prev = !hidden && dut.RW && dut.cart2600.a_in == 13'h1FFF &&
-					(fe_is_cdf ? dut.cart2600.cdf.stream_substitute : (fe_is_dpc && dut.cart2600.dpcplus.register_read));
+				// obus_ffe's condition for the next latch: this one is a shown read at $1FFF
+				// that upstream substitutes as the first (low) operand of a fast JMP
+				// (jump_remaining 2: the opcode is at $1FFE, so the next read, at $0000, is
+				// that JMP's high operand, and the 6507 then jumps back to the cartridge: one
+				// exposed read). Not a fetch (a fast LDA/LDX/LDY # at $1FFE) or a DPC+ fast
+				// fetch: their next opcode comes from the TIA, so $0001 is exposed as well
+				// (F1_fixes.md 3); not jump_remaining 1 (a JMP at $1FFD), whose next read is
+				// an opcode at the jump target.
+				f1_ffe_prev = !hidden && dut.RW && dut.cart2600.a_in == 13'h1FFF && fe_is_cdf &&
+					dut.cart2600.cdf.jump_substitute && dut.cart2600.cdf.jump_remaining == 2'd2;
+				f1_ffe_fe   = u_fe.fe_do;
+				f1_ffe_rom  = rom[dut.cart2600.cdf.rom_a];
 			end
 
 			// ---- at every pclk1: what the cycle before left ----
@@ -2149,8 +2204,8 @@
 			f1_tot[G_K1], f1_tot[G_K2], f1_tot[G_MERGES], f1_tot[G_HK_MERGES], f1_tot[G_CRB_USE], f1_tot[G_DET_LOCK_A],
 			f1_tot[G_R3_N], f1_tot[G_FORCED]);
 		if (f1_mask_t0 >= 0 && f1_clk - f1_mask_t0 > f1_mask_long) f1_mask_long = f1_clk - f1_mask_t0;
-		$display("FE masks: A1 masked by a class or a failure on %0d clk_sys, the longest mask %0d clk_sys (mask_stuck above %0d); %0d merges M_fe - M not 6 (merge_late)",
-			f1_tot[G_MASKED], f1_mask_long, fe_mask_max, f1_tot[G_MERGE_LATE]);
+		$display("FE masks: A1 masked by a class or a failure on %0d clk_sys, the longest mask %0d clk_sys (mask_stuck above %0d); %0d merges M_fe - M not 6 (merge_late); %0d sample captures on an unpaused edge right after a paused grant (lanes compared), %0d of them with the select high at the last unpaused edge, %0d pause_lane",
+			f1_tot[G_MASKED], f1_mask_long, fe_mask_max, f1_tot[G_MERGE_LATE], f1_pz_cap, f1_pz_sel, f1_tot[G_PAUSE_LANE]);
 		$display("FE inputs: hook %0d, slat %0d, hold %0d, resync %0d, K2 every %0d frames; %0d daria_fe failures logged",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full, f1_nfail);
 		$display("FE latency: post - accept {%s}; merge M_fe - M {%s}; busy fall fe - up {%s}; refresh up {%s}; refresh fe {%s}; NOTE capture fe - up {%s}; upstream ROM sample R -> sample_done {%s}",
@@ -2207,7 +2262,7 @@
 		f1_nm[G_MERGE_LATE] = "merge_late";     f1_nm[G_DMA_COVER] = "dma_cover";
 		f1_nm[G_MASK_STUCK] = "mask_stuck";     f1_nm[G_MASKED] = "masked_clocks";
 		f1_nm[G_DIG_VAL_BAD] = "dig_val_bad";   f1_nm[G_DIG_VAL_N] = "dig_val_n";      f1_nm[G_DIG_VAL_MRG] = "dig_val_merge";
-		f1_nm[G_OBUS_FFE] = "obus_ffe";
+		f1_nm[G_OBUS_FFE] = "obus_ffe";         f1_nm[G_COMMIT_PCLK1] = "commit_pclk1";
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
 		foreach (f1_h_post[b]) begin
@@ -2222,7 +2277,7 @@
 				G_SVC_RAM_BAD, G_INIT_BAD, G_RAM_CALL_BAD, G_RAM_FRAME_BAD, G_HID_LAST_BAD, G_COMMIT_HIDDEN,
 				G_RET_UNASKED, G_A2_BAD, G_A3_BAD, G_WB_DROP, G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD,
 				G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER, G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK,
-				G_DIG_VAL_BAD: f1_bad[c] = 1;
+				G_DIG_VAL_BAD, G_COMMIT_PCLK1: f1_bad[c] = 1;
 				default: ;
 			endcase
 		void'($value$plusargs("fe_slat=%d", fe_slat));

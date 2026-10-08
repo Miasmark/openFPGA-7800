@@ -28,8 +28,10 @@
 // (DFxDATA/DATAW/FRACDATA, PUSH, WRITE; DSWRITE, DSPTR), so that the action
 // is set with its ready flag at 0 (E3_rtl_issues.md issue 1). The release
 // cycle's latch and words are classified (rrel) and the DPC+ fetchers
-// resynced from upstream; the action must be dropped at pclk1, a_pend_late
-// stay 0 there (rcyc) and nothing fire later (docs/daria_fe/lanes/F1_fixes.md).
+// resynced from upstream; the action must be dropped at pclk1 (pending
+// before it, gone after it: every release must count one such pclk1, and
+// none may leave an action pending), a_pend_late stay 0 there (rcyc) and
+// nothing fire later (docs/daria_fe/lanes/F1_fixes.md).
 //
 // The checks (design 12.3, items 1-8):
 //  1 a2       sel_up == sel_ram_sel on every clock; aud_take == upstream's
@@ -52,7 +54,12 @@
 //             load (jmap)
 //  6 fix      no fixed R use outside sel_up in a cycle with C >= E0+6;
 //             a_collide, a_wb_late, a_p32_late (the arb's, formed here),
-//             a_pend_late, a_fpjr; one source per W, cr_fix, cs_req clock
+//             a_pend_late, a_fpjr; one source per W, cr_fix, cs_req clock;
+//             rcyc (bad class rcyc) against its meaning on every clock: 1
+//             exactly when some edge since the last pclk1 edge had rst_fe;
+//             "commit in a pclk1 clock", a sanity check of phase_gen only
+//             (it emits pclk1 and pclk0 exclusively; the system's proof is
+//             top.sv, checked by fe_shadow's commit_pclk1)
 //  7 svc      the service latch against upstream's service_* (count via
 //             min()); dma_set and callfn against upstream's pending rises;
 //             NOTE, waveforms and cdf_dig every clock
@@ -419,7 +426,14 @@ module tb_fe_core;
 	longint c_short = 0, c_dout_short = 0, c_steal = 0, c_q26 = 0, c_q26_rep = 0, c_alias = 0;
 	longint c_noacc = 0, c_aud_cls = 0, c_switch = 0, c_reset = 0, c_7800 = 0, c_other = 0, c_rst_skip = 0;
 	longint c_p32_rst = 0;
-	longint c_rrel = 0, c_rrel_dout = 0, c_rrel_words = 0, v_rrel_drop = 0;
+	longint c_rrel = 0, c_rrel_dout = 0, c_rrel_words = 0, v_rrel_drop = 0, v_rrel_kept = 0;
+	// rcyc's meaning, modelled apart from the RTL (lanes/F1_fixes.md 1): 1 exactly when some
+	// edge since the last pclk1 edge (that edge excluded) had rst_fe high, i.e. the last
+	// edge with rst_fe is later than the last pclk1 edge
+	longint t_rst_edge = -2, t_pclk1_edge = -1;
+	longint n_rcyc = 0;
+	bit     drop_chk = 1'b0;             // a pclk1 with rcyc left actions pending: are they gone after it?
+	bit     drop_c = 1'b0, drop_s = 1'b0, drop_r = 1'b0;
 	longint v_rrel_k [0:3] = '{0, 0, 0, 0};    // releases in DFxDATA-type reads, PUSH/WRITE, DSWRITE, DSPTR
 	longint v_cmp_state = 0, n_hold = 0;
 	bit     hold_on = 1'b0;              // fe_do must hold the latched byte (C ... the next E0+2)
@@ -720,11 +734,27 @@ module tb_fe_core;
 				else begin n_assert++; fail("assert", "a_p32_late", 1, 0); end
 			end
 			if (u_core.a_pend_late) begin n_assert++; fail("assert", "a_pend_late", 1, 0); end
-			// the post actions' set never meets their pclk1 clear (every set needs commit)
+			// the post actions' set never meets their pclk1 clear (every set needs commit). A
+			// sanity check of this bench's phase generator only: phase_gen emits pclk1 and pclk0
+			// in exclusive branches, so it cannot fail here. The system's proof is top.sv
+			// (phi1_en/phi2_en), checked by fe_shadow's commit_pclk1 (lanes/F1_fixes.md 1)
 			if (commit && pclk1) begin n_assert++; fail("assert", "commit in a pclk1 clock", 1, 0); end
-			// a release cycle's action dropped at pclk1 (rcyc masks a_pend_late there)
-			if (pclk1 && u_core.rcyc && !rst_fe && ((u_core.pend_c != PC_NONE) || u_core.pend_s || u_core.pend_r))
-				v_rrel_drop++;
+			// rcyc against its meaning, on every clock once a pclk1 edge was seen (not a formula
+			// check: it stays on in mutation runs, since rcyc gates a_pend_late)
+			if (t_pclk1_edge >= 0 && u_core.rcyc !== (t_rst_edge > t_pclk1_edge)) begin
+				n_rcyc++; fail("rcyc", "rcyc", u_core.rcyc, t_rst_edge > t_pclk1_edge);
+			end
+			// a release cycle's actions dropped at pclk1: pending before a pclk1 with rcyc (which
+			// masks a_pend_late there) and no longer pending after it (checked at the next clock)
+			if (drop_chk) begin
+				if ((drop_c && u_core.pend_c != PC_NONE) || (drop_s && u_core.pend_s) || (drop_r && u_core.pend_r))
+					v_rrel_kept++;
+				else v_rrel_drop++;
+			end
+			drop_chk = pclk1 && u_core.rcyc && !rst_fe && ((u_core.pend_c != PC_NONE) || u_core.pend_s || u_core.pend_r);
+			drop_c = u_core.pend_c != PC_NONE;
+			drop_s = u_core.pend_s;
+			drop_r = u_core.pend_r;
 			if (u_core.a_fpjr) begin n_assert++; fail("assert", "a_fpjr", 1, 0); end
 			// the port formulas of 1.4/3.1 (restated; off in mutation runs)
 			if (formula) begin
@@ -936,6 +966,9 @@ module tb_fe_core;
 		ti_prev   = cdf_ti;
 		if (pclk1) e0n = 0;
 		else if (e0n < 15) e0n++;
+		if (rst_fe) t_rst_edge = clk_n;      // rcyc's model: the edges at this posedge
+		if (pclk1)  t_pclk1_edge = clk_n;
+		if (!checking) drop_chk = 1'b0;
 		if (!checking) begin aud_cap = 1'b0; hold_on = 1'b0; end
 		if (pclk1 && pg_run && checking && !load) v_held_cyc++;
 		if (pclk1 && pg_run) begin
@@ -1371,11 +1404,11 @@ module tb_fe_core;
 			v_rst_cr, v_rst_sw, v_rst_oth, n_rst, c_reset, c_switch, c_7800, c_other, c_rst_skip);
 		$display("  classified: short_phase1 cycles %0d (dout %0d, grant_steal %0d, audio %0d), q26 %0d (words repaired %0d), tbl_alias %0d, ram_wr_noaccess %0d; a_p32_late's formula under a reset %0d",
 			c_short, c_dout_short, c_steal, c_aud_cls, c_q26, c_q26_rep, c_alias, c_noacc, c_p32_rst);
-		$display("  releases inside a post-action cycle (rrel) %0d (DFx reads %0d, PUSH/WRITE %0d, DSWRITE %0d, DSPTR %0d): actions dropped at pclk1 %0d, latches classified %0d, words repaired %0d",
-			c_rrel, v_rrel_k[0], v_rrel_k[1], v_rrel_k[2], v_rrel_k[3], v_rrel_drop, c_rrel_dout, c_rrel_words);
+		$display("  releases inside a post-action cycle (rrel) %0d (DFx reads %0d, PUSH/WRITE %0d, DSWRITE %0d, DSPTR %0d): pclk1s with rcyc whose pending actions were dropped there %0d, still pending after it %0d; latches classified %0d, words repaired %0d",
+			c_rrel, v_rrel_k[0], v_rrel_k[1], v_rrel_k[2], v_rrel_k[3], v_rrel_drop, v_rrel_kept, c_rrel_dout, c_rrel_words);
 		$display("  state compares %0d", v_cmp_state);
-		$display("  bad: hold %0d a2 %0d grant %0d dout %0d dout_hidden %0d state %0d ram %0d land %0d aud %0d jok %0d jmap %0d fix %0d assert %0d svc %0d dma %0d call %0d note %0d wave %0d dig %0d src %0d alias %0d misc %0d (total %0d)",
-			n_hold, n_a2, n_grant, n_dout, n_dout_hidden, n_state, n_ram, n_land, n_aud, n_jok, n_jmap, n_fix, n_assert, n_svc, n_dma,
+		$display("  bad: hold %0d a2 %0d grant %0d dout %0d dout_hidden %0d state %0d ram %0d land %0d aud %0d jok %0d jmap %0d fix %0d assert %0d rcyc %0d svc %0d dma %0d call %0d note %0d wave %0d dig %0d src %0d alias %0d misc %0d (total %0d)",
+			n_hold, n_a2, n_grant, n_dout, n_dout_hidden, n_state, n_ram, n_land, n_aud, n_jok, n_jmap, n_fix, n_assert, n_rcyc, n_svc, n_dma,
 			n_call, n_note, n_wave, n_dig, n_src, n_alias_bad, n_misc, bad);
 		// coverage minimums, scaled to the run
 		feat = 1;
@@ -1385,7 +1418,7 @@ module tb_fe_core;
 			if (v_sch[2] + v_sch[3] + v_sch[4] + v_sch[5] > 0 && (v_cls[5] < 100 || v_cls[4] < 20 || v_cls[3] < 50 || v_cls[2] < 50 || v_aud < 1000 || v_jok1 < 10)) feat = 0;
 			if (pg.k_busy > 0 && (v_held_cyc < 100 || v_hidden < 100)) feat = 0;   // no stalls in "nominal"
 		end
-		if (n_rrel > 0 && (c_rrel != 2 * n_rrel || v_rrel_drop != c_rrel)) feat = 0;  // every release strands its action
+		if (n_rrel > 0 && (c_rrel != 2 * n_rrel || v_rrel_drop != c_rrel || v_rrel_kept != 0)) feat = 0;  // every release strands its action, dropped at pclk1
 		if (feat == 0) $display("tb_fe_core: a coverage minimum was not met");
 		if (bad != 0 || feat == 0) $fatal(1, "tb_fe_core: FAIL (%0d bad)", bad);
 		$display("tb_fe_core: PASS");

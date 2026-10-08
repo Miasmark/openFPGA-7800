@@ -616,14 +616,17 @@ module daria_fe_core (
 	end
 
 	// ---- events and assertions (1.7, 9.6) --------------------------------------------------------
-	// rcyc: this 6507 cycle ran some of its k reads under rst_fe. Set while rst_fe
-	// is high, cleared at the first pclk1 with rst_fe low. Only a_pend_late reads
-	// it (synthesis removes both): the cycle in which rst_fe falls may commit an
-	// action whose ready flag was held at 0, and that action is dropped at pclk1.
+	// rcyc: this 6507 cycle ran some of its k reads under rst_fe, i.e. some edge
+	// since the last pclk1 (that pclk1's own edge excluded) had rst_fe high.
+	// Cleared at every pclk1 edge, whatever rst_fe is (the edge that starts a
+	// cycle), set at any other edge with rst_fe high. Only a_pend_late reads it
+	// (synthesis removes both): the cycle in which rst_fe falls may commit an
+	// action whose ready flag was held at 0, and that action is dropped at
+	// pclk1 (docs/daria_fe/lanes/F1_fixes.md, 1).
 	logic       rcyc;
 	always_ff @(posedge clk_sys) begin
-		if (rst_fe)     rcyc <= 1'b1;
-		else if (pclk1) rcyc <= 1'b0;
+		if (pclk1)       rcyc <= 1'b0;
+		else if (rst_fe) rcyc <= 1'b1;
 	end
 	assign ev_guard_sup = guard_on & (cr_fix | cr_p32);
 	assign ev_tbl_alias = act_dsw & jplus & (dsw_addr >= 15'h0098) & (dsw_addr < 15'h01B0);

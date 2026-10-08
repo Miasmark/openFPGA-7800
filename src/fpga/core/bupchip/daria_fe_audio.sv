@@ -35,7 +35,9 @@
 // $7F4 outside CDF (AUD:100-102), the RAM route of DIGITAL_ROUTE comes after
 // the ROM compare (AUD:336-343), and the merge, the seeds and the hook use
 // family >= 2 (AUD:207, 213). The byte lane al loads at every unpaused edge,
-// as upstream's lane register does (B-1), not only on a grant.
+// as upstream's lane register does (B-1), not only on a grant; it still
+// differs from upstream's lane after some paused grants (pause_lane, a
+// counted class: docs/daria_fe/lanes/F1_fixes.md 2).
 //
 // Reset: cart_reset only (never rst_fe); the sample client's busy flags,
 // its toggle and address are not reset at all.
@@ -397,11 +399,15 @@ module daria_fe_audio (
 	// The byte lane of the word a grant reads. Upstream's lane register
 	// (cart_ram_tdp.sv mapper_read_lane) loads the port's address at every edge
 	// with pause_core low, and the port's address is the engine's whenever the
-	// select is low; a grant needs the select low, and a paused (frozen) cycle's
-	// select is what it was at the last unpaused edge (AUD 12.5). So al loads
-	// a_d[1:0] at every unpaused edge, not only on aud_take as design 5.3 has
-	// it, and a capture after a grant in a pause reads upstream's lane
-	// (docs/daria_fe/lanes/B_audio.md, "Deviations": pause_lane).
+	// select is low. So al loads a_d[1:0] at every unpaused edge, not only on
+	// aud_take (docs/daria_fe/lanes/B_audio.md, B-1). That is not exact: the
+	// select can be high at the last unpaused edge before a pause and fall
+	// after it (the next cycle's address after a pclk1, the post-commit state
+	// after a commit, or one clock after an address or bank change while the
+	// ROM byte is still the old one), so a grant inside the pause can follow,
+	// and the capture after it reads the 6507 port's lane upstream and the
+	// engine's lane here: pause_lane, a counted class (lanes/F1_fixes.md 2).
+	// The Pocket never pauses the core, so it cannot occur there.
 	always_ff @(posedge clk_sys) begin
 		if (cart_reset)  al <= 2'd0;
 		else if (!pause) al <= a_d[1:0];

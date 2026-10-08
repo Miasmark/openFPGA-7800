@@ -125,7 +125,9 @@
 	//   rep    the replica: state (one-hot against the enum: the AS_* bit of
 	//          each state is its enum value), the refresh snapshot rc, refresh
 	//          and NOTE pending, voice, the sum, shift, offset, the digital
-	//          registers, AMPLITUDE, the request and its address, the grant
+	//          registers, AMPLITUDE, the request and its address, the grant;
+	//          ft_a1_rep(1) leaves out the two registers a sample byte writes
+	//          (the sum and AMPLITUDE), which pause_lane masks alone
 	`define FT_AUD dut.cart2600.mapper_audio
 	function automatic string ft_a1_tick();
 		`FT_CMP("accum", u_fe.u_audio.accum, `FT_AUD.tick_accum)
@@ -143,21 +145,21 @@
 		`FT_CMP("freq[2]", u_fe.u_audio.freq[2], `FT_AUD.frequency2)
 		return "";
 	endfunction
-	function automatic string ft_a1_rep();
+	function automatic string ft_a1_rep(input logic no_byte);
 		`FT_CMP("st (one-hot; upstream's state as 1 << state)", u_fe.u_audio.st, 12'd1 << `FT_AUD.state)
 		for (int v = 0; v < 3; v++)
 			`FT_CMP($sformatf("rc[%0d] (refresh_counter)", v), u_fe.u_audio.rc[v], `FT_AUD.refresh_counter[v])
 		`FT_CMP("rp (refresh_pending)", u_fe.u_audio.rp, `FT_AUD.refresh_pending)
 		`FT_CMP("np (note_pending)", u_fe.u_audio.np, `FT_AUD.note_pending)
 		`FT_CMP("voice", u_fe.u_audio.voice, `FT_AUD.voice)
-		`FT_CMP("ssum (sample_sum[7:0])", u_fe.u_audio.ssum, `FT_AUD.sample_sum[7:0])
+		if (!no_byte) `FT_CMP("ssum (sample_sum[7:0])", u_fe.u_audio.ssum, `FT_AUD.sample_sum[7:0])
 		`FT_CMP("wsh (waveform_shift)", u_fe.u_audio.wsh, `FT_AUD.waveform_shift)
 		`FT_CMP("woff (waveform_offset)", u_fe.u_audio.woff, `FT_AUD.waveform_offset)
 		`FT_CMP("dig_addr (digital_address)", u_fe.u_audio.dig_addr, `FT_AUD.digital_address)
 		`FT_CMP("dig_low (digital_low_nibble)", u_fe.u_audio.dig_low, `FT_AUD.digital_low_nibble)
 		`FT_CMP("dig_ram (digital_ram_addr)", u_fe.u_audio.dig_ram, `FT_AUD.digital_ram_addr)
 		`FT_CMP("dig_smp (digital_sample)", u_fe.u_audio.dig_smp, `FT_AUD.digital_sample)
-		`FT_CMP("amplitude", u_fe.u_audio.amplitude, `FT_AUD.amplitude)
+		if (!no_byte) `FT_CMP("amplitude", u_fe.u_audio.amplitude, `FT_AUD.amplitude)
 		`FT_CMP("aud_issue (ram_en)", u_fe.aud_issue, `FT_AUD.ram_en)
 		if (`FT_AUD.ram_en)
 			`FT_CMP("aud_addr (ram_addr)", {2'b00, u_fe.aud_addr}, `FT_AUD.ram_addr)

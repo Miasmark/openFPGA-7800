@@ -22,8 +22,10 @@
 // Both see the same random image and cart RAM (written into both RAMs), the
 // same random select stream (fe_phase_gen's cycles with per-cycle select
 // patterns: phase-1 reads, until the commit, the whole cycle, random
-// clocks; frozen from the last unpaused edge through a pause, as a frozen
-// 6507 cycle's select is, AUD 12.5), the same 6507 byte stores (at C, under
+// clocks; frozen through a pause, AUD 12.5: the stream stops on pause_pg,
+// one clock before the engines see pause, so the select at their last
+// unpaused edge always holds through the pause, which upstream's need not:
+// docs/daria_fe/lanes/F1_fixes.md 2), the same 6507 byte stores (at C, under
 // the select), the same clk_arm writes (non-shared edges, as upstream's port
 // B arbitrates), the same NOTE strobes (at C+1, at random clocks, and at
 // the grant edges g and g+1 of a NOTE read: AUD 9.4's overlap rows),
@@ -65,9 +67,11 @@
 // the replica's registers until both engines are IDLE with nothing pending,
 // then resynchronised by a deposit of upstream's values (fe_deposit_audio's
 // rule): merge_amp (own path, a dispatch in (M, M_fe+1]), dig_rom_lag (an
-// upstream miss on a local sample), pause_lane (a grant edge in a pause
-// whose last unpaused edge had the select high: never, with a frozen
-// select), size_over32k (upstream reading its RAM above 32 KB) and rmw_call
+// upstream miss on a local sample), pause_lane (a sample capture on an
+// unpaused edge right after a grant edge in a pause, whose last unpaused
+// edge had the select high; with no lane term, unlike fe_shadow's: never
+// here, since the select stream is frozen one clock early; F1_fixes.md 2),
+// size_over32k (upstream reading its RAM above 32 KB) and rmw_call
 // (own path, a tick on M under an RMW: the second payload carries that
 // tick; checked, then upstream's seeds deposited). The "exact" segments
 // allow no class at all. A run passes with no error and every coverage
