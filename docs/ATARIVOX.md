@@ -127,13 +127,19 @@ high pitch the readings land on the voice's harmonics).
 
 | Sound | Real chip (Hz) | Source | Status |
 |---|---|---|---|
-| `OW` | 490-500 / 904-908 | "Juno", "over" | Textbook values matched |
+| `OW` | 490-500 / 900-908 | "Juno", "over", the alphabet's O | Textbook values matched |
 | `AX` | 520 / 1,515 / 2,400 | "Game over" (`AXRR` start) | Textbook values matched |
-| `RR` | 435-440 / 1,310-1,336 / 1,765-1,796 | "First" (`RR` x5), "over" (`AXRR` end) | Set; was a consonantal R |
+| `RR` | 435-440 / 1,300-1,336 / 1,730-1,796 | "First" (`RR` x5), "over" (`AXRR` end), the alphabet's R | Set; was a consonantal R |
 | `UX` | 605 / 1,335 | "human" (held while the pitch rises) | Set |
 | `IH` | ~300 / 1,775 / 2,520 | "Foolish" | Set |
 | `MM` | ~280 / 1,150 / 2,200 | "human", "Game" | Set |
 | `EY` | 480 / 1,870 / 2,460 | "Game" (`EYIY` start) | Set |
+| `EH` | 590 / 1,650 | the alphabet's F, L, M, N, S (identical in all five) | Set |
+| `AW` | 610 / 1,030 | the alphabet's R (`AWRR` start) | Set |
+
+The alphabet recording loses everything above about 1.6 kHz, so it gives
+only F1 and a low F2: no reading of `IY`, `IH` or other high-F2 vowels.
+Its letters start about every 0.3-0.35 s from 6.05 s (A), E at 7.43 s.
 
 Also: the hiss sits about 20 dB under the vowels, and F is almost silent
 ("Juno First"); the voice is periodic at exactly the commanded pitch, so the
