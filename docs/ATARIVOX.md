@@ -99,10 +99,14 @@ gives these, at the chip's default settings:
 - **Effects** are stacks of three parallel tones that sweep and step: data
   for the effect tables, once the codes behind each can be identified.
 
-A clip of Juno First's title ("Juno First") from a video looked much
-cleaner than this, with energy only below about 1.5 kHz: the video's audio
-was filtered or compressed. Recordings from game videos are not a reliable
-reference for the voice's timbre.
+A clip of Juno First saying its title is clean too (the game silences
+everything else for that one phrase) but sounds quite different: a voice
+of about 150-165 Hz rising through "Juno", "Juno" about 0.9 s long, and
+energy only below about 1.5 kHz. The game evidently sets the chip up its
+own way for it (pitch, speed, perhaps bend, or synthesizer registers
+written directly in serial control mode). It becomes a second reference,
+for the controls rather than the default voice, once Juno First's code log
+(`tb_load +voxlog`) shows what it sends.
 
 ## The plan
 
