@@ -117,6 +117,29 @@ the timing model (lengths from Table E, speed scaling, repeats) holds.
 The timbre does not yet: the real voice keeps its energy in a few low
 bands, while ours has buzz and hiss well up the spectrum.
 
+## Sound settings measured against the real chip
+
+Phrases whose exact codes are known (from the games' ROMs) and which are
+clean in recordings: Juno First's title and "Foolish human", Stratovox's
+"Game over". The voice's pitch steps line each sound up; formants are read
+where the pitch is low or the sound is held across several pitches (at
+high pitch the readings land on the voice's harmonics).
+
+| Sound | Real chip (Hz) | Source | Status |
+|---|---|---|---|
+| `OW` | 490-500 / 904-908 | "Juno", "over" | Textbook values matched |
+| `AX` | 520 / 1,515 / 2,400 | "Game over" (`AXRR` start) | Textbook values matched |
+| `RR` | 435-440 / 1,310-1,336 / 1,765-1,796 | "First" (`RR` x5), "over" (`AXRR` end) | Set; was a consonantal R |
+| `UX` | 605 / 1,335 | "human" (held while the pitch rises) | Set |
+| `IH` | ~300 / 1,775 / 2,520 | "Foolish" | Set |
+| `MM` | ~280 / 1,150 / 2,200 | "human", "Game" | Set |
+| `EY` | 480 / 1,870 / 2,460 | "Game" (`EYIY` start) | Set |
+
+Also: the hiss sits about 20 dB under the vowels, and F is almost silent
+("Juno First"); the voice is periodic at exactly the commanded pitch, so the
+tone oscillators restart every pitch period; phrases run about 1.2 times
+the manual's lengths. `tools/atarivox/sjsynth.py` has all of these.
+
 ## Measured from recordings of the real chip
 
 A demonstration recording (effects, then the alphabet; no music behind it)

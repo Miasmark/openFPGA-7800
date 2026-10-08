@@ -63,7 +63,7 @@ def fr(name, ms, nhz, nvol, dist, voiced=False, f=(250, 1400, 2500)):
 def st(name, ms, nhz, voiced, f):
     T[name] = ("S" if voiced else "P", ms, list(f), [0, 0, 0], nhz, 20, 200)
 
-v("IY", 70, (270, 2290, 3010)); v("IH", 70, (300, 1775, 2520)); v("EY", 70, (480, 2050, 2600))  # IH measured: "Foolish human"
+v("IY", 70, (270, 2290, 3010)); v("IH", 70, (300, 1775, 2520)); v("EY", 70, (480, 1870, 2460))  # IH: "Foolish human"; EY: Stratovox "Game over"
 v("EH", 70, (530, 1840, 2480)); v("AY", 70, (660, 1720, 2410)); v("AX", 70, (500, 1500, 2500))
 v("UX", 70, (605, 1335, 2390)); v("OH", 70, (730, 1090, 2440)); v("AW", 70, (570, 840, 2410))  # UX measured: "Foolish human", held at 110-200 Hz
 v("OW", 70, (490, 910, 2450)); v("UH", 70, (440, 1020, 2240)); v("UW", 70, (300, 870, 2240))
