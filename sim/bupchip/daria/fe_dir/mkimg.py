@@ -388,6 +388,8 @@ def main():
             for k, op, v in meta.get('need', []):
                 f.write('need %s %s %d\n' % (k, op, v))
             f.write('desc %s\n' % meta.get('desc', ''))
+            if meta.get('tree_bench'):
+                f.write('tree_bench 1\n')
             for k, a in sorted(img.labels.items(), key=lambda kv: kv[1]):
                 f.write('check %s %d\n' % (k, a))
         print('%-14s %6d bytes  scheme %d rev %d' % (n, len(rom), bs, rev))

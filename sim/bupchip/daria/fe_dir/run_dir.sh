@@ -16,6 +16,8 @@
 #            from git, in <work>/snap/), whatever the tree holds now: the
 #            reference front end only, against which every test must show 0.
 #            Any other FLAVOR builds the bench in the tree (stage 1: daria_fe).
+#            A test marked tree_bench in tests.py needs the bench in the tree:
+#            FLAVOR=s0 skips it (verdict SKIP).
 #   ARGS     extra plusargs for every test (e.g. +fe_merge_hook=1), and
 #   TAG      a name for that set: runs go to runs/fe_<TAG>/, results to
 #            results_<TAG>.txt (default: runs/fe/, results.txt)
@@ -65,6 +67,14 @@ RUNS="fe${TAG:+_$TAG}"
 RES="$W/results${TAG:+_$TAG}.txt"
 one() {
 	local t="$1" a f
+	if [ -n "$FE_DIR_SNAP" ] && grep -q '^tree_bench 1$' "$W/img/$t.meta"; then
+		# a test that needs the bench in the tree (tests.py, tree_bench): not run on the snapshot
+		mkdir -p "$W/runs/$RUNS/$t"
+		rm -f "$W/runs/$RUNS/$t/run.log"
+		echo "SKIP $t needs the bench in the tree (tree_bench); FLAVOR=s0 is the stage-0 snapshot" \
+			| tee "$W/runs/$RUNS/$t/verdict.txt"
+		return 0
+	fi
 	f="$(sed -n 's/^frames //p' "$W/img/$t.meta")"
 	a="$(sed -n 's/^args //p' "$W/img/$t.meta")"
 	# shellcheck disable=SC2086
@@ -74,7 +84,7 @@ one() {
 	cat "$W/runs/$RUNS/$t/verdict.txt"
 }
 export -f one
-export W HERE D RUNS ARGS
+export W HERE D RUNS ARGS FE_DIR_SNAP
 printf '%s\n' "${TESTS[@]}" | xargs -P "${JOBS:-2}" -I{} bash -c 'one {}'
 for t in "${TESTS[@]}"; do cat "$W/runs/$RUNS/$t/verdict.txt"; done > "$RES.new"
 # keep the verdicts of tests not run this time

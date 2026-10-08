@@ -70,6 +70,7 @@ c30~core~core~else if (act_dsw | act_dsp | act_svc | pclk1)~else if (act_dsw | a
 c31~core~core~else if (r_fire | pclk1)~else if (r_fire)~PUSH/WRITE byte not dropped at pclk1
 c32~core~core~assign a_pend_late  = pclk1 & !rcyc & ~assign a_pend_late  = pclk1 & ~a_pend_late without rcyc (fires in a release cycle)
 c33~core~core~if (pclk1)       rcyc <= 1'b0;~if (1'b0)       rcyc <= 1'b0;~rcyc never cleared (a_pend_late off for the whole run)
+c34~core~core~if (pclk1)       rcyc <= 1'b0;~if (rst_fe)       rcyc <= 1'b1; else if (pclk1) rcyc <= 1'b0;~rcyc with rst_fe first (F1's first version: set by a reset high only at the E0 edge, a_pend_late off for the next cycle)
 EOF
 
 ids=("$@")

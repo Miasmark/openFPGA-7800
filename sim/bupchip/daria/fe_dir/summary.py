@@ -10,7 +10,8 @@ sim/work/bupchip/daria/fe_dir. For each test: the scheme, the bins it needs
 with the values the first set reached (its event counts; a 'cls:<class>'
 requirement, a counted class of the stage-1 shadow, with the value of the
 first stage-1 set, '-' if no set given is stage 1), and per set the verdict
-with the counted classes of design 9.5 (stage 1) or the reason it failed.
+with the counted classes of design 9.5 (stage 1) or the reason it failed
+('skipped' for a tree_bench test in FLAVOR=s0).
 """
 import os
 import re
@@ -59,7 +60,9 @@ def main():
             fl, _, tag = s.partition(':')
             run = os.path.join(work, fl, 'runs', 'fe' + ('_' + tag if tag else ''), t)
             if not os.path.exists(os.path.join(run, 'run.log')):
-                cells.append('-')
+                vp = os.path.join(run, 'verdict.txt')
+                skip = os.path.exists(vp) and open(vp).read().startswith('SKIP')
+                cells.append('skipped (tree_bench)' if skip else '-')
                 continue
             reasons, bads, got, cov, classes = dircheck.check(run, meta)
             if cov0 is None:

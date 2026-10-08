@@ -38,8 +38,11 @@
 // class for the one obus_exposed case accepted (the TIA read at $0000 right
 // after a CDF fast JMP's low operand at $1FFF, with the values that case
 // leaves on both sides); commit_pclk1 (must be 0: a commit in a pclk1 clock);
-// pause_lane narrowed to a capture whose lanes differ, masking only the sum
-// and AMPLITUDE, and any other lane difference at a capture audio_bad.
+// pause_lane narrowed to a capture whose lanes differ, each register holding
+// what it loaded at the last unpaused edge, masking only the sum and
+// AMPLITUDE, and any other lane difference at a capture audio_bad; the
+// reference's RAM tap check compares port A's byte only with pause low (top.sv
+// masks it to $FF in a pause).
 //
 // STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
 // daria_fe existed; the text below):
@@ -747,7 +750,12 @@
 				fe_inc(FC_ROM);
 				fe_fail("rom", $sformatf("reference %02x, tb cart_q %02x", fe_rom_q, cart_q));
 			end
-			if (fe_up_men_q && fe_own_ra_q == fe_up_ra_q) begin
+			// cart2600 sees port A's byte through top.sv:936, $FF while pause is high, so it is
+			// compared only with pause low: a pause that rises between two edges shows $FF
+			// already in the clock after the last unpaused edge, while the registered enable
+			// (fe_up_men_q) is still 1 (and a pause forced at a posedge may show the old byte
+			// with pause already high in that clock)
+			if (fe_up_men_q && !dut.pause && fe_own_ra_q == fe_up_ra_q) begin
 				fe_inc(FC_RAM_N);
 				if (fe_own_rq != dut.cart2600.cartram_data) begin
 					fe_inc(FC_RAMTAP);
@@ -1234,6 +1242,11 @@
 	// (it clears the sum and writes AMPLITUDE): no resync. f1_upgr_pz: the last clock was an
 	// upstream grant clock with pause high.
 	logic        f1_m_amp = 0, f1_upgr_pz = 0;
+	// What the two lane registers load at the last unpaused edge p (the last clock with pause
+	// low): upstream's mapper_read_lane the port's address lane (cart_ram_tdp.sv:61-64, mapper_en
+	// = !pause, top.sv:921), u_fe's al the engine's a_d[1:0] (0 under cart_reset). pause_lane
+	// needs each register to hold exactly that at the capture.
+	logic  [1:0] f1_pt_unp = 0, f1_al_unp = 0;
 	longint      f1_pz_cap = 0, f1_pz_sel = 0;	// captures right after a paused grant; of them, select high
 	logic [40:0] f1_rq_up [$], f1_rq_fe [$];			// T5: ROM-sample amplitudes in order
 	longint      f1_mask_t0 = -1, f1_mask_long = 0;
@@ -1639,7 +1652,7 @@
 			`F1_CHK(u_fe.u_audio.dig_addr != dut.cart2600.mapper_audio.digital_address, G_DIG_BAD,
 				$sformatf("T4: sample address %08x, upstream %08x", u_fe.u_audio.dig_addr,
 					dut.cart2600.mapper_audio.digital_address))
-		// grants: svc_audio_race, pre_lock, pause_lane
+		// grants: svc_audio_race, pre_lock
 		gr = dut.cart2600.audio_ram_grant || u_fe.aud_take;
 		if (gr) begin
 			wa = dut.cart2600.audio_ram_grant ? dut.cart2600.audio_ram_addr[14:2] : u_fe.aud_addr[14:2];
@@ -1654,31 +1667,39 @@
 			end
 		end
 		// pause_lane (F1_fixes.md 2; design 9.5), and only then: a sample capture on an unpaused
-		// edge (AUDIO_SAMPLE_CAPTURE, pause low: the byte is read, not $FF) right after an
-		// upstream grant edge in a pause, whose last unpaused edge had sel_ram_sel high
-		// (f1_sel_unp), with the two lane registers differing: upstream's mapper_read_lane
-		// still holds the 6507 port's lane from that edge, u_fe's al the engine's (B-1). It
+		// edge (AUDIO_SAMPLE_CAPTURE and u_audio in SMCAP, pause low: the byte is read, not $FF)
+		// right after an upstream grant edge in a pause, whose last unpaused edge p had
+		// sel_ram_sel high (f1_sel_unp), with the two lane registers differing and each holding
+		// what it loaded at p: upstream's mapper_read_lane the port's lane, which with the select
+		// high is the 6507's (f1_pt_unp), u_fe's al the engine's a_d[1:0] (f1_al_unp; B-1). It
 		// masks only what that byte writes (f1_m_amp). Any other lane difference at an unpaused
-		// capture, the replica in step, is audio_bad.
-		if (f1_rst_seen && dut.cart2600.mapper_audio.state == 4'd8 && !dut.pause && f1_upgr_pz) begin
-			f1_pz_cap++;						// the lane check's exposure (FE masks: line)
-			if (f1_sel_unp) f1_pz_sel++;
-		end
+		// capture, the replica in step, is audio_bad: an al that loads at another edge or
+		// another value fails here even when the select was high at p.
 		if (f1_rst_seen && dut.cart2600.mapper_audio.state == 4'd8 && !dut.pause &&	// AUDIO_SAMPLE_CAPTURE
-				u_fe.u_audio.st == 12'd1 << daria_fe_pkg::AS_SMCAP &&
-				dut.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
-			if (f1_upgr_pz && f1_sel_unp) begin
-				f1_inc(G_PAUSE_LANE);
-				if (!f1_m_rep && !f1_m_cf && !f1_m_amp) f1_m_why = "pause_lane";
-				f1_m_amp = 1;
-			end else if (!f1_m_rep) begin
-				`F1_CHK(1, G_AUDIO_BAD, $sformatf("A1 lane: a sample capture reads lane %0d, upstream lane %0d (no pause_lane: grant edge paused %0d, select at the last unpaused edge %0d)",
-					u_fe.u_audio.al, dut.cart_ram.mapper_read_lane, f1_upgr_pz, f1_sel_unp))
-				f1_mask(0, "audio_bad");
+				u_fe.u_audio.st == 12'd1 << daria_fe_pkg::AS_SMCAP) begin
+			if (f1_upgr_pz) begin
+				f1_pz_cap++;					// the lane check's exposure (FE masks: line)
+				if (f1_sel_unp) f1_pz_sel++;
+			end
+			if (dut.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
+				if (f1_upgr_pz && f1_sel_unp && dut.cart_ram.mapper_read_lane == f1_pt_unp &&
+						u_fe.u_audio.al == f1_al_unp) begin
+					f1_inc(G_PAUSE_LANE);
+					if (!f1_m_rep && !f1_m_cf && !f1_m_amp) f1_m_why = "pause_lane";
+					f1_m_amp = 1;
+				end else if (!f1_m_rep) begin
+					`F1_CHK(1, G_AUDIO_BAD, $sformatf("A1 lane: a sample capture reads lane %0d, upstream lane %0d (no pause_lane: grant edge paused %0d, select at the last unpaused edge %0d, lanes loaded there: port %0d, engine %0d)",
+						u_fe.u_audio.al, dut.cart_ram.mapper_read_lane, f1_upgr_pz, f1_sel_unp, f1_pt_unp, f1_al_unp))
+					f1_mask(0, "audio_bad");
+				end
 			end
 		end
 		f1_upgr_pz = dut.cart2600.audio_ram_grant && dut.pause;
-		if (!dut.pause) f1_sel_unp = dut.cart2600.sel_ram_sel;
+		if (!dut.pause) begin
+			f1_sel_unp = dut.cart2600.sel_ram_sel;
+			f1_pt_unp  = dut.cartram_addr[1:0];
+			f1_al_unp  = dut.effective_reset ? 2'd0 : u_fe.aud_addr[1:0];
+		end
 		if (u_fe.u_audio.ev_size_hi || (dut.cart2600.mapper_audio.state == 4'd5 &&
 				dut.cart2600.mapper_audio.ram_addr[16:15] != 2'd0))
 			f1_mask(0, "size_over32k");
@@ -2204,7 +2225,7 @@
 			f1_tot[G_K1], f1_tot[G_K2], f1_tot[G_MERGES], f1_tot[G_HK_MERGES], f1_tot[G_CRB_USE], f1_tot[G_DET_LOCK_A],
 			f1_tot[G_R3_N], f1_tot[G_FORCED]);
 		if (f1_mask_t0 >= 0 && f1_clk - f1_mask_t0 > f1_mask_long) f1_mask_long = f1_clk - f1_mask_t0;
-		$display("FE masks: A1 masked by a class or a failure on %0d clk_sys, the longest mask %0d clk_sys (mask_stuck above %0d); %0d merges M_fe - M not 6 (merge_late); %0d sample captures on an unpaused edge right after a paused grant (lanes compared), %0d of them with the select high at the last unpaused edge, %0d pause_lane",
+		$display("FE masks: A1 masked by a class or a failure on %0d clk_sys, the longest mask %0d clk_sys (mask_stuck above %0d); %0d merges M_fe - M not 6 (merge_late); %0d sample captures on an unpaused edge right after a paused grant (both engines capturing: lanes compared), %0d of them with the select high at the last unpaused edge, %0d pause_lane",
 			f1_tot[G_MASKED], f1_mask_long, fe_mask_max, f1_tot[G_MERGE_LATE], f1_pz_cap, f1_pz_sel, f1_tot[G_PAUSE_LANE]);
 		$display("FE inputs: hook %0d, slat %0d, hold %0d, resync %0d, K2 every %0d frames; %0d daria_fe failures logged",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full, f1_nfail);

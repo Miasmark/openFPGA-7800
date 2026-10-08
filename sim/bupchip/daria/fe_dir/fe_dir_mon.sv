@@ -34,7 +34,22 @@
 //                   the n-th E0 (+dir_pause_n, default 2000; dly 1..5 puts it
 //                   in phase 1, 6..11 in phase 2); M=2 the n-th call accept;
 //                   M=3 the n-th service start. +dir_pause_rep=K repeats it
-//                   at every K-th further E0 / call / service.
+//                   at every K-th further E0 / call / service. M=4 the n-th
+//                   E0 that ends a cycle with sel_ram_sel high in its last
+//                   clock (a RAM-backed register access up to the pclk1),
+//                   counting only E0s outside a pause: the pause rises at
+//                   the negedge right after that E0, so the E0 is the last
+//                   unpaused edge and the select was high in the clock
+//                   before it (+dir_pause_dly is not used). +dir_pause_grant=1
+//                   (any M): once +dir_pause_len is over, the pause lasts
+//                   until a paused clock with upstream's sample grant
+//                   (AUDIO_SAMPLE_ISSUE) and falls at the negedge after its
+//                   edge (at most 20,000 clk_sys later), so the capture of
+//                   that grant is on the first unpaused edge: design 9.5's
+//                   pause_lane case (lanes/F1_fixes.md 2). Both act between
+//                   two edges, so every block sees the same pause at each
+//                   edge (a force at a posedge races the blocks that sample
+//                   pause there).
 // The variant inputs are bins too: tb_lat (tb_daria's +lat) and, in stage-1
 // builds, fe_slat (the bench's +fe_slat), so a variant test whose arguments
 // are lost fails its own counts.
@@ -80,7 +95,7 @@ module fe_dir_mon;
 
 	// ---- plusargs
 	int rst_mode = 0, rst_n = 1, rst_dly = 20, rst_len = 1000, rst_rep = 0, rst_max = 0, ev_dsw = 0, n_inj = 0;
-	int pz_mode = 0, pz_n = 2000, pz_dly = 3, pz_len = 200, pz_rep = 0;
+	int pz_mode = 0, pz_n = 2000, pz_dly = 3, pz_len = 200, pz_rep = 0, pz_grant = 0;
 	longint tr_from = -1, tr_n = 0;   // +dir_trace=N [+dir_trace_from=CLK]: print N commits
 	string out = "./";
 	initial begin
@@ -96,6 +111,7 @@ module fe_dir_mon;
 		void'($value$plusargs("dir_pause_dly=%d", pz_dly));
 		void'($value$plusargs("dir_pause_len=%d", pz_len));
 		void'($value$plusargs("dir_pause_rep=%d", pz_rep));
+		void'($value$plusargs("dir_pause_grant=%d", pz_grant));
 		void'($value$plusargs("dir_trace=%d", tr_n));
 		void'($value$plusargs("dir_trace_from=%d", tr_from));
 	end
@@ -115,10 +131,28 @@ module fe_dir_mon;
 	// injections
 	longint rst_at = -1, rst_end = -1, pz_at = -1, pz_end = -1;
 	logic   pz_on = 0;
+	longint pz_rel = -1;                 // +dir_pause_grant: the edge the pause ends at
+	int     ev_sel_e0 = 0;
 
 	function automatic string hx3(input logic [11:0] a);
 		return $sformatf("%03x", a);
 	endfunction
+
+	logic pz_sel_q = 0;
+	always @(negedge clk) begin
+		if (pz_rel >= 0 && clk_n == pz_rel) begin
+			force tb_daria.dut.pause = 1'b0;
+			pz_on = 0;
+			pz_rel = -1;
+		end
+		if (pz_sel_q) begin
+			force tb_daria.dut.pause = 1'b1;
+			pz_on = 1;
+			pz_sel_q = 0;
+			pz_end = clk_n + pz_len;
+			inc("inj_pause");
+		end
+	end
 
 	always @(posedge clk) begin
 		clk_n++;
@@ -149,12 +183,28 @@ module fe_dir_mon;
 			if (call_busy) inc("inj_pause_in_call");
 			if (dma_busy && !init_busy) inc("inj_pause_in_svc");
 		end
-		if (pz_end >= 0 && clk_n == pz_end) begin
+		if (pz_end >= 0 && clk_n == pz_end && !pz_grant) begin
 			// (release does not hand the port back to its constant driver in
 			// this simulator; forcing the driver value 0 does)
 			force tb_daria.dut.pause = 1'b0;
 			pz_on = 0;
 			pz_end = -1;
+		end
+		// +dir_pause_grant: end at the edge after an upstream sample grant edge (pre-edge
+		// values: the clock that ends here is a paused AUDIO_SAMPLE_ISSUE clock with the grant).
+		// The force is released at the next negedge, so every block sees the pause low at the
+		// capture edge and high at the grant edge (a force at a posedge races the blocks that
+		// sample pause at that edge, and the capture is exactly there)
+		if (pz_end >= 0 && clk_n >= pz_end && pz_grant) begin
+			if (tb_daria.dut.pause && tb_daria.dut.cart2600.audio_ram_grant &&
+					tb_daria.dut.cart2600.mapper_audio.state == 4'd7) begin
+				inc("inj_pause_grant_end");
+				pz_rel = clk_n;
+				pz_end = -1;
+			end else if (clk_n >= pz_end + 20000) begin
+				pz_rel = clk_n;
+				pz_end = -1;
+			end
 		end
 		if (pz_on) begin
 			inc("pause_clk");
@@ -202,6 +252,13 @@ module fe_dir_mon;
 				ev_e0++;
 				if (pz_mode == 1 && (ev_e0 == pz_n || (pz_rep > 0 && ev_e0 > pz_n && (ev_e0 - pz_n) % pz_rep == 0)))
 					pz_at = clk_n + pz_dly;
+				if (pz_mode == 4 && !pz_on && !pz_sel_q && pz_rel < 0 && tb_daria.dut.cart2600.sel_ram_sel) begin
+					ev_sel_e0++;
+					if (ev_sel_e0 == pz_n || (pz_rep > 0 && ev_sel_e0 > pz_n && (ev_sel_e0 - pz_n) % pz_rep == 0)) begin
+						pz_sel_q = 1;
+						inc("inj_pause_sel");
+					end
+				end
 			end
 			if (pclk0) begin
 				if (t_e0 > t_p0) inc($sformatf("sp_e0p0_%0d", clk_n - t_e0));

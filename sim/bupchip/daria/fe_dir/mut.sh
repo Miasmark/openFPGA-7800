@@ -21,6 +21,8 @@ MUTS=(
 "m7|daria_fe_core.sv|s/be_fld = sf ? 4'b0011 : 4'b0010;/be_fld = 4'b0010;/|dpc_regs dpc_regs_sf"
 "m8|daria_fe_core.sv|s/(pptr < 4'd8)) pptr <= pptr + 4'd1;/(pptr < 4'd4)) pptr <= pptr + 4'd1;/|dpc_regs"
 "m9|daria_fe_core.sv|s/(15'h0800 + W\[30:16\])/(15'h0800 + {1'b0, W[29:16]})/|dsw_cdfjp dsw_cdfj"
+"m10|daria_fe_audio.sv|s/else if (!pause) al <= a_d\[1:0\];/else al <= a_d[1:0];/|pause_lane_dpc"
+"m11|daria_fe_audio.sv|s/else if (!pause) al <= a_d\[1:0\];/else if (aud_take) al <= a_d[1:0];/|pause_lane_dpc"
 )
 sel=" $* "
 : > "$W/mut_results.txt"

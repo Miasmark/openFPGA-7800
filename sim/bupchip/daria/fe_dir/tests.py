@@ -7,8 +7,11 @@ Each test is a function returning (Img, meta). meta:
   args    extra plusargs (injections, latencies)
   need    [(bin, op, value)]: fe_dir_mon coverage bins the run must reach;
           a test whose feature never fires fails ('s1:<bin>': required only
-          in stage-1 builds, where the bin exists)
+          in stage-1 builds, where the bin exists; 'cls:<class>': a counted
+          class of the stage-1 shadow, skipped in stage 0)
   desc    one line
+  tree_bench  True: the test needs the bench in the tree; FLAVOR=s0, which
+          builds the stage-0 bench as committed at STAGE0_REV, skips it
 """
 from mkimg import Img
 from armenc import OP_W8, OP_W16, OP_W32, OP_FSET, OP_ADD32, OP_COPY, OP_FILL, OP_FADD
@@ -1016,6 +1019,30 @@ def pause_cdf_ph():
                                                '+dir_pause_len=181', '+dir_pause_rep=157'],
                        [('inj_pause', '>=', 20), ('pause_seen', '>=', 2000), ('dir_marker', '>=', 3)],
                        'CDFJ (waveform and digital audio frames): pauses in phase 1')
+
+
+@test
+def pause_lane_dpc():
+    """DPC+: pauses whose last unpaused edge is the pclk1 that ends a cycle
+    with sel_ram_sel high (a fetcher read or write), so upstream's lane
+    register keeps the 6507 port's byte lane, and that end right after an
+    upstream sample grant, so its capture lands on the first unpaused edge:
+    design 9.5's pause_lane case. Stage 1 counts it where the two lane
+    registers differ, each holding what it loaded at the last unpaused edge,
+    and masks only the sum and AMPLITUDE until they agree again
+    (lanes/F1_fixes.md 2); any other lane difference fails (audio_bad).
+    The pauses rise and fall between two edges, so the first paused clock
+    already shows port A's byte as $FF (top.sv:936). The reference's RAM tap
+    check in the tree compares that byte only with pause low; the stage-0
+    snapshot's (FLAVOR=s0) compares it in that clock too and would fail, so
+    that flavour skips the test (tree_bench)."""
+    img, meta = _reset_test(_busy_dpc(), (21, 0), ['+dir_pause=4', '+dir_pause_n=200', '+dir_pause_len=40',
+                                                    '+dir_pause_grant=1', '+dir_pause_rep=23'],
+                            [('inj_pause_sel', '>=', 20), ('inj_pause_grant_end', '>=', 20), ('dir_marker', '>=', 3),
+                             ('cls:pause_lane', '>=', 1)],
+                            'DPC+: pauses from the pclk1 after a fetcher access to just after a sample grant (pause_lane)')
+    meta['tree_bench'] = True
+    return img, meta
 
 
 @test
