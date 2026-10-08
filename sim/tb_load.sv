@@ -300,6 +300,37 @@ module tb_load;
 		end
 	end
 
+	// ---------------- AtariVox probe (+voxlog) ----------------
+	// The AtariVox's serial line: port 2's UP pin (RIOT port A bit 0), which
+	// the game pulls low through the DDR. 8N1, not inverted. The AtariVox
+	// drivers send a bit every 62 CPU cycles (about 19,250 baud; 744
+	// clk_sys in 2600 mode), so this samples mid-bit at that rate and logs
+	// each byte with its time.
+	logic vox_on = 1'b0, vox_old = 1'b1;
+	int   vox_cnt = 0, vox_bit = -1;
+	logic [7:0] vox_sh = 0;
+	initial vox_on = $test$plusargs("voxlog");
+	always @(posedge clk_sys) if (vox_on) begin
+		vox_old <= dut.main.PAout[0];
+		if (vox_bit < 0) begin
+			if (vox_old && !dut.main.PAout[0]) begin   // start bit
+				vox_bit <= 0; vox_cnt <= 744 + 372;
+			end
+		end else if (vox_cnt > 1)
+			vox_cnt <= vox_cnt - 1;
+		else begin
+			vox_cnt <= 744;
+			if (vox_bit < 8) begin
+				vox_sh <= {dut.main.PAout[0], vox_sh[7:1]};
+				vox_bit <= vox_bit + 1;
+			end else begin
+				$display("VOX %0d.%03d ms: %3d $%02x%s", $time / 1000000, ($time / 1000) % 1000,
+					vox_sh, vox_sh, dut.main.PAout[0] ? "" : " (no stop bit)");
+				vox_bit <= -1;
+			end
+		end
+	end
+
 	// ---------------- save device probe ----------------
 	// Which save devices a cart actually talks to: CPU accesses to the HSC
 	// RAM ($1000-$17FF) and ROM ($3000-$3FFF) while the HSC is enabled, SCL
