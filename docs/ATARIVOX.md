@@ -101,6 +101,22 @@ So the receiver must handle serial control mode at least for `R` (clear the
 64-byte buffer and stop), `V` (say "Ready") and `X`, and must never speak
 the escape bytes.
 
+## What games send: Juno First
+
+The Juno First demo ROM (Champ Games; AtariVox output disabled, speech by
+Glenn Saunders) holds the full game's phrases in bank 0 (`$0969`-`$0F8x`).
+They are far from plain speech: pitch and speed change on almost every
+sound, with sounds repeated to hold and bend them. The title phrase:
+
+    VOL=127 SPEED=90 JH PITCH=170 UW NO PITCH=90 OW, OW x7 with the pitch
+    110 to 162, OWWW P0 FF, RR x5 with the pitch 200 down to 100, SO TT
+
+Rendered from these codes at the manual's lengths, our model lasts 1.38 s
+against 1.35 s for the real chip in a clean recording of the game's title:
+the timing model (lengths from Table E, speed scaling, repeats) holds.
+The timbre does not yet: the real voice keeps its energy in a few low
+bands, while ours has buzz and hiss well up the spectrum.
+
 ## Measured from recordings of the real chip
 
 A demonstration recording (effects, then the alphabet; no music behind it)
@@ -121,13 +137,8 @@ gives these, at the chip's default settings:
   for the effect tables, once the codes behind each can be identified.
 
 A clip of Juno First saying its title is clean too (the game silences
-everything else for that one phrase) but sounds quite different: a voice
-of about 150-165 Hz rising through "Juno", "Juno" about 0.9 s long, and
-energy only below about 1.5 kHz. The game evidently sets the chip up its
-own way for it (pitch, speed, perhaps bend, or synthesizer registers
-written directly in serial control mode). It becomes a second reference,
-for the controls rather than the default voice, once Juno First's code log
-(`tb_load +voxlog`) shows what it sends.
+everything else for that one phrase) but sounds quite different: its
+codes (above) hold and bend the vowels with repeats and pitch steps.
 
 ## The plan
 
