@@ -308,7 +308,7 @@ A DPC+ analogue, a fast-fetch `LDA #` with its operand at $1FFF, would expose th
 
 **Fix options, for the lead.**
 
-- (a) Accept it and document that a fast jump or a substituted operand at $xFFF differs on hardware.
+- (a) Accept it and document that a fast jump or a substituted operand at $xFFF differs on hardware. [The lead's choice: `obus_ffe`, F1_fixes.md 3.]
 - (b) In `daria_fe_core`, after a substituted read at `a_in[11:0] == $FFF`, load `fe_do` with the mirror's ROM byte at C+1, as upstream's `d_out` does. This costs a term in `fe_do`'s load and the existing `k1b` lane.
 
 ### 6.2 Issue 2 (stage-1 bench, lane E1; fixed in E1's current bench): R3 on a queued RMW service pair (`dpc_svc`)
@@ -348,7 +348,7 @@ The earlier bench counted this as `audio_bad` (2).
 
 ## 7. Open questions
 
-1. **Issue 1:** accept and document, or change `fe_do` after a substituted read at $xFFF (6.1, option (b))? `cdf_jump_ffe` stays a failing test until that is decided. If the behaviour is accepted, the test's expectation should become a counted class.
+1. **Issue 1:** accept and document, or change `fe_do` after a substituted read at $xFFF (6.1, option (b))? `cdf_jump_ffe` stays a failing test until that is decided. If the behaviour is accepted, the test's expectation should become a counted class. [Decided: option (a), the counted class `obus_ffe`; `cdf_jump_ffe` requires `obus_ffe` 5 (F1_fixes.md 3).]
 2. **Should design 12.1's `rsync` row be dropped**, or should a bench option be added? For example a forced TIA divider phase, or MARIA's phases, would give 2- and 10-clock phases. As it stands, `short_phase1` is unreachable in tb_daria (section 5).
 3. **`bios`** needs a BIOS image and `bypass_bios = 0` in tb_daria. That is a tb_daria change, outside this lane.
 4. **The stage-1 results are tied to E1's bench as of md5 `acd6550553fa…`.** `FLAVOR=s1 ./run_dir.sh` rebuilds and reruns against whatever the tree holds; the whole suite takes about 2 minutes.
