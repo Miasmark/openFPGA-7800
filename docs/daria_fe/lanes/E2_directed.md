@@ -11,6 +11,7 @@ Lane E2 is point 4 of the original lane-E task: the directed tests of design 12.
 - **Real `daria_fe` (E1's stage-1 bench, `fe_shadow.svh` md5 `acd6550553fa…`): 47 of 48 pass.** The same holds with the poisoned RAM model, and with `+fe_merge_hook=1` 30 of the 31 CDF tests pass. The one failure is `cdf_jump_ffe`:
   - **It is a real behavioural difference in `daria_fe`:** `obus_exposed` on a fast jump whose opcode is at $1FFE (section 6.1).
   - [Decided, F1_fixes.md 3: accepted. The stage-1 shadow counts that read as `obus_ffe`, and `cdf_jump_ffe` requires `obus_ffe` 5; it passes. The suite now has 50 tests, all of which pass in stage 1.]
+  - [F1_fixes.md 2, second review: a 51st test, `pause_lane_dpc`, reaches the narrowed `pause_lane`; it needs the bench in the tree, so `FLAVOR=s0` skips it. All 51 pass in stage 1.]
 - **Two bench gaps found and already fixed.** On an earlier stage-1 bench (md5 `85ffaaf68c07…`), two more tests failed. Both were gaps in the stage-1 bench, not RTL errors: R3 on a queued RMW service pair, and A1 after `rmw_seed` (sections 6.2, 6.3). E1's current bench fixes both:
   - R3 now runs once both sides are quiet;
   - a new class, `rmw_merge`, covers the merge after `rmw_seed`.
@@ -196,7 +197,7 @@ In parentheses: `daria_fe`'s counted classes (design 9.5).
 | `rmw_call` | `rmw_call_dpc`, `rmw_call_cdf` | <ul><li>`INC $105A`/`INC $1FF3` over ROM $FE: FE, then FF while the first call runs. DPC+ also has `DEC` (FE, then FD).</li><li>CDF: 1,536 pairs, returns that change counter 0 and the frequencies, and keep counters 1/2.</li><li>Ticks exactly at M: 4. Ticks in (M, M+6]: 25.</li></ul> |
 | `rsync` | `rsync_dpc`, `rsync_cdfj` | <ul><li>`STA RSYNC` at every cycle position 0..63 of a line (WSYNC + exact delay), followed by cartridge commits (register reads, fast fetch, WRITE/DSWRITE).</li><li>Result: no short phase arises in this bench (section 5).</li></ul> |
 | `hard_reset` | `hard_reset_call_dpc`, `_svc_dpc`, `_call_cdf`, `_init_cdfjp`, `_rel_dpc`, `_rel_cdf1`, `_frame_dpc`, `_frame_cdfj` | Console resets in a call (15 or 40 clk_sys after the accept), in a running DPC+ DMA (4 clk_sys after its start), during the load-time init and F6, 3 clk_sys after the first release (a second init right after the first), and at a frame start (`+hard_reset_at=3`). |
-| `pause` | `pause_dpc_ph1`, `_ph2`, `_call`, `_svc`, `pause_cdf_ph`, `pause_cdf_call` | Pauses starting in phase 1 and in phase 2 (69 and 85 of them), inside calls and inside services. The CDF run alternates waveform and digital frames. |
+| `pause` | `pause_dpc_ph1`, `_ph2`, `_call`, `_svc`, `pause_cdf_ph`, `pause_cdf_call`; [added, F1_fixes.md 2] `pause_lane_dpc` | Pauses starting in phase 1 and in phase 2 (69 and 85 of them), inside calls and inside services. The CDF run alternates waveform and digital frames. `pause_lane_dpc`: 31 pauses from the `pclk1` that ends a cycle with `sel_ram_sel` high to just after a paused sample grant, both edges forced between two clock edges (`+dir_pause=4`, `+dir_pause_grant=1`). |
 | (added) | `dpc_short` | A 29,696-byte DPC+ image: the init copy reads past the file end (`short_image`). |
 | (smoke) | `smoke_dpc`, `smoke_cdf` | Boot, frames and one call each. |
 | `bios` | none | Not possible in this bench (section 5). |
@@ -217,7 +218,7 @@ The "Events" column summarises a family of bins as "name* n bins, min m".
 | `cdf_jump_cdf1` | CDF1 | cdf_jarm 39, cdf_jsub_at_ffe 5, _fff 5, cdf_hot_sub 10, cdf_jarm_data 20, cdf_jarm_at_ffd 10, _ffe 5, _fff 5, cdf_jcancel 19, cdf_4c_nomap 25, cdf_4c_nomap_7ffe 5 | PASS | PASS (drift_up 40) | PASS | PASS |
 | `cdf_jump_cdfj` | CDFJ | as cdf1, plus cdf_jsub_r2_s34 5 | PASS | PASS (drift_up 50) | PASS | PASS |
 | `cdf_jump_cdfjp` | CDFJ+ | as cdfj, without the $7FFE case (not reachable on CDFJ+) | PASS | PASS (drift_up 50) | PASS | PASS |
-| `cdf_jump_ffe` | CDFJ | cdf_jsub_at_fff 5, cdf_jarm_at_ffe 5 | PASS | **FAIL: obus_exposed 5** [Decided, F1_fixes.md 3: PASS, `obus_ffe` 5] | FAIL (same) | FAIL (same) [now PASS, `obus_ffe` 5] |
+| `cdf_jump_ffe` | CDFJ | cdf_jsub_at_fff 5, cdf_jarm_at_ffe 5 | PASS | **FAIL: obus_exposed 5** [Decided, F1_fixes.md 3: PASS, `obus_ffe` 5] | FAIL (same) [rerun after F1, second review: PASS, `obus_ffe` 5] | FAIL (same) [now PASS, `obus_ffe` 5] |
 | `digital_cdfj` | CDFJ | aud_dig_ram 117, aud_dig_rom_lo 74, aud_dig_rom_hi 91, aud_dig_none 93, cdf_amp 1792, merge_counter_set 6 | PASS | PASS (amp_class 23, dig_rom_lag 97, merge_amp 1, resync 98) | PASS (no merge_amp) | PASS |
 | `digital_cdfj_s5` | CDFJ | the same | PASS | PASS (amp_class 2, dig_rom_lag 97, merge_amp 1) | PASS | PASS |
 | `digital_cdfj_s200` | CDFJ | the same | PASS | PASS (amp_class 109, dig_rom_lag 98) | PASS | PASS |
@@ -239,9 +240,10 @@ The "Events" column summarises a family of bins as "name* n bins, min m".
 | `hard_reset_frame_dpc` / `_cdfj` | DPC+ / CDFJ | console_reset 1, reset_release 2 | PASS | PASS | PASS | PASS |
 | `hotspot_dpc` | DPC+ | hot_rd 190, hot_wr 120, bank changes rd/wr 120/25, hot_sub 5 | PASS | PASS | - | PASS |
 | `hotspot_cdf1` / `_cdfj` / `_cdfjp` | CDF1/J/J+ | hot_rd 250, hot_wr 160-170, bank changes 145-150/35-45, hot_sub 5 | PASS | PASS | PASS | PASS |
-| `pause_dpc_ph1` / `_ph2` | DPC+ | 69 / 85 pauses, 9453 / 7905 paused clk_sys | PASS | PASS (pause_lane 36 / 26) | - | PASS |
-| `pause_dpc_call` / `_svc` | DPC+ | pauses in calls 6, in services 13 | PASS | PASS (pause_lane 9 / 12) | - | PASS |
-| `pause_cdf_ph` / `_call` | CDFJ | 84 pauses / 7 in calls | PASS | PASS (pause_lane 92 / 20) | PASS | PASS |
+| `pause_dpc_ph1` / `_ph2` | DPC+ | 69 / 85 pauses, 9453 / 7905 paused clk_sys | PASS | PASS (pause_lane 36 / 26) [F1_fixes.md 2: now 0, the narrowed class] | - | PASS |
+| `pause_dpc_call` / `_svc` | DPC+ | pauses in calls 6, in services 13 | PASS | PASS (pause_lane 9 / 12) [F1_fixes.md 2: now 0, the narrowed class] | - | PASS |
+| `pause_cdf_ph` / `_call` | CDFJ | 84 pauses / 7 in calls | PASS | PASS (pause_lane 92 / 20) [F1_fixes.md 2: now 0, the narrowed class] | PASS | PASS |
+| `pause_lane_dpc` [added, F1_fixes.md 2] | DPC+ | inj_pause_sel 31, inj_pause_grant_end 31, dir_marker 7, cls:pause_lane 23 | skipped (`tree_bench`) | PASS (amp_class 9, drift_up 2, pause_lane 23, resync 1, svc_audio_race 1) | - | PASS (the same) |
 | `rmw_call_cdf` | CDFJ | CALLFN while busy 1536, calls 3073, tick at M 4, ticks in (M, M+6] 25, counters set 3072 | PASS | PASS (rmw_seed 2, rmw_merge 2, rmw_call 1536, merge_amp 29, deposit_cf 2); audio_bad 2 on the earlier bench (6.3) | PASS (rmw_call 1536) | PASS |
 | `rmw_call_dpc` | DPC+ | CALLFN while busy 180, calls 300 | PASS | PASS (rmw_call 120) | - | PASS |
 | `rsync_dpc` / `_cdfj` | DPC+ / CDFJ | RSYNC strobe clocks 1320; E0→latch always 6 (29,614) | PASS | PASS | PASS | PASS |
@@ -270,8 +272,10 @@ Each mutant is a one-line change to a **copy** of one `daria_fe` file, built thr
 | m7 | `daria_fe_core`: FRACLOW ignores `stable_fractional` | `dpc_regs_sf` (`state_bad` 828). `dpc_regs` (revision 0) passes, as it should |
 | m8 | `daria_fe_core`: PARAMETER pointer saturates at 4 | `dpc_regs` (`state_bad` 180) |
 | m9 | `daria_fe_core`: CDFJ+ DSWRITE address loses offset bit 14 | `dsw_cdfjp` (`dout_bad` 5, `ram_bad` 15, `ram_call_bad` 5, `ram_frame_bad` 4). `dsw_cdfj` passes, as it should |
+| m10 [added, F1_fixes.md 2] | `daria_fe_audio`: `al` loads in a pause too | `pause_lane_dpc` (`audio_bad` 16, "A1 lane") |
+| m11 [added, F1_fixes.md 2] | `daria_fe_audio`: `al` loads only on `aud_take`, paused or not | `pause_lane_dpc` (`audio_bad` 16, "A1 lane") |
 
-The m3 and m4 runs used the earlier stage-1 bench, whose `dpc_svc` already showed the R3 artefact (`svc_ram_bad` 6, section 6.2). What counts as the catch is the counts beyond it: `ram_frame_bad`, `dout_bad` and `ram`. The mutants' work directories are deleted after each run; `mut_results.txt` keeps the verdicts.
+(m10 and m11 are `mut.sh` ids; section V's M10-M32 are other mutants.) The m3 and m4 runs used the earlier stage-1 bench, whose `dpc_svc` already showed the R3 artefact (`svc_ram_bad` 6, section 6.2). What counts as the catch is the counts beyond it: `ram_frame_bad`, `dout_bad` and `ram`. The mutants' work directories are deleted after each run; `mut_results.txt` keeps the verdicts.
 
 ## 5. What the bench cannot do
 
@@ -509,7 +513,7 @@ Lane E2's own m1–m9 (section 4) were not re-run individually. M10–M32 cover 
      | Lane B's narrow condition | 6/6 pass | caught 6/6 |
 
    - Recommendation: narrow the class to lane B's condition.
-   - [Decided, F1_fixes.md 2: narrowed further. The class is now a sample capture on an unpaused edge right after a paused upstream grant edge whose last unpaused edge had `sel_ram_sel` high, with the two lane registers differing; it masks only the sum and AMPLITUDE until they agree again, and any other lane difference at a capture is `audio_bad`.]
+   - [Decided, F1_fixes.md 2: narrowed further. The class is now a sample capture on an unpaused edge right after a paused upstream grant edge whose last unpaused edge had `sel_ram_sel` high, with the two lane registers differing; it masks only the sum and AMPLITUDE until they agree again, and any other lane difference at a capture is `audio_bad`. Second review: each register must also hold what it loaded at that edge, `pause_lane_dpc` reaches the class, and m10/m11 (section 4) show that a pause-only `al` defect now fails.]
 2. **E1: `dig_rom_lag` masks the remote route's data, not only its latency.** Fix 5 covers this in the directed tests. The random and game benches still have no comparison of that route. Recommendation: the same per-refresh pairing inside `fe_shadow.svh`.
 3. **RTL/design: `cdf_jump_ffe` `obus_exposed` 5 is unchanged (section 6.1).** One point for the decision: on hardware the undriven D5–D0 of the TIA read most likely keep the last value driven, the cartridge's $C5. That is `daria_fe`'s result ($05C5), not upstream's ($00C5). Option (a), accept and class it, therefore loses nothing towards hardware. [Decided, F1_fixes.md 3: option (a), `obus_ffe`.]
 4. **Coverage limits, by design of the tests and not bench faults:**
@@ -523,7 +527,7 @@ Lane E2's own m1–m9 (section 4) were not re-run individually. M10–M32 cover 
 - **The pause injection reaches the DUT.** The same 8 frames of the same program take more audio ticks with the pauses than without them (`pause_dpc_ph1` 265, `pause_dpc_svc` 256; F11, the pause removed: 252), and M17 is caught once the mask is lifted.
 - **Not re-run:** the `s0live` and `s1p` columns of section 3, which still show the 48-test state.
 - **What section 3 now lacks:**
-  - the suite has 50 tests;
+  - the suite has 50 tests [F1_fixes.md 2, second review: 51, with `pause_lane_dpc`];
   - the digital tests need 2–4 more bins (`tb_lat`, `s1:fe_slat`, `s1:dirchk_rom_lo_n`/`_hi_n`).
 - **Where things are.** All verification outputs are under `sim/work/bupchip/daria/fe_dir/`:
   - `vfy/` holds the fault images, the gated mutant sources and the scripts: `vfy/scripts/faults.py`, `mkmut.py`, `run_faults.sh` and `run_muts.sh`;

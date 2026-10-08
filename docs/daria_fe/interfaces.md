@@ -291,7 +291,7 @@ Taps (1.7):
 | `mode`, `fexp`, `jr`, `jexp`, `jstream` | 8, 13, 2, 13, 6 | CDF |
 | `ev_tbl_alias`, `ev_guard_sup` (port), `ev_rmw_svc` | 1 each | events (one-clock pulses); `ev_rmw_svc` = a taken CALLFUNCTION 1/2 (`dma_set`) while `dma_busy` is high pre-edge (R-2, L-1) |
 | `a_fpjr`, `a_pend_late` | 1 each | assertions (must stay 0) |
-| `rcyc` | 1 | bench and assertion only: 1 when some edge since the last `pclk1` had `rst_fe` high; it masks `a_pend_late` at the end of such a cycle and nothing else reads it (lanes/F1_fixes.md 1) |
+| `rcyc` | 1 | bench and assertion only: 1 when some edge since the last `pclk1` had `rst_fe` high, that `pclk1` edge excluded; it masks `a_pend_late` at the end of such a cycle and nothing else reads it (lanes/F1_fixes.md 1) |
 
 ### 5.4 `daria_fe_audio` (5; lane B)
 
