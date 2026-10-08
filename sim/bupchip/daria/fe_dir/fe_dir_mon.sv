@@ -22,13 +22,22 @@
 //                   M=2 the n-th DPC+ service (DMA) start; M=3 load_end (the
 //                   console is in reset there: upstream's init and F6 run);
 //                   M=4 the n-th release of the console reset (right after
-//                   init: the next F6 starts on that reset's rise)
+//                   init: the next F6 starts on that reset's rise); M=5 the
+//                   n-th CDF DSWRITE/DSPTR cycle, seen at E0+1 (the reset
+//                   lands in that cycle's phase 1, where daria_fe's P32 read
+//                   runs: lane A O-1 / lane D issue 1, class p32_reset), and
+//                   with +dir_rst_rep=K again at every K-th further one, the
+//                   delay stepping through +dir_rst_dly + 0..3, at most
+//                   +dir_rst_max times (0: no limit)
 //   +dir_pause=M    pause (a force on dut.pause) for +dir_pause_len clk_sys
 //                   (default 200), starting +dir_pause_dly clk_sys after: M=1
 //                   the n-th E0 (+dir_pause_n, default 2000; dly 1..5 puts it
 //                   in phase 1, 6..11 in phase 2); M=2 the n-th call accept;
 //                   M=3 the n-th service start. +dir_pause_rep=K repeats it
 //                   at every K-th further E0 / call / service.
+// The variant inputs are bins too: tb_lat (tb_daria's +lat) and, in stage-1
+// builds, fe_slat (the bench's +fe_slat), so a variant test whose arguments
+// are lost fails its own counts.
 // The 6507 programs keep a marker in RIOT RAM: $FF counts completed test
 // bodies, $FE counts the program's own self-check failures. Both are
 // reported (dir_marker, dir_selfcheck_err).
@@ -64,10 +73,13 @@ module fe_dir_mon;
 	wire        tick     = tb_daria.dut.cart2600.mapper_audio.audio_tick;
 	wire  [3:0] ast      = tb_daria.dut.cart2600.mapper_audio.state;
 	wire  [3:0] ctl      = tb_daria.ctl_state;
-	wire        load_end = tb_daria.old_cart_download && !tb_daria.cart_download;
+	// the download's end: cart_download falls (a blocking write in tb_daria's
+	// initial block, so it is sampled through a register here)
+	logic       old_cd = 0;
+	wire        load_end = old_cd && !tb_daria.cart_download;
 
 	// ---- plusargs
-	int rst_mode = 0, rst_n = 1, rst_dly = 20, rst_len = 1000;
+	int rst_mode = 0, rst_n = 1, rst_dly = 20, rst_len = 1000, rst_rep = 0, rst_max = 0, ev_dsw = 0, n_inj = 0;
 	int pz_mode = 0, pz_n = 2000, pz_dly = 3, pz_len = 200, pz_rep = 0;
 	longint tr_from = -1, tr_n = 0;   // +dir_trace=N [+dir_trace_from=CLK]: print N commits
 	string out = "./";
@@ -75,6 +87,8 @@ module fe_dir_mon;
 		void'($value$plusargs("out=%s", out));
 		void'($value$plusargs("dir_rst=%d", rst_mode));
 		void'($value$plusargs("dir_rst_n=%d", rst_n));
+		void'($value$plusargs("dir_rst_rep=%d", rst_rep));
+		void'($value$plusargs("dir_rst_max=%d", rst_max));
 		void'($value$plusargs("dir_rst_dly=%d", rst_dly));
 		void'($value$plusargs("dir_rst_len=%d", rst_len));
 		void'($value$plusargs("dir_pause=%d", pz_mode));
@@ -88,13 +102,11 @@ module fe_dir_mon;
 
 	// ---- clocks since things, phase tracking
 	longint clk_n = 0;
-	longint t_e0 = -100, t_p0 = -100, t_note = -1000, t_tick = -1000, t_call = -1000;
+	longint t_e0 = -100, t_p0 = -100, t_note = -1000;
 	longint t_cf = -1000;            // last CALLFN commit
 	longint t_done = -1000;
 	longint dcf = 1000;              // clocks since the CALLFN commit before this one          // last call_done seen (= upstream's merge edge M)
-	int     note_cnt_since = 0;
-	logic   old_rst = 1, old_dma = 0, old_busy = 0, old_init = 0, old_tick_note = 0;
-	logic   live = 0;                // checks-style window: from a pclk1 with !effective_reset && tia_en
+	logic   old_rst = 1, old_dma = 0, old_init = 0;
 	logic   [7:0] last_arm_byte = 0; // CDF: the opcode byte that armed the last fast fetch
 	logic   [14:0] svc_lo = 0, svc_hi = 0;
 	logic   svc_win = 0;
@@ -116,10 +128,11 @@ module fe_dir_mon;
 			rst_end = clk_n + rst_len;
 			$display("DIR inject: console reset at clk_sys %0d for %0d (mode %0d): call_busy %0d ctl %0d dma_busy %0d init_busy %0d",
 				clk_n, rst_len, rst_mode, call_busy, ctl, dma_busy, init_busy);
-			if (call_busy || ctl != 0) inc("inj_rst_in_call");
+			if (call_busy) inc("inj_rst_in_call");
 			if (dma_busy && !init_busy) inc("inj_rst_in_svc");
 			if (init_busy) inc("inj_rst_in_init");
 			inc("inj_rst");
+			n_inj++;
 			rst_at = -1;
 		end
 		if (rst_end >= 0 && clk_n == rst_end) begin
@@ -133,7 +146,7 @@ module fe_dir_mon;
 			pz_at = -1;
 			inc("inj_pause");
 			if (clk_n - t_e0 < 6) inc("inj_pause_ph1"); else inc("inj_pause_ph2");
-			if (call_busy || ctl != 0) inc("inj_pause_in_call");
+			if (call_busy) inc("inj_pause_in_call");
 			if (dma_busy && !init_busy) inc("inj_pause_in_svc");
 		end
 		if (pz_end >= 0 && clk_n == pz_end) begin
@@ -148,6 +161,7 @@ module fe_dir_mon;
 			if (tb_daria.dut.pause) inc("pause_seen");
 		end
 
+		old_cd <= tb_daria.cart_download;
 		if (load_end) begin
 			inc("load_end");
 			if (rst_mode == 3) rst_at = clk_n + rst_dly;
@@ -158,7 +172,10 @@ module fe_dir_mon;
 		// ---------------------------------------------------------- resets
 		if (e_rst && !old_rst && running) begin
 			inc("console_reset");
-			if (call_busy || ctl != 0) inc("reset_in_call");
+			// the reset rose inside the phase 1 of a CDF DSWRITE/DSPTR cycle
+			if (mapper == 6'd23 && !rw && (a_in == 13'h1FF0 || a_in == 13'h1FF1) && clk_n - t_e0 < 6)
+				inc("reset_in_dsw_ph1");
+			if (call_busy) inc("reset_in_call");
 			if (dma_busy && !init_busy) inc("reset_in_svc");
 			if (init_busy) inc("reset_in_init");
 		end
@@ -172,6 +189,13 @@ module fe_dir_mon;
 
 		if (running && !e_rst) begin
 			// ------------------------------------------------------ phases
+			// +dir_rst=5: a CDF DSWRITE/DSPTR cycle, at E0+1 (its address is on the bus)
+			if (rst_mode == 5 && mapper == 6'd23 && clk_n - t_e0 == 1 && !rw && (a_in == 13'h1FF0 || a_in == 13'h1FF1)) begin
+				ev_dsw++;
+				if ((rst_max == 0 || n_inj < rst_max) &&
+					(ev_dsw == rst_n || (rst_rep > 0 && ev_dsw > rst_n && (ev_dsw - rst_n) % rst_rep == 0)))
+					rst_at = clk_n + rst_dly + (n_inj % 4);
+			end
 			if (pclk1) begin
 				if (t_p0 > t_e0 && t_e0 >= 0) inc($sformatf("sp_p0e0_%0d", clk_n - t_p0));
 				t_e0 = clk_n;
@@ -200,7 +224,6 @@ module fe_dir_mon;
 			if (call_acc) begin
 				inc("call_accept");
 				ev_calls++;
-				t_call = clk_n;
 				if (rst_mode == 1 && ev_calls == rst_n) rst_at = clk_n + rst_dly;
 				if (pz_mode == 2 && (ev_calls == pz_n || (pz_rep > 0 && ev_calls > pz_n && (ev_calls - pz_n) % pz_rep == 0)))
 					pz_at = clk_n + pz_dly;
@@ -224,6 +247,7 @@ module fe_dir_mon;
 			if (call_done) t_done = clk_n;
 			if (tick && clk_n - t_done >= 0 && clk_n - t_done <= 8)
 				inc($sformatf("tick_m+%0d", clk_n - t_done));
+			if (tick && clk_n - t_done >= 1 && clk_n - t_done <= 6) inc("tick_in_m_mfe");
 			if (dma_busy && !old_dma && !init_busy) begin
 				inc("svc_dma");
 				ev_svcs++;
@@ -443,12 +467,80 @@ module fe_dir_mon;
 		old_dma <= dma_busy;
 	end
 
+`ifndef FE_STAGE0
+`ifdef FE_SHADOW
+	// stage 1: a few of daria_fe's own events (u_fe exists only there)
+	logic fe_run_q = 0;
+	always @(posedge clk) if (running) begin
+		cov["fe_slat"] = tb_daria.fe_slat;	// the bench's +fe_slat as used (a test's variant)
+		if (tb_daria.u_fe.u_copy.run && !fe_run_q) inc("fe_copy_run_rise");
+		if (tb_daria.u_fe.svc_take) inc("fe_svc_take");
+		if (tb_daria.u_fe.svc_take && tb_daria.u_fe.u_copy.run) inc("fe_svc_take_while_run");
+		fe_run_q <= tb_daria.u_fe.u_copy.run;
+	end
+
+	// ROM-route digital samples: every amplitude written from a ROM sample,
+	// upstream's (AUDIO_ROM_WAIT & rom_done) and daria_fe's (am_rom), paired in
+	// order and compared with their sample addresses. The bench's A1 masks
+	// and resyncs every sample of the >= 32 KB route (its dig_rom_lag class),
+	// so this is the comparison of that route's data (the sample port's byte,
+	// its nibble, the amplitude). A refresh either side dispatched in the
+	// bench's merge window (M, M_fe+1] (its merge_amp class: daria_fe's
+	// counters are merged 6 clocks after upstream's) is counted, not compared
+	// (dirchk_rom_merge). dircheck.py fails a run with a dirchk_*_bad bin above 0.
+	logic [40:0] rq_up [$], rq_fe [$];
+	logic        mw = 0, mw_end = 0, up_inw = 0, fe_inw = 0;
+	always @(posedge clk) begin
+		if (!running || e_rst) begin
+			rq_up.delete();
+			rq_fe.delete();
+			mw = 0;
+			mw_end = 0;
+		end else begin
+			// the dispatches, against the window as it stands before this edge
+			if (ast == 4'd0 && tb_daria.dut.cart2600.mapper_audio.refresh_pending &&
+				!(tb_daria.dut.cart2600.mapper_audio.note_pending && tb_daria.dut.cart2600.mapper_audio.family == 2'd1))
+				up_inw = mw;
+			if (tb_daria.u_fe.u_audio.dispatch) fe_inw = mw;
+			// the window (M, M_fe+1]: M sees upstream's call_done, M_fe u_fe's cp_apply
+			if (mw_end) begin
+				mw = 0;
+				mw_end = 0;
+			end else if (mw && tb_daria.u_fe.cp_apply) mw_end = 1;
+			else if (!mw && call_done && mapper == 6'd23 && tb_daria.fe_merge_hook == 0) mw = 1;
+			if (ast == 4'd11 && tb_daria.dut.cart2600.mapper_audio.rom_done)
+				rq_up.push_back({up_inw, tb_daria.dut.cart2600.mapper_audio.digital_address, 4'h0,
+					tb_daria.dut.cart2600.mapper_audio.digital_low_nibble ?
+					tb_daria.dut.cart2600.mapper_audio.rom_data[3:0] : tb_daria.dut.cart2600.mapper_audio.rom_data[7:4]});
+			if (tb_daria.u_fe.u_audio.am_rom)
+				rq_fe.push_back({fe_inw, tb_daria.u_fe.u_audio.dig_addr, tb_daria.u_fe.u_audio.amp_d});
+			while (rq_up.size() > 0 && rq_fe.size() > 0) begin : pair
+				logic [40:0] pu, pf;
+				pu = rq_up.pop_front();
+				pf = rq_fe.pop_front();
+				if (pu[40] || pf[40]) inc("dirchk_rom_merge");
+				else begin
+					inc(pu[39:8] < 32'h8000 ? "dirchk_rom_lo_n" : "dirchk_rom_hi_n");
+					if (pu[39:0] != pf[39:0]) begin
+						inc("dirchk_rom_bad");
+						if (cov["dirchk_rom_bad"] <= 5)
+							$display("DIR check: ROM sample at clk_sys %0d: upstream address %08x amplitude %02x, daria_fe %08x %02x",
+								clk_n, pu[39:8], pu[7:0], pf[39:8], pf[7:0]);
+					end
+				end
+			end
+		end
+	end
+`endif
+`endif
+
 	final begin
 		int fd, marker, err;
 		string s;
 		marker = tb_daria.dut.riot_inst.riot_ram.mem_q[127];
 		err    = tb_daria.dut.riot_inst.riot_ram.mem_q[126];
 		cov["dir_marker"] = marker;
+		cov["tb_lat"] = tb_daria.lat;		// tb_daria's +lat as used (a test's variant)
 		cov["dir_selfcheck_err"] = err;
 		for (int i = 0; i < 8; i++) cov[$sformatf("dir_res%0d", i)] = tb_daria.dut.riot_inst.riot_ram.mem_q[112 + i];
 		fd = $fopen({out, "dir_cov.txt"}, "w");

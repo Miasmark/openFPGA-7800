@@ -11,7 +11,12 @@ PASS needs all of:
   - every "<name> <n>, ... bad" group of the FE lines is all 0, and every
     must-be-0 counter the FE lines name (MUST0) is 0;
   - every required coverage bin of META (fe_dir_mon's dir_cov.txt) is met:
-    the test exercised what it is meant to exercise.
+    the test exercised what it is meant to exercise ('s1:<bin>' only in
+    stage-1 builds, which print "FE bad:");
+  - fe_dir_mon's own comparisons (dirchk_*_bad bins) are 0;
+  - the comparisons ran: "FE shadow" counts latches and commits, "FE detail"
+    (and in stage 1 "FE counts") read latches compared, all > 0, and a
+    stage-1 log has its "FE result" line.
 Prints one line: verdict, test, the bad counts, the bins, and the reasons.
 """
 import os
@@ -72,15 +77,45 @@ def check(run, meta):
         reasons.append('detect %s, expected %s' % (m.groups() if m else None, meta['scheme']))
     if not re.search(r'^FE shadow: (?!.*not shadowed)', log, re.M):
         reasons.append('no FE shadow line')
+    stage1 = re.search(r'^FE bad:', log, re.M) is not None
+    # nothing compared is not a pass (a bench whose checks never start would show 0 everywhere)
+    m = re.search(r'^FE shadow: \S+ (\d+) latches, (\d+) commits', log, re.M)
+    if m and (int(m.group(1)) == 0 or int(m.group(2)) == 0):
+        reasons.append('nothing compared: %s latches, %s commits' % m.groups())
+    for pat, req in ((r'^FE detail: (\d+) read latches compared', True),
+                     (r'^FE counts: (\d+) read latches compared', stage1)):
+        m = re.search(pat, log, re.M)
+        if (m and int(m.group(1)) == 0) or (req and not m):
+            reasons.append('no read latch compared ("%s" %s)' % (pat[1:10], m.group(1) if m else 'missing'))
+    if stage1 and not re.search(r'^FE result: ', log, re.M):
+        reasons.append('stage-1 log without its FE result line')
     bads = {}
+    classes = {}
+    result = None
     for line in log.splitlines():
-        if line.startswith('FE '):
+        if line.startswith(('FE shadow:', 'FE reference:', 'FE detail:')):
             for k, v in bad_groups(line).items():
                 bads[k] = bads.get(k, 0) + v
+        if line.startswith(('FE shadow:', 'FE bad:')):
             for k in MUST0:
                 for mm in re.finditer(r'(?<![\w])%s[ =](\d+)' % re.escape(k), line):
                     if int(mm.group(1)) != 0:
                         bads[k] = bads.get(k, 0) + int(mm.group(1))
+        if line.startswith('FE bad:'):         # stage 1: every listed counter must be 0
+            for part in line[len('FE bad:'):].split(';')[0].split(','):
+                mm = re.match(r'^\s*(\w+)\s+(-?\d+)\s*$', part)
+                if mm:
+                    bads[mm.group(1)] = int(mm.group(2))
+        if line.startswith('FE classes:'):
+            for part in line[len('FE classes:'):].split(','):
+                mm = re.match(r'^\s*(\w+)\s+(-?\d+)\s*$', part)
+                if mm and int(mm.group(2)):
+                    classes[mm.group(1)] = int(mm.group(2))
+        mm = re.match(r'^FE result: (\w+)', line)
+        if mm:
+            result = mm.group(1)
+    if result is not None and result != 'PASS':
+        reasons.append('FE result %s' % result)
     nbad = {k: v for k, v in bads.items() if v}
     if nbad:
         reasons.append('bad: ' + ', '.join('%s %d' % kv for kv in sorted(nbad.items())))
@@ -94,12 +129,19 @@ def check(run, meta):
     else:
         reasons.append('no dir_cov.txt')
     got = []
+    for k, v in sorted(cov.items()):         # fe_dir_mon's own comparisons (stage 1)
+        if k.startswith('dirchk_') and k.endswith('_bad') and v:
+            reasons.append('%s %d (fe_dir_mon)' % (k, v))
     if cov.get('dir_selfcheck_err', 0):
         a = (cov.get('dir_res1', 0) << 8 | cov.get('dir_res0', 0)) - 2
         lab = meta.get('checks', {}).get(a, '$%04X' % a)
         reasons.append('6507 self-check failed %d times, last at %s, read $%02X' % (
             cov['dir_selfcheck_err'], lab, cov.get('dir_res2', 0)))
     for b, op, n in meta['need']:
+        if b.startswith('s1:'):     # a bin that exists only in stage-1 builds
+            if not stage1:
+                continue
+            b = b[3:]
         if b.endswith('*'):
             v = sum(x for k, x in cov.items() if k.startswith(b[:-1]))
         else:
@@ -108,19 +150,20 @@ def check(run, meta):
         if not ok:
             reasons.append('%s %d, needs %s %d' % (b, v, op, n))
     checked = sum(bads.values()) if bads else 0
-    return reasons, bads, got, cov
+    return reasons, bads, got, cov, classes
 
 
 def main():
     run, metap = sys.argv[1], sys.argv[2]
     meta = parse_meta(metap)
-    reasons, bads, got, cov = check(run, meta)
+    reasons, bads, got, cov, classes = check(run, meta)
     name = os.path.basename(os.path.normpath(run))
     verdict = 'PASS' if not reasons else 'FAIL'
     nb = len(meta['need'])
-    print('%s %-16s %s; bad counts all 0: %s; bins met %d/%d%s' % (
-        verdict, name, 'FE checked %d latches' % cov.get('_latches', 0) if False else '',
-        'yes' if not any(bads.values()) else 'NO', nb - sum(1 for r in reasons if ', needs ' in r), nb,
+    print('%s %-20s bad counts all 0: %s; bins met %d/%d; classes: %s%s' % (
+        verdict, name, 'yes' if not any(bads.values()) else 'NO',
+        nb - sum(1 for r in reasons if ', needs ' in r), nb,
+        ' '.join('%s=%d' % kv for kv in sorted(classes.items())) or '-',
         ('  << ' + '; '.join(reasons)) if reasons else ''))
     sys.exit(0 if verdict == 'PASS' else 1)
 

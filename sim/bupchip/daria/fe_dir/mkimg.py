@@ -137,13 +137,16 @@ fl_ln:  STA WSYNC
         JMP frame
 ckfail: STA M_RES+2
         INC M_ERR
-        TSX
+        BNE ckf_n
+        DEC M_ERR
+ckf_n:  TSX
         LDA $0101,X
         STA M_RES
         LDA $0102,X
         STA M_RES+1
         RTS
 """
+# (M_ERR saturates at 255, so 256 failed checks never read back as 0.)
 # (The kernel uses no immediate below $E0: in CDF fast mode an LDA # (and on
 # CDFJ+ with the options, LDX #/LDY #) with an operand in the stream range is
 # a stream fetch, and in DPC+ fast fetch an LDA # below $28 is a register.)
@@ -163,6 +166,7 @@ class Img:
         self.syms.update(TIA)
         self.syms.update(MARK)
         self.syms.update(DPC if kind == 'dpc' else CDF)
+        self.jplus = False
         self.used = {}              # rom offset -> owner, to catch overlaps
         self.labels = {}            # the self-check labels (ck_N_VV), for the .meta
         if kind == 'dpc':
@@ -331,7 +335,7 @@ class Img:
 
     def build(self):
         self._driver()
-        if self.kind == 'dpc' and 0x6C00 not in self.used:
+        if self.kind == 'dpc' and 0x6C00 not in self.used and self.size == 32768:
             self.dpc_data()
         return bytes(self.rom)
 
@@ -355,6 +359,8 @@ def classify(rom):
         c0 = sum(1 for w in words if w == 0x00464443)
         rev = 3 if plus else (2 if cj >= 3 else (0 if c0 >= 3 else 1))
         return 23, rev
+    if size == 29696:
+        return 21, 0
     if count(b'DPC+') >= 2 and size == 32768:
         return 21, 1 if crc_detect(rom[0:3072]) == DPC_REV1_CRC else 0
     return None, None

@@ -16,6 +16,9 @@
 #            from git, in <work>/snap/), whatever the tree holds now: the
 #            reference front end only, against which every test must show 0.
 #            Any other FLAVOR builds the bench in the tree (stage 1: daria_fe).
+#   ARGS     extra plusargs for every test (e.g. +fe_merge_hook=1), and
+#   TAG      a name for that set: runs go to runs/fe_<TAG>/, results to
+#            results_<TAG>.txt (default: runs/fe/, results.txt)
 #   JOBS     parallel simulations (default 2)
 #   REBUILD=1  rebuild the binary; NORUN=1 only build
 #   TMO      seconds per simulation (default 1800)
@@ -30,7 +33,7 @@ W="$(mkdir -p "$D/../../work/bupchip/daria/fe_dir/$FLAVOR" && cd "$D/../../work/
 export VERILATOR_REAL="${VERILATOR_REAL:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
 
 if [ "$FLAVOR" = s0 ]; then
-	export FE_DIR_SNAP="$W/snap"
+	export FE_DIR_SNAP="$W/snap" FE_STAGE0=1
 	mkdir -p "$FE_DIR_SNAP"
 	for f in tb_daria.sv fe_shadow.svh daria_shadow.svh; do
 		git -C "$D" show "${STAGE0_REV:-d729ba7}:sim/bupchip/daria/$f" > "$FE_DIR_SNAP/$f.new"
@@ -42,32 +45,43 @@ cat "$W/mkimg.log"
 TESTS=("$@")
 [ ${#TESTS[@]} -gt 0 ] || mapfile -t TESTS < <(cd "$W/img" && ls *.meta | sed 's/\.meta$//')
 
-BIN="$W/obj_fe/vtb"
-if [ -x "$BIN" ] && { [ -n "$REBUILD" ] || [ -n "$(find "$HERE/fe_dir_mon.sv" "$HERE/vwrap.sh" ${FE_DIR_SNAP:+"$FE_DIR_SNAP"} -newer "$BIN")" ]; }; then
-	rm -f "$BIN"
+# Build from scratch whenever any input changed (a stamp of their contents):
+# run_daria.sh's own check sees its patched copies as new on every call, and an
+# incremental rebuild in an object directory whose .gch it deleted fails.
+BUP="$(cd "$D/../../../src/fpga/core/bupchip" && pwd)"
+INPUTS=("$HERE/fe_dir_mon.sv" "$HERE/vwrap.sh" "$D/run_daria.sh" "$D/tb_daria.sv" "$D"/*.svh "$BUP"/daria_fe*.sv "$BUP/daria_mem.sv")
+[ -z "$FE_DIR_SNAP" ] || INPUTS+=("$FE_DIR_SNAP"/*)
+for m in $FE_DIR_MUT; do INPUTS+=("${m#*=}"); done    # the mutated copies vwrap.sh builds instead
+STAMP="$(cat "${INPUTS[@]}" | md5sum | cut -c1-32)"
+STAMP="$STAMP ${FE_STAGE0:-0} ${FE_POISON:-0} $(echo "$FE_DIR_MUT" | md5sum | cut -c1-8)"
+if [ -n "$REBUILD" ] || [ "$(cat "$W/build.stamp" 2>/dev/null)" != "$STAMP" ] || ! ls "$W"/obj_fe*/vtb > /dev/null 2>&1; then
+	rm -rf "$W"/obj_fe* "$W/build.stamp"
+	WORK="$W" FE=1 VERILATOR="$HERE/vwrap.sh" "$D/run_daria.sh" --build-only
+	echo "$STAMP" > "$W/build.stamp"
 fi
-WORK="$W" FE=1 VERILATOR="$HERE/vwrap.sh" "$D/run_daria.sh" --build-only
 [ -z "$NORUN" ] || exit 0
 
+RUNS="fe${TAG:+_$TAG}"
+RES="$W/results${TAG:+_$TAG}.txt"
 one() {
 	local t="$1" a f
 	f="$(sed -n 's/^frames //p' "$W/img/$t.meta")"
 	a="$(sed -n 's/^args //p' "$W/img/$t.meta")"
 	# shellcheck disable=SC2086
-	WORK="$W" FE=1 NOBUILD=1 DTRACE=0 NAME="fe/$t" timeout "${TMO:-1800}" "$D/run_daria.sh" "$W/img/$t.bin" \
-		+frames="$f" +snap=0 +fire_at=0 +play_at=0 $a > /dev/null 2>&1 || true
-	python3 "$HERE/dircheck.py" "$W/runs/fe/$t" "$W/img/$t.meta" > "$W/runs/fe/$t/verdict.txt" || true
-	cat "$W/runs/fe/$t/verdict.txt"
+	WORK="$W" FE=1 NOBUILD=1 DTRACE=0 NAME="$RUNS/$t" timeout "${TMO:-1800}" "$D/run_daria.sh" "$W/img/$t.bin" \
+		+frames="$f" +snap=0 +fire_at=0 +play_at=0 $a $ARGS > /dev/null 2>&1 || true
+	python3 "$HERE/dircheck.py" "$W/runs/$RUNS/$t" "$W/img/$t.meta" > "$W/runs/$RUNS/$t/verdict.txt" || true
+	cat "$W/runs/$RUNS/$t/verdict.txt"
 }
 export -f one
-export W HERE D
+export W HERE D RUNS ARGS
 printf '%s\n' "${TESTS[@]}" | xargs -P "${JOBS:-2}" -I{} bash -c 'one {}'
-for t in "${TESTS[@]}"; do cat "$W/runs/fe/$t/verdict.txt"; done > "$W/results.txt.new"
+for t in "${TESTS[@]}"; do cat "$W/runs/$RUNS/$t/verdict.txt"; done > "$RES.new"
 # keep the verdicts of tests not run this time
-if [ -f "$W/results.txt" ]; then
-	grep -v -F -f <(printf ' %s \n' "${TESTS[@]}") "$W/results.txt" >> "$W/results.txt.new" || true
+if [ -f "$RES" ]; then
+	grep -v -F -f <(printf ' %s \n' "${TESTS[@]}") "$RES" >> "$RES.new" || true
 fi
-sort -k2,2 "$W/results.txt.new" > "$W/results.txt"
-rm -f "$W/results.txt.new"
-echo "== $W/results.txt"
-cat "$W/results.txt"
+sort -k2,2 "$RES.new" > "$RES"
+rm -f "$RES.new"
+echo "== $RES"
+cat "$RES"

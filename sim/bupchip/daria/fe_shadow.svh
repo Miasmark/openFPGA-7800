@@ -1,6 +1,42 @@
 //------------------------------------------------------------------------------
-// The front-end shadow, stage 0 (DARIA step 6): included at the end of
-// tb_daria.sv with -DFE_SHADOW (run_daria.sh with FE=1).
+// The front-end shadow (DARIA step 6): included at the end of tb_daria.sv
+// with -DFE_SHADOW (run_daria.sh with FE=1).
+//
+// Two stages share this file.
+//
+// STAGE 1 (the default; docs/daria_fe/design.md 12.4, bench.md 7.4-7.7):
+// daria_fe itself (u_fe) on its own daria_mem (fe_mem), in mode A (upstream's
+// ARM runs the calls), beside the stage-0 reference below, which stays as a
+// check of the taps. Every input of u_fe is a continuous assign of a DUT
+// signal or NBA-updated bench state: cart_win emulated from the download
+// (bup_capture's window), cpu_ready as design 6.6, upstream's CPU writes
+// mirrored into fe_mem's cart RAM port A (writeback and DMA left out), the
+// returns written into state RAM F8-FD at the clk_arm edges upstream's
+// controller captures them, ret_tog flipped with upstream's complete_toggle
+// once u_fe has posted that call (per call number), the sample port answered
+// after +fe_slat clk_sys, the merge hook (+fe_merge_hook=1), the sticky hold
+// (fe_hold_reset, tb_daria's reset term) and the forced arm_call_stall that
+// covers u_fe's arm_dma_busy (H1 checks it). fe_taps.svh maps u_fe's state
+// to upstream's. The checks of design 12.4 (L1, commit_on_hidden,
+// hidden_last_bad, C1-C4, R1-R3, I1/I2, K1/K2, T1-T4, A1-A3, O1, H1, the RTL
+// assertions) and the counted classes of 9.5 are in the stage-1 section
+// (f1_*). Outputs: fe.csv (daria_fe's, one line a frame), fe_ref.csv (the
+// reference's), fe_err.txt (both; the first two daria_fe failures with the
+// 64-clock ring), and the run.log lines "FE stage 1:", "FE load:", "FE
+// init:", "FE service ...", then "FE shadow:" (bench.md 7.7's line), "FE
+// bad:", "FE classes:", "FE counts:", "FE inputs:", "FE latency:", "FE
+// result:", and the reference's "FE reference:" and stage-0 lines below.
+// Plusargs: +fe_merge_hook=1, +fe_slat=N (40), +fe_hold=0/1 (1),
+// +fe_resync=0/1 (1), +fe_full=N (K2 every N frames, 1), +fe_ticks=1
+// (fe_ticks.csv), +fe_pcm=1 (amp_up.pcm, amp_fe.pcm), +fe_mask_max=N (20000:
+// mask_stuck), and the self-test +fe1_inj=K +fe1_inj_at=N (one fault in u_fe
+// or fe_mem; see there). Added by the lane's verification (E1_shadow.md,
+// "Verification"): T5 (ROM-sample amplitudes paired in order), merge_late,
+// dma_cover, mask_stuck, the "FE masks:" line; pause_lane narrowed to lane
+// B's condition; rmw_seed/rmw_merge bounded to one tick / k ticks.
+//
+// STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
+// daria_fe existed; the text below):
 //
 // Before DARIA's own front end (daria_fe) exists, a REFERENCE front end
 // stands where it will stand: a second copy of upstream's mapper_dpcplus and
@@ -904,20 +940,31 @@
 	// ---- u_fe's inputs: continuous assigns of DUT signals, or NBA-updated bench state ----
 	wire         f1_load_start = ~old_cart_download && cart_download;
 	wire         f1_load_end   = old_cart_download && ~cart_download;
-	// cart_win: bup_capture's window (bup_capture.sv:141-164), on the tb's strobes
-	logic        f1_c_open = 1'b0;
+	// cart_win: bup_capture's window (bup_capture.sv:141-164): open from the
+	// download's start until DRAIN = 64 clocks after its end. The bench's own
+	// blocks take the download's edges from the cart_download level through a
+	// private copy, not from the load_start/load_end pulses: tb_daria writes
+	// cart_download with a blocking assignment in an initial block at a clock
+	// edge, and a block that runs before that write in the time step, while
+	// tb_daria's old_cart_download flop runs after it, would never see the
+	// pulse (seen in a build of this file: I1 never armed). The edge seen here
+	// can be one clock off the DUT's; the window's fall only starts F6
+	// (bounded by the hold). u_fe's own load_start/load_end stay the DUT's
+	// expressions, as bench.md 1.3 asks.
+	logic        f1_c_open = 1'b0, f1_cw_q = 1'b0;
 	logic  [6:0] f1_c_drain = 7'd0;
 	always @(posedge clk_sys) begin
-		if (f1_load_start) begin
+		if (cart_download && !f1_cw_q) begin
 			f1_c_open <= 1'b1;
 			f1_c_drain <= 7'd0;
-		end else if (f1_load_end && f1_c_open) begin
+		end else if (!cart_download && f1_cw_q && f1_c_open) begin
 			f1_c_open <= 1'b0;
 			f1_c_drain <= 7'd64;
 		end else if (f1_c_drain != 7'd0)
 			f1_c_drain <= f1_c_drain - 7'd1;
+		f1_cw_q = cart_download;
 	end
-	wire         f1_cart_win = f1_load_start || f1_c_open || f1_c_drain > 7'd1;
+	wire         f1_cart_win = cart_download || f1_c_open || f1_c_drain > 7'd1;
 	// cpu_ready, design 6.6 (critic 8): upstream's call_ready without call_busy
 	wire         f1_cpu_ready = dut.cart2600.arm_mappers.call_controller.arm_online_sync2 &&
 		dut.cart2600.arm_mappers.call_controller.shadow_ready_sync2 && !dut.effective_reset;
@@ -1042,8 +1089,8 @@
 	int          f1_hold_cnt = 0, f1_never_busy = 0;
 	always @(posedge clk_sys) begin
 		f1_rst_q <= dut.effective_reset;
-		if (f1_load_end) f1_loaded <= 1'b1;
-		if (f1_load_start || (f1_loaded && dut.effective_reset && !f1_rst_q)) begin
+		if (cart_download) f1_loaded <= 1'b1;			// (the level: see cart_win above)
+		if (cart_download || (f1_loaded && dut.effective_reset && !f1_rst_q)) begin
 			fe_hold_reset <= fe_hold != 0;
 			f1_seen_busy <= 1'b0;
 			f1_hold_cnt <= 0;
@@ -1089,7 +1136,10 @@
 		G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD, G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER,
 		G_READS, G_HIDDEN, G_CYCLES, G_PTR_N, G_RAM_N, G_K1, G_K2, G_INIT_N, G_SVC_FE, G_MERGES, G_HK_MERGES,
 		G_AMP_READS, G_AMP_CLASS, G_SHORT_DOUT, G_Q26, G_SHORT_IMAGE, G_RMW_SEED, G_DEPOSIT_CF,
-		G_DROP_UP, G_DROP_FE,
+		G_DROP_UP, G_DROP_FE, G_R3_N, G_FORCED, G_RMW_MERGE,
+		G_DIG_LOCAL, G_DIG_REMOTE, G_DIG_RAM, G_DIG_NONE,
+		// added by the lane's verification (E1_shadow.md, "Verification")
+		G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK, G_MASKED, G_DIG_VAL_BAD, G_DIG_VAL_N, G_DIG_VAL_MRG,
 		G_N
 	} f1_cnt_t;
 	string       f1_nm [G_N];
@@ -1127,7 +1177,8 @@
 	// refresh length (dispatch to IDLE) up and fe; NOTE capture fe - up.
 	localparam int F1_HB = 64;
 	longint      f1_h_post [F1_HB], f1_h_merge [F1_HB], f1_h_busy [F1_HB], f1_h_rup [F1_HB], f1_h_rfe [F1_HB];
-	longint      f1_h_note [F1_HB];
+	longint      f1_h_note [F1_HB], f1_h_slat [F1_HB];
+	longint      f1_smp_t = -1;
 	function automatic int f1_bin(input longint d);
 		return d < 0 ? 0 : (d >= F1_HB - 1 ? F1_HB - 1 : int'(d));
 	endfunction
@@ -1155,6 +1206,7 @@
 	// M_fe+1. Counters and frequencies are compared from M_fe+1 on (5.6).
 	int          f1_w = 0;
 	longint      f1_w_m = 0, f1_late_until = -1;
+	logic        f1_rmw_merge = 0, f1_w_rmw = 0, f1_rmw_chk = 0;
 	longint      f1_dig_chk = -1, f1_up_disp_t = -1, f1_fe_disp_t = -1, f1_up_ncap_t = -1;
 	logic        f1_up_busy_q = 0, f1_fe_busy_q = 0;
 	longint      f1_up_busy_fall = -1;
@@ -1163,6 +1215,38 @@
 		f1_m_rep = 1;
 		if (cf) f1_m_cf = 1;
 		f1_m_why = why;
+	endfunction
+	// How long the masks stay set: a mask that never meets a quiet point would
+	// leave A1 blind for the rest of the run (mask_stuck, +fe_mask_max clk_sys).
+	int          fe_mask_max = 20000;
+	logic        f1_sel_unp = 0, f1_up_inw = 0, f1_fe_inw = 0;	// pause_lane; T5's merge-window flags
+	logic [40:0] f1_rq_up [$], f1_rq_fe [$];			// T5: ROM-sample amplitudes in order
+	longint      f1_mask_t0 = -1, f1_mask_long = 0;
+	logic        f1_mask_stk = 0;
+	// The merge after an rmw_seed (rmw_merge): in mode A call 2's returns are
+	// upstream's, so a voice the ARM left alone returns upstream's seed, which
+	// u_fe takes (its own seed differs by the tick at M) while upstream keeps
+	// its counter: upstream's counter is then u_fe's plus k ticks of that
+	// voice's frequency during call 2 (its payload's, f1_rmw_f), k the ticks
+	// since call 2's accept. Anything else is audio_bad.
+	logic [95:0] f1_rmw_f = 0;
+	function automatic logic f1_rmw_cnt_ok();
+		logic [31:0] u, f, fr, acc;
+		logic        ok;
+		for (int v = 0; v < 3; v++) begin
+			u  = v == 0 ? dut.cart2600.mapper_audio.counter0 : (v == 1 ? dut.cart2600.mapper_audio.counter1 :
+				dut.cart2600.mapper_audio.counter2);
+			f  = u_fe.u_audio.counter[v];
+			fr = f1_rmw_f[32 * v +: 32];
+			ok = 0;
+			acc = f;
+			for (int k = 0; k <= 4096 && !ok; k++) begin
+				if (acc == u) ok = 1;
+				acc = acc + fr;
+			end
+			if (!ok) return 0;
+		end
+		return 1;
 	endfunction
 
 	// ---- per-cycle bookkeeping ------------------------------------------------------------
@@ -1184,10 +1268,14 @@
 	logic  [31:0] f1_r3_d [$], f1_r3_c [$];
 	int           f1_svc_up_done = 0, f1_svc_fe_done = 0, f1_r3_n = 0;
 	logic         f1_sp_q = 0, f1_fsp_q = 0, f1_run_q = 0, f1_updma_q = 0;
+	longint       f1_up_dma_t = 0, f1_fe_run_t = 0;
 	logic  [14:0] f1_up_rng_d = 0, f1_fe_rng_d = 0;
 	logic   [7:0] f1_up_rng_c = 0, f1_fe_rng_c = 0;
 	// I1/I2
-	logic         f1_i_arm = 0, f1_i_up = 0, f1_i_fe = 0, f1_erst_q = 0, f1_rom_done = 0;
+	logic         f1_i_arm = 0, f1_i_up = 0, f1_i_fe = 0, f1_erst_q = 0, f1_rom_done = 0, f1_cd_q = 0;
+	logic         f1_f6_q = 0, f1_ib_q = 0;
+	longint       f1_t_ld1 = -1, f1_t_f6 = -1;
+	int           f1_nf6 = 0;
 
 	// ---- RAM compares (I1, K1, K2, R3) ---------------------------------------------------------
 	// Words [0, n) of upstream's cart RAM against fe_mem's (aliased CDFJ+ pointer
@@ -1362,6 +1450,13 @@
 				$sformatf("H1: arm_call_stall %0d, expected %0d, RDY %0d, mapper_phi2 %0d", dut.arm_call_stall, exp,
 					dut.RDY, dut.mapper_phi2))
 		end
+		// dma_cover (design 7.4): u_fe's arm_dma_busy covers a latched or running
+		// service. H1 checks that the hold follows the busy; this checks that the
+		// busy covers the engine (in mode A upstream's longer stall hides a
+		// short one).
+		`F1_CHK((u_fe.u_copy.run || u_fe.u_core.svc_hold) && !u_fe.arm_dma_busy && !u_fe.init_busy &&
+			!dut.effective_reset, G_DMA_COVER,
+			$sformatf("dma_cover: arm_dma_busy 0 with run %0d, svc_hold %0d", u_fe.u_copy.run, u_fe.u_core.svc_hold))
 
 		// ---- A1 and T1/T2 (every clock from the first reset): the state the last edge left ----
 		if (f1_rst_seen) begin
@@ -1375,10 +1470,17 @@
 				why = ft_a1_cf();
 				if (why != "") begin
 					if (f1_clk < f1_late_until) f1_inc(G_MERGE_RACE);	// only after a ret_late (7.6)
-					else `F1_CHK(1, G_AUDIO_BAD, {"A1 counters/frequencies: ", why})
+					else if (f1_rmw_chk && u_fe.u_audio.freq[0] == dut.cart2600.mapper_audio.frequency0 &&
+							u_fe.u_audio.freq[1] == dut.cart2600.mapper_audio.frequency1 &&
+							u_fe.u_audio.freq[2] == dut.cart2600.mapper_audio.frequency2 && f1_rmw_cnt_ok())
+						f1_inc(G_RMW_MERGE);			// the merge after an rmw_seed: counters only, k ticks
+					else `F1_CHK(1, G_AUDIO_BAD, {"A1 counters/frequencies: ", why, f1_rmw_chk ?
+						$sformatf(" (after an rmw_seed: call 2's frequencies %024x, now %08x %08x %08x)", f1_rmw_f,
+							u_fe.u_audio.freq[2], u_fe.u_audio.freq[1], u_fe.u_audio.freq[0]) : ""})
 					f1_mask(1, "audio_bad");
 				end
 			end
+			f1_rmw_chk = 0;
 			if (!f1_m_rep) begin
 				why = ft_a1_rep();
 				if (why != "") begin
@@ -1388,10 +1490,55 @@
 			end
 		end
 		if (dut.effective_reset) f1_rst_seen = 1;
+		// how long A1 is masked (the resync clears a mask at a falling edge)
+		if (f1_m_rep || f1_m_cf) begin
+			f1_inc(G_MASKED);
+			if (f1_mask_t0 < 0) f1_mask_t0 = f1_clk;
+			else if (fe_resync != 0 && !f1_mask_stk && f1_clk - f1_mask_t0 > fe_mask_max) begin
+				f1_mask_stk = 1;
+				`F1_CHK(1, G_MASK_STUCK, $sformatf("mask_stuck: A1 masked for %0d clk_sys (%s) with no quiet point",
+					f1_clk - f1_mask_t0, f1_m_why))
+			end
+		end else if (f1_mask_t0 >= 0) begin
+			if (f1_clk - f1_mask_t0 > f1_mask_long) f1_mask_long = f1_clk - f1_mask_t0;
+			f1_mask_t0 = -1;
+			f1_mask_stk = 0;
+		end
 
 		// ---- the audio classes: their conditions at this edge set the masks -------------------
 		up_disp = ft_up_dispatch();
 		fe_disp = u_fe.u_audio.dispatch;
+		// T5: every amplitude written from a ROM sample (both routes), upstream's
+		// (AUDIO_ROM_WAIT & rom_done) and u_fe's (am_rom), paired in order, value
+		// and sample address. dig_rom_lag masks the replica's timing and resyncs,
+		// so without this the >= 32 KB route's data (sample port, nibble) would
+		// never be compared. A refresh either side dispatched in (M, M_fe+1]
+		// (merge_amp) or before tia_en (pre_lock) is counted, not compared.
+		if (up_disp) f1_up_inw = f1_w != 0 || !dut.tia_en;
+		if (fe_disp) f1_fe_inw = f1_w != 0 || !dut.tia_en;
+		if (dut.effective_reset) begin
+			f1_rq_up.delete();
+			f1_rq_fe.delete();
+		end else begin
+			if (dut.cart2600.mapper_audio.state == 4'd11 && dut.cart2600.mapper_audio.rom_done)
+				f1_rq_up.push_back({f1_up_inw, dut.cart2600.mapper_audio.digital_address, 4'h0,
+					dut.cart2600.mapper_audio.digital_low_nibble ? dut.cart2600.mapper_audio.rom_data[3:0] :
+					dut.cart2600.mapper_audio.rom_data[7:4]});
+			if (u_fe.u_audio.am_rom)
+				f1_rq_fe.push_back({f1_fe_inw, u_fe.u_audio.dig_addr, u_fe.u_audio.amp_d});
+			while (f1_rq_up.size() > 0 && f1_rq_fe.size() > 0) begin
+				logic [40:0] qu, qf;
+				qu = f1_rq_up.pop_front();
+				qf = f1_rq_fe.pop_front();
+				if (qu[40] || qf[40]) f1_inc(G_DIG_VAL_MRG);
+				else begin
+					f1_inc(G_DIG_VAL_N);
+					`F1_CHK(qu[39:0] != qf[39:0], G_DIG_VAL_BAD,
+						$sformatf("T5: ROM sample address %08x amplitude %02x, upstream %08x %02x", qf[39:8], qf[7:0],
+							qu[39:8], qu[7:0]))
+				end
+			end
+		end
 		// merge_amp: a refresh dispatched at D in (M, M_fe+1] of a CDF call, no hook
 		if (f1_w != 0 && (up_disp || fe_disp)) begin
 			f1_inc(G_MERGE_AMP);
@@ -1404,6 +1551,8 @@
 				else begin
 					f1_w = 1;
 					f1_w_m = f1_clk;
+					f1_w_rmw = f1_rmw_merge;
+					f1_rmw_merge = 0;
 					f1_inc(G_MERGES);
 				end
 			end
@@ -1411,16 +1560,36 @@
 			if (u_fe.cp_apply) begin
 				f1_w = 2;
 				f1_h_merge[f1_bin(f1_clk - f1_w_m)]++;
+				// The window this bench masks is u_fe's own (M, M_fe]: its length is
+				// design 5.6's M_fe = M+6 (F5), longer only after a ret_late.
+				`F1_CHK(f1_clk - f1_w_m != 6 && f1_clk >= f1_late_until, G_MERGE_LATE,
+					$sformatf("merge_late: M_fe - M = %0d clk_sys, design 5.6: 6", f1_clk - f1_w_m))
 			end else if (f1_clk - f1_w_m > 64) begin
 				`F1_CHK(1, G_AUDIO_BAD, "merge: u_fe never applied the returns (cp_apply) within 64 clocks of M")
 				f1_w = 0;
 				f1_mask(1, "audio_bad");
 			end
-		end else
-			f1_w = 0;
+		end else begin
+			f1_w = 0;					// this edge is M_fe+1: compared from the next clock
+			f1_rmw_chk = f1_w_rmw;
+			f1_w_rmw = 0;
+		end
 		if (f1_hk_en && dut.cart2600.arm_call_done && fe_is_cdf) f1_h_merge[0]++;
 		// grant_steal (short_phase1): the replica is a clock behind; NOTE loads may move
 		if (u_fe.u_arb.ev_grant_steal) f1_mask(1, "grant_steal");
+		// coverage: upstream's digital routes (AUD:335-347) and its ROM sample latency
+		if (dut.cart2600.mapper_audio.state == 4'd9) begin		// AUDIO_DIGITAL_ROUTE
+			if (dut.cart2600.mapper_audio.digital_address < dut.cart2600.mapper_audio.rom_size) begin
+				if (dut.cart2600.mapper_audio.digital_address[31:15] == 17'd0) f1_inc(G_DIG_LOCAL);
+				else f1_inc(G_DIG_REMOTE);
+			end else if (dut.cart2600.mapper_audio.digital_address[31:15] == 17'h0_8000) f1_inc(G_DIG_RAM);
+			else f1_inc(G_DIG_NONE);
+		end
+		if (dut.cart2600.arm_sample_request) f1_smp_t = f1_clk;
+		if (dut.cart2600.arm_sample_done && f1_smp_t >= 0) begin
+			f1_h_slat[f1_bin(f1_clk - f1_smp_t)]++;
+			f1_smp_t = -1;
+		end
 		// dig_rom_lag: upstream's ROM sample request R (rom_request includes rom_ready)
 		if (dut.cart2600.arm_sample_request) begin
 			if (dut.cart2600.mapper_audio.digital_address[31:15] != 17'd0) begin
@@ -1454,11 +1623,16 @@
 				f1_inc(G_PRE_LOCK);
 				f1_mask(0, "pre_lock");
 			end
-			if (dut.pause) begin
+			// pause_lane (lane B, B-1): only a paused grant whose last unpaused edge
+			// had sel_ram_sel high, so upstream's lane register holds the 6507
+			// port's lane. Any other paused grant reads the engine's lane on both
+			// sides and stays compared.
+			if (dut.pause && f1_sel_unp) begin
 				f1_inc(G_PAUSE_LANE);
 				f1_mask(0, "pause_lane");
 			end
 		end
+		if (!dut.pause) f1_sel_unp = dut.cart2600.sel_ram_sel;
 		if (u_fe.u_audio.ev_size_hi || (dut.cart2600.mapper_audio.state == 4'd5 &&
 				dut.cart2600.mapper_audio.ram_addr[16:15] != 2'd0))
 			f1_mask(0, "size_over32k");
@@ -1529,7 +1703,7 @@
 						if (aread) f1_inc(G_AMP_READS);
 						if (bad) begin
 							if (f1_short) f1_inc(G_SHORT_DOUT);			// short_phase1: that cycle's fe_do
-							else if (aread && (f1_m_rep || f1_w != 0)) f1_inc(G_AMP_CLASS);	// under an audio class
+							else if (aread && f1_m_rep) f1_inc(G_AMP_CLASS);	// under an audio class
 							else if (aread) `F1_CHK(1, G_AMP_LAG, $sformatf("amp_lag: AMPLITUDE read, daria_fe %02x, upstream %02x, no class",
 								fd, ud))
 							else if (fe_is_cdf && dut.cart2600.cdf.stream_substitute && f1_alias[dut.cart2600.cdf.table_index])
@@ -1660,7 +1834,15 @@
 				if (pu[63:0] != pf[63:0] || pu[255:160] != pf[255:160])
 					`F1_CHK(1, G_CALL_BAD, $sformatf("R1: call %0d posted %064x, upstream's payload %064x",
 						f1_tot[G_CALLS_FE] - f1_feq.size(), pf, pu))
-				else if (rmw) f1_inc(G_RMW_SEED);		// rmw_call: call 2's seeds (design 6.4, lane C C-3)
+				else if (rmw && one_tick) begin		// design 9.5: one tick's add, no more
+					f1_inc(G_RMW_SEED);			// rmw_call: call 2's seeds (design 6.4, lane C C-3)
+					// In mode A call 2's returns come from upstream's ARM, which got
+					// upstream's seeds: a voice it leaves alone returns upstream's seed,
+					// which u_fe compares with its own and takes. Call 2's merge may
+					// then leave counters that differ: classed, resynced (E2 6.3).
+					if (fe_is_cdf && !f1_hk_en) f1_rmw_merge = 1;
+					f1_rmw_f = pu[255:160];			// call 2's frequencies (upstream's payload)
+				end
 				else if (one_tick) `F1_CHK(1, G_SEED_RACE, $sformatf("seed_race: posted seeds %024x, upstream %024x", pf[159:64], pu[159:64]))
 				else `F1_CHK(1, G_CALL_BAD, $sformatf("R1: seeds %024x, upstream %024x", pf[159:64], pu[159:64]))
 			end
@@ -1688,6 +1870,10 @@
 		while (f1_sq_up.size() > 0 && f1_sq_fe.size() > 0) begin
 			su = f1_sq_up.pop_front();
 			sf = f1_sq_fe.pop_front();
+			if (f1_tot[G_SVC_FE] <= 10)
+				$display("FE service %0d at clk_sys %0d (frame %0d): %s src $%05x dst $%04x count %0d value $%02x; daria_fe %s src $%05x dst $%04x count %0d value $%02x",
+					f1_tot[G_SVC_FE], f1_clk, f1_frame, su[50] ? "fill" : "copy", su[49:31], su[30:16], su[15:8], su[7:0],
+					sf[50] ? "fill" : "copy", sf[49:31], sf[30:16], sf[15:8], sf[7:0]);
 			`F1_CHK(su != sf, G_SVC_BAD, $sformatf("R2: service fill/src/dst/count/val %013x, upstream %013x", sf, su))
 			f1_r3_d.push_back({17'd0, su[30:16]});
 			f1_r3_c.push_back({24'd0, su[15:8]});
@@ -1696,32 +1882,70 @@
 			f1_up_rng_d = dut.cart2600.dpcplus.service_dest;
 			f1_up_rng_c = dut.cart2600.dpcplus.service_count;
 		end
-		if (f1_updma_q && !(dut.arm_dma_busy && !dut.mapper_init_busy)) f1_svc_up_done++;
+		if (dut.arm_dma_busy && !dut.mapper_init_busy && !f1_updma_q) f1_up_dma_t = f1_clk;
+		if (f1_updma_q && !(dut.arm_dma_busy && !dut.mapper_init_busy)) begin
+			f1_svc_up_done++;
+			if (f1_svc_up_done <= 10)
+				$display("FE service %0d: upstream's DMA busy for %0d clk_sys", f1_svc_up_done, f1_clk - f1_up_dma_t);
+		end
 		f1_updma_q = dut.arm_dma_busy && !dut.mapper_init_busy;
 		if (u_fe.svc_take) begin
 			sf = ft_svc_fe();
 			f1_fe_rng_d = sf[30:16];
 			f1_fe_rng_c = sf[15:8];
 		end
-		if (f1_run_q && !u_fe.u_copy.run) f1_svc_fe_done++;
+		if (!f1_run_q && u_fe.u_copy.run) f1_fe_run_t = f1_clk;
+		if (f1_run_q && !u_fe.u_copy.run) begin
+			f1_svc_fe_done++;
+			if (f1_svc_fe_done <= 10)
+				$display("FE service %0d: daria_fe's engine ran %0d clk_sys", f1_svc_fe_done, f1_clk - f1_fe_run_t);
+		end
+		if (f1_forced) f1_inc(G_FORCED);
 		f1_run_q = u_fe.u_copy.run;
-		while (f1_r3_d.size() > 0 && f1_svc_up_done > f1_r3_n && f1_svc_fe_done > f1_r3_n) begin
-			int dd, cc;
-			dd = int'(f1_r3_d.pop_front());
-			cc = int'(f1_r3_c.pop_front());
-			f1_r3_n++;
-			n = 0;
-			for (int a = dd; a < dd + cc; a++) if (fe_ram_byte(17'(a)) != ft_cb(a)) n++;
-			`F1_CHK(n != 0, G_SVC_RAM_BAD, $sformatf("R3: %0d of the %0d bytes at $%04x differ", n, cc, dd))
+		// R3 once both sides are quiet: no service latched, pending or running on
+		// either side. A burst (an RMW pair, or a service latched while one runs)
+		// is compared at its end, every range of it: the two engines finish the
+		// services of a burst at different times, and a later one may overwrite an
+		// earlier one's range (E2's dpc_svc).
+		if (f1_r3_d.size() > 0 && !(dut.arm_dma_busy && !dut.mapper_init_busy) &&
+				!dut.cart2600.dpcplus.service_pending && !u_fe.u_copy.run && !u_fe.u_core.svc_hold &&
+				f1_svc_up_done >= f1_r3_n + f1_r3_d.size() && f1_svc_fe_done >= f1_r3_n + f1_r3_d.size()) begin
+			while (f1_r3_d.size() > 0) begin
+				int dd, cc;
+				dd = int'(f1_r3_d.pop_front());
+				cc = int'(f1_r3_c.pop_front());
+				f1_r3_n++;
+				f1_inc(G_R3_N);
+				n = 0;
+				for (int a = dd; a < dd + cc; a++) if (fe_ram_byte(17'(a)) != ft_cb(a)) n++;
+				`F1_CHK(n != 0, G_SVC_RAM_BAD, $sformatf("R3: %0d of the %0d bytes at $%04x differ", n, cc, dd))
+			end
 		end
 
 		// ---- I1/I2 at the first edge both inits are done; the ROM check after the load --------
-		if (f1_load_end || (f1_loaded && dut.effective_reset && !f1_erst_q)) begin
+		// (the download's end from the cart_download level, as cart_win above)
+		if ((!cart_download && f1_cd_q) || (f1_loaded && !cart_download && dut.effective_reset && !f1_erst_q)) begin
 			f1_i_arm = 1;
 			f1_i_up = 0;
 			f1_i_fe = 0;
+			if (f1_tot[G_INIT_N] == 0)
+				$display("FE load: the download ends at clk_sys %0d (the bench's view); u_fe's F6 window falls %0d clk_sys later",
+					f1_clk, 63);
 		end
 		f1_erst_q = dut.effective_reset;
+		f1_cd_q = cart_download;
+		// the inits' edges, for the log (first load and each console reset)
+		if (u_fe.u_copy.ld1) f1_t_ld1 = f1_clk;
+		if (u_fe.f6_act && !f1_f6_q) f1_t_f6 = f1_clk;
+		if (!u_fe.f6_act && f1_f6_q && f1_nf6 < 4) begin
+			f1_nf6++;
+			$display("FE init: u_fe saw load_end at clk_sys %0d; F6 ran from clk_sys %0d for %0d clk_sys (scheme %0d, ram32 %0d); upstream's init busy %0d",
+				f1_t_ld1, f1_t_f6, f1_clk - f1_t_f6, force_bs, dut.mapper_ram_size == 16'd32768, dut.mapper_init_busy);
+		end
+		if (!dut.mapper_init_busy && f1_ib_q && f1_nf6 < 4)
+			$display("FE init: upstream's init done at clk_sys %0d", f1_clk);
+		f1_f6_q = u_fe.f6_act;
+		f1_ib_q = dut.mapper_init_busy;
 		if (f1_i_arm) begin
 			if (dut.mapper_init_busy) f1_i_up = 1;
 			if (u_fe.init_busy) f1_i_fe = 1;
@@ -1757,6 +1981,8 @@
 	//   8 u_copy.dma_busy forced 1 for 200 clk_sys (a DPC+ service only daria_fe
 	//     sees): the hold must stall the 6507 (forced arm_call_stall) and every
 	//     check must stay 0, H1 included
+	//   9 a posted word (F5, frequency 0) changed after the post         -> R1 call_bad
+	//  10 CDF: a return word (FB, frequency 0) changed while u_call reads them -> A1 audio_bad
 	int     fe1_inj = 0, fe1_inj_at = 20000;
 	logic   f1_inj_done = 0;
 	longint f1_inj_rel = -1;
@@ -1797,10 +2023,25 @@
 					u_fe.u_core.bank = u_fe.u_core.bank + 3'd1;
 					f1_inj_done = 1;
 				end
+				9: if (u_fe.call_tog != f1_tog2) begin		// the post is complete, R1 reads it next edge
+					fe_mem.state_ram.mem_q[8'hF5] = fe_mem.state_ram.mem_q[8'hF5] ^ 32'h0000_0100;
+					f1_inj_done = 1;
+				end
+				10: if (u_fe.u_call.st[4] && fe_is_cdf) begin	// RD: F8 was read, F9-FD follow
+					fe_mem.state_ram.mem_q[8'hFB] = fe_mem.state_ram.mem_q[8'hFB] + 32'd1;
+					f1_inj_done = 1;
+				end
 				8: if (dut.tia_en && !dut.arm_call_busy && !dut.arm_dma_busy) begin
 					force u_fe.u_copy.dma_busy = 1'b1;		// released 200 clk_sys later
 					f1_inj_rel = f1_clk + 200;
 					f1_inj_done = 1;
+					// The hold's own negedge block may have run before this one in this
+					// time step (it saw arm_dma_busy low): apply its force here too, as it
+					// would for a busy that rose at the last posedge.
+					if (fe_hold != 0 && !dut.mapper_init_busy && !f1_forced) begin
+						force dut.arm_call_stall = 1'b1;
+						f1_forced = 1'b1;
+					end
 				end
 				default: f1_inj_done = 1;
 			endcase
@@ -1878,22 +2119,30 @@
 		foreach (f1_nm[c])
 			if (c >= G_MERGE_AMP && c <= G_GRANT_STEAL || c == G_MERGE_RACE || c == G_SIZE_OVER32K ||
 				c == G_P32_RESET || c == G_SHORT_IMAGE || c == G_Q26 || c == G_SHORT_DOUT || c == G_AMP_CLASS ||
-				c == G_RMW_SEED || c == G_DRIFT_UP || c == G_DRIFT_FE || c == G_RESYNC || c == G_DEPOSIT_CF)
+				c == G_RMW_SEED || c == G_RMW_MERGE || c == G_DRIFT_UP || c == G_DRIFT_FE || c == G_RESYNC ||
+				c == G_DEPOSIT_CF)
 				begin
 					sep = ", ";
 					if (cl.len() == 0) sep = "";
 					cl = {cl, sep, $sformatf("%s %0d", f1_nm[c], f1_tot[c])};
 				end
 		$display("FE classes: %s", cl);
-		$display("FE counts: %0d read latches compared (%0d AMPLITUDE), %0d hidden pclk0 (%0d differ, information; %0d the last of a stall), %0d cycles compared (%s), %0d pointer writes (C3), %0d 6507 RAM writes (C4), %0d inits (I1/I2), %0d call starts (K1), %0d frames (K2), %0d CDF merges own path / %0d through the hook, %0d crb_use clocks, mode A guard locked %0d clocks",
+		$display("FE counts: %0d read latches compared (%0d AMPLITUDE), %0d hidden pclk0 (%0d differ, information; %0d the last of a stall), %0d cycles compared (%s), %0d pointer writes (C3), %0d 6507 RAM writes (C4), %0d inits (I1/I2), %0d call starts (K1), %0d frames (K2), %0d CDF merges own path / %0d through the hook, %0d crb_use clocks, mode A guard locked %0d clocks; %0d services' RAM compared (R3), %0d clocks of the stall forced by the hold",
 			f1_tot[G_READS], f1_tot[G_AMP_READS], f1_tot[G_HIDDEN], f1_tot[G_DOUT_HID], f1_tot[G_HID_LAST],
 			f1_tot[G_CYCLES], cn, f1_tot[G_PTR_N], f1_tot[G_RAM_N], f1_tot[G_INIT_N],
-			f1_tot[G_K1], f1_tot[G_K2], f1_tot[G_MERGES], f1_tot[G_HK_MERGES], f1_tot[G_CRB_USE], f1_tot[G_DET_LOCK_A]);
+			f1_tot[G_K1], f1_tot[G_K2], f1_tot[G_MERGES], f1_tot[G_HK_MERGES], f1_tot[G_CRB_USE], f1_tot[G_DET_LOCK_A],
+			f1_tot[G_R3_N], f1_tot[G_FORCED]);
+		if (f1_mask_t0 >= 0 && f1_clk - f1_mask_t0 > f1_mask_long) f1_mask_long = f1_clk - f1_mask_t0;
+		$display("FE masks: A1 masked by a class or a failure on %0d clk_sys, the longest mask %0d clk_sys (mask_stuck above %0d); %0d merges M_fe - M not 6 (merge_late)",
+			f1_tot[G_MASKED], f1_mask_long, fe_mask_max, f1_tot[G_MERGE_LATE]);
 		$display("FE inputs: hook %0d, slat %0d, hold %0d, resync %0d, K2 every %0d frames; %0d daria_fe failures logged",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full, f1_nfail);
-		$display("FE latency: post - accept {%s}; merge M_fe - M {%s}; busy fall fe - up {%s}; refresh up {%s}; refresh fe {%s}; NOTE capture fe - up {%s}",
+		$display("FE latency: post - accept {%s}; merge M_fe - M {%s}; busy fall fe - up {%s}; refresh up {%s}; refresh fe {%s}; NOTE capture fe - up {%s}; upstream ROM sample R -> sample_done {%s}",
 			f1_hist(f1_h_post), f1_hist(f1_h_merge), f1_hist(f1_h_busy), f1_hist(f1_h_rup), f1_hist(f1_h_rfe),
-			f1_hist(f1_h_note));
+			f1_hist(f1_h_note), f1_hist(f1_h_slat));
+		$display("FE digital: upstream's digital refreshes by route: ROM below 32 KB %0d, ROM above (u_fe's sample port) %0d, cart RAM window %0d, out of range %0d; T5: %0d ROM-sample amplitudes compared (%0d differ), %0d in a merge window",
+			f1_tot[G_DIG_LOCAL], f1_tot[G_DIG_REMOTE], f1_tot[G_DIG_RAM], f1_tot[G_DIG_NONE], f1_tot[G_DIG_VAL_N],
+			f1_tot[G_DIG_VAL_BAD], f1_tot[G_DIG_VAL_MRG]);
 		$display("FE result: %s (%0d bad)", res, nbad);
 		if (fd_f1 != 0) $fclose(fd_f1);
 		if (fd_f1_ticks != 0) $fclose(fd_f1_ticks);
@@ -1935,10 +2184,18 @@
 		f1_nm[G_SHORT_DOUT] = "short_dout";     f1_nm[G_Q26] = "q26";                  f1_nm[G_SHORT_IMAGE] = "short_image";
 		f1_nm[G_RMW_SEED] = "rmw_seed";         f1_nm[G_DEPOSIT_CF] = "deposit_cf";
 		f1_nm[G_DROP_UP] = "drop_up";           f1_nm[G_DROP_FE] = "drop_fe";
+		f1_nm[G_R3_N] = "svc_ram_compares";     f1_nm[G_FORCED] = "stall_forced";
+		f1_nm[G_RMW_MERGE] = "rmw_merge";
+		f1_nm[G_DIG_LOCAL] = "dig_rom_local";   f1_nm[G_DIG_REMOTE] = "dig_rom_remote";
+		f1_nm[G_DIG_RAM] = "dig_ram_window";    f1_nm[G_DIG_NONE] = "dig_out_of_range";
+		f1_nm[G_MERGE_LATE] = "merge_late";     f1_nm[G_DMA_COVER] = "dma_cover";
+		f1_nm[G_MASK_STUCK] = "mask_stuck";     f1_nm[G_MASKED] = "masked_clocks";
+		f1_nm[G_DIG_VAL_BAD] = "dig_val_bad";   f1_nm[G_DIG_VAL_N] = "dig_val_n";      f1_nm[G_DIG_VAL_MRG] = "dig_val_merge";
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
 		foreach (f1_h_post[b]) begin
 			f1_h_post[b] = 0; f1_h_merge[b] = 0; f1_h_busy[b] = 0; f1_h_rup[b] = 0; f1_h_rfe[b] = 0; f1_h_note[b] = 0;
+			f1_h_slat[b] = 0;
 		end
 		foreach (f1_bad[c])
 			case (c)
@@ -1947,7 +2204,8 @@
 				G_A_GUARD_CORE, G_A_GUARD_WR, G_A_OWNER, G_A_FPJR, G_A_PEND_LATE, G_A_TDEF2, G_A_F6_LIVE,
 				G_SVC_RAM_BAD, G_INIT_BAD, G_RAM_CALL_BAD, G_RAM_FRAME_BAD, G_HID_LAST_BAD, G_COMMIT_HIDDEN,
 				G_RET_UNASKED, G_A2_BAD, G_A3_BAD, G_WB_DROP, G_RAM_WR_NOACC, G_DET_LOCK_A, G_DIG_BAD, G_ROM_BAD,
-				G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER: f1_bad[c] = 1;
+				G_DIN_BAD, G_RET_MODEL_BAD, G_INIT_NEVER, G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK,
+				G_DIG_VAL_BAD: f1_bad[c] = 1;
 				default: ;
 			endcase
 		void'($value$plusargs("fe_slat=%d", fe_slat));
@@ -1959,6 +2217,7 @@
 		void'($value$plusargs("fe_pcm=%d", fe_pcm));
 		void'($value$plusargs("fe1_inj=%d", fe1_inj));
 		void'($value$plusargs("fe1_inj_at=%d", fe1_inj_at));
+		void'($value$plusargs("fe_mask_max=%d", fe_mask_max));
 		if (fe_slat < 0) fe_slat = 0;
 		$display("FE stage 1: daria_fe on fe_mem, mode A; +fe_merge_hook=%0d +fe_slat=%0d +fe_hold=%0d +fe_resync=%0d +fe_full=%0d",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full);

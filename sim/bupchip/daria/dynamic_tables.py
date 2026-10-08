@@ -718,12 +718,12 @@ def sec_fe(runs, margin):
                 elif line.startswith("FE S1:") and "latches with" in line:
                     short6 = line.split()[2]
         if st1:
-            def nonzero(text):
+            def nonzero(text, skip=()):
                 if not text:
                     return "?"
                 text = text.split(";")[0]
                 items = [x.strip() for x in text.split(",")]
-                nz = [x for x in items if x and not x.endswith(" 0")]
+                nz = [x for x in items if x and not x.endswith(" 0") and not x.startswith(skip)]
                 return ", ".join(nz) if nz else "0"
             tot = re.search(r"total (\d+)", bad or "")
             badtxt = nonzero(bad)
@@ -731,7 +731,7 @@ def sec_fe(runs, margin):
                 badtxt = "posts/accepts unpaired (%s)" % tot.group(1)
             s1_rows.append([R.short, st1.group(1), inp.group(1) if inp else "?", frames, st1.group(2), st1.group(3),
                             st1.group(4), st1.group(5), st1.group(6), badtxt,
-                            nonzero(cls) if cls else "?",
+                            nonzero(cls, ("drift_",)) if cls else "?",  # drift_up/drift_fe: O1 information
                             "%s/%s" % (ref.group(1), ref.group(2)) if ref else "-", res or "?"])
             continue
         if sh is None:
