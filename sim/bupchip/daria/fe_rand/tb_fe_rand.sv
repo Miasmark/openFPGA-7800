@@ -67,7 +67,11 @@
 // svc_audio_race, tbl_alias (upstream's table copy resynced from its RAM, as
 // the ARM would rewrite it), rmw_call (rmw_seed, rmw_merge), rmw_svc,
 // size_over32k, p32_reset (a_p32_late under a console reset: lane A O-1),
-// pause_lane (a capture after a paused grant whose last unpaused edge had the select high).
+// pause_lane (F1_fixes.md 2: a capture right after a paused grant whose last unpaused edge
+// had the select high, each lane register holding what it loaded there; it masks the sum and
+// AMPLITUDE only; any other lane difference is audio_bad), rst_release (F1_fixes.md 1: rcyc at
+// a pclk1 with a post action pending; resynced from upstream: the fetcher word, the written
+// byte, P32, a dropped service's range).
 //
 // Plusargs: +seed=N +cycles=N (6507 cycles, default 400000) +epoch=N (50000)
 // +only=all|dpc|cdf|dpc0|dpc1|cdf0|cdf1|cdfj|cdfjp +hook=0|1|2 (2: per epoch)
@@ -77,7 +81,9 @@
 // +slat_min/+slat_max (daria_fe's sample latency) +ddr_lat_min/max,
 // +ddr_long, +ddr_long_max (upstream's DDR, fe_rand_up) +inj=K +inj_at=N
 // (self-test faults) +strict=0/1 (no class masks; SELF's default) +self_ofs=N
-// +rst_bus=1 (the CPU in reset reads anywhere, not only the stack page)
+// +rst_bus=1 (the CPU in reset reads anywhere, not only the stack page, and the release
+// planner places a cartridge access, writes too, in the cycle the reset ends: +rst_rel=N per
+// mille of reset tails) +resets=N (console resets per epoch beyond the event rotation)
 // (SELF: side B's DDR on another random stream) +trace_from=N +trace_to=M
 // (+dbg_word=W: one cart RAM word's changes) +pg_* (phase_gen.svh).
 // Passes iff every bad count is 0; $fatal otherwise.
@@ -107,7 +113,11 @@ module tb_fe_rand;
 	int     seed = 1, stop_n = 30, maxfail = 500, events = 1, hook_mode = 2, full_every = 4096;
 	int     k_call = 120, k_svc = 160, arm_wmax = 6, slat_min = 5, slat_max = 120;
 	int     inj = 0, inj_at = 20000;
-	int     rst_bus = 0;                 // 1: the CPU in reset reads anywhere (E3_rtl_issues.md issue 1)
+	int     rst_bus = 0;                 // 1: the CPU in reset reads anywhere, and the release planner
+	                                     // places cartridge accesses (writes too) in the cycle in which
+	                                     // the reset ends (design 9.5 rst_release; E3_rtl_issues.md issue 1)
+	int     rst_rel = 700;               // +rst_bus=1: per mille of reset tails the planner takes
+	int     resets = 0;                  // console resets per epoch beyond the event rotation
 	int     strict = 0;                  // no class may mask anything (the self-check's default)
 	string  only = "all";
 	longint tr_from = -1, tr_to = -1;
@@ -164,7 +174,11 @@ module tb_fe_rand;
 	// ======================================================================================
 	logic reset_r = 1'b1, rhold = 1'b1, hold_reset = 1'b0;
 	int   rtail = 0;
-	wire  eff_reset = reset_r | rhold;
+	// +rst_bus=1, the release planner (gen_next): rel_hold holds the reset past the tail until a
+	// chosen edge of the planned release cycle; rel_own takes the tail (rhold) out of eff_reset
+	// from the plan until rhold has fallen by itself
+	logic rel_hold = 1'b0, rel_own = 1'b0, rel_go = 1'b0;
+	wire  eff_reset = reset_r | (rhold & !rel_own) | rel_hold;
 	// tia_en (and lock_ctrl): the 2600 driver. A console reset puts the 7800 back in its
 	// own mode, so the 2600 path (access, the cart RAM strobes, the stall) is off in reset.
 	wire  tia_en = tia_req && !eff_reset;
@@ -356,20 +370,20 @@ module tb_fe_rand;
 		`CMP("frequency2", `BA.frequency2, `UA.frequency2)
 		return "";
 	endfunction
-	function automatic string b_a1_rep();
+	function automatic string b_a1_rep(input logic no_amp);
 		`CMP("state", `BA.state, `UA.state)
 		for (int v = 0; v < 3; v++) `CMP($sformatf("refresh_counter[%0d]", v), `BA.refresh_counter[v], `UA.refresh_counter[v])
 		`CMP("refresh_pending", `BA.refresh_pending, `UA.refresh_pending)
 		`CMP("note_pending", `BA.note_pending, `UA.note_pending)
 		`CMP("voice", `BA.voice, `UA.voice)
-		`CMP("sample_sum", `BA.sample_sum[7:0], `UA.sample_sum[7:0])
+		if (!no_amp) `CMP("sample_sum", `BA.sample_sum[7:0], `UA.sample_sum[7:0])
 		`CMP("waveform_shift", `BA.waveform_shift, `UA.waveform_shift)
 		`CMP("waveform_offset", `BA.waveform_offset, `UA.waveform_offset)
 		`CMP("digital_address", `BA.digital_address, `UA.digital_address)
 		`CMP("digital_low_nibble", `BA.digital_low_nibble, `UA.digital_low_nibble)
 		`CMP("digital_ram_addr", `BA.digital_ram_addr, `UA.digital_ram_addr)
 		`CMP("digital_sample", `BA.digital_sample, `UA.digital_sample)
-		`CMP("amplitude", `BA.amplitude, `UA.amplitude)
+		if (!no_amp) `CMP("amplitude", `BA.amplitude, `UA.amplitude)
 		`CMP("ram_en", `BA.ram_en, `UA.ram_en)
 		if (`UA.ram_en) `CMP("ram_addr", `BA.ram_addr, `UA.ram_addr)
 		`CMP("grant", u_b.audio_ram_grant, u_up.audio_ram_grant)
@@ -412,6 +426,9 @@ module tb_fe_rand;
 	function automatic logic [51:0] b_svc();
 		return {u_b.dpcplus.service_fill, u_b.dpcplus.service_source, u_b.dpcplus.service_dest,
 			u_b.dpcplus.service_count, u_b.dpcplus.service_value};
+	endfunction
+	function automatic logic b_sum_amp_eq();
+		return `BA.sample_sum[7:0] == `UA.sample_sum[7:0] && `BA.amplitude == `UA.amplitude;
 	endfunction
 	wire b_svc_pend = u_b.dpcplus.service_pending;
 	wire b_svc_run  = u_b.arm_dma_busy && !u_b.mapper_init_busy;
@@ -563,21 +580,22 @@ module tb_fe_rand;
 		`CMP("freq[2]", u_fe.u_audio.freq[2], `UA.frequency2)
 		return "";
 	endfunction
-	function automatic string b_a1_rep();
+	// no_amp: pause_lane's own mask (the sum and AMPLITUDE left out; F1_fixes.md 2)
+	function automatic string b_a1_rep(input logic no_amp);
 		`CMP("st (one-hot; upstream's state as 1 << state)", u_fe.u_audio.st, 12'd1 << `UA.state)
 		for (int v = 0; v < 3; v++)
 			`CMP($sformatf("rc[%0d] (refresh_counter)", v), u_fe.u_audio.rc[v], `UA.refresh_counter[v])
 		`CMP("rp (refresh_pending)", u_fe.u_audio.rp, `UA.refresh_pending)
 		`CMP("np (note_pending)", u_fe.u_audio.np, `UA.note_pending)
 		`CMP("voice", u_fe.u_audio.voice, `UA.voice)
-		`CMP("ssum (sample_sum[7:0])", u_fe.u_audio.ssum, `UA.sample_sum[7:0])
+		if (!no_amp) `CMP("ssum (sample_sum[7:0])", u_fe.u_audio.ssum, `UA.sample_sum[7:0])
 		`CMP("wsh (waveform_shift)", u_fe.u_audio.wsh, `UA.waveform_shift)
 		`CMP("woff (waveform_offset)", u_fe.u_audio.woff, `UA.waveform_offset)
 		`CMP("dig_addr (digital_address)", u_fe.u_audio.dig_addr, `UA.digital_address)
 		`CMP("dig_low (digital_low_nibble)", u_fe.u_audio.dig_low, `UA.digital_low_nibble)
 		`CMP("dig_ram (digital_ram_addr)", u_fe.u_audio.dig_ram, `UA.digital_ram_addr)
 		`CMP("dig_smp (digital_sample)", u_fe.u_audio.dig_smp, `UA.digital_sample)
-		`CMP("amplitude", u_fe.u_audio.amplitude, `UA.amplitude)
+		if (!no_amp) `CMP("amplitude", u_fe.u_audio.amplitude, `UA.amplitude)
 		`CMP("aud_issue (ram_en)", u_fe.aud_issue, `UA.ram_en)
 		if (`UA.ram_en) `CMP("aud_addr (ram_addr)", {2'b00, u_fe.aud_addr}, `UA.ram_addr)
 		`CMP("aud_take (audio_ram_grant)", u_fe.aud_take, u_up.audio_ram_grant)
@@ -631,6 +649,9 @@ module tb_fe_rand;
 		cc = (off >= 17'h07400) ? 8'd0 : ((sav < {9'd0, fc}) ? sav[7:0] : fc);
 		return {u_fe.u_core.svc_fill, 2'b00, u_fe.u_core.svc_src, 2'b00, u_fe.u_core.svc_dst,
 			u_fe.u_core.svc_fill ? fc : cc, u_fe.u_core.svc_val};
+	endfunction
+	function automatic logic b_sum_amp_eq();
+		return u_fe.u_audio.ssum == `UA.sample_sum[7:0] && u_fe.u_audio.amplitude == `UA.amplitude;
 	endfunction
 	wire b_svc_pend = u_fe.u_core.svc_pend;
 	wire b_svc_run  = u_fe.u_copy.run;
@@ -887,15 +908,39 @@ module tb_fe_rand;
 	function automatic logic [2:0] up_bank();
 		return is_dpc ? u_up.dpcplus.bank : u_up.cdf.bank;
 	endfunction
+	// ---- +rst_bus=1: the release planner (design 9.5 rst_release; F1_fixes.md 1) ----------------
+	// In a reset's tail (reset_r low, rhold high) the planner may take the next cycle as the
+	// release cycle: it chooses a cartridge access that waits for a ready flag (a DPC+ DFx read,
+	// PUSH, WRITE, CALLFUNCTION 1/2 alone or as an RMW's first write; a CDF DSWRITE or DSPTR),
+	// holds the reset (rel_hold) until the edge at which phase 1 has rel_m clocks left, and
+	// drops it there: rst_fe is then high up to the edge C - rel_m and low at C (rel_m 1-4,
+	// so the release lands on both sides of each ready flag's edge, E0+4 and E0+3). An RMW's
+	// second write ($105A, the old value + 1) follows in the next cycle. A 6502 makes none of
+	// this (it only reads in reset): a bench option, as +rst_bus=1 itself is.
+	localparam int RK_DFX = 0, RK_PUSH = 1, RK_WRITE = 2, RK_CF = 3, RK_CF_RMW = 4, RK_DSW = 5, RK_DSP = 6, RK_N = 7;
+	int          rel_st = 0;             // 0 idle; 1 planned (the next load presents it); 2 its cycle runs
+	int          rel_kind = 0, rel_m = 1, rel_hcnt = 0;
+	logic  [7:0] rel_d = 8'h00;
+	logic        rel_abort = 1'b0;
+	longint      n_rel_plan [RK_N];
+	longint      n_rel_drop = 0, n_rel_abort = 0;
 	task automatic gen_next();
 		int r;
 		logic [12:0] a;
 		logic w;
 		logic [7:0] d;
-		logic armed;
+		logic armed, planned;
 		d = rnd8();
 		w = 1'b0;
 		fresh_now = 1'b0;
+		planned = 1'b0;
+		if (rel_abort) begin
+			rel_abort = 1'b0;
+			rel_st = 0;
+		end else if (rel_st == 1) begin      // this load presents the planned cycle
+			rel_st = 2;
+			rel_go <= 1'b1;
+		end else if (rel_st == 2) rel_st = 0;  // ... and this one its successor
 		// the mapper took the last read for an arming opcode ($A9 and the like) or a fast jump:
 		// fast-fetch code always follows it with its operand (DPC+ substitutes the next read at
 		// any address, CDF the next one at the expected address)
@@ -996,12 +1041,46 @@ module tb_fe_rand;
 				w = rnd(4) == 0;
 			end
 		end
+		// +rst_bus=1: the release planner (above). Its access replaces the stream's; the stream's
+		// own rules below do not apply to it
+		if (rst_bus != 0) begin
+			if (rel_st == 2 && rel_kind == RK_CF_RMW) begin
+				a = 13'h105A;                                // the RMW's second write: the new value
+				w = 1'b1;
+				d = rel_d + 8'd1;
+				planned = 1'b1;
+			end else if (rel_st == 0 && eff_reset && !reset_r && !rel_own && !rel_hold && tia_req &&
+					(is_dpc || is_cdf) && pm(rst_rel)) begin
+				int q;
+				q = int'(rnd(100));
+				if (is_dpc) rel_kind = (q < 30) ? RK_DFX : (q < 45) ? RK_PUSH : (q < 60) ? RK_WRITE : (q < 80) ? RK_CF : RK_CF_RMW;
+				else rel_kind = (q < 50) ? RK_DSW : RK_DSP;
+				w = 1'b1;
+				case (rel_kind)
+					RK_DFX:   begin a = 13'h1008 + 13'(rnd(24)); w = 1'b0; end   // DFxDATA, DFxDATAW, FRACDATA
+					RK_PUSH:  a = 13'h1060 + 13'(rnd(8));
+					RK_WRITE: a = 13'h1078 + 13'(rnd(8));
+					RK_DSW:   a = 13'h1FF0;
+					RK_DSP:   a = 13'h1FF1;
+					default:  begin a = 13'h105A; d = 8'd1 + 8'(rnd(2)); end    // CALLFUNCTION 1/2
+				endcase
+				rel_d = d;
+				q = int'(rnd(100));
+				rel_m = (q < 30) ? 1 : (q < 60) ? 2 : (q < 85) ? 3 : 4;
+				rel_st = 1;
+				rel_hold <= 1'b1;
+				rel_own <= 1'b1;
+				burst = 0;
+				n_rel_plan[rel_kind]++;
+				planned = 1'b1;
+			end
+		end
 		// A store is the last cycle of an instruction whose opcode and address bytes the
 		// CPU fetched first: a write that does not continue a run needs three reads since
 		// the last write. (It also means the cycle a one-clock stall dip lets through, the
 		// held fetch's successor, is never a write: lane C's "third CALLFN in (M, M_fe]"
 		// stays as unreachable as on a real 6502.) Otherwise read the program instead.
-		if (w && !(burst_n >= 2 && burst_run) && rd_run < 3) begin
+		if (w && !planned && !(burst_n >= 2 && burst_run) && rd_run < 3) begin
 			if (burst_n == 1) burst = 0;
 			if (fresh_now) fresh++;
 			a = pc;
@@ -1011,8 +1090,9 @@ module tb_fe_rand;
 		// The CPU in reset only reads, and only the stack page: a cycle that starts in reset is
 		// never a cartridge access, also when the reset ends inside it (a 6502 leaves reset
 		// through its reset sequence: PC, the stack, the vector; and in DARIA's systems the 7800
-		// BIOS runs first). +rst_bus=1 reads anywhere (E3_rtl_issues.md issue 1).
-		if (eff_reset) begin
+		// BIOS runs first). +rst_bus=1 reads anywhere, and its planner places accesses in the
+		// release cycle and the one after it (rel_st 2: the reset ends in the cycle now running).
+		if (eff_reset && !planned && rel_st != 2) begin
 			w = 1'b0;
 			if (rst_bus == 0) a = {1'b0, 4'h1, 8'(rnd(256))};
 		end
@@ -1025,6 +1105,24 @@ module tb_fe_rand;
 		nx_d  <= d;
 	endtask
 	always @(posedge clk_sys) if (load) gen_next();
+	// the planner's release edge: phase 1 of the planned cycle has rel_m clocks left (the edge
+	// C - rel_m when no pause follows); abort on another reset, a mode change or no cycle
+	always @(posedge clk_sys) begin
+		if (rel_hold) begin
+			if (reset_r || !tia_req || rel_hcnt > 400) begin
+				rel_hold <= 1'b0;
+				rel_go <= 1'b0;
+				rel_abort = 1'b1;
+				n_rel_abort++;
+			end else if (rel_go && pg.phase == 2'd1 && !pg.pclk1 && pg.pz_left == 8'd0 && int'(pg.cnt) <= rel_m) begin
+				rel_hold <= 1'b0;
+				rel_go <= 1'b0;
+				n_rel_drop++;
+			end
+			rel_hcnt <= rel_hcnt + 1;
+		end else rel_hcnt <= 0;
+		if (rel_own && (reset_r || (!rel_hold && !rhold))) rel_own <= 1'b0;
+	end
 
 	// ======================================================================================
 	// counters, failures, the ring
@@ -1033,7 +1131,7 @@ module tb_fe_rand;
 		// failures (must be 0)
 		B_DOUT, B_STATE, B_PTR, B_WBLAG, B_RAM, B_FULL, B_K1, B_CALL, B_SVC, B_SVC_RAM, B_INIT, B_TICK, B_AUDIO,
 		B_A2, B_A3, B_ASSERT, B_A_P32, B_RET_UNASKED, B_COMMIT_HID, B_DET_LOCK, B_WB_DROP, B_OVER32K,
-		B_NOACC, B_SEED_RACE, B_AMP, B_DIG, B_BENCH, B_INIT_NEVER, B_HID_LAST,
+		B_NOACC, B_SEED_RACE, B_AMP, B_DIG, B_BENCH, B_INIT_NEVER, B_HID_LAST, B_RCYC,
 		// classes and information
 		I_CYCLES, I_COMMITS, I_LATCH, I_HIDDEN, I_DOUT_HID, I_SHORT, I_SHORT_DOUT, I_Q26, I_STEAL, I_MERGE_AMP,
 		I_RET_LATE, I_MERGE_RACE, I_DIG_LAG, I_SVC_RACE, I_TBL_ALIAS, I_RMW_CALL, I_RMW_SEED, I_RMW_MERGE,
@@ -1041,6 +1139,8 @@ module tb_fe_rand;
 		I_R3, I_INITS, I_FULL, I_K1, I_TICKS, I_MERGES, I_HK_MERGES, I_PTR_N, I_RAM_N, I_AMP_READS,
 		I_AMP_CLASS, I_DROP_UP, I_DROP_B, I_GRANTS, I_PZ_GRANTS, I_DIG_LOCAL, I_DIG_REMOTE, I_DIG_RAM, I_DIG_NONE,
 		I_NOTES, I_HELD, I_PAUSE_CLK, I_HOT, I_PU, I_CRB_USE, I_WB_P32, I_YIELD3, I_PAUSE_LANE, I_COLL_RST, I_HELD_SVC,
+		I_PZ_CAP, I_PZ_SEL, I_PL_LONG, I_REL_CYC, I_RST_REL, I_RR_DFX, I_RR_PW, I_RR_SVC, I_RR_DSW, I_RR_DSP, I_RR_EXTRA,
+		I_RR_AUD, I_RR_DOUT,
 		C_N
 	} cnt_t;
 	string  nm [C_N];
@@ -1055,7 +1155,7 @@ module tb_fe_rand;
 		nm[B_DET_LOCK] = "det_lock_a"; nm[B_WB_DROP] = "wb_drop"; nm[B_OVER32K] = "over32k";
 		nm[B_NOACC] = "ram_wr_noaccess"; nm[B_SEED_RACE] = "seed_race"; nm[B_AMP] = "amp_lag";
 		nm[B_DIG] = "dig_bad"; nm[B_BENCH] = "bench_bad"; nm[B_INIT_NEVER] = "init_never_busy";
-		nm[B_HID_LAST] = "hidden_last_bad";
+		nm[B_HID_LAST] = "hidden_last_bad"; nm[B_RCYC] = "rcyc_bad";
 		nm[I_CYCLES] = "cycles"; nm[I_COMMITS] = "commits"; nm[I_LATCH] = "latches"; nm[I_HIDDEN] = "hidden";
 		nm[I_DOUT_HID] = "dout_hidden"; nm[I_SHORT] = "short_phase1"; nm[I_SHORT_DOUT] = "short_dout";
 		nm[I_Q26] = "q26"; nm[I_STEAL] = "grant_steal"; nm[I_MERGE_AMP] = "merge_amp"; nm[I_RET_LATE] = "ret_late";
@@ -1074,6 +1174,10 @@ module tb_fe_rand;
 		nm[I_HOT] = "hotspot_switches"; nm[I_PU] = "pointer_updates";
 		nm[I_WB_P32] = "wb_and_p32_requested"; nm[I_YIELD3] = "three_r_requests"; nm[I_PAUSE_LANE] = "pause_lane"; nm[I_COLL_RST] = "collide_reset"; nm[I_HELD_SVC] = "held_svc_race";
 		nm[I_CRB_USE] = "crb_use";
+		nm[I_PZ_CAP] = "pz_captures"; nm[I_PZ_SEL] = "pz_captures_sel"; nm[I_PL_LONG] = "pause_lane_long";
+		nm[I_REL_CYC] = "release_cycles"; nm[I_RST_REL] = "rst_release"; nm[I_RR_DFX] = "rr_dfx"; nm[I_RR_PW] = "rr_push_write";
+		nm[I_RR_SVC] = "rr_callfunction"; nm[I_RR_DSW] = "rr_dswrite"; nm[I_RR_DSP] = "rr_dsptr"; nm[I_RR_EXTRA] = "rr_rmw_svc";
+		nm[I_RR_AUD] = "rr_audio"; nm[I_RR_DOUT] = "rr_dout";
 		for (int c = 0; c < C_N; c++) cnt[c] = 0;
 	end
 
@@ -1131,7 +1235,15 @@ module tb_fe_rand;
 	// the audio classes' masks and the resync (design 9.5, 12.4; E1's rules)
 	// ======================================================================================
 	logic   m_rep = 1'b0, m_cf = 1'b0;
-	logic   up_gr_pz = 1'b0;             // upstream's last audio grant edge was in a pause
+	// pause_lane (F1_fixes.md 2): its own mask m_amp leaves the sum and AMPLITUDE out of the
+	// replica compare (and counts the 6507's AMPLITUDE reads as amp_class) until both agree
+	// again, which the next refresh brings about by itself: no resync. up_gr_pz: the last clock
+	// was an upstream grant clock with pause high. pl_sel, pl_port, pl_eng: at the last clock
+	// with pause low (its edge is p), sel_ram_sel, the port's address lane (what
+	// mapper_read_lane loads at p) and the engine's lane (what al loads at p; 0 under cart_reset)
+	logic   m_amp = 1'b0, up_gr_pz = 1'b0, pl_sel = 1'b0;
+	logic [1:0] pl_port = 2'd0, pl_eng = 2'd0;
+	longint m_amp_t0 = 0;
 	string  m_why = "";
 	function automatic void mask(input logic cf, input string why);
 		if (strict != 0) return;
@@ -1219,6 +1331,30 @@ module tb_fe_rand;
 	logic         i_arm = 1'b0, i_up = 1'b0, i_b = 1'b0, erst_q = 1'b0, cd_q = 1'b0;
 	logic         btog_q = 1'b0, hid_pend = 1'b0, hid_bad = 1'b0;
 	longint       h_post [16];
+	// rst_release (design 9.5; F1_fixes.md 1, "What lane E3's random bench needs"): a cycle that
+	// ran some of its k reads under rst_fe (u_core.rcyc) and still has a post action pending at
+	// its pclk1, where daria_fe drops it. Upstream performed that access; the bench resyncs what
+	// it touched from upstream at the next falling edge (rr_due): the DPC+ fetcher's state word
+	// field, the bytes upstream's 6507 side wrote in the cycle (PUSH/WRITE, DSWRITE), the P32
+	// word (DSWRITE, DSPTR). A CALLFUNCTION 1/2: upstream's service leaves R2 (up_skip), its
+	// destination range is resynced once every service is done (rr_svc_win); daria_fe makes no
+	// copy, unless the next cycle is an RMW's second write to $105A, whose own service it then
+	// performs: paired by R2 with upstream's if upstream took it too, else dropped (b_skip) and
+	// resynced as well (rr_k1 watches that cycle). Anything differing after the resync fails.
+	localparam int RR_DFX = 0, RR_PW = 1, RR_SVC = 2, RR_DSW = 3, RR_DSP = 4;
+	int           cyc_ubytes [$];        // byte addresses upstream's 6507 side wrote since the last pclk1
+	int           cyc_gwords [$];        // words an audio grant read since the last pclk1 (either side)
+	int           cyc_up_svc = 0, cyc_b_svc = 0;   // services latched since the last pclk1
+	logic         cyc_cf12 = 1'b0;       // this cycle committed a write of 1 or 2 to $105A (DPC+)
+	logic         rr_due = 1'b0, rr_rng_due = 1'b0, rr_svc_win = 1'b0, rr_p32 = 1'b0;
+	int           rr_kind = 0, rr_k1 = 0, up_skip = 0, b_skip = 0;
+	logic   [4:0] rr_sw_a = 5'd0;
+	int           rr_bytes [$], rr_rd [$], rr_rc [$];
+	logic         rcyc_m = 1'b0;         // the bench's own rcyc: some edge since the last pclk1 had rst_fe
+	function automatic logic rr_in_rng(input logic [12:0] wa);
+		foreach (rr_rd[i]) if ({wa, 2'b11} >= 15'(rr_rd[i]) && {wa, 2'b00} < 15'(rr_rd[i] + rr_rc[i])) return 1'b1;
+		return 1'b0;
+	endfunction
 
 	// RAM compares: words [0, n) and the CDF tables
 	function automatic int ram_cmp(input string what, input int n);
@@ -1323,6 +1459,27 @@ module tb_fe_rand;
 		`CHK(u_fe.u_call.ev_ret_unasked, B_RET_UNASKED, "ret_unasked: a ret_tog change outside RUN")
 		`CHK(u_fe.u_seq.commit && pclk0 && !mapper_phi2, B_COMMIT_HID, "commit_on_hidden")
 		`CHK(u_fe.u_guard.locked, B_DET_LOCK, "det_lock_a: the guard locked on mode A's 5x clk_arm")
+		// rcyc against its meaning (F1_fixes.md 1): the bench's own model, from its own rst_fe
+		// (cart_reset | no DPC+/CDF | a scheme change); rst_release is counted by rcyc
+		begin
+			logic rst_m;
+			rst_m = eff_reset || !scheme_ok || scheme != scheme_q;
+			`CHK(rst_m != u_fe.rst_fe, B_BENCH, $sformatf("the bench's rst_fe %0d, u_fe's %0d", rst_m, u_fe.rst_fe))
+			`CHK(u_fe.u_core.rcyc != rcyc_m, B_RCYC, $sformatf("rcyc %0d, the bench's model %0d", u_fe.u_core.rcyc, rcyc_m))
+			if (pclk1) rcyc_m = 1'b0;
+			else if (rst_m) rcyc_m = 1'b1;
+		end
+		if (u_up.cartram_wr) begin
+			int ba;
+			logic dup;
+			ba = int'(u_up.cartram_addr[14:0]);
+			dup = 1'b0;
+			foreach (cyc_ubytes[i]) if (cyc_ubytes[i] == ba) dup = 1'b1;
+			if (!dup) cyc_ubytes.push_back(ba);
+		end
+		if (u_up.audio_ram_grant) cyc_gwords.push_back(int'(u_up.audio_ram_addr[14:2]));
+		if (b_grant) cyc_gwords.push_back(int'(u_fe.aud_addr[14:2]));
+		if (access && a_in[12] && !rw && is_dpc && a_in == 13'h105A && (d_in == 8'd1 || d_in == 8'd2)) cyc_cf12 = 1'b1;
 		// A3: one owner per port; crb_use marks exactly last clock's consumed read
 		`CHK(!$onehot0(u_fe.u_arb.own_r) || !$onehot0(u_fe.u_arb.own_s) || !$onehot0(u_fe.u_arb.own_a) ||
 			u_fe.u_arb.crb_use != a3_use, B_A3,
@@ -1374,8 +1531,15 @@ module tb_fe_rand;
 				end
 			end
 			rmw_chk = 1'b0;
+			if (m_amp && b_sum_amp_eq()) m_amp = 1'b0;
+			else if (m_amp && clk_n - m_amp_t0 > 100000) begin
+				// no refresh rewrote them for 100,000 clk_sys: the whole replica waits for a resync
+				m_amp = 1'b0;
+				cnt[I_PL_LONG]++;
+				mask(0, "pause_lane");
+			end
 			if (!m_rep) begin
-				why = b_a1_rep();
+				why = b_a1_rep(m_amp);
 				if (why != "") begin
 					fail(B_AUDIO, {"A1 replica: ", why});
 					mask(0, "audio_bad");
@@ -1453,18 +1617,45 @@ module tb_fe_rand;
 				cnt[I_SVC_RACE]++;
 				mask(0, "svc_audio_race");
 			end
+			if (rr_svc_win && rr_in_rng(wa)) begin     // rst_release: a dropped service's range
+				cnt[I_RR_AUD]++;
+				mask(0, "rst_release");
+			end
 			if (pause) cnt[I_PZ_GRANTS]++;
 		end
 `ifndef SELF
-		// pause_lane (design 9.5): a byte capture on an unpaused edge after a grant edge in a
-		// pause. cart_ram_tdp's read lane is frozen at what the port's address was at the last
-		// unpaused edge; daria_fe's al (B-1) at the engine's a_d there. They differ iff the select
-		// was high at that edge (lane B's B-1 takes that as unreachable; it is not: a pause can
-		// start on the clock after a pclk1 that ended a RAM read cycle)
-		if (u_up.audio_ram_grant) up_gr_pz = pause;
-		if (`UA.state == 4'd8 && !pause && up_gr_pz && u_up.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
-			cnt[I_PAUSE_LANE]++;
-			mask(0, "pause_lane");
+		// pause_lane (design 9.5; F1_fixes.md 2, the stage-1 shadow's condition), and only then: a
+		// sample capture on an unpaused edge (upstream in AUDIO_SAMPLE_CAPTURE and u_audio in
+		// SMCAP, pause low: the byte is read, not $FF) right after an upstream grant clock with
+		// pause high, whose last unpaused edge p had sel_ram_sel high, with the two lane registers
+		// differing and each holding what it loaded at p: upstream's mapper_read_lane the port's
+		// address lane (the 6507's, the select being high), u_fe's al the engine's (B-1). It masks
+		// only the sum and AMPLITUDE (m_amp). Any other lane difference at an unpaused capture,
+		// the replica in step, is audio_bad ("A1 lane"): an al that loads at another edge or
+		// another value fails even after such a pause.
+		if (rst_seen && `UA.state == 4'd8 && !pause && u_fe.u_audio.st == 12'd1 << AS_SMCAP) begin
+			if (up_gr_pz) begin
+				cnt[I_PZ_CAP]++;                     // the lane check's exposure
+				if (pl_sel) cnt[I_PZ_SEL]++;
+			end
+			if (u_up.cart_ram.mapper_read_lane != u_fe.u_audio.al) begin
+				if (up_gr_pz && pl_sel && u_up.cart_ram.mapper_read_lane == pl_port && u_fe.u_audio.al == pl_eng &&
+						strict == 0) begin
+					cnt[I_PAUSE_LANE]++;
+					if (!m_amp) m_amp_t0 = clk_n;
+					m_amp = 1'b1;
+				end else if (!m_rep) begin
+					fail(B_AUDIO, $sformatf("A1 lane: a sample capture reads lane %0d, upstream lane %0d (no pause_lane: grant clock paused %0d, select at the last unpaused edge %0d, lanes loaded there: port %0d, engine %0d)",
+						u_fe.u_audio.al, u_up.cart_ram.mapper_read_lane, up_gr_pz, pl_sel, pl_port, pl_eng));
+					mask(0, "audio_bad");
+				end
+			end
+		end
+		up_gr_pz = u_up.audio_ram_grant && pause;
+		if (!pause) begin
+			pl_sel  = u_up.sel_ram_sel;
+			pl_port = u_up.cartram_addr[1:0];
+			pl_eng  = eff_reset ? 2'd0 : u_fe.aud_addr[1:0];
 		end
 `endif
 		if (`UA.state == 4'd2) cnt[I_NOTES]++;
@@ -1511,7 +1702,10 @@ module tb_fe_rand;
 					if (bad) begin
 						if ((cyc_short || e0n < 5) && strict == 0) cnt[I_SHORT_DOUT]++;
 						// (fe_do holds the AMPLITUDE it loaded before a resync deposit for a clock)
-						else if (aread && (m_rep || mw != 0 || clk_n <= rs_clk + 2)) cnt[I_AMP_CLASS]++;
+						else if (aread && (m_rep || m_amp || mw != 0 || clk_n <= rs_clk + 2)) cnt[I_AMP_CLASS]++;
+						// rst_release: a cartridge RAM read while a dropped service's range waits for
+						// its resync (expected 0: the 6507 is held through the services)
+						else if (u_up.sel_ram_sel && strict == 0 && rr_svc_win) cnt[I_RR_DOUT]++;
 						// held_svc_race: a cartridge RAM read (the held fetch after a service write,
 						// made a DPC+ data-fetcher read by a fast fetch the RMW's own read armed) while
 						// a service burst runs: the two copy engines fill the RAM at different times
@@ -1536,7 +1730,7 @@ module tb_fe_rand;
 			if (live && !cyc_rst && scheme_ok && tia_en) begin
 				cnt[I_CYCLES]++;
 				cyc_n++;
-				c1_svc_ok = !(up_dma_busy || b_svc_run || r3_d.size() != 0 || sq_up.size() != 0 || sq_b.size() != 0);
+				c1_svc_ok = !(up_dma_busy || b_svc_run || r3_d.size() != 0 || sq_up.size() != 0 || sq_b.size() != 0 || rr_svc_win);
 				// pend_up is upstream's call_pending when both see the return on one edge; after a
 				// ret_late (the bench held ret_tog back) u_fe's X, and so its M, are later
 				c1_call_ok = clk_n >= late_until;
@@ -1682,11 +1876,13 @@ module tb_fe_rand;
 		if (u_up.dpcplus.service_pending && !sp_q && is_dpc) begin
 			sq_up.push_back(u_svc());
 			cnt[I_SVCS_UP]++;
+			cyc_up_svc++;
 		end
 		sp_q = u_up.dpcplus.service_pending;
 		if (b_svc_pend && !bsp_q) begin
 			sq_b.push_back(b_svc());
 			cnt[I_SVCS_B]++;
+			cyc_b_svc++;
 		end
 		bsp_q = b_svc_pend;
 		while (sq_up.size() > 0 && sq_b.size() > 0) begin
@@ -1717,7 +1913,8 @@ module tb_fe_rand;
 		if (bdma_q && !b_svc_run) svc_b_done++;
 		bdma_q = b_svc_run;
 		if (r3_d.size() > 0 && !(up_dma_busy && !up_init_busy) && !u_up.dpcplus.service_pending &&
-				!b_svc_run && !b_svc_hold && svc_up_done >= r3_n + r3_d.size() && svc_b_done >= r3_n + r3_d.size()) begin
+				!b_svc_run && !b_svc_hold && svc_up_done >= r3_n + up_skip + r3_d.size() &&
+				svc_b_done >= r3_n + b_skip + r3_d.size()) begin
 			while (r3_d.size() > 0) begin
 				int dd, cc;
 				dd = int'(r3_d.pop_front());
@@ -1729,6 +1926,76 @@ module tb_fe_rand;
 				`CHK(n != 0, B_SVC_RAM, $sformatf("R3: %0d of the %0d bytes at $%04x differ", n, cc, dd))
 			end
 		end
+`ifndef SELF
+		// ---- rst_release (state and comments at its declarations) ----
+		if (pclk1) begin
+			// the cycle after a dropped CALLFUNCTION 1/2 ends here: a daria_fe service of its own
+			// is an RMW's second write that upstream did not take (its first service still
+			// pending) or a failure; one both sides took is paired by R2 as usual
+			if (rr_k1 == 1 && cyc_b_svc > 0 && cyc_up_svc == 0) begin
+				if (cyc_cf12 && sq_b.size() > 0) begin
+					sb = sq_b.pop_back();
+					b_skip++;
+					rr_rd.push_back(int'(sb[30:16]));
+					rr_rc.push_back(int'(sb[15:8]));
+					cnt[I_RR_EXTRA]++;
+				end else fail(B_SVC, "rst_release: daria_fe latched a service after a dropped CALLFUNCTION 1/2, not for an RMW's second write");
+			end
+			if (rr_k1 > 0) rr_k1--;
+			if (u_fe.u_core.rcyc && !u_fe.rst_fe) begin
+				cnt[I_REL_CYC]++;
+				if (u_fe.u_core.pend_c != PC_NONE || u_fe.u_core.pend_s || u_fe.u_core.pend_r) begin
+					int k;
+					k = (u_fe.u_core.pend_c == PC_DSW) ? RR_DSW : (u_fe.u_core.pend_c == PC_DSP) ? RR_DSP :
+					    (u_fe.u_core.pend_c == PC_SVC) ? RR_SVC : (u_fe.u_core.pend_r ? RR_PW : RR_DFX);
+					cnt[I_RST_REL]++;
+					cnt[cnt_t'(int'(I_RR_DFX) + k)]++;
+					`CHK(k == RR_DFX && !u_fe.u_core.sw_d, B_BENCH, "rst_release: a field or parameter write left pending")
+					`CHK(k == RR_PW && !u_fe.u_core.pend_s, B_BENCH, "rst_release: a PUSH/WRITE byte without its counter write")
+					`CHK((k == RR_PW || k == RR_DSW) != (cyc_ubytes.size() != 0), B_BENCH,
+						$sformatf("rst_release kind %0d: upstream's 6507 side wrote %0d bytes in the cycle", k, cyc_ubytes.size()))
+					rr_due = 1'b1;
+					rr_kind = k;
+					rr_sw_a = u_fe.u_core.sw_a;
+					rr_p32 = (k == RR_DSW || k == RR_DSP);
+					rr_bytes = cyc_ubytes;
+					// an audio grant of this cycle that read a word the resync rewrites
+					foreach (cyc_gwords[i]) begin
+						logic hit;
+						hit = rr_p32 && cyc_gwords[i] == pb_now() + 32;
+						foreach (rr_bytes[j]) if ((rr_bytes[j] >> 2) == cyc_gwords[i]) hit = 1'b1;
+						if (hit) begin
+							cnt[I_RR_AUD]++;
+							mask(0, "rst_release");
+						end
+					end
+					if (k == RR_SVC) begin
+						// upstream's service leaves R2; its destination range is resynced once every
+						// service is done; daria_fe makes no copy (the next cycle is watched: rr_k1)
+						if (cyc_up_svc == 0 || sq_up.size() == 0) fail(B_BENCH, "rst_release: upstream latched no service in the release cycle");
+						else begin
+							su = sq_up.pop_back();
+							up_skip++;
+							rr_rd.push_back(int'(su[30:16]));
+							rr_rc.push_back(int'(su[15:8]));
+						end
+						rr_svc_win = 1'b1;
+						rr_k1 = 1;
+					end
+				end
+			end
+			cyc_ubytes.delete();
+			cyc_gwords.delete();
+			cyc_up_svc = 0;
+			cyc_b_svc = 0;
+			cyc_cf12 = 1'b0;
+		end
+		// the dropped service's ranges: resynced from upstream once every service is done
+		if (rr_svc_win && rr_k1 == 0 && !rr_rng_due && !(up_dma_busy && !up_init_busy) && !u_up.dpcplus.service_pending &&
+				!b_svc_run && !b_svc_hold && sq_up.size() == 0 && sq_b.size() == 0 && r3_d.size() == 0 &&
+				svc_up_done >= r3_n + up_skip && svc_b_done >= r3_n + b_skip)
+			rr_rng_due = 1'b1;
+`endif
 		if (eff_reset) begin                 // a console reset abandons a service on both sides
 			sq_up.delete();
 			sq_b.delete();
@@ -1737,6 +2004,13 @@ module tb_fe_rand;
 			r3_n = 0;
 			svc_up_done = 0;
 			svc_b_done = 0;
+			up_skip = 0;
+			b_skip = 0;
+			rr_svc_win = 1'b0;
+			rr_rng_due = 1'b0;
+			rr_k1 = 0;
+			rr_rd.delete();
+			rr_rc.delete();
 		end
 
 		// ---- I1/I2 at the first edge both inits are done ----
@@ -1784,7 +2058,8 @@ module tb_fe_rand;
 	// the falling edge) or still to be decided at this cycle's pclk1 (a short cycle's pointer
 	// update): K1 and the full compare wait for it
 	function automatic logic alias_pending();
-		return alias_m != 64'd0 || alias_i != 64'd0 || q26_rep || (pu_pend && pu_short && strict == 0);
+		return alias_m != 64'd0 || alias_i != 64'd0 || q26_rep || (pu_pend && pu_short && strict == 0) ||
+			rr_due || rr_rng_due || rr_svc_win;
 	endfunction
 	function automatic logic [7:0] b_byte(input int a);
 		logic [31:0] w;
@@ -1805,10 +2080,66 @@ module tb_fe_rand;
 	// self-test faults (+inj=K at checked cycle +inj_at=N); each must be caught
 	//   1 fe_do bit 0 flipped before a shown latch -> L1   2 counter[0] + 1 -> A1
 	//   3 bank + 1 -> C1/C2   4 cart RAM word $100 inverted -> full/K1   5 a posted word -> R1
+	//   6 (+rst_bus=1) the fetcher word an rst_release resync wrote, bit 0 flipped -> C1
 	// ======================================================================================
 	logic inj_done = 1'b0;
+`ifndef SELF
+	task automatic b_set_byte(input int a, input logic [7:0] v);
+		logic [31:0] w;
+		w = fe_mem.cart_ram.mem_q[13'(a >> 2)];
+		w[8 * (a & 3) +: 8] = v;
+		fe_mem.cart_ram.mem_q[13'(a >> 2)] = w;
+	endtask
+`endif
+	// rst_release's resync (falling edge after the release cycle's pclk1, where u_core dropped
+	// the action; the next cycle's first read is at E0+1): what the action would have written,
+	// from upstream
+	task automatic neg_release();
+`ifndef SELF
+		if (rr_due) begin
+			rr_due = 1'b0;
+			if (rr_kind == RR_DFX || rr_kind == RR_PW) begin
+				logic [31:0] wv;
+				int f;
+				f = int'(rr_sw_a[3:1]);
+				wv = fe_mem.state_ram.mem_q[{3'b000, rr_sw_a}];
+				if (rr_sw_a[0]) wv[19:0] = u_up.dpcplus.fractional[f];     // FRACDATA: w1's fractional
+				else wv[11:0] = u_up.dpcplus.counter[f];                   // DFxDATA(W), PUSH, WRITE: w0's counter
+				if (inj == 6 && !inj_done && live && cyc_n >= inj_at) begin
+					wv[0] = ~wv[0];
+					inj_done = 1'b1;
+					$display("INJECT fault 6 at clk %0d (cycle %0d): state word %02x after its rst_release resync", clk_n, cyc_n, rr_sw_a);
+				end
+				fe_mem.state_ram.mem_q[{3'b000, rr_sw_a}] = wv;
+			end
+			foreach (rr_bytes[i]) begin
+				int n;
+				b_set_byte(rr_bytes[i], u_byte(rr_bytes[i]));
+				// a CDFJ+ DSWRITE byte into the pointer or increment table: upstream's table copy is
+				// resynced from its RAM at this edge, as for tbl_alias (neg_repair)
+				if (jplus) begin
+					n = (rr_bytes[i] >> 2) - pb_now();
+					if (n >= 0 && n < ns_now()) begin alias_m[n] = 1'b1; cnt[I_TBL_ALIAS]++; end
+					n = (rr_bytes[i] >> 2) - ib_now();
+					if (n >= 0 && n < ns_now()) begin alias_i[n] = 1'b1; cnt[I_TBL_ALIAS]++; end
+				end
+			end
+			if (rr_p32) fe_mem.cart_ram.mem_q[13'(pb_now() + 32)] = u_up.stream_tables.pointer_ram.mem_q[32];
+			rr_bytes.delete();
+		end
+		if (rr_rng_due) begin
+			rr_rng_due = 1'b0;
+			rr_svc_win = 1'b0;
+			foreach (rr_rd[i])
+				for (int a = rr_rd[i]; a < rr_rd[i] + rr_rc[i]; a++) b_set_byte(a, u_byte(a));
+			rr_rd.delete();
+			rr_rc.delete();
+		end
+`endif
+	endtask
 	always @(negedge clk_sys) begin
 		neg_resync();
+		neg_release();
 		neg_repair();
 `ifndef SELF
 		if (inj != 0 && !inj_done && live && cyc_n >= inj_at) begin
@@ -2054,6 +2385,17 @@ module tb_fe_rand;
 		end
 	endtask
 
+	// a console reset at any moment (a call, a service, F6, mid-cycle)
+	task automatic do_reset();
+		@(negedge clk_sys);
+		repeat (rnd(12)) @(negedge clk_sys);
+		reset_in = 1'b1;
+		repeat (2 + rnd(200)) @(negedge clk_sys);
+		reset_in = 1'b0;
+		fresh = 2;
+		wait_running();
+	endtask
+
 	task automatic run_epoch(input longint n);
 		longint done, ev_at;
 		int ev;
@@ -2071,15 +2413,7 @@ module tb_fe_rand;
 		done = cyc_n;
 		run_cycles(ev_at);
 		case (ev)
-			0: begin                                    // a console reset: anywhere (a call, a service, F6)
-				@(negedge clk_sys);
-				repeat (rnd(12)) @(negedge clk_sys);
-				reset_in = 1'b1;
-				repeat (2 + rnd(200)) @(negedge clk_sys);
-				reset_in = 1'b0;
-				fresh = 2;
-				wait_running();
-			end
+			0: do_reset();                              // a console reset: anywhere (a call, a service, F6)
 			1: begin                                    // 7800 mode: tia_en and the driver off (no call
 				wait_idle(100000);                      // or service in flight: the 2600 is not running)
 				@(negedge clk_sys);
@@ -2105,6 +2439,11 @@ module tb_fe_rand;
 			end
 			default: ;
 		endcase
+		// +resets=N: N more console resets, spread over the rest of the epoch
+		for (int i = 0; i < resets && cyc_n - done < n; i++) begin
+			run_cycles((n - (cyc_n - done)) / (resets - i + 1));
+			do_reset();
+		end
 		if (cyc_n - done < n) run_cycles(n - (cyc_n - done));
 		// the epoch's end: let calls and services finish, then the whole RAM at a cycle's end
 		wait_idle(200000);
@@ -2145,6 +2484,8 @@ module tb_fe_rand;
 `endif
 		void'($value$plusargs("strict=%d", strict));
 		void'($value$plusargs("rst_bus=%d", rst_bus));
+		void'($value$plusargs("rst_rel=%d", rst_rel));
+		void'($value$plusargs("resets=%d", resets));
 		void'($value$plusargs("inj_at=%d", inj_at));
 		void'($value$plusargs("trace_from=%d", tr_from));
 		void'($value$plusargs("trace_to=%d", tr_to));
@@ -2154,11 +2495,11 @@ module tb_fe_rand;
 		for (int i = 0; i < 16; i++) h_post[i] = 0;
 		for (int i = 0; i < 65536; i++) img[i] = 8'h00;
 `ifdef SELF
-		$display("tb_fe_rand: SELF (upstream against upstream), seed %0d, %0d cycles, epochs of %0d, only %s, strict %0d, self_ofs %0d",
-			seed, n_cycles, epoch_len, only, strict, self_ofs);
+		$display("tb_fe_rand: SELF (upstream against upstream), seed %0d, %0d cycles, epochs of %0d, only %s, strict %0d, self_ofs %0d, rst_bus %0d (rst_rel %0d), resets %0d",
+			seed, n_cycles, epoch_len, only, strict, self_ofs, rst_bus, rst_rel, resets);
 `else
-		$display("tb_fe_rand: daria_fe against upstream, seed %0d, %0d cycles, epochs of %0d, only %s, hook %0d", seed, n_cycles,
-			epoch_len, only, hook_mode);
+		$display("tb_fe_rand: daria_fe against upstream, seed %0d, %0d cycles, epochs of %0d, only %s, hook %0d, rst_bus %0d (rst_rel %0d), resets %0d",
+			seed, n_cycles, epoch_len, only, hook_mode, rst_bus, rst_rel, resets);
 `endif
 		repeat (8) @(negedge clk_sys);
 		arm_reset = 1'b0;
@@ -2198,6 +2539,12 @@ module tb_fe_rand;
 		$display("  ret_tog: %0d on upstream's edge, %0d late", ret_sync_n, ret_late_n);
 `endif
 		$display("  bus: held %0d, phase 1 of 2/4 seen in the generator's lengths; pause clocks %0d", cnt[I_HELD], cnt[I_PAUSE_CLK]);
+		$display("  pause_lane: %0d sample captures on an unpaused edge right after a paused grant, %0d with the select high at the last unpaused edge, %0d pause_lane, %0d masks ended by the 100,000-clock bound",
+			cnt[I_PZ_CAP], cnt[I_PZ_SEL], cnt[I_PAUSE_LANE], cnt[I_PL_LONG]);
+		$display("  rst_release: planned (+rst_bus) dfx %0d push %0d write %0d callfunction %0d callfunction_rmw %0d dswrite %0d dsptr %0d (released %0d, aborted %0d); release cycles %0d, rst_release %0d: dfx %0d push_write %0d callfunction %0d dswrite %0d dsptr %0d; rmw_svc %0d, audio %0d, dout %0d",
+			n_rel_plan[RK_DFX], n_rel_plan[RK_PUSH], n_rel_plan[RK_WRITE], n_rel_plan[RK_CF], n_rel_plan[RK_CF_RMW], n_rel_plan[RK_DSW],
+			n_rel_plan[RK_DSP], n_rel_drop, n_rel_abort, cnt[I_REL_CYC], cnt[I_RST_REL], cnt[I_RR_DFX], cnt[I_RR_PW], cnt[I_RR_SVC],
+			cnt[I_RR_DSW], cnt[I_RR_DSP], cnt[I_RR_EXTRA], cnt[I_RR_AUD], cnt[I_RR_DOUT]);
 	endtask
 
 `undef CHK
