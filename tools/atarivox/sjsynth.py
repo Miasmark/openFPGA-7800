@@ -34,6 +34,12 @@ ENV_WAVE = 1
 # Hiss (oscillators 4 and 5) against the vowels: the recording's are much
 # quieter than the first tables had them.
 NOISE_LEVEL = 0.5
+# The SpeakJet's PWM output goes through a two-pole low-pass (the manual's
+# Figure 1), which the AtariVox board has too. Fitted to a clean recording of
+# the real chip reciting the alphabet at default settings (87 Hz voice): one
+# 2-pole low-pass at 2,200 Hz brings the long-term spectrum to within 3.4 dB
+# of it, against 13-14 dB without. 0 turns it off (--lpf).
+LPF_HZ = 2200
 
 # ---------------------------------------------------------------- tables
 # name: (type, ms, [F1, F2, F3], [A1, A2, A3], noise_hz, noise_vol, dist)
@@ -264,8 +270,10 @@ class SpeakJet:
 def main():
     global STRETCH
     global ENV_WAVE
-    while len(sys.argv) > 2 and sys.argv[1] in ("--stretch", "--env"):
+    global LPF_HZ
+    while len(sys.argv) > 2 and sys.argv[1] in ("--stretch", "--env", "--lpf"):
         if sys.argv[1] == "--stretch": STRETCH = float(sys.argv[2])
+        elif sys.argv[1] == "--lpf": LPF_HZ = float(sys.argv[2])
         else: ENV_WAVE = int(sys.argv[2])
         del sys.argv[1:3]
     out = sys.argv[1]
@@ -275,7 +283,16 @@ def main():
         codes = [int(x, 0) for x in sys.argv[2:]]
     sj = SpeakJet()
     sj.play(codes)
-    x = np.clip(np.array(sj.out) * 0.8, -1, 1)
+    x = np.array(sj.out)
+    if LPF_HZ:
+        w0 = 2 * math.pi * LPF_HZ / RATE; al = math.sin(w0) / (2 * 0.707); c = math.cos(w0)
+        b0, b1, a0, a1, a2 = (1 - c) / 2, 1 - c, 1 + al, -2 * c, 1 - al
+        y = np.zeros_like(x); x1 = x2 = y1 = y2 = 0.0
+        for i, v in enumerate(x):
+            o = (b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2) / a0
+            x2, x1, y2, y1 = x1, v, y1, o; y[i] = o
+        x = y
+    x = np.clip(x * 0.8, -1, 1)
     # 8,192 Hz, as the chip; most players resample it themselves
     with wave.open(out, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE)

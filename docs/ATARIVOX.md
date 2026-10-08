@@ -80,6 +80,30 @@ escape. A receiver has to recognise it, at least so as not to speak it.
 **Not published:** the "MSA" database, the oscillator settings and
 movements behind each allophone and effect. Ours will be written by ear.
 
+## Measured from recordings of the real chip
+
+A demonstration recording (effects, then the alphabet; no music behind it)
+gives these, at the chip's default settings:
+
+- **Voice pitch: 87 Hz,** flat through the whole alphabet: the manual's
+  default of 88. So the demo used default settings, and is a fair reference.
+- **Output filter:** the long-term spectrum falls steeply above 2 kHz
+  (-22 dB at 2.5 kHz, -43 dB near 4 kHz, re 100-500 Hz). One two-pole
+  low-pass at about 2,200 Hz on the model's output brings it to within
+  3.4 dB, against 13-14 dB without: the low-pass after the SpeakJet's PWM
+  output (the manual's Figure 1), which the AtariVox board has.
+- **Glides between sounds are straight lines** in the spectrogram: linear
+  interpolation of the oscillator frequencies, as the model does.
+- **Harmonic density** in 0-2 kHz is between what a sine and a saw voice
+  envelope give, nearer the sine.
+- **Effects** are stacks of three parallel tones that sweep and step: data
+  for the effect tables, once the codes behind each can be identified.
+
+A clip of Juno First's title ("Juno First") from a video looked much
+cleaner than this, with energy only below about 1.5 kHz: the video's audio
+was filtered or compressed. Recordings from game videos are not a reliable
+reference for the voice's timbre.
+
 ## The plan
 
 | Step | What | FPGA cost |
