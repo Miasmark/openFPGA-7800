@@ -126,7 +126,26 @@ Thirteen more demo images, published by Champ Games but written by others, joine
 | Not ARM | Juno First (F4), Squish 'Em Deluxe (F8, 8 KB), Star Castle Arcade (FA2, 28 KB) |
 
 - **Coverage.** The nine ARM images more than double DPC+'s share of the set, which before had only Space Rocks and Stay Frosty 2, and they bring both DPC+ revisions, so both forms of the FRACLOW rule meet real games. rubyQ is the game `top.sv`'s stall comment is written around.
-- **Step 5's shadow** (DARIA against upstream's ARM, 64 KB window, 1,500 frames) is running on the nine; results follow. Step 6's mode-A shadow adds them to its set.
+- **Step 5's shadow** (DARIA against upstream's ARM, as in "Step 5 work", results, but with the 64 KB window; every image is 32 KB), 1,500 frames each, 2026-10-08:
+
+  | Image | Scheme | Calls | Differ | RAM writes compared | MMIO compared | Late (DARIA / model) | Highest share of a budget (DARIA / model) | Collisions (upstream / DARIA) |
+  |---|---|---|---|---|---|---|---|---|
+  | Boom! | CDFJ | 3,000 | 0 | 2,338,420 | 0 | 0 / 0 | 37% / 37% | 2 / 0 |
+  | Chaotic Grill | DPC+ 1 | 674 | 0 | 95,509 | 0 | 0 / 0 | 57% / 52% | 0 / 0 |
+  | Dino Eggs | DPC+ 1 | 1,476 | 0 | 1,014,311 | 0 | 0 / 0 | 4% / 4% | 0 / 0 |
+  | GridLock | CDFJ | 5,148 | 1, a T1TC read (below) | 4,908,186 | 3 | 0 / 0 | 50% / 50% | 0 / 0 |
+  | Lucky Chase | DPC+ 1 | 1,499 | 0 | 1,097,064 | 0 | 0 / 0 | 2% / 2% | 0 / 0 |
+  | rubyQ | CDFJ | 2,999 | 0 | 1,873,960 | 0 | 0 / 0 | 37% / 37% | 0 / 0 |
+  | Stratovox | DPC+ 0 | 1,094 | 0 | 1,228,517 | 0 | 0 / 0 | 3% / 3% | 0 / 0 |
+  | The End | DPC+ 0 | 1,127 | 0 | 1,043,237 | 0 | 0 / 0 | 2% / 2% | 0 / 0 |
+  | Tomahawk 777 | DPC+ 1 | 1,145 | 0 | 1,014,570 | 0 | 0 / 0 | 2% / 2% | 0 / 0 |
+  | **9 images** | | **18,162** | **1** | **14,613,774** | **3** | **0 / 0** | | **2 / 0** |
+
+  - **Every other call matches**, register, RAM write and MMIO access, and none halts or is skipped. No call is late, on DARIA or in the model. DARIA's clocks per call are the model's `s1_cyc` (median ratio 1.00–1.03 per image); the highest single ratio, 1.66 in GridLock, is a 44-cycle call that takes 73 clocks, the call's fixed cost.
+  - **GridLock's timer read.** The game zeroes T1TC and starts the timer in call 3 (frame 0), and reads it once, in call 23 (frame 10), about 11.68 M counts later. DARIA reads 591 counts more than upstream, over the bench's 200 bound, so the shadow flags the call. The 200 bound was set for a reading taken inside one call (Draconian, open item 17). This reading spans 20 calls, so it also carries how far into call 3 and call 23 each CPU is when it makes the access: each is a different CPU at a different clock, and upstream's write lands about 51 µs into call 3. That predicts about 690 counts; 591 is seen. The counter itself counts `clk_sys` exactly (`mmio/`, "Step 5 work"). With the bound at 1,000 (`+mmio_tol=1000`, 40 frames), call 23 matches in full, its RAM writes included, so the game does not keep the raw reading. All 5,147 calls after it match over the 1,500 frames.
+  - Collisions: 2 for upstream and none for DARIA in 113.7 M console-side cart RAM reads.
+
+  Step 6's mode-A shadow adds the nine to its set.
 - **FA2 aside.** The Pocket build runs FA2, but its NVRAM bridge is not connected (`atari7800_pocket.sv:1002-1008`: reads give `$FF`), so Star Castle Arcade's saves do not persist. That is outside DARIA.
 
 ### Packaging
@@ -1686,5 +1705,5 @@ What step 1 leaves open, each with the step that settles it:
 | 14 | **Thumb hi-register forms with H1 = H2 = 0** halt; running them is free if a game needs it. | When needed |
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | Step 6 |
 | 16 | **The added images** (Draconian in two builds, Space Rocks, Robot War, Stay Frosty 2 NTSC and PAL; 2026-10-05): traced: nothing new for the CPU, the call protocol or the memory map ("The added images"). | Done |
-| 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | **Settled (step 5):** Draconian is the only image that reads T1TC: once, at power-on, in both builds. DARIA's reading is 37 counts above upstream's, inside the 200 bound and about 1% of the game's 3,872-count margin. Every call after it matches upstream's |
+| 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | **Settled (step 5):** Draconian is the only image that reads T1TC: once, at power-on, in both builds. DARIA's reading is 37 counts above upstream's, inside the 200 bound and about 1% of the game's 3,872-count margin. Every call after it matches upstream's. **Champ Games Presents (2026-10-08):** GridLock reads T1TC once, 20 calls after zeroing it. DARIA reads 591 counts more than upstream, because each CPU reaches the write and the read at a different point in its call. With a 1,000-count bound that call matches in full, and every call after it matches ("The Champ Games Presents batch"). The bench's default stays 200, and `+mmio_tol` widens it |
 | 18 | **The code space per profile.** With `CODE_AW` 15, the BupChip profile's code space must still end at 16 KB, as ARIA's does. FETCH applies past 0x3FFC and to jumps above it, and DATA to ROM reads above 16 KB. Step 3's probe left it at 128 KB in both profiles. Step 5 adds the profile to those checks. They run a clock late or in W, off the critical path. | **Done (step 5):** the call suite's BupChip-profile tests on the `CODE_AW` 15 core halt a jump to 0x4000, the fall-through past 0x3FFC and a ROM read at 0x4000, and the return sentinel stays a fetch fault there (`call/run_call.py`, `bup_*`) |
