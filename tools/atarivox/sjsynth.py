@@ -63,11 +63,11 @@ def fr(name, ms, nhz, nvol, dist, voiced=False, f=(250, 1400, 2500)):
 def st(name, ms, nhz, voiced, f):
     T[name] = ("S" if voiced else "P", ms, list(f), [0, 0, 0], nhz, 20, 200)
 
-v("IY", 70, (270, 2290, 3010)); v("IH", 70, (300, 1775, 2520))  # measured: "Foolish human"; v("EY", 70, (480, 2050, 2600))
+v("IY", 70, (270, 2290, 3010)); v("IH", 70, (300, 1775, 2520)); v("EY", 70, (480, 2050, 2600))  # IH measured: "Foolish human"
 v("EH", 70, (530, 1840, 2480)); v("AY", 70, (660, 1720, 2410)); v("AX", 70, (500, 1500, 2500))
-v("UX", 70, (605, 1335, 2390))  # measured: "Foolish human" (held at 110-200 Hz); v("OH", 70, (730, 1090, 2440)); v("AW", 70, (570, 840, 2410))
+v("UX", 70, (605, 1335, 2390)); v("OH", 70, (730, 1090, 2440)); v("AW", 70, (570, 840, 2410))  # UX measured: "Foolish human", held at 110-200 Hz
 v("OW", 70, (490, 910, 2450)); v("UH", 70, (440, 1020, 2240)); v("UW", 70, (300, 870, 2240))
-nas("MM", 70, (280, 1150, 2200))  # measured: "Foolish human"; nas("NE", 70, (250, 1700, 2600)); nas("NO", 70, (250, 1300, 2500))
+nas("MM", 70, (280, 1150, 2200)); nas("NE", 70, (250, 1700, 2600)); nas("NO", 70, (250, 1300, 2500))  # MM measured: "Foolish human"
 nas("NGE", 70, (250, 2000, 2700)); nas("NGO", 70, (250, 1100, 2400))
 v("LE", 70, (360, 1300, 2700), (20, 10, 4)); v("LO", 70, (360, 900, 2600), (20, 10, 4))
 v("WW", 70, (290, 610, 2150), (20, 8, 2)); v("RR", 70, (435, 1310, 1765), (24, 12, 3))  # measured: Juno First's "First" (RR x5)
@@ -88,7 +88,7 @@ st("ED", 10, 3500, True, (250, 1800, 2700)); st("OD", 10, 3200, True, (250, 1400
 st("GE", 55, 2200, True, (250, 2200, 2800)); st("GO", 55, 1500, True, (250, 1200, 2300))
 st("EG", 55, 2200, True, (250, 2200, 2800)); st("OG", 55, 1500, True, (250, 1200, 2300))
 fr("CH", 70, 2600, 20, 160); fr("HE", 35, 1800, 4, 255); fr("HO", 35, 1100, 4, 255)  # H: barely audible on the real chip ("Help me")
-fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 3, 255)  # F: almost silent on the real chip (Juno First); fr("SE", 40, 3950, 22, 120)
+fr("WH", 70, 900, 8, 255); fr("FF", 70, 3500, 3, 255); fr("SE", 40, 3950, 22, 120)  # FF: almost silent on the real chip (Juno First)
 fr("SO", 40, 3700, 22, 120); fr("SH", 50, 2500, 22, 160); fr("TH", 40, 3800, 5, 255)
 st("TT", 50, 3800, False, (250, 1800, 2700)); st("TU", 70, 3800, False, (250, 1800, 2700))
 T["TS"] = ("P", 170, [250, 1800, 2700], [0, 0, 0], 3950, 22, 120)
@@ -101,6 +101,10 @@ ALLOPHONES = ("IY IH EY EH AY AX UX OH AW OW UH UW MM NE NO NGE NGO LE LO WW RR 
               "DH BE BO EB OB DE DO ED OD GE GO EG OG CH HE HO WH FF SE SO SH TH TT TU TS KE KO "
               "EK OK PE PO").split()
 assert len(ALLOPHONES) == 72
+# Every code must have a table entry: a missing one would only show up when a
+# phrase reaches it.
+assert all(a in T or a in GLIDES for a in ALLOPHONES), [a for a in ALLOPHONES if a not in T and a not in GLIDES]
+assert all(a in T and b in T for a, b, _ in GLIDES.values())
 DTMF = {0: (941, 1336), 1: (697, 1209), 2: (697, 1336), 3: (697, 1477), 4: (770, 1209),
         5: (770, 1336), 6: (770, 1477), 7: (852, 1209), 8: (852, 1336), 9: (852, 1477),
         10: (941, 1209), 11: (941, 1477)}
