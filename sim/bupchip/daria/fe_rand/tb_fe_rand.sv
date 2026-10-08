@@ -922,7 +922,8 @@ module tb_fe_rand;
 			// still armed (an RMW whose read returned $A9): no cartridge read here, or the held
 			// fetch after a service write would be a data-fetcher read (design 4: no R use)
 			if (armed) a = {1'b0, 4'h1, 8'(rnd(256))};
-		end else if (armed) begin                       // the operand of an arming read
+		end else if (armed) begin                       // the operand of an arming read (a cartridge
+			if (!pc[12]) pc = {1'b1, 12'(rnd(4096))};    // read: only those clear the arming)
 			a = pc;
 			pc = pc + 13'd1;
 		end else if (rnd(1000) < 15) begin

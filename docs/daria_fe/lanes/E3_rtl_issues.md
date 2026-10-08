@@ -1,6 +1,6 @@
 # Lane E3: RTL issues found by the random differential bench
 
-One RTL issue (low severity: not reachable from real 6507 code, but it breaks `daria_fe`'s own `a_pend_late` assertion and can corrupt a fetcher word), and two notes for the lead. No RTL file was changed. Every other failure the random bench (`sim/bupchip/daria/fe_rand/`, report `E3_random.md`) produced was traced to its first differing clock and was a bench error or a counted class of design 9.5 (E3_random.md section 7).
+One RTL issue (low severity: not reachable from real 6507 code, but it breaks `daria_fe`'s own `a_pend_late` assertion and can corrupt a fetcher word), and three notes for the lead. No RTL file was changed. Every other failure the random bench (`sim/bupchip/daria/fe_rand/`, report `E3_random.md`) produced was traced to its first differing clock and was a bench error or a counted class of design 9.5 (E3_random.md section 7).
 
 ---
 
@@ -55,3 +55,9 @@ Found by seed 101 of group `mix` (n = 31221885, g = 31221908; `+trace_from=31221
 ## Note 2: the one-deep `pend2` (lane C issue 3), seen from this bench
 
 Before the bench's 6502 write rule (E3_random.md 2.3) required three reads before a store, two campaign runs (seeds 101 and 102 of group `mix`) failed with cascades from a third CALLFN inside (M, M_fe] of a CDF call: upstream's one-clock busy dip at X let the stream place a CALLFN store in the cycle after the held fetch, and `pend2`, already holding call 2, dropped it. This is lane C issue 3 exactly, and as lane C says a 6507 cannot do it (a store needs its opcode and operand cycles). With the rule in place it never happened again. No action beyond lane C's note.
+
+## Note 3: the held fetch after a service write can be a data-fetcher read (DPC+)
+
+Design 4 (the "Hidden phase 2" row) says the held address is the opcode fetch after the CALLFN or service write, so it has no R use. Upstream's DPC+ (`mapper_dpcplus.sv` lines 113-115 and 251) arms the fast fetch on *any* read that returns `$A9` with fast fetch on, and then substitutes the next read at any address whose ROM byte is below `$28`. An RMW on a write register (`INC $105A`, CALLFUNCTION 1 then 2, as lane C's pairs) reads the ROM byte under `$105A`; if that byte is `$A9`, the opcode fetch after the RMW's writes, the held one, becomes a data-fetcher read of display RAM while the copy or fill runs. Its taken read then returns whatever byte each side's engine has written by then (different speeds, design 7.4): seed 134 of group `dpc` saw `$E2` (`daria_fe`) against `$1B` (upstream) at `$1FFF`, on the taken (shown) latch of the held cycle.
+
+Real code reaches it only with `$A9` in ROM at the RMW's register address and an opcode below `$28` after the RMW, so it is a curiosity rather than a defect; but the design's "no R use" is not true for every 6507 program. The bench keeps its stream inside the design's assumption (E3_random.md 2.3) and counts any residual case as `held_svc_race`. A note in design 4, or a 9.5 class, would close it.
