@@ -54,7 +54,8 @@ def main():
                     evs = ', '.join('%s* %d bins, min %d' % (k, len(v), min(x for _, x in v)) if len(v) > 1
                                     else '%s %d' % v[0] for k, v in fams.items())
                 else:
-                    evs = ', '.join(short(b, cov.get(b.replace('s1:', ''), 0)) for b, op, n in need)
+                    evs = ', '.join(short(b, classes.get(b[4:], 0) if b.startswith('cls:') else
+                                          cov.get(b.replace('s1:', ''), 0)) for b, op, n in need)
             v = 'PASS' if not reasons else 'FAIL: ' + '; '.join(reasons)
             if classes:
                 v += ' (' + ', '.join('%s %d' % kv for kv in sorted(classes.items())) + ')'

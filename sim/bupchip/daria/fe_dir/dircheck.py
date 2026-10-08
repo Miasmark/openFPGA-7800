@@ -12,7 +12,8 @@ PASS needs all of:
     must-be-0 counter the FE lines name (MUST0) is 0;
   - every required coverage bin of META (fe_dir_mon's dir_cov.txt) is met:
     the test exercised what it is meant to exercise ('s1:<bin>' only in
-    stage-1 builds, which print "FE bad:");
+    stage-1 builds, which print "FE bad:"); a 'cls:<class>' requirement is a
+    counted class of the stage-1 "FE classes:" line (skipped in stage 0);
   - fe_dir_mon's own comparisons (dirchk_*_bad bins) are 0;
   - the comparisons ran: "FE shadow" counts latches and commits, "FE detail"
     (and in stage 1 "FE counts") read latches compared, all > 0, and a
@@ -138,14 +139,19 @@ def check(run, meta):
         reasons.append('6507 self-check failed %d times, last at %s, read $%02X' % (
             cov['dir_selfcheck_err'], lab, cov.get('dir_res2', 0)))
     for b, op, n in meta['need']:
-        if b.startswith('s1:'):     # a bin that exists only in stage-1 builds
+        if b.startswith('cls:'):    # a counted class of the stage-1 shadow ("FE classes:")
             if not stage1:
                 continue
-            b = b[3:]
-        if b.endswith('*'):
-            v = sum(x for k, x in cov.items() if k.startswith(b[:-1]))
+            v = classes.get(b[4:], 0)
         else:
-            v = cov.get(b, 0)
+            if b.startswith('s1:'):     # a bin that exists only in stage-1 builds
+                if not stage1:
+                    continue
+                b = b[3:]
+            if b.endswith('*'):
+                v = sum(x for k, x in cov.items() if k.startswith(b[:-1]))
+            else:
+                v = cov.get(b, 0)
         ok = {'>=': v >= n, '==': v == n, '<=': v <= n, '>': v > n}[op]
         if not ok:
             reasons.append('%s %d, needs %s %d' % (b, v, op, n))

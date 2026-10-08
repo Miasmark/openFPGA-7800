@@ -630,8 +630,9 @@ def cdf_jump_ffe():
     """A fast JMP whose opcode is at $1FFE: the low operand at $1FFF comes from
     stream 33, the high one from TIA $0000, i.e. the open bus, which upstream
     leaves holding ROM[$1FFF] ($00) after the commit: the 6507 lands in zero
-    page RAM. A front end that holds the committed byte would show a different
-    open bus there (bench.md 7.5 O1, obus_exposed)."""
+    page RAM. A front end that holds the committed byte shows a different open
+    bus there (bench.md 7.5 O1). daria_fe holds it; the stage-1 shadow counts
+    that read as obus_ffe, the lead's accepted case (lanes/F1_fixes.md 3)."""
     img = Img('cdf', rev=2)
     main = img.reset_bank
     b = call_cdf() + '        STA CXCLR\n        STA $%04X\n' % hot_addr(img, 3) + '        JMP $1FFE\n'
@@ -652,10 +653,12 @@ def cdf_jump_ffe():
     img2.scripts = [[cdf_data(img2, bytes([ZP, ZP]), 0x400)],
                     [(OP_W32, 0x40000000 + img2.ptr_base + 4 * 33, p33)]]
     img2.cdf_tables({33: p33}, {})
+    # stage 1: each jump's TIA read is the one accepted exposure, counted as obus_ffe
+    # (docs/daria_fe/lanes/F1_fixes.md 3); any other obus_exposed still fails
     req = need(('cdf_jsub_at_fff', '>=', 5), ('cdf_jarm_at_ffe', '>=', 5), ('dir_marker', '>=', 5),
-               ('dir_selfcheck_err', '==', 0))
+               ('dir_selfcheck_err', '==', 0), ('cls:obus_ffe', '==', 5))
     return img2, dict(scheme=(23, 2), frames=6, need=req,
-                      desc='fast JMP at $1FFE: high operand from the TIA open bus (obus_exposed in stage 1)')
+                      desc='fast JMP at $1FFE: high operand from the TIA open bus (obus_ffe in stage 1)')
 
 
 # ---------------------------------------------------------------- DSWRITE / DSPTR

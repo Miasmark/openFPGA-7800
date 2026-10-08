@@ -33,7 +33,10 @@
 // or fe_mem; see there). Added by the lane's verification (E1_shadow.md,
 // "Verification"): T5 (ROM-sample amplitudes paired in order), merge_late,
 // dma_cover, mask_stuck, the "FE masks:" line; pause_lane narrowed to lane
-// B's condition; rmw_seed/rmw_merge bounded to one tick / k ticks.
+// B's condition; rmw_seed/rmw_merge bounded to one tick / k ticks. Added by
+// the lead's decisions (docs/daria_fe/lanes/F1_fixes.md): obus_ffe, a counted
+// class for the one obus_exposed case accepted (a read at $0000 right after a
+// substituted read at $1FFF).
 //
 // STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
 // daria_fe existed; the text below):
@@ -1140,6 +1143,8 @@
 		G_DIG_LOCAL, G_DIG_REMOTE, G_DIG_RAM, G_DIG_NONE,
 		// added by the lane's verification (E1_shadow.md, "Verification")
 		G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK, G_MASKED, G_DIG_VAL_BAD, G_DIG_VAL_N, G_DIG_VAL_MRG,
+		// the lead's decision F1-3 (docs/daria_fe/lanes/F1_fixes.md 3)
+		G_OBUS_FFE,
 		G_N
 	} f1_cnt_t;
 	string       f1_nm [G_N];
@@ -1255,6 +1260,7 @@
 	logic  [5:0] f1_pu_idx = 0;
 	logic [17:0] f1_wr_a = 0;
 	logic  [7:0] f1_o1_up = 0, f1_o1_fe = 0, f1_obus = 0;
+	logic        f1_ffe_prev = 0;	// obus_ffe: the last latch was a substituted read at $1FFF
 	logic [63:0] f1_alias = 0;		// CDFJ+ streams whose pointer word a DSWRITE hit (tbl_alias)
 
 	// R1: upstream's accepts and u_fe's posts, paired in order
@@ -1710,10 +1716,16 @@
 								f1_inc(G_TBL_ALIAS);
 							else `F1_CHK(1, G_DOUT, $sformatf("L1 dout: daria_fe %02x/%02x, upstream %02x/%02x (d/oe)", fd, fo, ud, uo))
 						end
-						// obus_exposed: the open-bus leak reaching the CPU through a partial driver
-						if (!bad && f1_read_db() != dut.read_DB)
-							`F1_CHK(1, G_OBUS, $sformatf("obus_exposed: read_DB %02x, with daria_fe's bus %02x", dut.read_DB,
+						// obus_exposed: the open-bus leak reaching the CPU through a partial driver.
+						// Counted instead as obus_ffe (F1_fixes.md 3), and only then: the read at
+						// $0000 that follows a substituted read at $1FFF (the 13-bit address wraps;
+						// a fast JMP or LDA # at $1FFE). fe_do holds the substituted byte there,
+						// upstream's d_out has fallen back to ROM[$1FFF].
+						if (!bad && f1_read_db() != dut.read_DB) begin
+							if (f1_ffe_prev && dut.cart2600.a_in == 13'h0000) f1_inc(G_OBUS_FFE);
+							else `F1_CHK(1, G_OBUS, $sformatf("obus_exposed: read_DB %02x, with daria_fe's bus %02x", dut.read_DB,
 								f1_read_db()))
+						end
 						if (dut.cart2600.a_in[12]) begin
 							f1_o1_pend = 1;
 							f1_o1_up = ud;
@@ -1726,6 +1738,10 @@
 						if (bad) f1_inc(G_DOUT_HID);
 					end
 				end
+				// obus_ffe's condition for the next latch: this one is a shown, substituted
+				// cartridge read at $1FFF (CDF fetch or jump; DPC+ fast fetch)
+				f1_ffe_prev = !hidden && dut.RW && dut.cart2600.a_in == 13'h1FFF &&
+					(fe_is_cdf ? dut.cart2600.cdf.stream_substitute : (fe_is_dpc && dut.cart2600.dpcplus.register_read));
 			end
 
 			// ---- at every pclk1: what the cycle before left ----
@@ -2120,7 +2136,7 @@
 			if (c >= G_MERGE_AMP && c <= G_GRANT_STEAL || c == G_MERGE_RACE || c == G_SIZE_OVER32K ||
 				c == G_P32_RESET || c == G_SHORT_IMAGE || c == G_Q26 || c == G_SHORT_DOUT || c == G_AMP_CLASS ||
 				c == G_RMW_SEED || c == G_RMW_MERGE || c == G_DRIFT_UP || c == G_DRIFT_FE || c == G_RESYNC ||
-				c == G_DEPOSIT_CF)
+				c == G_DEPOSIT_CF || c == G_OBUS_FFE)
 				begin
 					sep = ", ";
 					if (cl.len() == 0) sep = "";
@@ -2191,6 +2207,7 @@
 		f1_nm[G_MERGE_LATE] = "merge_late";     f1_nm[G_DMA_COVER] = "dma_cover";
 		f1_nm[G_MASK_STUCK] = "mask_stuck";     f1_nm[G_MASKED] = "masked_clocks";
 		f1_nm[G_DIG_VAL_BAD] = "dig_val_bad";   f1_nm[G_DIG_VAL_N] = "dig_val_n";      f1_nm[G_DIG_VAL_MRG] = "dig_val_merge";
+		f1_nm[G_OBUS_FFE] = "obus_ffe";
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
 		foreach (f1_h_post[b]) begin
