@@ -21,8 +21,8 @@
 //     against upstream's audio_*_result), every RAM write each CPU makes
 //     (word address, byte lanes, data on those lanes), and every MMIO access
 //     in order: writes and reads by value, except T1TC (0xE0008008) reads,
-//     within +/- MMIO_TOL counts (open item 17); the final report gives
-//     the range of DARIA's reading less upstream's.
+//     within +/- MMIO_TOL counts (open item 17; +mmio_tol=N, default 200);
+//     the final report gives the range of DARIA's reading less upstream's.
 //   - daria.csv, one line per compared call: call, frame, DARIA's clk_arm
 //     from call_go to returned and the microseconds that is, the clk_sys from
 //     the post to the last return word read (what a front end waits, less
@@ -449,6 +449,7 @@
 	initial begin
 		void'($value$plusargs("shadow_stop=%d", shadow_stop));
 		void'($value$plusargs("d_await=%d", d_await));
+		void'($value$plusargs("mmio_tol=%d", MMIO_TOL));
 		#1;
 		fd_dar = $fopen({out, "daria.csv"}, "w");
 		$fwrite(fd_dar, "call,frame,daria_clk,daria_us,e2e_sys,up_clk,ram_writes,mmio,result\n");
