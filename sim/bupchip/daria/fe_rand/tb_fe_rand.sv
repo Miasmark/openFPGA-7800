@@ -1143,6 +1143,7 @@ module tb_fe_rand;
 	longint mw_m = 0, late_until = -1, late_from = -1, dig_chk = -1;
 	logic   rmw_merge = 1'b0, mw_rmw = 1'b0, rmw_chk = 1'b0;
 	int     rst_negs = 0;                // falling edges with the console reset high in a row
+	longint rs_clk = -10;                // the clock of the last resync deposit
 	task automatic neg_resync();
 		rst_negs = eff_reset ? rst_negs + 1 : 0;
 		if (m_rep || m_cf) begin
@@ -1155,6 +1156,7 @@ module tb_fe_rand;
 				end
 			end else if (mw == 0 && b_aud_quiet()) begin
 				b_deposit(m_cf);
+				rs_clk = clk_n;
 				if (m_cf) cnt[I_DEP_CF]++;
 				cnt[I_RESYNC]++;
 				m_rep = 1'b0;
@@ -1508,7 +1510,8 @@ module tb_fe_rand;
 					if (aread) cnt[I_AMP_READS]++;
 					if (bad) begin
 						if ((cyc_short || e0n < 5) && strict == 0) cnt[I_SHORT_DOUT]++;
-						else if (aread && (m_rep || mw != 0)) cnt[I_AMP_CLASS]++;
+						// (fe_do holds the AMPLITUDE it loaded before a resync deposit for a clock)
+						else if (aread && (m_rep || mw != 0 || clk_n <= rs_clk + 2)) cnt[I_AMP_CLASS]++;
 						// held_svc_race: a cartridge RAM read (the held fetch after a service write,
 						// made a DPC+ data-fetcher read by a fast fetch the RMW's own read armed) while
 						// a service burst runs: the two copy engines fill the RAM at different times
