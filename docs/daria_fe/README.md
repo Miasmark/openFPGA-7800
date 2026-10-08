@@ -23,6 +23,15 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 - Specs, design and stage-0 bench: done.
 - **The owner chose the exact audio** (2026-10-07; `docs/DARIA_CORE.md`, decision 9): `design.md` 5.1, about 1,350 ALMs for the front end, which lands the device on the 84% gate. DARIA is meant as the 7800 core's last major revision, so spare area matters only as far as routing and timing closure need it: the 84% gate is a guide, and step 7's fit decides. If the exact audio causes trouble later, the lean audio (`daria_fe_audio_lean`, the same ports, about 250 ALMs less, AMPLITUDE may lag one tick, counted) is the way back.
 - Step 0 of `design.md` 12.2 (the interfaces frozen as stubs, `interfaces.md`): done, and independently reviewed (`interfaces.md` section 11: fixes R-1 … R-4, questions L-1 … L-6 for the lead). Any port change from here needs the lead's sign-off.
-- Next: build the modules and their unit benches (five lanes), then mode A on three images, then all 21 (`design.md` 12).
+- Step 1 (the five lanes, `lanes/*.md`): done. Every block passes its unit bench against upstream's RTL, every lane's planted mutants are caught (A 41, B 64, C 66, D 58).
+- Integration (`design.md` 12.2 step 2), 2026-10-08: Verilator `-Wall` clean on the whole front end; `run_unit.sh` 10 of 10. Quartus fits of `daria_fe` alone (5CEBA4F23C8, `ap_core.qsf` settings, virtual pins):
+
+  | Probe | Synthesis estimate | ALMs placed − [B] | ALMs needed | Registers | M10K | Slack `clk_sys` / `clk_arm` |
+  |---|---|---|---|---|---|---|
+  | `daria_fe` (bench hook live on virtual pins) | 1,737 | 1,389 | 1,732 | 1,097 | 0 | +55.6 / +23.6 ns |
+  | `daria_fe_probe` (hook tied 0, as the core will) | 1,667 | 1,490 | 1,728 | 1,099 | 0 | +54.6 / +22.2 ns |
+
+  The hook costs about 70 ALMs in synthesis, but single fits of a block this size vary by more than that in the fitter's packing measure, so the front end is about 1,400-1,500 ALMs against the design's 1,255-1,445. Step 7's full-core fit decides.
+- Next: lane E (the stage-1 shadow, directed tests, the random differential bench), then mode A on three images, then all 21 and the nine new ARM images (`design.md` 12).
 
 The specs mention a few files that lived only in the session scratchpad and were not kept: a copy of MiSTer's `Atari7800.sv` wrapper, two throwaway stall benches, and a Stella `CartCDF.cxx` used for behaviour notes only.

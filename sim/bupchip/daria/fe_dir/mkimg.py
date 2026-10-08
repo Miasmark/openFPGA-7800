@@ -201,10 +201,13 @@ class Img:
             self.put(base + (a & 0xFFF), [v], 'bank%d' % bank)
         return labs
 
-    def program(self, bank, init, body, lines=8, extra='', syms=None, reset=True):
+    def program(self, bank, init, body, lines=8, extra='', syms=None, reset=True, org=None):
         """The standard program in `bank`: clear RAM, init, then a frame loop
-        (VSYNC, body, `lines` WSYNC lines, M_FRAME++). Returns the labels."""
-        text = KERNEL_HEAD + init + FRAME.format(body=body, lines=lines) + extra
+        (VSYNC, body, `lines` WSYNC lines, M_FRAME++). Returns the labels.
+        DPC+ code starts at $1100, above the register file ($1000-$107F)."""
+        if org is None:
+            org = 0x1100 if self.kind == 'dpc' else 0x1000
+        text = ('.org $%04X\n' % org) + KERNEL_HEAD + init + FRAME.format(body=body, lines=lines) + extra
         labs = self.asm(bank, text, syms=syms)
         if reset:
             self.vector(bank, labs['start'])
