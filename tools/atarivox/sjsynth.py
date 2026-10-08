@@ -25,8 +25,15 @@ import numpy as np
 
 RATE = 8192
 # Length factor on every sound and pause (--stretch). The manual's lengths
-# played as given sound rushed; tune this by ear.
-STRETCH = 1.0
+# played as given sounded rushed; 1.5 is closer by ear.
+STRETCH = 1.5
+# The voice's envelope wave (register 8 bits 1:0): 0 saw, 1 sine, 2 triangle,
+# 3 square. A recording of the real chip ("Juno First") shows a few clean
+# harmonic bands, as a sine gives; a saw spreads buzz to 4 kHz.
+ENV_WAVE = 1
+# Hiss (oscillators 4 and 5) against the vowels: the recording's are much
+# quieter than the first tables had them.
+NOISE_LEVEL = 0.5
 
 # ---------------------------------------------------------------- tables
 # name: (type, ms, [F1, F2, F3], [A1, A2, A3], noise_hz, noise_vol, dist)
@@ -156,10 +163,11 @@ class SpeakJet:
 
     def voice(self, f, a, noise_hz=0, noise_vol=0, dist=0, half_env=False):
         self.s.freq[0] = self.pitch
-        self.s.env_ctl = 0x40 | (0x80 if half_env else 0)
+        self.s.env_ctl = ENV_WAVE | 0x40 | (0x80 if half_env else 0)
         self.s.dist = dist
         fs = [self.bendf(x) for x in f] + [min(3999, noise_hz), min(3999, noise_hz * 1.1)]
-        return fs, list(a) + [noise_vol, noise_vol // 2]
+        nv = int(noise_vol * NOISE_LEVEL)
+        return fs, list(a) + [nv, nv // 2]
 
     def dur(self, ms):
         r = ms * STRETCH * 114 / max(1, self.speed) * self.next_rate
@@ -255,8 +263,11 @@ class SpeakJet:
 
 def main():
     global STRETCH
-    if len(sys.argv) > 2 and sys.argv[1] == "--stretch":
-        STRETCH = float(sys.argv[2]); del sys.argv[1:3]
+    global ENV_WAVE
+    while len(sys.argv) > 2 and sys.argv[1] in ("--stretch", "--env"):
+        if sys.argv[1] == "--stretch": STRETCH = float(sys.argv[2])
+        else: ENV_WAVE = int(sys.argv[2])
+        del sys.argv[1:3]
     out = sys.argv[1]
     if len(sys.argv) > 3 and sys.argv[2] == "--log":
         codes = [int(m.group(1)) for m in re.finditer(r"VOX [\d.]+ ms:\s+(\d+)", open(sys.argv[3], errors="replace").read())]
