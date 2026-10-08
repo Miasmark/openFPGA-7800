@@ -61,8 +61,9 @@
 //   A1    every audio register every clock, outside the class masks; at each
 //         sample capture on an unpaused edge, the lane registers ("A1 lane":
 //         any difference outside pause_lane's exact form fails); after a
-//         dig_rom_lag mask alone, the sum and AMPLITUDE at the resync
-//         (dig_val_bad: that class allows timing, not a value)
+//         dig_rom_lag mask alone, the whole replica at the resync, the sum
+//         and AMPLITUDE included (dig_val_bad: that class allows timing, not
+//         a value)
 //   T4    each remote sample request's address
 //   A2    sel_up == sel_ram_sel every clock; A3 one owner per port, crb_use
 //   rcyc  u_core.rcyc against the bench's own model every clock (rcyc_bad)
@@ -1161,6 +1162,7 @@ module tb_fe_rand;
 		I_NOTES, I_HELD, I_PAUSE_CLK, I_HOT, I_PU, I_CRB_USE, I_WB_P32, I_YIELD3, I_PAUSE_LANE, I_COLL_RST, I_HELD_SVC,
 		I_PZ_CAP, I_PZ_SEL, I_PL_LONG, I_REL_CYC, I_RST_REL, I_RR_DFX, I_RR_PW, I_RR_SVC, I_RR_DSW, I_RR_DSP, I_RR_EXTRA,
 		I_RR_AUD, I_RR_DOUT, I_EF_BOTH, I_EF_NONE, I_DIG_VAL_N, I_RR_RMW2, I_RR_NEXT0, I_PZ_SEL_EQ, I_LANE_MASKED,
+		I_EV_RESET, I_EV_7800, I_EV_NONARM, I_EV_NONE, I_RESETS_X,
 		C_N
 	} cnt_t;
 	string  nm [C_N];
@@ -1202,6 +1204,8 @@ module tb_fe_rand;
 		nm[B_EF_KIND] = "ef_kind_bad"; nm[B_DIG_VAL] = "dig_val_bad"; nm[I_DIG_VAL_N] = "dig_val_checks";
 		nm[I_RR_RMW2] = "rr_rmw2"; nm[I_RR_NEXT0] = "rr_next_idle"; nm[I_PZ_SEL_EQ] = "pz_captures_sel_equal";
 		nm[I_LANE_MASKED] = "lane_masked";
+		nm[I_EV_RESET] = "ev_reset"; nm[I_EV_7800] = "ev_7800"; nm[I_EV_NONARM] = "ev_nonarm"; nm[I_EV_NONE] = "ev_none";
+		nm[I_RESETS_X] = "resets_extra";
 		for (int c = 0; c < C_N; c++) cnt[c] = 0;
 	end
 
@@ -1261,7 +1265,8 @@ module tb_fe_rand;
 	logic   m_rep = 1'b0, m_cf = 1'b0;
 	// m_val: a class that may change a value masked the replica too. dig_rom_lag alone allows
 	// only timing (design 9.5: the AMPLITUDE edge, the replica offset until IDLE), so a resync
-	// after it alone first requires the sum and AMPLITUDE to agree (dig_val_bad)
+	// after it alone must change nothing: the whole replica, the sample's sum and AMPLITUDE
+	// included, is compared first (dig_val_bad)
 	logic   m_val = 1'b0;
 	// pause_lane (F1_fixes.md 2): its own mask m_amp leaves the sum and AMPLITUDE out of the
 	// replica compare (and counts the 6507's AMPLITUDE reads as amp_class) until both agree
@@ -1298,12 +1303,15 @@ module tb_fe_rand;
 				end
 			end else if (mw == 0 && b_aud_quiet()) begin
 				// only dig_rom_lag masked (and no pause_lane mask is open): the refresh it offset
-				// has ended on both sides, so its value must be upstream's before the deposit
+				// has ended on both sides, so the replica, its value included, must be upstream's
+				// before the deposit
 				if (!m_val && !m_cf && !m_amp) begin
+					string dv;
 					cnt[I_DIG_VAL_N]++;
-					if (!b_sum_amp_eq())
-						fail(B_DIG_VAL, $sformatf("dig_val: after a dig_rom_lag mask, at the resync, sum/AMPLITUDE %s, upstream %02x/%02x",
-							b_sum_amp_str(), `UA.sample_sum[7:0], `UA.amplitude));
+					dv = b_a1_rep(1'b0);
+					if (dv != "")
+						fail(B_DIG_VAL, $sformatf("dig_val: at the resync after a dig_rom_lag mask alone (sum/AMPLITUDE %s, upstream %02x/%02x): %s",
+							b_sum_amp_str(), `UA.sample_sum[7:0], `UA.amplitude, dv));
 				end
 				b_deposit(m_cf);
 				rs_clk = clk_n;
@@ -2540,9 +2548,13 @@ module tb_fe_rand;
 		done = cyc_n;
 		run_cycles(ev_at);
 		case (ev)
-			0: do_reset();                              // a console reset: anywhere (a call, a service, F6)
+			0: begin                                    // a console reset: anywhere (a call, a service, F6)
+				cnt[I_EV_RESET]++;
+				do_reset();
+			end
 			1: begin                                    // 7800 mode: tia_en and the driver off (no call
-				wait_idle(100000);                      // or service in flight: the 2600 is not running)
+				cnt[I_EV_7800]++;                       // or service in flight: the 2600 is not running)
+				wait_idle(100000);
 				@(negedge clk_sys);
 				// as the scheme switch: not while a pointer check or repair is still to come
 				while (pu_pend || u_up.cdf.pointer_update || alias_pending() || busy_any()) @(negedge clk_sys);
@@ -2551,6 +2563,7 @@ module tb_fe_rand;
 				tia_req = 1'b1;
 			end
 			2: if (is_cdf) begin                        // a non-ARM scheme interval (CDF only, nothing in flight)
+				cnt[I_EV_NONARM]++;
 				wait_idle(100000);
 				@(negedge clk_sys);
 				// in the pclk1 clock (where a switch is exact for daria_fe, lane A O-3) of a cycle
@@ -2563,12 +2576,13 @@ module tb_fe_rand;
 				while (!pclk1 || alias_pending()) @(negedge clk_sys);
 				scheme = SCHEME_CDF;
 				fresh = 2;
-			end
-			default: ;
+			end else cnt[I_EV_NONE]++;                  // a DPC+ epoch: no event
+			default: cnt[I_EV_NONE]++;
 		endcase
 		// +resets=N: N more console resets, spread over the rest of the epoch
 		for (int i = 0; i < resets && cyc_n - done < n; i++) begin
 			run_cycles((n - (cyc_n - done)) / (resets - i + 1));
+			cnt[I_RESETS_X]++;
 			do_reset();
 		end
 		if (cyc_n - done < n) run_cycles(n - (cyc_n - done));
@@ -2674,7 +2688,7 @@ module tb_fe_rand;
 			cnt[I_RR_DSW], cnt[I_RR_DSP], cnt[I_RR_EXTRA], cnt[I_RR_AUD], cnt[I_RR_DOUT]);
 		$display("  rst_release forms (every release cycle): both %0d, edge form only %0d, observed only %0d, neither %0d, kinds differ %0d; after a dropped CALLFUNCTION 1/2: %0d RMW second writes serviced by both sides, %0d cycles with no service",
 			cnt[I_EF_BOTH], cnt[B_EF_PRED], cnt[B_EF_OBS], cnt[I_EF_NONE], cnt[B_EF_KIND], cnt[I_RR_RMW2], cnt[I_RR_NEXT0]);
-		$display("  dig_rom_lag: %0d resyncs after a dig_rom_lag mask alone, each with the sum and AMPLITUDE compared first (%0d differed)",
+		$display("  dig_rom_lag: %0d resyncs after a dig_rom_lag mask alone, each with the whole replica (sum and AMPLITUDE included) compared first (%0d differed)",
 			cnt[I_DIG_VAL_N], cnt[B_DIG_VAL]);
 	endtask
 

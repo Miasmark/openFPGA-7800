@@ -1,8 +1,8 @@
 # Lane E3: RTL issues found by the random differential bench
 
-One RTL issue (low severity: not reachable from real 6507 code, but it broke `daria_fe`'s own `a_pend_late` assertion and could corrupt a fetcher word), and three notes for the lead. No RTL file was changed by this lane. Every other failure the random bench (`sim/bupchip/daria/fe_rand/`, report `E3_random.md`) produced was traced to its first differing clock and was a bench error or a counted class of design 9.5 (E3_random.md section 7).
+One RTL issue (low severity: not reachable from real 6507 code, but it broke `daria_fe`'s own `a_pend_late` assertion and could corrupt a fetcher word), and four notes for the lead. No RTL file was changed by this lane. Every other failure the random bench (`sim/bupchip/daria/fe_rand/`, report `E3_random.md`) produced was traced to its first differing clock. Each was a bench error, a counted class of design 9.5, or an RTL assertion firing under a console reset, which the bench counts as its own classification: `p32_reset` (lane A O-1) and `collide_reset` (note 4). Neither of those two is a design 9.5 class (E3_random.md 3.1, section 7).
 
-**After F1** (`F1_fixes.md`): issue 1 is decided and fixed in the RTL (option (a) with `rcyc`); the bench counts the release cycle as design 9.5's `rst_release` for all five kinds and fails the RTL before F1 (E3_random.md 5.3). Note 1 is decided as a counted class, not made exact; the bench counts only its exact form (E3_random.md 3.1). Notes 2 and 3 are unchanged. The final campaign found no new RTL issue (E3_random.md 5).
+**After F1** (`F1_fixes.md`): issue 1 is decided and fixed in the RTL (option (a) with `rcyc`); the bench counts the release cycle as design 9.5's `rst_release` for all five kinds, checks design 9.5's edge form against it at every release cycle, and fails F1's RTL with its three `pclk1` clears removed (E3_random.md 2.5, 5.3). Note 1 is decided as a counted class, not made exact; the bench counts only its exact form (E3_random.md 3.1). Notes 2 and 3 are unchanged. Note 4 is new in this revision. It records a classification the bench has made since its bring-up (E3_random.md section 7, item 18) and never raised with the lead. The final campaign found no new RTL issue (E3_random.md 5).
 
 ---
 
@@ -10,7 +10,13 @@ One RTL issue (low severity: not reachable from real 6507 code, but it broke `da
 
 **Files** (line numbers of the current RTL, after F1's commit c967eb6 and its review commits up to ec10fa3): `src/fpga/core/bupchip/daria_fe_core.sv`: the ready flags (`rdW`, `rdP`, `rdS_r`) are held at 0 while `rst_fe` is high (line 367: `if (rst_fe | pclk1)`); the post actions are set at the commit and fire on a ready flag (`pend_c` lines 298-309, `pend_s` with `s_fire` lines 503-510, `pend_r` with `r_fire` lines 530-538); since F1 the three also clear at `pclk1` (lines 307, 509, 536), `rcyc` is lines 626-630 and `a_pend_late` line 635. `daria_fe_seq.sv` has no reset, so `k[]` and `commit` run straight through `rst_fe`. `daria_fe.sv` line 97: `rst_fe = cart_reset | ...` (combinational). The table and the text below describe the RTL before F1 (commit 90ef6e7).
 
-**What happens.** When `cart_reset` falls after k[3] of a 6507 cycle and that cycle's access is a cartridge register with a post action (DPC+ data fetcher read, PUSH/WRITE, field write, PARAMETER; CDF DSWRITE/DSPTR), the commit sets `pend_s` (or `pend_r`, `pend_c`), but the reads of k[1..4] happened under `rst_fe`, so `rdW`/`rdP` stay 0 for the rest of the cycle. The action is still pending at `pclk1` (`a_pend_late` fires) and stays pending through the following cycles. It fires at the first later cycle that sets the ready flag, with *that* cycle's `W` and the stale `sw_a`/`sw_be`. Upstream (combinational at the access, out of reset at that edge) performs the access in the release cycle.
+**What happens.** Take a 6507 cycle in which `cart_reset` falls (`rst_fe` high at some edge after E0, low at C), and whose access is a cartridge register with a post action that waits for a ready flag. The commit sets the action. The flag, however, was held at 0 while `rst_fe` was high, and nothing sets it again in that cycle. Five kinds of access do this (F1_fixes.md 1, which corrected this note's first text):
+- **A DPC+ DFxDATA/DATAW/FRACDATA read, a PUSH/WRITE, or a CALLFUNCTION 1/2.** These wait for `rdW` or `rdS`, which only the edge that samples k[3] (E0+4) sets. `rst_fe` high at any edge from E0+4 to C−1 strands them.
+- **A CDF DSWRITE or DSPTR.** These wait for `rdP`, which is set the edge after the P32 read. `rst_fe` high at any edge from E0+3 to C−1 strands them: at E0+3 it clears a P32 read captured at E0+2 and loses the retry in k[2].
+
+The first text said "after k[3]" for all five and listed field writes and PARAMETER, but those never strand. They write `din`, not W, so they fire at once (`s_fire = pend_s & (!sw_d | rdW)`, daria_fe_core.sv:503).
+
+In the RTL before F1, the stranded action was still pending at `pclk1` (`a_pend_late` fired) and stayed pending through the following cycles. It fired in the first later cycle that set its flag, with that cycle's W and the stale `sw_a`/`sw_be`. A stranded CALLFUNCTION 1/2 also held `arm_dma_busy` high, a hang unless another CALLFUNCTION write followed. In that write's cycle the stranded service fired at E0+5, with the stranded write's own value, and the write's own CALLFUNCTION then found a service pending (F1_fixes.md 1; mutant r3 in E3_random.md 6). Upstream, combinational at the access and out of reset at that edge, performs the access in the release cycle.
 
 **Minimal reproduction** (DPC+ rev 0; trace of `u_core`):
 
@@ -50,7 +56,7 @@ Reproduce (the RTL before F1): in `sim/bupchip/daria/fe_rand/`, `TAG=repro ./run
 
 Found by seed 101 of group `mix` (n = 31221885, g = 31221908; `+trace_from=31221880 +trace_to=31221912` prints both engines in the `TA` lines). Before the bench had the class, this was `FAIL audio_bad at clk 31221911 (epoch 89, cycle 2206268, scheme 21 rev 4): A1 replica: ssum (sample_sum[7:0]) a8, upstream 4b`; the bench counted it as `pause_lane` and resynced. Since F1 the bench counts `pause_lane` only in this exact form (the select high at the last unpaused edge, each lane register holding what it loaded there) and masks only the sum and AMPLITUDE until they agree (E3_random.md 3.1).
 
-**Impact.** One sample byte after an OSD pause, only when the pause starts right after a 6507 RAM-read cycle and an audio grant falls in the pause with its capture on the first unpaused edge. The design counts it (9.5 `pause_lane`; design.md 1191, 1608), so DARIA meets the design. Lane B's report should not call the class unreachable.
+**Impact.** One sample byte after an OSD pause, only when the pause starts right after a 6507 RAM-read cycle and an audio grant falls in the pause with its capture on the first unpaused edge. The design counts it (`pause_lane`: design.md 5.8 and 9.5), so DARIA meets the design. Lane B's report should not call the class unreachable.
 
 **If exactness is wanted** (the lead's call; not done here): `al` would load the port's lane as upstream's does, `sel_up ? <the 6507's RAM byte address>[1:0] : a_d[1:0]`, at every unpaused edge. That needs the 6507's RAM byte address in `u_audio` (one 2-bit input), and the bench's `pause_lane` count would then have to be 0.
 
@@ -63,3 +69,19 @@ Before the bench's 6502 write rule (E3_random.md 2.3) required three reads befor
 Design 4 (the "Hidden phase 2" row) says the held address is the opcode fetch after the CALLFN or service write, so it has no R use. Upstream's DPC+ (`mapper_dpcplus.sv` lines 113-115 and 251) arms the fast fetch on *any* read that returns `$A9` with fast fetch on, and then substitutes the next read at any address whose ROM byte is below `$28`. An RMW on a write register (`INC $105A`, CALLFUNCTION 1 then 2, as lane C's pairs) reads the ROM byte under `$105A`; if that byte is `$A9`, the opcode fetch after the RMW's writes, the held one, becomes a data-fetcher read of display RAM while the copy or fill runs. Its taken read then returns whatever byte each side's engine has written by then (different speeds, design 7.4): seed 134 of group `dpc` saw `$E2` (`daria_fe`) against `$1B` (upstream) at `$1FFF`, on the taken (shown) latch of the held cycle.
 
 Real code reaches it only with `$A9` in ROM at the RMW's register address and an opcode below `$28` after the RMW, so it is a curiosity rather than a defect; but the design's "no R use" is not true for every 6507 program. The bench keeps its stream inside the design's assumption (E3_random.md 2.3) and counts any residual case as `held_svc_race`. A note in design 4, or a 9.5 class, would close it.
+
+## Note 4: `a_collide` fires under `rst_fe` (the bench's `collide_reset`)
+
+**Files:** `src/fpga/core/bupchip/daria_fe_arb.sv` (`ev_grant_steal = aud_issue & !sel_up & fix_eff`, `a_collide = ev_grant_steal & !sh_c`, lines 265-266; `u_arb` has no reset input), `daria_fe.sv` line 97 (`rst_fe`). Design 9.6 lists `a_collide` as must-be-0 outside `short_phase1`, with no exception for a reset.
+
+**What happens.** This is E3_random.md section 7, item 18. It was found in seed 105 of group `mix` on an earlier bench and RTL, one clock into an epoch's download reset, with the scheme going from DPC+ to CDFJ. The bench sets the new scheme while the console reset is already high. In that clock `rst_fe` is high. `u_core`'s fixed request, decoded under the new scheme, takes the R port (`fix_eff`), because nothing in `u_arb` gates it with `rst_fe`. Upstream's engine still has its last audio grant in that clock (`aud_issue & !sel_up`). So `ev_grant_steal` is true in a cycle with no `ev_short`, and `a_collide` fires. Both engines reset at the next edge, and nothing differed afterwards.
+
+**What the bench does.** It counts `a_collide` in a clock with `u_fe.rst_fe` high as `collide_reset`, and fails it in any other clock (`tb_fe_rand.sv`). This is the bench's own classification, not a design 9.5 class. It mirrors `p32_reset`, the bench's name for `a_p32_late` under a reset (lane A O-1, lane D issue 1). Counts: 1 in the final campaign (`fastddr`) and 1 in the `+rst_bus=1` groups (E3_random.md 5.2, 5.3).
+
+**Reachability and impact.** A scheme changes only at a load or a live override. At a load the console is in reset, so the stolen grant is the last one before both engines reset. It has no effect: no difference followed in any run.
+
+**For the lead.** Choose one:
+- record the exception in design 9.6 (`a_collide` in a clock with `rst_fe` high is a reset artifact), as lane D proposes for `a_p32_late`;
+- gate the assertion with `rst_fe`. That needs a reset input on `u_arb`, which is a frozen port, the same reason lane D gives against a port for O-1.
+
+Until then this lane's report lists `collide_reset` and `p32_reset` as the bench's own classifications, not as design classes (E3_random.md 3.1, open question 6).

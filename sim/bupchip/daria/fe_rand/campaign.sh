@@ -5,8 +5,10 @@
 #   ./campaign.sh self [G..]  the upstream-vs-upstream self-check (strict, except self_ofs)
 #   ./campaign.sh fe [G..]    daria_fe against upstream: the campaign groups (or those named)
 #   ./campaign.sh rst [G..]   the +rst_bus=1 groups (design 9.5 rst_release), and the same
-#                             seeds against the RTL before F1 (oldrtl: must FAIL)
-#   ./campaign.sh sum         the totals over every campaign log in runs/ (camp_*)
+#                             seeds against F1's RTL without its three pclk1 clears
+#                             (oldrtl: must FAIL)
+#   ./campaign.sh sum         the totals over every campaign log in runs/ (camp_*), and
+#                             the epochs' coverage (from each log's "epoch N:" lines)
 # Each group is a tag, build options and plusargs; seeds are distinct per group.
 # Every run skips a seed whose log already has a verdict on the current build
 # stamp and plusargs (run_rand.sh SKIP_DONE=1), so a piece can be restarted;
@@ -17,7 +19,8 @@ ROOT="$(cd "$HERE/../../../.." && pwd)"
 WORK="${WORK:-$ROOT/sim/work/bupchip/daria/fe_rand}"
 CYC="${CYC:-2500000}"
 CYC_RST="${CYC_RST:-1000000}"
-# the RTL before F1 (F1_fixes.md 1): daria_fe_core.sv without the three pclk1 clears
+# F1's RTL without its pclk1 clears (F1_fixes.md 1): daria_fe_core.sv with only its three
+# "| pclk1" clears removed; it keeps rcyc and a_pend_late's !rcyc, so it is not 90ef6e7 itself
 OLDRTL="${OLDRTL:-$WORK/oldrtl}"
 
 group() {   # tag env seeds... -- plusargs... (+cycles=, +epoch= among them replace the defaults)
@@ -62,7 +65,7 @@ fe)
 	want fastddr && group fastddr   ""         151 152 153 154 -- +pg_mode=all +ddr_lat_min=1 +ddr_lat_max=3 +ddr_long=0 +slat_min=1 +slat_max=8
 	;;
 rst)
-	# the RTL before F1: the current daria_fe_core.sv without its three "| pclk1" clears
+	# the current daria_fe_core.sv without its three "| pclk1" clears
 	if [ ! -f "$OLDRTL/daria_fe_core.sv" ]; then
 		mkdir -p "$OLDRTL"
 		sed 's/ | pclk1)$/)/' "$ROOT/src/fpga/core/bupchip/daria_fe_core.sv" > "$OLDRTL/daria_fe_core.sv"
@@ -83,6 +86,8 @@ SELF = ["self_mix", "self_all", "self_rst", "self_ofs"]
 RST = ["rst_dpc", "rst_cdf", "rst_all"]
 OLD = ["old_dpc", "old_cdf"]
 tot = collections.Counter(); bad = collections.Counter(); runs = collections.Counter()
+ep = collections.defaultdict(collections.Counter)   # per tag: the epochs' settings
+EPL = re.compile(r"^epoch (\d+): scheme (\d+) rev (\d+) ldx (\d) ldy (\d) foff (\d)/\w+ rom_size (\d+) asz ([0-9a-f]+) hook (\d)", re.M)
 stamps = collections.defaultdict(set); fails = []; firsts = []
 for f in sorted(glob.glob(os.path.join(sys.argv[1], "camp_*_s*.log"))):
     tag = re.sub(r"_s\d+\.log$", "", os.path.basename(f))[5:]
@@ -98,6 +103,16 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "camp_*_s*.log"))):
     if not m:
         fails.append((os.path.basename(f), "no summary")); continue
     runs[tag] += 1
+    for e in EPL.finditer(txt):
+        sch = {"21": "dpc", "23": "cdf"}.get(e.group(2), "s" + e.group(2))
+        rev, ldx, ldy, foff, rsz, asz, hook = int(e.group(3)), e.group(4), e.group(5), e.group(6), int(e.group(7)), int(e.group(8), 16), e.group(9)
+        c = ep[tag]
+        c["epochs"] += 1; c[sch] += 1; c["%s_rev%d" % (sch, rev)] += 1; c["hook" + hook] += 1
+        if sch == "cdf":
+            c["cdf_foff" + foff] += 1
+            if rev == 3: c["cdfjp_ldx%s_ldy%s" % (ldx, ldy)] += 1
+        if rsz > 32768: c[sch + "_rom_over32k"] += 1
+        c[sch + ("_asz_none" if asz == 0 else ("_asz_7ff8_up" if asz >= 0x7FF8 else "_asz_ram"))] += 1
     tot[(tag, "cycles")] += int(m.group(2)); tot[(tag, "clk")] += int(m.group(3)); tot[(tag, "epochs")] += int(m.group(1))
     for k, val in re.findall(r" ([a-z_0-9]+) (\d+)", re.search(r"^  bad:(.*)$", txt, re.M).group(1)):
         if k != "total": bad[(tag, k)] += int(val)
@@ -124,10 +139,14 @@ def line(tags, title):
     print("  counters: " + ", ".join("%s %d" % (k, sum(tot[(t, k)] for t in tags)) for k in keys))
     nz = {(t, k): v for (t, k), v in bad.items() if v and t in tags}
     print("  bad counts not 0: %s" % (nz if nz else "none"))
+    c = collections.Counter()
+    for t in tags: c.update(ep[t])
+    if c:
+        print("  epochs: " + ", ".join("%s %d" % (k, c[k]) for k in sorted(c)))
 line(FE, "campaign (daria_fe)")
 line(SELF, "self-check")
 line(RST, "rst_bus groups")
-line(OLD, "rst_bus groups, RTL before F1 (each run must FAIL)")
+line(OLD, "rst_bus groups, F1's RTL without its pclk1 clears (each run must FAIL)")
 print("failed runs:", fails if fails else "none")
 for f, l in firsts:
     print("  first failure %s: %s" % (f, l))
