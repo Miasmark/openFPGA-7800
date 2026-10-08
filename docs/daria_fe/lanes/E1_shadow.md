@@ -112,7 +112,7 @@ An audio class masks the replica's registers (and, where noted, the counters and
 | `ret_late` | `u_fe`'s `call_tog` flip later than upstream's completion of that call number | allows `merge_race` for 2,000 clocks |
 | `dig_rom_lag` | upstream's ROM sample request R with `digital_address` ≥ $8000, or `sample_done` not high before R+4 | replica |
 | `svc_audio_race` | an audio grant reading a word of a running service's destination range (either side) | replica |
-| `pause_lane` | an audio grant with `pause` high (tb_daria ties `pause` to 0; lane B: unreachable) | replica |
+| `pause_lane` | an audio grant with `pause` high (tb_daria ties `pause` to 0; lane B: unreachable) [Decided, F1_fixes.md 2: reachable; now a sample capture on an unpaused edge right after a paused upstream grant edge whose last unpaused edge had `sel_ram_sel` high, with the two lane registers differing; any other lane difference at a capture is `audio_bad`] | replica [now the sum and AMPLITUDE only, until they agree again; no resync] |
 | `pre_lock` | an upstream audio grant while `!tia_en` and out of reset | replica |
 | `tbl_alias` | `u_core.ev_tbl_alias` (CDFJ+ DSWRITE into the tables); that stream is excluded from C3, its fetches' L1 and the RAM compares | |
 | `rmw_call` | `u_call.ev_rmw_call`; R1's call-2 seed difference `rmw_seed`; the call-2 merge difference `rmw_merge` | counters (resync) |
@@ -227,7 +227,7 @@ Every fault is caught by the check meant for it, at the first clock it can be se
 
 **No RTL issue from the image runs.** Over the 7 runs of section 5.1, every 6507 latch, every scheme register after every cycle, every pointer and RAM write, every call payload, service and return, the init image, the whole cart RAM at every call start and every frame, and every audio register on every clock match upstream, except where a class of design 9.5 says they may not; `docs/daria_fe/lanes/E1_rtl_issues.md` is therefore not written.
 
-**One behaviour that differs on the bus (found by lane E2's `cdf_jump_ffe`, through this bench's O1):** a CDF fast-jump operand substituted at `$1FFF`, followed by the operand read that wraps to `$0000` (TIA, D7-D6 driven only). Upstream's `d_out` falls back to the ROM byte after the commit and the open bus holds it; `fe_do` holds the substituted byte (design 2.4), so the TIA read's D5-D0 differ: `obus_exposed`, which design 9.6 lists as must-be-0. It is design behaviour, not an RTL slip, so it is the lead's call (E2 report 6.1 gives the options: document it, or reload `fe_do` with the mirror byte at C+1 after a substituted read at `$xFFF`). No image in the set does it (`obus_exposed` 0 in every run here).
+**One behaviour that differs on the bus (found by lane E2's `cdf_jump_ffe`, through this bench's O1):** a CDF fast-jump operand substituted at `$1FFF`, followed by the operand read that wraps to `$0000` (TIA, D7-D6 driven only). Upstream's `d_out` falls back to the ROM byte after the commit and the open bus holds it; `fe_do` holds the substituted byte (design 2.4), so the TIA read's D5-D0 differ: `obus_exposed`, which design 9.6 lists as must-be-0. It is design behaviour, not an RTL slip, so it is the lead's call (E2 report 6.1 gives the options: document it, or reload `fe_do` with the mirror byte at C+1 after a substituted read at `$xFFF`). No image in the set does it (`obus_exposed` 0 in every run here). [Decided, F1_fixes.md 3: accepted (option (a)). That one read is counted as `obus_ffe`, only after a fast JMP's low operand at $1FFF and only with the values this case leaves on both sides; a fast `LDA #` at $1FFE is not in the class, since it exposes $0001 too.]
 
 **Observations for the lead (not failures):**
 
@@ -257,7 +257,7 @@ Every fault is caught by the check meant for it, at the first clock it can be se
 | T2 | compare at each tick edge (except a tick in (M, M_fe+1], at M_fe+2) | counters and frequencies every clock outside (M, M_fe] | stricter; equal by design 5.6 |
 | R3 | when both copies are done | when both sides are quiet; every range of a burst | section 8.2 |
 | 9.5 `rmw_call` | stall shape; CDF call-2 seeds | plus `rmw_merge`, the call-2 merge in mode A | section 8.3; the lead may fold it into 9.5 |
-| 9.5 `pause_lane` | a grant edge with `pause` high and the capture clock low | a grant with `pause` high | tb_daria ties `pause` to 0; lane B showed it unreachable |
+| 9.5 `pause_lane` | a grant edge with `pause` high and the capture clock low | a grant with `pause` high | tb_daria ties `pause` to 0; lane B showed it unreachable [Decided, F1_fixes.md 2: the bench now counts the exact case, section 4] |
 | 9.5 `tbl_alias` | until the ARM rewrites the word | until the end of the run | never occurs in the set (no CDFJ+ image here); simpler |
 | `live_override`, `refresh_overlap` | classes | not implemented | the scheme never changes without a load in tb_daria; lever 1 not taken |
 | fe.csv | BEN 7.7's columns plus 12.4's | those, in that order, then every other counter of the bench (the full list is the header) | one table drives the csv, the `FE bad:` and `FE classes:` lines |
@@ -265,7 +265,7 @@ Every fault is caught by the check meant for it, at the first clock it can be se
 **Open questions:**
 
 1. **The `cart_download` race (section 8.1).** `u_fe`'s and the DUT's own load pulses still depend on Verilator running tb_daria's `initial` write before the clocked blocks of that time step. If a future build ordered `u_copy`'s block first, `u_fe` would miss `load_end`, F6 would never start, and the hold would keep the console in reset (a hang, not a silent pass). A robust fix is in tb_daria (change `cart_download` by NBA, or away from the clock edge), but it moves the load by a clock in every build, so plain and `SHADOW` runs would need new baselines. Lead's decision.
-2. **E2's issue 1** (`obus_exposed` after a substituted read at `$1FFF`): accept and document, or change `fe_do` (section 7).
+2. **E2's issue 1** (`obus_exposed` after a substituted read at `$1FFF`): accept and document, or change `fe_do` (section 7). [Decided, F1_fixes.md 3: accepted, counted as `obus_ffe`.]
 3. **`short_phase1` and RSYNC.** No image and no directed test (E2 section 5) produces an E0→latch < 6 in tb_daria, so `short_phase1`, `grant_steal`, `q26` and `short_dout` are exercised only by the unit benches. A bench option that forces a misaligned TIA divider would be needed to see them here.
 4. **Coverage gaps of the image set** (section 5.2): no digital audio through the ROM route (so no `dig_rom_lag`), no CDFJ+ or DPC+ revision 1 in this run list, no DPC+ fill or RMW service, no `ret_late`, no console reset after the checks start. E2's directed tests cover most of them; `+hard_reset_at` once per scheme (design 12.2 step 7) is still to run.
 
@@ -367,7 +367,7 @@ Lane E2's 50 directed tests on the fixed bench and the real RTL (`FLAVOR=e1v`, `
 ### V.6 Remaining issues (not fixed here)
 
 1. **`cart_download` race in tb_daria** (section 9, question 1): unchanged; it needs a tb_daria change and new baselines (lead's decision).
-2. **`cdf_jump_ffe` `obus_exposed`** (section 7, E2 issue 1): a design decision for the lead; E2 V.5 item 3 recommends accepting `daria_fe`'s value.
+2. **`cdf_jump_ffe` `obus_exposed`** (section 7, E2 issue 1): a design decision for the lead; E2 V.5 item 3 recommends accepting `daria_fe`'s value. [Decided, F1_fixes.md 3: accepted; `cdf_jump_ffe` passes with `obus_ffe` 5.]
 3. **`tbl_alias` is raised by `daria_fe` itself** (`u_core.ev_tbl_alias`), and then removes that stream from C3, L1 and the RAM compares for the rest of the run (design 9.5: until the ARM rewrites the word). C4 still checks the DSWRITE byte itself at upstream's address, so a wrong alias address fails there, but a spurious alias would still blind C3 for one stream. No CDFJ+ game is in the set, so this was not exercised.
 4. **Coverage of the game set** (on top of section 5.2): the merge's values (m09/m10 equivalent on every game), RMW pairs, fills, `ret_late`/`merge_race`, console resets and `short_phase1` are reached only by E2's directed tests or unit benches. The take of counter 2 at an own merge is reached by nothing (m10 on voice 2 is equivalent on all available inputs); a directed script that changes r10 in a CDF call would close it (lane E2's `tests.py`).
 5. **`merge_late` and `dma_cover` are checks on `daria_fe`'s timing**, added because the bench's masks depend on it. If the lead accepts a design change to M_fe (design 5.6) or to the busy rule (7.4), these two must follow.

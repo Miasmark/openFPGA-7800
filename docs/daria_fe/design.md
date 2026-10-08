@@ -117,10 +117,10 @@ Kept from simple:
 
 | D1 item | Level here |
 |---|---|
-| `d_out & oe` at every non-hidden latch (tb_daria's 1-clock ROM) | Exact. Counted: `short_phase1` (C < E0+6), plus the AMPLITUDE classes below |
-| Every scheme register after every 6507 cycle | Exact. Counted: CDF Q26 inside `short_phase1` |
-| Cart RAM after init, after each 6507 write, at each call start and each frame | Exact. Counted: `tbl_alias` (CDFJ+ DSWRITE into its own tables), `short_image`, `live_override` |
-| DPC+ copy/fill results | Exact, including the RMW pair |
+| `d_out & oe` at every non-hidden latch (tb_daria's 1-clock ROM) | Exact. Counted: `short_phase1` (C < E0+6), plus the AMPLITUDE classes below; `rst_release` (that cycle's latch) |
+| Every scheme register after every 6507 cycle | Exact. Counted: CDF Q26 inside `short_phase1`; `rst_release` (the DPC+ fetcher or parameter state the dropped action would have written) |
+| Cart RAM after init, after each 6507 write, at each call start and each frame | Exact. Counted: `tbl_alias` (CDFJ+ DSWRITE into its own tables), `short_image`, `live_override`; `rst_release` (the words the dropped action would have written: a PUSH/WRITE byte, the DSWRITE byte, P32) |
+| DPC+ copy/fill results | Exact, including the RMW pair. Counted: `rst_release` (a CALLFUNCTION 1/2 in that cycle: no copy or fill) |
 | Call payloads, in order; seeds by logical ordering | Exact: ring captured at L = C+1, so `seed_race` = 0 by construction |
 | Audio ticks on the same `clk_sys` edge | Exact (same Bresenham, same reset) |
 | Per-tick counters and frequencies | Exact. `merge_race` must be 0 unless the bench had to hold `ret_tog` back (`ret_late`) |
@@ -128,6 +128,8 @@ Kept from simple:
 | AMPLITUDE | **Exact.** Counted: `merge_amp`, `dig_rom_lag`, `svc_audio_race`, `pause_lane`, `pre_lock`, `short_phase1` |
 
 With `+fe_merge_hook=1`, `merge_amp` is 0 as well. A run on an image without digital audio, DPC+ services, pause or RSYNC then has no counted AMPLITUDE class at all.
+
+`rst_release` (9.5) is the one exception from a console reset: a reset released inside a 6507 cycle that commits a post action. `daria_fe` drops the action (2.3), upstream performs it. It is not reachable from 6507 code: a 6502 leaves reset through its reset sequence, and none of its reads is such a register (lanes/E3_rtl_issues.md, issue 1; lanes/F1_fixes.md 1).
 
 ### 0.3 Size
 
@@ -444,7 +446,7 @@ These rules let each module be written and unit-tested alone.
 | Group | Taps |
 |---|---|
 | seq | `u_fe.u_seq.k`, `.c`, `.ph2`; `u_fe.u_seq.ev_short` |
-| core, both | `u_fe.u_core.op`, `.bank`, `.fpend`, `.W`, `.wb_v`, `.wb_a`, `.p32_in`, `.sel_up`, `.pend_s`, `.pend_r`, `.pend_c`, `.rdW`, `.rdP`, `.rdS` |
+| core, both | `u_fe.u_core.op`, `.bank`, `.fpend`, `.W`, `.wb_v`, `.wb_a`, `.p32_in`, `.sel_up`, `.pend_s`, `.pend_r`, `.pend_c`, `.rdW`, `.rdP`, `.rdS`; `.rcyc` (1 bit, bench and assertion only: 1 when some edge since the last `pclk1` had `rst_fe` high; it masks `a_pend_late`, 2.3, lanes/F1_fixes.md 1) |
 | core, DPC+ | `.ff_en`, `.rnd`, `.pptr` (4-bit, compare with `parameter_pointer` directly), `.wave[0:2]`, `.svc_pend`, `.svc_fill`, `.svc_src`, `.svc_dst`, `.svc_rem` (the requested p3; the bench forms upstream's clamped count, 7.3), `.svc_val`, `.note_stb`, `.note_v`, `.note_val` |
 | core, CDF | `.mode`, `.fexp`, `.jr`, `.jexp`, `.jstream` |
 | state RAM | words $00-$0F (w0 mask `FFFF0FFF`, w1 mask `FF0FFFFF`), word $10 (params 0-3), $F0-$FD |
@@ -574,7 +576,7 @@ wire dec_t opc = k[1] ? {dec, jok} : op;            // the op at a commit edge (
 
 ### 2.3 Commit actions and the ready rule (the fix for F1)
 
-Each commit causes up to three kinds of work. Each fires as soon as its data is ready. It never fires before C, and never after the next E0 (`a_pend_late`). A deferred action (`pend_c`, `pend_s`, `pend_r`) still pending at the next E0 is dropped there: the three clear at `pclk1`. Outside a reset none is pending then. In the cycle in which `rst_fe` falls one can be: its reads ran under `rst_fe`, so its ready flag stayed 0. Dropped, it cannot fire in a later cycle with that cycle's W (lanes/F1_fixes.md 1).
+Each commit causes up to three kinds of work. Each fires as soon as its data is ready. It never fires before C, and never after the next E0 (`a_pend_late`). A deferred action (`pend_c`, `pend_s`, `pend_r`) still pending at the next E0 is dropped there: the three clear at `pclk1`. Outside a reset none is pending then. In the cycle in which `rst_fe` falls one can be: its reads ran under `rst_fe`, so its ready flag stayed 0. Dropped, it cannot fire in a later cycle with that cycle's W (lanes/F1_fixes.md 1). The release cycle itself stays inexact: upstream performs its access (9.5, `rst_release`).
 
 **Kind 1. Flip-flop state, always at C.** These need only `opc`, `a_in` and `d_in`:
 
@@ -686,7 +688,7 @@ d = ({8{fd_k1 & !dec.amp}} & (dec.rrnd ? rnd_byte(dec.ix) : romb))
 // rnd_byte: 0 rnd_next[7:0], 1 rnd_prior[7:0], 2 rnd[15:8], 3 rnd[23:16], 4 rnd[31:24], 6/7 0
 ```
 
-- `ph1_open` is 0 at C and through phase 2. `fe_do` therefore holds the byte the 6507 latched until the next cycle's E0+2. The bench counts this as `drift_fe` (information); `obus_exposed` must be 0, except for the read at $0000 right after a substituted read at $1FFF (`obus_ffe`, 9.5).
+- `ph1_open` is 0 at C and through phase 2. `fe_do` therefore holds the byte the 6507 latched until the next cycle's E0+2. The bench counts this as `drift_fe` (information); `obus_exposed` must be 0, except for the TIA read at $0000 right after a CDF fast JMP's low operand at $1FFF (`obus_ffe`, 9.5).
 - `amp_nx` is the value `amplitude` takes at this edge (5.3). Loading it at every edge up to C−1 makes `fe_do` in (C−1, C) equal upstream's `amplitude` in that clock.
 
 ### 2.5 DPC+ timing (relative to E0 and C; nominal C = E0+6)
@@ -1035,7 +1037,7 @@ The definitions used in the table:
 | `dig_low` | 1 | 0 | `st.PCAP & digital` | `jplus_s ? rc[0][12] : rc[0][20]` |
 | `dig_ram` | 15 | 0 | `st.DROUTE & in_ram` | `dig_addr[14:0]` |
 | `amplitude` | 8 | 0 | `amp_we` | `nib(byte, dig_low)` (SMCAP, `dig_smp`); `ssum + byte` (SMCAP, voice 2); 0 (DROUTE, out of range); `nib(rdat, dig_low)` (RWAIT, `rom_done`) |
-| `al` | 2 | 0 | `aud_take & !pause` | `aud_addr[1:0]` |
+| `al` | 2 | 0 (`cart_reset`) | `!pause`: every unpaused edge (lanes/B_audio.md, B-1; 5.2) | `aud_addr[1:0]` |
 
 More definitions:
 
@@ -1188,8 +1190,8 @@ rom_done = (lcnt[3] & busy_l) | rdone_q;      // amplitude one edge after rdat
 - The engine has no enable: ticks, refreshes, NOTEs and samples run on.
 - Sample bytes read $FF; words read true data (top.sv:934-936).
 - The 6507 bus freezes, and `sel_up` is evaluated on the frozen bus, so a frozen selecting cycle blocks grants for the whole pause, as upstream's (AUD 12.5).
-- The select can still change right after the last unpaused edge: at a `pclk1` the next cycle's address appears, and at a commit the state changes. Upstream's lane register then holds the 6507's byte lane while grants run in the pause; `al` holds the engine's.
-- Counted: `pause_lane` (a capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high). `al` cannot follow upstream's lane at every such edge (lanes/F1_fixes.md 2). In mode B, DARIA's CPU also runs through a pause (`pause_call`). **The Pocket never pauses** (`core_top.v:883` ties `pause_core` to 0), so neither class occurs on hardware. They matter only for a port to a core that pauses, such as MiSTer with its OSD menu; `lanes/F1_pause_lane_mister.patch` is the near-exact `al` for that case (unsimulated; F1_fixes.md 2).
+- The select can still change right after the last unpaused edge: at a `pclk1` the next cycle's address appears, and at a commit the state changes, or one clock after an address or bank change, while `rom_do` still holds the previous byte (lanes/F1_fixes.md 2, rows 3-4). Upstream's lane register then holds the 6507's byte lane while grants run in the pause; `al` holds the engine's.
+- Counted: `pause_lane` (in the stage-1 shadow: a sample capture on an unpaused edge right after a grant edge in a pause, whose last unpaused edge had the select high, with upstream's lane register and `al` differing; the unit benches' conditions are in lanes/F1_fixes.md 2). `al` cannot follow upstream's lane at every such edge (lanes/F1_fixes.md 2). In mode B, DARIA's CPU also runs through a pause (`pause_call`). **The Pocket never pauses** (`core_top.v:883` ties `pause_core` to 0), so neither class occurs on hardware. They matter only for a port to a core that pauses, such as MiSTer with its OSD menu; `lanes/F1_pause_lane_mister.patch` is the near-exact `al` for that case (unsimulated; F1_fixes.md 2).
 
 ### 5.9 Exactness argument
 
@@ -1591,7 +1593,7 @@ G8 is applied: `waveform_pointer` is dead and the sum is 8 bits. Two exceptions 
 | CPU reset on console reset (G6) | `daria_mreset` |
 | Release-window duplicate (GL 7.5, G1) | `rel_ok` on both busy signals (D3, CR 2) |
 | 29,696-byte DPC+ image (CR 25) | `short_image` |
-| `open_bus` | `fe_do` holds the committed byte: `drift_fe`; `obus_exposed` must be 0, except the read at $0000 after a substituted read at $1FFF (`obus_ffe`) |
+| `open_bus` | `fe_do` holds the committed byte: `drift_fe`; `obus_exposed` must be 0, except the TIA read at $0000 after a CDF fast JMP's low operand at $1FFF (`obus_ffe`) |
 | `rom_ready` waits for an orphaned sample (G7) | `busy_l`/`busy_r` survive `cart_reset` (5.7) |
 
 ### 9.5 Counted differences (complete list)
@@ -1606,7 +1608,7 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | `merge_race` | Only with `ret_late`: counters/frequencies differ by the rule of BEN 7.6 | per-tick counters and frequencies (resync) | A |
 | `dig_rom_lag` | Digital ROM sample: upstream's `sample_done` later than R+3 (a DDR miss), or `dig_addr ≥ $8000` | the AMPLITUDE edge; replica offset until IDLE (resync) | A, B |
 | `svc_audio_race` | An audio grant reads a word in a running copy/fill's destination range (either side) | that refresh's value | A, B |
-| `pause_lane` | A capture on an unpaused edge after a grant edge in a pause, whose last unpaused edge had the select high. Not on the Pocket, which never pauses (F1_fixes.md 2) | one sample byte | A (directed), B |
+| `pause_lane` | A sample capture on an unpaused edge right after a grant edge in a pause, whose last unpaused edge had the select high, with upstream's lane register (`mapper_read_lane`) and `al` differing (the stage-1 shadow's condition; `tb_fe_audio` and the random bench use wider ones, lanes/F1_fixes.md 2). Any other lane difference at a capture is `audio_bad`. Not on the Pocket, which never pauses (F1_fixes.md 2) | one sample byte: the sum and AMPLITUDE, until the next refresh rewrites them (no resync) | A (directed), B |
 | `pre_lock` | Refreshes with a grant before `tia_en` (BIOS path; upstream reads the 7800 path's RAM address, AUD 12.6) | AMPLITUDE until the first refresh after `tia_en` | A |
 | `tbl_alias` | A CDFJ+ DSWRITE byte address in [$098, $1B0) (pointer and increment words) | that stream's pointer and data, until the ARM rewrites the word; C3 excludes that stream | A, B |
 | `rmw_call` | A CALLFN while `call_busy`, or committed after X (C-3) | the stall shape (no dip); CDF call-2 seeds iff a tick lands exactly on M, or (C-3) between upstream's accept and DARIA's capture at M_fe+2 | A (value), B |
@@ -1614,8 +1616,9 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | `short_image` | A DPC+ image shorter than $8000 bytes, after a larger one | RAM bytes copied from beyond the file | A |
 | `live_override` | Scheme override changed without a reload or reset | DPC+ fetchers in state RAM keep their values (upstream: flip-flops reset); F6 family stays latched | A, B |
 | `size_over32k` | `ev_size_hi`: `audio_size_addr + 8 > $7FFF` | that SIZE read (upstream addresses 128 KB) | A, B (expected 0) |
-| `drift_fe` | O1: `fe_do` holds the committed byte after the latch | information; `obus_exposed` must be 0 | A |
-| `obus_ffe` | O1: a read at $0000 right after a substituted read at $1FFF (a fast JMP or `LDA #` at $1FFE; the 13-bit address wraps) | that read's undriven bits: `fe_do` holds the substituted byte, upstream's `d_out` has fallen back to ROM[$1FFF]. On hardware the undriven bits most likely keep the cartridge's last driven byte, as `daria_fe`'s do. No game does it | A |
+| `drift_fe` | O1: `fe_do` holds the committed byte after the latch | information; `obus_exposed` must be 0, except `obus_ffe` (below) | A |
+| `obus_ffe` | O1: the TIA read at $0000 right after the low operand of a CDF fast JMP whose opcode is at $1FFE (upstream's `jump_substitute` at $1FFF with `jump_remaining` 2; the 13-bit address wraps), with the undriven bits holding the byte `daria_fe` latched at $1FFF on its side and ROM[$1FFF] on upstream's | that read's undriven bits: `fe_do` holds the substituted byte, upstream's `d_out` has fallen back to ROM[$1FFF]. One read: the 6507 then jumps to the target. On hardware the undriven bits most likely keep the cartridge's last driven byte, as `daria_fe`'s do. No game does it. A fast `LDA #` at $1FFE (CDF or DPC+) is not in the class: its next opcode comes from the TIA, so $0001 is exposed too (F1_fixes.md 3) | A |
+| `rst_release` | `rst_fe` fell after k[3] of a cycle whose commit set `pend_c`, `pend_s` or `pend_r` (a console reset released inside a DPC+ DFxDATA/DATAW/FRACDATA read, PUSH, WRITE or CALLFUNCTION 1/2, or a CDF DSWRITE or DSPTR): `daria_fe` drops the action at `pclk1` (2.3), upstream performs it. Not reachable from 6507 code (lanes/E3_rtl_issues.md, issue 1) | that cycle's access, its latch and the words it touches (the fetcher's state words, the DSWRITE byte and P32, a service's copy), resynced after it | A (`tb_fe_core`'s `rrel`; the random bench with `+rst_bus=1`) |
 | `refresh_overlap` | Only if lever 1 (drop `rc`) is taken: a tick or merge during a refresh | that refresh's value | A, B |
 | hardware and mode B only | `call_len`, `dma_len`, `f6_len` (durations); `release_dup` (removed duplicate commit); `guard_shift` (grants moved to phase B); `pause_call` (DARIA's CPU runs during pause; mode B only, since the Pocket never pauses); `reset_in_call`; `det_unlock_active` | timing only | B |
 
@@ -1624,7 +1627,7 @@ Every class has a condition the bench can evaluate. Anything outside the classes
 | Group | Counters |
 |---|---|
 | Classes absent by construction | `seed_race`, `note_race`, `amp_lag`, `amp_input_race`; `merge_race` without `ret_late`; `tick_bad` |
-| Bench assertions | `over32k`, `wb_drop`, `ram_wr_noaccess` (upstream side); `obus_exposed` (outside `obus_ffe`); `hold_bad`; `commit_on_hidden` (a `daria_fe` commit on `pclk0 && !mapper_phi2`); `hidden_last_bad` (S0 C.5); `ret_unasked`; `det_bad`, `det_lock_a` |
+| Bench assertions | `over32k`, `wb_drop`, `ram_wr_noaccess` (upstream side); `obus_exposed` (outside `obus_ffe`); `hold_bad`; `commit_on_hidden` (a `daria_fe` commit on `pclk0 && !mapper_phi2`); `commit_pclk1` (a `daria_fe` commit in a clock with `pclk1` high: top.sv makes it impossible, 2.3, lanes/F1_fixes.md 1); `hidden_last_bad` (S0 C.5); `ret_unasked`; `det_bad`, `det_lock_a` |
 | RTL assertions | `a_collide` (`grant_steal` outside `short_phase1`), `a_wb_late`, `a_p32_late`, `a_guard_core`, `a_guard_wr`, `a_fpjr` (`!(fpend & jr != 0)` in CDF), `a_pend_late` (a commit action still pending at the next `pclk1`, except at the end of a cycle that ran some of its k reads under `rst_fe`: `rcyc`, a flop only the assertion reads), `a_tdef2`, `a_f6_live` |
 | Every-clock oracles | A1 (audio registers against upstream's, outside the class masks), A2 (`sel_up == sel_ram_sel`), A3 (one owner per port; `crb_use` consistent) |
 
@@ -1943,14 +1946,14 @@ Lever 4 is a planned swap behind fixed ports, not a redesign. It is started only
 
 **Classes** are evaluated as in 9.5. After a classified audio divergence, `fe_deposit_audio` resyncs at the next falling edge where both engines are IDLE with nothing pending. `resync` counts it.
 
-**`fe.csv`.** BEN 7.7's header plus `merge_amp`, `ret_late`, `dig_rom_lag`, `svc_audio_race`, `pause_lane`, `pre_lock`, `tbl_alias`, `rmw_call`, `rmw_svc`, `short_phase1`, `grant_steal`, `a_*` (one column each), `crb_use`, `obus_ffe`.
+**`fe.csv`.** BEN 7.7's header plus `merge_amp`, `ret_late`, `dig_rom_lag`, `svc_audio_race`, `pause_lane`, `pre_lock`, `tbl_alias`, `rmw_call`, `rmw_svc`, `short_phase1`, `grant_steal`, `a_*` (one column each), `crb_use`, then the remaining counters in the bench's enum order, `obus_ffe` and `commit_pclk1` last.
 
 ### 12.5 Done criteria for step 6
 
 1. All unit benches pass, and every block is within its probe target or a lever was taken and documented.
 2. Mode A:
    - the 21 images × 1,500 frames, the random bench (10^8 cycles) and every directed test show 0 in every bad counter;
-   - only the classes of 9.5 occur, each with its condition met;
+   - only the classes of 9.5 occur, each with its condition met (`rst_release` included, which only the unit bench's release epochs and the random bench's `+rst_bus=1` produce);
    - with `+fe_merge_hook=1` on the three stage-0 images, no AMPLITUDE class occurs except `dig_rom_lag` (draconian only).
 3. Mode B: the guard checks of 8.4 are 0.
 4. The stage-0 regressions are unchanged (S0 C.3).

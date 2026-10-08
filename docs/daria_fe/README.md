@@ -33,5 +33,6 @@ Everything here was derived from upstream MiSTer's MIT RTL (`src/fpga/mister/rtl
 
   The hook costs about 70 ALMs in synthesis, but single fits of a block this size vary by more than that in the fitter's packing measure, so the front end is about 1,400-1,500 ALMs against the design's 1,255-1,445. Step 7's full-core fit decides.
 - Next: lane E (the stage-1 shadow, directed tests, the random differential bench), then mode A on three images, then all 21 and the nine new ARM images (`design.md` 12).
+- F1 (2026-10-08): lane E's findings decided; `lanes/F1_fixes.md`.
 
 The specs mention a few files that lived only in the session scratchpad and were not kept: a copy of MiSTer's `Atari7800.sv` wrapper, two throwaway stall benches, and a Stella `CartCDF.cxx` used for behaviour notes only.

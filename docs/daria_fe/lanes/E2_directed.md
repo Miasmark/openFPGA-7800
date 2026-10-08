@@ -10,6 +10,7 @@ Lane E2 is point 4 of the original lane-E task: the directed tests of design 12.
   - the live bench built with `FE_STAGE0=1`.
 - **Real `daria_fe` (E1's stage-1 bench, `fe_shadow.svh` md5 `acd6550553fa…`): 47 of 48 pass.** The same holds with the poisoned RAM model, and with `+fe_merge_hook=1` 30 of the 31 CDF tests pass. The one failure is `cdf_jump_ffe`:
   - **It is a real behavioural difference in `daria_fe`:** `obus_exposed` on a fast jump whose opcode is at $1FFE (section 6.1).
+  - [Decided, F1_fixes.md 3: accepted. The stage-1 shadow counts that read as `obus_ffe`, and `cdf_jump_ffe` requires `obus_ffe` 5; it passes. The suite now has 50 tests, all of which pass in stage 1.]
 - **Two bench gaps found and already fixed.** On an earlier stage-1 bench (md5 `85ffaaf68c07…`), two more tests failed. Both were gaps in the stage-1 bench, not RTL errors: R3 on a queued RMW service pair, and A1 after `rmw_seed` (sections 6.2, 6.3). E1's current bench fixes both:
   - R3 now runs once both sides are quiet;
   - a new class, `rmw_merge`, covers the merge after `rmw_seed`.
@@ -216,7 +217,7 @@ The "Events" column summarises a family of bins as "name* n bins, min m".
 | `cdf_jump_cdf1` | CDF1 | cdf_jarm 39, cdf_jsub_at_ffe 5, _fff 5, cdf_hot_sub 10, cdf_jarm_data 20, cdf_jarm_at_ffd 10, _ffe 5, _fff 5, cdf_jcancel 19, cdf_4c_nomap 25, cdf_4c_nomap_7ffe 5 | PASS | PASS (drift_up 40) | PASS | PASS |
 | `cdf_jump_cdfj` | CDFJ | as cdf1, plus cdf_jsub_r2_s34 5 | PASS | PASS (drift_up 50) | PASS | PASS |
 | `cdf_jump_cdfjp` | CDFJ+ | as cdfj, without the $7FFE case (not reachable on CDFJ+) | PASS | PASS (drift_up 50) | PASS | PASS |
-| `cdf_jump_ffe` | CDFJ | cdf_jsub_at_fff 5, cdf_jarm_at_ffe 5 | PASS | **FAIL: obus_exposed 5** | FAIL (same) | FAIL (same) |
+| `cdf_jump_ffe` | CDFJ | cdf_jsub_at_fff 5, cdf_jarm_at_ffe 5 | PASS | **FAIL: obus_exposed 5** [Decided, F1_fixes.md 3: PASS, `obus_ffe` 5] | FAIL (same) | FAIL (same) [now PASS, `obus_ffe` 5] |
 | `digital_cdfj` | CDFJ | aud_dig_ram 117, aud_dig_rom_lo 74, aud_dig_rom_hi 91, aud_dig_none 93, cdf_amp 1792, merge_counter_set 6 | PASS | PASS (amp_class 23, dig_rom_lag 97, merge_amp 1, resync 98) | PASS (no merge_amp) | PASS |
 | `digital_cdfj_s5` | CDFJ | the same | PASS | PASS (amp_class 2, dig_rom_lag 97, merge_amp 1) | PASS | PASS |
 | `digital_cdfj_s200` | CDFJ | the same | PASS | PASS (amp_class 109, dig_rom_lag 98) | PASS | PASS |
@@ -297,14 +298,14 @@ The m3 and m4 runs used the earlier stage-1 bench, whose `dpc_svc` already showe
 
 **`daria_fe`.** `fe_do` holds the committed $C5 (design 2.4: "fe_do holds the latched byte from C until the next E0+2"). The bench's O1 sees the TIA read return $05 with `daria_fe`'s bus: "read_DB 00, with daria_fe's bus 05". On hardware the 6507 would jump to $05C5.
 
-**Result.** `obus_exposed` = 5, one per frame, which design 9.6 lists as must-be-0.
+**Result.** `obus_exposed` = 5, one per frame, which design 9.6 lists as must-be-0. [Decided, F1_fixes.md 3: accepted; counted as `obus_ffe`.]
 
 **How general it is.** It needs a substituted cartridge read at $1FFF followed by the wrap to $0000. Other paths where the last cartridge read of a cycle is followed directly by a TIA or RIOT read with a partial `oe` were not found:
 
 - every other substituted read is followed by a cartridge opcode fetch, which fully drives the bus;
 - code running from RIOT RAM fetches from RIOT RAM, which also drives fully.
 
-A DPC+ analogue, a fast-fetch `LDA #` with its operand at $1FFF, would expose the same way. It was not run, because upstream's TIA-sourced opcode makes the 6507 execute TIA space.
+A DPC+ analogue, a fast-fetch `LDA #` with its operand at $1FFF, would expose the same way. It was not run, because upstream's TIA-sourced opcode makes the 6507 execute TIA space. [Corrected, F1_fixes.md 3: not the same way. After a fast `LDA #` at $1FFE (DPC+, or CDF's fetch) the next opcode comes from TIA $0000 and its second cycle reads $0001, also TIA and partly driven, so two reads are exposed, not one. Only the fast JMP exposes exactly one, and only it is in the accepted class `obus_ffe`.]
 
 **Fix options, for the lead.**
 
@@ -403,7 +404,7 @@ Results after the fixes:
 | Stage 0 (`s0`) | 50 of 50 pass |
 | Stage 1 (`s1`) | 49 of 50 pass |
 
-The one stage-1 failure is still `cdf_jump_ffe` (`obus_exposed` 5, section 6.1).
+The one stage-1 failure is still `cdf_jump_ffe` (`obus_exposed` 5, section 6.1). [Decided, F1_fixes.md 3: it now passes, `obus_ffe` 5.]
 
 ### V.2 Feature-disabled faults: 16 of 16 fail their own counts
 
@@ -508,8 +509,9 @@ Lane E2's own m1–m9 (section 4) were not re-run individually. M10–M32 cover 
      | Lane B's narrow condition | 6/6 pass | caught 6/6 |
 
    - Recommendation: narrow the class to lane B's condition.
+   - [Decided, F1_fixes.md 2: narrowed further. The class is now a sample capture on an unpaused edge right after a paused upstream grant edge whose last unpaused edge had `sel_ram_sel` high, with the two lane registers differing; it masks only the sum and AMPLITUDE until they agree again, and any other lane difference at a capture is `audio_bad`.]
 2. **E1: `dig_rom_lag` masks the remote route's data, not only its latency.** Fix 5 covers this in the directed tests. The random and game benches still have no comparison of that route. Recommendation: the same per-refresh pairing inside `fe_shadow.svh`.
-3. **RTL/design: `cdf_jump_ffe` `obus_exposed` 5 is unchanged (section 6.1).** One point for the decision: on hardware the undriven D5–D0 of the TIA read most likely keep the last value driven, the cartridge's $C5. That is `daria_fe`'s result ($05C5), not upstream's ($00C5). Option (a), accept and class it, therefore loses nothing towards hardware.
+3. **RTL/design: `cdf_jump_ffe` `obus_exposed` 5 is unchanged (section 6.1).** One point for the decision: on hardware the undriven D5–D0 of the TIA read most likely keep the last value driven, the cartridge's $C5. That is `daria_fe`'s result ($05C5), not upstream's ($00C5). Option (a), accept and class it, therefore loses nothing towards hardware. [Decided, F1_fixes.md 3: option (a), `obus_ffe`.]
 4. **Coverage limits, by design of the tests and not bench faults:**
    - a reset right after the first init cannot show reset-state bugs (M22, M30 on `hard_reset_rel_dpc`);
    - a one-clock-late commit is invisible to 8 tests (M26);
