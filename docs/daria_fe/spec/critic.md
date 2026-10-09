@@ -343,7 +343,7 @@ AUD:864-865 and AUD:1450-1465 say that DPC §8.3 assumes W+2's address is on the
 ### 22. [gap] The Pocket's BIOS boot path
 
 **What happens.**
-- With `use_bios`, the core gets `bypass_bios` = 0 and `tia_mode` = 0 (core/atari7800_pocket.sv:875, 933-934).
+- With `use_bios`, the core gets `bypass_bios` = 0 and `tia_mode` = 0 (core/atari7800_pocket.sv:875, 933-934, before decision 11; since then a 2600 image never boots through the BIOS on the Pocket, DARIA_CORE.md).
 - The BIOS then runs in 7800 mode on MARIA phases of 4 or 6 clocks until it locks 2600 mode. `access` stays 0 meanwhile.
 - In an 8-clock cycle the `phi1` ring never reaches s8, so no audio job runs. Upstream's engine keeps ticking (AUD:1127-1149).
 - The sketch's 3-bit tick backlog wraps (sk:615, 624).

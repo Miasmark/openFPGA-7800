@@ -53,7 +53,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   through it. Unlike on MiSTer, 2600 games always start directly, without
   the BIOS, whatever the setting: the BIOS recognises a 2600 cartridge by a
   bus clash that the core does not reproduce, so it would miss some 2600
-  games and never start them.
+  games and never start them. A 7800 game therefore needs its A78 header:
+  an image without one is taken as a 2600 game.
 - **The BupChip** (from 2.1.1), the Souper cartridge's music co-processor:
   Rikki & Vikki plays its whole soundtrack. On MiSTer it is firmware running
   on a soft ARM7TDMI; this port runs the same, unmodified firmware on
