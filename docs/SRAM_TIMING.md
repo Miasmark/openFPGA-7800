@@ -2,7 +2,8 @@
 
 Notes on the core's tightest timing path, why 2.1.1 has less margin on it
 than 2.0.21, and two fixes. Neither fix is in 2.1.1; Fix A is in 2.1.2
-(results in `SRAM_TIMING_REVIEW.md`). Figures come from
+(results in `SRAM_TIMING_REVIEW.md`). Fix B ships with DARIA (step 7); its
+design as built is in `DARIA_CORE.md`, "Fix B". Figures come from
 Quartus 21.1.1 on the 5CEBA4F23C8, slow 1100 mV 85 °C model, unless stated
 otherwise.
 
@@ -129,6 +130,13 @@ outputs to idle.
 Split the two requests where `top.sv` merges them, and register the 2600
 one before it reaches `sram_ctrl`'s compare and arbiter.
 
+This is the proposal. The design as built (`DARIA_CORE.md`, "Fix B")
+settles its choices: the register sits at the top of `sram_ctrl`, on
+`clk_sys`; `top.sv` keeps upstream's select (`mapper_init_busy` or
+`tia_en`) for the split; and a 2600 read's byte now lands 15 `clk_sdram`
+after the edge that loads the 6507's address (19 at worst, the last edge
+the `c_rdata` multicycle allows), against 11 (15) before.
+
 - **`top.sv`** (`ifdef POCKET_SRAM`, beside the existing Pocket port groups):
   export the 2600 request (`cartram_addr26`, `cartram_rd26`,
   `cartram_wr26`, its write data) and `mapper_init_busy` separately from
@@ -149,13 +157,13 @@ one before it reaches `sram_ctrl`'s compare and arbiter.
 - **Gain.** The `clk_sdram` cone becomes the 7800 request alone: +0.86 ns in
   today's placement before taking out the compare's two levels. It should
   stop depending on the seed. Measure over three seeds; aim for +1.5 ns.
-- **For DARIA:** the ARM's own cartridge-RAM traffic (`arm_cartram_*` in
-  `cart2600.sv`) should come in as another registered client of
-  `sram_ctrl` on this side, never through the 7800 cone.
-- **Checks:** as for Fix A, plus a 2600 RAM-mapper test in simulation
-  (none exists yet: `run_sim.sh` loads a 4 KiB 2600 image without RAM).
-  It should write and read back cartridge RAM through each RAM mapper,
-  with the added latency.
+- **For DARIA:** superseded. DARIA keeps its cartridge RAM in block RAM
+  (`DARIA_CORE.md`, decision 4), so no ARM traffic reaches the SRAM, and
+  Fix B covers the 2600 RAM mappers alone.
+- **Checks:** as for Fix A, plus a 2600 RAM-mapper test in simulation that
+  writes and reads back cartridge RAM through each RAM mapper with the
+  added latency. It now exists: `sim/cartram2600_test.py`'s images under
+  the `+cartram` monitor (`DARIA_CORE.md`, "Fix B", section 4).
 
 ## Not recommended: timing exceptions
 
@@ -175,6 +183,7 @@ the logic.
 2. Fix A in the next 2.1.x: small `ifdef` change, about 1,750 ALMs back, a
    2600 hardware check.
 3. Fix B before DARIA's mapper work (`BUPCHIP_CORE.md`, "Later: 2600 ARM
-   cartridges"), with its own hardware test.
+   cartridges"), with its own hardware test. Decision 2 in `DARIA_CORE.md`
+   ties it to DARIA's release; it is built in DARIA's step 7.
 4. Until then, check the seed whenever the design changes (`ap_core.qsf`'s
    comment above `SEED`).
