@@ -70,13 +70,15 @@
 //     the every-clock compare: every refresh is still compared by value at
 //     its end, upstream's n-th against daria_fe's n-th, AMPLITUDE and the sum
 //     (refresh_bad, must be 0), and read by read: the same words with the
-//     same values. A pair is excused (counted) only when either refresh ran
-//     under another class's mask, or at its first read whose values differ:
-//     a read in a flight of a word either ARM wrote since the flight began
-//     (up_wt, d_wt), daria_fe's value one its RAM held in the flight (the
-//     rest of that pair may follow the value). Under another class too,
-//     every read daria_fe makes in a flight of a word DARIA stored in it
-//     must return a value that word held there (an undefined read).
+//     same values. Every audio read of each engine, whatever its class, must
+//     take what its own RAM held at the read: daria_fe's what dmem held at
+//     its grant edge (read_bad), upstream's what its cart RAM held at its
+//     grant edge (up_read_bad), both must be 0. A pair is excused (counted)
+//     only when either refresh ran under another class's mask, or at its
+//     first read whose values differ: a read in a flight of a word either
+//     ARM wrote since the flight began (up_wt, d_wt), with both values what
+//     their RAMs held at the reads (the rest of that pair may follow the
+//     value; its reads are still checked at their reads).
 //     At a quiet point the two sides must have run as many refreshes
 //     (refresh_count_bad), and a resync that overwrites any difference with
 //     no excused pair or other class since the last resync is deposit_bad;
@@ -115,7 +117,10 @@
 //   7 an undefined read: $A5A5A5A5, what the poisoned daria_ram returns to a
 //     read that meets a write of its word at one time step, forced into
 //     daria_fe's port-B q for each audio read in a flight of a word DARIA
-//     has stored in that flight (refresh_bad: a value the RAM never held).
+//     has stored in that flight (read_bad, refresh_bad);
+//   8 a stale read: the same reads take the word's value from before DARIA's
+//     first store to it in the flight (daria_shadow.svh's mb_hist), a value
+//     the word held in the flight but not at the read (read_bad).
 // Run.log: "FE mode B:" and "MODE B result:" after the stage-1 lines.
 //
 // STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
@@ -1285,6 +1290,9 @@
 		// value (pairs in order) and what each resync overwrites; then their information
 		G_MB_LOCK_EDGE, G_MB_REF_BAD, G_MB_REF_CNT, G_MB_DEP_BAD,
 		G_MB_REF_N, G_MB_REF_FL, G_MB_REF_XARM, G_MB_REF_XCLS, G_MB_REF_XDIFF, G_MB_REF_UNP, G_MB_DEP_DIFF,
+		// added by the final check: every audio read against its own RAM at the read; then the
+		// reads checked
+		G_MB_RD_BAD, G_MB_URD_BAD, G_MB_RD_N, G_MB_RD_FL, G_MB_URD_N,
 `endif
 		G_N
 	} f1_cnt_t;
@@ -1369,8 +1377,9 @@
 	logic  [2:0] mb_take_up = 0;				// upstream's take per voice, at U
 	int          mb_i6_n = 0;				// self-test 6's flips
 	logic        mb_i6_done = 0;
-	int          mb_i7_n = 0;				// self-test 7's poisoned reads
+	int          mb_i7_n = 0;				// self-test 7's poisoned reads (and 8's stale ones)
 	logic        mb_i7_arm = 0, mb_i7_on = 0;
+	logic [31:0] mb_i8_v = 0, mb_i8_f = 0;		// self-test 8: the value to force (the word's before the flight's first DARIA store)
 	logic        mb_chk = 0;				// the first compare after the window
 	logic        mb_in_fl = 0;				// a call in flight on either side
 	longint      mb_clk = 0, mb_lock_edge = -1;
@@ -1454,23 +1463,38 @@
 		end
 		return -1;
 	endfunction
+	// Every read at its read (header): each engine's audio read against its own RAM at the
+	// grant edge E, the edge that registers the read's address (the grant high pre-edge). The
+	// capture at E+1 takes what the RAM held at E. Both RAM models write with nonblocking
+	// assignments (daria_ram's mem_q, cache_ram_tdp_dc's), so this block, at E, reads each RAM
+	// as it was before E's writes: the expected word, exactly. A store on E itself would be a
+	// coincidence: coll_d_same in dmem; upstream's ARM never writes on the mapper's edge
+	// (cart_ram_tdp's arm_allow). The word is the engine's own address (aud_addr[14:2];
+	// upstream's ram_addr[16:2], its lanes' 15-bit index), so a wrong address at the port, a
+	// stale or undefined q, or a capture on the wrong clock all fail (read_bad, up_read_bad).
+	logic        mb_cu_pend = 0, mb_cf_pend = 0, mb_cf_fl = 0;
+	logic [14:0] mb_cu_w = 0;
+	logic [12:0] mb_cf_w = 0;
+	logic [31:0] mb_cu_exp = 0, mb_cf_exp = 0;
+	logic        mb_cu_ok = 0, mb_cf_ok = 0;	// the last capture's result, for its refresh record
 	// Every refresh by value (header): each side's refresh from its dispatch clock to the clock
 	// whose pre-edge state is IDLE again, closed at the falling edge before that clock (so the
 	// resync, at the same falling edge, sees it). Per refresh: AMPLITUDE and the sum at its end;
-	// each cart RAM read its grants made, in order, as {word, the 32-bit word the capture clock
-	// took} (mb_r*_r; n per refresh); whether a call was in flight on any of its clocks; whether
-	// another class's mask was set on any of them. A pair is compared read by read: the same
-	// words, and the same values, up to the first read of a word an ARM wrote in the flight
-	// (up_wt, d_wt from mb_fl_t0) whose values differ; that read excuses the rest of the pair
-	// (the two ARMs write it at different times; what follows, addresses included, may follow
-	// the value), provided daria_fe's value is one its memory held in the flight: the word as
-	// the flight found it or after one of its stores there (mb_hist, daria_shadow.svh), never an
-	// undefined read. Without such a read the two AMPLITUDEs and sums must be equal. A pair under
-	// another class's mask is not compared, except for that last rule: every read daria_fe's
-	// refreshes make in a flight of a word DARIA stored in it must return a value it held.
+	// each cart RAM read its grants made, in order, as {ok, word, the 32-bit word the capture
+	// clock took}, ok = the value is what its RAM held at the read (above) (mb_r*_r; n per
+	// refresh); whether a call was in flight on any of its clocks; whether another class's mask
+	// was set on any of them. A pair is compared read by read: the same words, and the same
+	// values, up to the first read of a word an ARM wrote in the flight (up_wt, d_wt from
+	// mb_fl_t0) whose values differ; that read excuses the rest of the pair (the two ARMs write
+	// it at different times; what follows, addresses included, may follow the value), provided
+	// both values are what their own RAMs held at their reads. The difference is then one of
+	// the two RAMs' contents at two times, which K1d, K2 and DARIA's call compare cover. Without
+	// such a read the two AMPLITUDEs and sums must be equal. A pair under another class's mask
+	// is not compared; its reads are still checked at their reads, as every read is.
 	logic        mb_m_oth = 0;			// a mask other than call_amp/guard_shift since the last resync
 	string       mb_oth_why = "";		// (the last such class)
 	logic        mb_x_arm = 0;			// a pair excused by an ARM-written word since the last resync
+	longint      mb_xw_n [int], mb_xw_d [int];	// per excusing word: pairs excused, of them with a difference at the end
 	longint      mb_fl_t0 = -1;			// $time (ps) of the clk_sys edge that first saw the latest flight
 	logic        mb_fl_q = 0;
 	logic        mb_ru_on = 0, mb_rf_on = 0, mb_ru_fl = 0, mb_rf_fl = 0, mb_ru_ot = 0, mb_rf_ot = 0;
@@ -1478,23 +1502,17 @@
 	logic [12:0] mb_ru_pa = 0, mb_rf_pa = 0;
 	longint      mb_ru_t0 = 0, mb_rf_t0 = 0;
 	int          mb_ru_nw = 0, mb_rf_nw = 0;
-	logic [44:0] mb_ru_r [$], mb_rf_r [$];	// {word, value} of every read, all refreshes in order
+	logic [45:0] mb_ru_r [$], mb_rf_r [$];	// {ok, word, value} of every read, all refreshes in order
 	// one entry per finished refresh: {fl, other, nreads[7:0], amplitude, sum, t0[39:0], t1[39:0]}
 	logic [105:0] mb_ru_q [$], mb_rf_q [$];
-	// a value daria_fe's memory held for word w during the flight
-	function automatic logic mb_val_ok(input logic [12:0] w, input logic [31:0] v);
-		if (!mb_hist.exists(int'(w))) return v == `FE_MEM.cart_ram.mem_q[w];
-		foreach (mb_hist[int'(w)][k]) if (mb_hist[int'(w)][k] == v) return 1;
-		return 0;
-	endfunction
 	// Close a refresh that has ended (current values: called at the falling edge), then compare
 	// the pairs that are complete.
 	task automatic mb_ref_close();
 		logic [105:0] eu, ef;
-		logic [44:0]  ru [$], rf [$];
-		logic [12:0]  w;
+		logic [45:0]  ru [$], rf [$];
+		logic [12:0]  w, xw;
 		logic         xarm, xcls, diff, fl, aw;
-		string        ws, bad, hb;
+		string        ws, bad;
 		if (mb_ru_on && dut.cart2600.mapper_audio.state == 4'd0) begin
 			mb_ru_on = 0;
 			mb_ru_q.push_back({mb_ru_fl, mb_ru_ot, 8'(mb_ru_nw), dut.cart2600.mapper_audio.amplitude,
@@ -1517,13 +1535,6 @@
 			xarm = 0;
 			bad = "";
 			ws = "";
-			// whatever the pair's class: daria_fe never takes a value its RAM did not hold in the
-			// flight from a word DARIA stored there (an undefined read meets a store of its word)
-			hb = "";
-			if (fl)
-				foreach (rf[i]) if (hb == "" && mb_hist.exists(int'(rf[i][44:32])) && !mb_val_ok(rf[i][44:32], rf[i][31:0]))
-					hb = $sformatf("read %0d of word %04x: %08x, a value daria_fe's memory never held in the flight", i, rf[i][44:32],
-						rf[i][31:0]);
 			for (int i = 0; i < (ru.size() > rf.size() ? ru.size() : rf.size()); i++) begin
 				if (i < ru.size()) ws = {ws, $sformatf(" %04x:%08x", ru[i][44:32], ru[i][31:0])};
 				else ws = {ws, " -"};
@@ -1537,10 +1548,11 @@
 					aw = fl && mb_fl_t0 >= 0 && (up_wt[w] >= mb_fl_t0 || d_wt[w] >= mb_fl_t0);
 					if (!aw) bad = $sformatf("read %0d of word %04x: %08x, upstream %08x, and no ARM wrote it in the flight", i, w,
 						rf[i][31:0], ru[i][31:0]);
-					else if (!mb_val_ok(w, rf[i][31:0])) bad = $sformatf("read %0d of word %04x: %08x, a value daria_fe's memory never held in the flight (upstream %08x)",
-						i, w, rf[i][31:0], ru[i][31:0]);
+					else if (!rf[i][45] || !ru[i][45]) bad = $sformatf("read %0d of word %04x: %08x, upstream %08x, and %s value is not what its RAM held at the read (read_bad, up_read_bad)",
+						i, w, rf[i][31:0], ru[i][31:0], !rf[i][45] ? (!ru[i][45] ? "neither" : "daria_fe's") : "upstream's");
 					else begin
 						xarm = 1;
+						xw = w;
 						ws = {ws, $sformatf(" (word %04x written in the flight: upstream's ARM at %0d ps, DARIA at %0d ps)", w,
 							up_wt[w] >= mb_fl_t0 ? up_wt[w] : -1, d_wt[w] >= mb_fl_t0 ? d_wt[w] : -1)};
 					end
@@ -1550,12 +1562,14 @@
 			if (bad == "" && !xarm && diff) bad = "AMPLITUDE or the sum differ with every read equal";
 			f1_inc(G_MB_REF_N);
 			if (fl) f1_inc(G_MB_REF_FL);
-			if (xcls && hb == "") f1_inc(G_MB_REF_XCLS);
-			else if (!xcls && xarm && bad == "") begin
+			if (xcls) f1_inc(G_MB_REF_XCLS);
+			else if (xarm && bad == "") begin
 				f1_inc(G_MB_REF_XARM);
 				mb_x_arm = 1;
+				mb_xw_n[int'(xw)]++;
+				if (diff) mb_xw_d[int'(xw)]++;
 			end
-			if (diff && hb == "" && (xcls || (xarm && bad == ""))) begin
+			if (diff && (xcls || (xarm && bad == ""))) begin
 				string xw;
 				xw = "a word an ARM wrote in the flight";
 				if (xcls) xw = {"another class, ", mb_oth_why};
@@ -1565,8 +1579,7 @@
 						xw, ef[95:88], ef[87:80], ef[79:40], ef[39:0],
 						eu[95:88], eu[87:80], eu[79:40], eu[39:0], mb_fl_t0, ws);
 			end
-			if (hb != "") bad = hb;
-			`F1_CHK(bad != "" && (!xcls || hb != ""), G_MB_REF_BAD,
+			`F1_CHK(bad != "" && !xcls, G_MB_REF_BAD,
 				$sformatf("refresh_bad: %s; the refresh ended with AMPLITUDE %02x sum %02x (clk_sys %0d..%0d), upstream's %02x %02x (%0d..%0d); in flight %0d; reads (upstream/daria_fe):%s",
 					bad, ef[95:88], ef[87:80], ef[79:40], ef[39:0], eu[95:88], eu[87:80], eu[79:40], eu[39:0], fl, ws))
 		end
@@ -2245,16 +2258,48 @@
 			mb_rf_r.delete();
 			mb_ru_pend = 0;
 			mb_rf_pend = 0;
+			mb_cu_pend = 0;
+			mb_cf_pend = 0;
 		end else begin
+			// every read at its read (above): a grant at the last edge E, its word taken now
+			// against what the engine's own RAM held at E
+			if (mb_cu_pend) begin
+				f1_inc(G_MB_URD_N);
+				mb_cu_ok = dut.cart2600.mapper_audio.ram_word_data == mb_cu_exp;
+				`F1_CHK(!mb_cu_ok, G_MB_URD_BAD,
+					$sformatf("up_read_bad: upstream's audio read of word %04x (byte %05x) took %08x; its cart RAM held %08x at the read (the grant edge, clk_sys %0d) and %08x now",
+						mb_cu_w, {mb_cu_w, 2'b00}, dut.cart2600.mapper_audio.ram_word_data, mb_cu_exp, f1_clk - 1, ft_uw(int'(mb_cu_w))))
+			end
+			if (mb_cf_pend) begin
+				f1_inc(G_MB_RD_N);
+				if (mb_cf_fl) f1_inc(G_MB_RD_FL);
+				mb_cf_ok = u_fe.crb_q == mb_cf_exp;
+				`F1_CHK(!mb_cf_ok, G_MB_RD_BAD,
+					$sformatf("read_bad: daria_fe's audio read of word %04x took %08x; dmem held %08x at the read (the grant edge, clk_sys %0d) and %08x now; in a flight %0d (DARIA's last store to it at %0d ps, the flight from %0d ps)",
+						mb_cf_w, u_fe.crb_q, mb_cf_exp, f1_clk - 1, `FE_MEM.cart_ram.mem_q[mb_cf_w], mb_cf_fl, d_wt[mb_cf_w], mb_fl_t0))
+			end
 			// the word a grant at the last edge read, as the capture takes it (upstream's engine
-			// takes ram_word_data, daria_fe's crb_q, in the clock after the grant)
+			// takes ram_word_data, daria_fe's crb_q, in the clock after the grant), with the
+			// read-time result just formed (each refresh read is a grant mb_c*_pend saw too)
 			if (mb_ru_pend && mb_ru_nw < 255) begin
-				mb_ru_r.push_back({mb_ru_pa, dut.cart2600.mapper_audio.ram_word_data});
+				mb_ru_r.push_back({mb_cu_ok, mb_ru_pa, dut.cart2600.mapper_audio.ram_word_data});
 				mb_ru_nw++;
 			end
 			if (mb_rf_pend && mb_rf_nw < 255) begin
-				mb_rf_r.push_back({mb_rf_pa, u_fe.crb_q});
+				mb_rf_r.push_back({mb_cf_ok, mb_rf_pa, u_fe.crb_q});
 				mb_rf_nw++;
+			end
+			// the reads registered at this edge: each RAM's word now, before this edge's writes
+			mb_cu_pend = dut.cart2600.audio_ram_grant;
+			if (mb_cu_pend) begin
+				mb_cu_w = dut.cart2600.mapper_audio.ram_addr[16:2];
+				mb_cu_exp = ft_uw(int'(dut.cart2600.mapper_audio.ram_addr[16:2]));
+			end
+			mb_cf_pend = u_fe.aud_take;
+			if (mb_cf_pend) begin
+				mb_cf_w = u_fe.aud_addr[14:2];
+				mb_cf_fl = mb_in_fl;
+				mb_cf_exp = `FE_MEM.cart_ram.mem_q[u_fe.aud_addr[14:2]];
 			end
 			mb_ru_pend = 0;
 			mb_rf_pend = 0;
@@ -2288,6 +2333,13 @@
 					mb_rf_pa = u_fe.aud_addr[14:2];
 					// self-test 7: this read's q poisoned if DARIA has stored its word in the flight
 					if (mb_inj == 7 && mb_in_fl && mb_fl_t0 >= 0 && d_wt[u_fe.aud_addr[14:2]] >= mb_fl_t0) mb_i7_arm = 1;
+					// self-test 8: this read's q stale if DARIA has stored its word in the flight: the
+					// word as the flight found it (mb_hist's first entry, daria_shadow.svh)
+					if (mb_inj == 8 && mb_in_fl && mb_fl_t0 >= 0 && d_wt[u_fe.aud_addr[14:2]] >= mb_fl_t0 &&
+							mb_hist.exists(int'(u_fe.aud_addr[14:2]))) begin
+						mb_i7_arm = 1;
+						mb_i8_v = mb_hist[int'(u_fe.aud_addr[14:2])][0];
+					end
 				end
 			end
 		end
@@ -2819,14 +2871,18 @@
 	// ---- self-test 7: an undefined read (header). The poisoned daria_ram returns $A5A5A5A5 to a
 	// port that reads a word the other port writes at the same time step (design 12.1); here that
 	// value is forced into daria_fe's cart RAM port-B q for the clock its audio capture takes it,
-	// on each audio read in a flight of a word DARIA has stored in that flight.
-	always @(negedge clk_sys) if (mb_inj == 7) begin
+	// on each audio read in a flight of a word DARIA has stored in that flight. Self-test 8, a
+	// stale read: the same reads take the word's value from before DARIA's first store to it in
+	// the flight instead, a value the word did hold in the flight, but not at the read.
+	always @(negedge clk_sys) if (mb_inj == 7 || mb_inj == 8) begin
 		if (mb_i7_on) begin
 			release fu_crb_q;
 			mb_i7_on = 0;
 		end
 		if (mb_i7_arm) begin
-			force fu_crb_q = 32'hA5A5_A5A5;
+			mb_i8_f = mb_i8_v;		// (changes only here: the forced q holds through the capture)
+			if (mb_inj == 8) force fu_crb_q = mb_i8_f;
+			else force fu_crb_q = 32'hA5A5_A5A5;
 			mb_i7_on = 1;
 			mb_i7_arm = 0;
 			mb_i7_n++;
@@ -2929,8 +2985,17 @@
 		$display("FE mode B refreshes: %0d pairs compared by value, %0d of them during a call in flight; excused: %0d by a word either ARM wrote in the flight, %0d by another class (%0d of the excused differ); refresh_bad %0d, refresh_count_bad %0d (%0d unpaired under another class); resyncs that overwrote a difference: %0d excused, deposit_bad %0d",
 			f1_tot[G_MB_REF_N], f1_tot[G_MB_REF_FL], f1_tot[G_MB_REF_XARM], f1_tot[G_MB_REF_XCLS], f1_tot[G_MB_REF_XDIFF],
 			f1_tot[G_MB_REF_BAD], f1_tot[G_MB_REF_CNT], f1_tot[G_MB_REF_UNP], f1_tot[G_MB_DEP_DIFF], f1_tot[G_MB_DEP_BAD]);
+		$display("FE mode B reads: every audio read against its own RAM at the read: daria_fe %0d (%0d during a call in flight), read_bad %0d; upstream %0d, up_read_bad %0d",
+			f1_tot[G_MB_RD_N], f1_tot[G_MB_RD_FL], f1_tot[G_MB_RD_BAD], f1_tot[G_MB_URD_N], f1_tot[G_MB_URD_BAD]);
+		begin
+			string xs;
+			xs = "";
+			foreach (mb_xw_n[k]) xs = {xs, $sformatf(" %04x: %0d (%0d)", k, mb_xw_n[k], mb_xw_d.exists(k) ? mb_xw_d[k] : 0)};
+			$display("FE mode B refreshes excused by an ARM-written word, per word: pairs (of them with AMPLITUDE or the sum different):%s",
+				xs == "" ? " none" : xs);
+		end
 		if (mb_inj >= 4)
-			$display("FE mode B self-test %0d: %0d injected", mb_inj, mb_inj == 7 ? longint'(mb_i7_n) :
+			$display("FE mode B self-test %0d: %0d injected", mb_inj, mb_inj >= 7 ? longint'(mb_i7_n) :
 				(mb_inj == 6 ? longint'(mb_i6_n) : mb_pc_n));
 		$display("MODE B result: %s (FE %0d bad; DARIA %0d calls differ or halted, %0d skipped; lock %0s)",
 			nbad == 0 && shadow_bad == 0 && shadow_skip == 0 && mb_lock_edge >= 0 && mb_lock_edge <= 24 ? "PASS" : "FAIL",
@@ -2998,6 +3063,8 @@
 		f1_nm[G_MB_DEP_BAD] = "deposit_bad";    f1_nm[G_MB_REF_N] = "refresh_pairs";   f1_nm[G_MB_REF_FL] = "refresh_pairs_fl";
 		f1_nm[G_MB_REF_XARM] = "refresh_x_arm"; f1_nm[G_MB_REF_XCLS] = "refresh_x_class"; f1_nm[G_MB_REF_XDIFF] = "refresh_x_differ";
 		f1_nm[G_MB_REF_UNP] = "refresh_unpaired"; f1_nm[G_MB_DEP_DIFF] = "deposit_differ";
+		f1_nm[G_MB_RD_BAD] = "read_bad";        f1_nm[G_MB_URD_BAD] = "up_read_bad";   f1_nm[G_MB_RD_N] = "reads_fe";
+		f1_nm[G_MB_RD_FL] = "reads_fe_fl";      f1_nm[G_MB_URD_N] = "reads_up";
 `endif
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
@@ -3021,7 +3088,8 @@
 			case (c)
 				G_MB_DET_BAD, G_MB_PHB_BAD, G_MB_LOCK_LATE, G_MB_UNLOCK, G_MB_GWIN_BAD, G_MB_WR_SH_G, G_MB_RD_SH_G,
 				G_MB_WR_SH_D, G_MB_RD_SH_D, G_MB_COLL_SAME, G_MB_COLL_LD, G_MB_COLL_WW, G_MB_K1D_BAD,
-				G_MB_CALL_BAD, G_MB_LOCK_EDGE, G_MB_REF_BAD, G_MB_REF_CNT, G_MB_DEP_BAD: f1_bad[c] = 1;
+				G_MB_CALL_BAD, G_MB_LOCK_EDGE, G_MB_REF_BAD, G_MB_REF_CNT, G_MB_DEP_BAD, G_MB_RD_BAD,
+				G_MB_URD_BAD: f1_bad[c] = 1;
 				default: ;
 			endcase
 `endif
@@ -3063,6 +3131,8 @@
 			$display("FE mode B self-test 6: state RAM word FB (voice 0's returned frequency) bit 8 flipped in dmem while u_call reads the returns, every CDF call");
 		else if (mb_inj == 7)
 			$display("FE mode B self-test 7: $A5A5A5A5 (the poisoned RAM's undefined read) forced into daria_fe's port-B q for each audio read in a flight of a word DARIA has stored in it");
+		else if (mb_inj == 8)
+			$display("FE mode B self-test 8: a stale read: daria_fe's port-B q forced to the word's value before DARIA's first store to it in the flight, for each audio read in a flight of a word DARIA has stored in it");
 `endif
 		fd_f1 = $fopen({out, "fe.csv"}, "w");
 		$fwrite(fd_f1, "frame");

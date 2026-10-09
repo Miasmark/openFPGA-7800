@@ -70,6 +70,8 @@
 //     writes (coll_d_same); +mb_inj=5, on each shared edge, a daria_fe write of
 //     the cart RAM word DARIA's port A is at (coll_d_ld_same for its loads,
 //     coll_ww_same for its stores). Only the counters see these accesses.
+//     +mb_inj=8 keeps mb_hist, each word's values in a call's flight, for its
+//     stale read (fe_shadow.svh).
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -525,11 +527,12 @@
 	longint d_stores = 0, d_shared_stores = 0, d_loads = 0, d_shared_loads = 0, fe_rd_n = 0, fe_wr_n = 0;
 	longint mb_d_prev_t = -1;		// the last clk_d rising edge (ps)
 	longint mb_pc_n = 0;			// the positive controls' injected accesses (+mb_inj=4/5)
-	// The values each word of this RAM held during a call's flight, for fe_shadow.svh's refresh
-	// compare (mb_val_ok): at the first store to a word, its value before it, then its value
-	// after each store, DARIA's and daria_fe's (the latter while a call is in flight).
-	// Emptied at the clk_sys edge that first sees a call in flight (either side's busy), as
-	// fe_shadow.svh's mb_fl_t0.
+	// The values each word of this RAM held during a call's flight, for fe_shadow.svh's
+	// self-test 8 (+mb_inj=8, a stale read: the word as the flight found it); kept only then.
+	// At the first store to a word, its value before it, then its value after each store,
+	// DARIA's and daria_fe's (the latter while a call is in flight). Emptied at the clk_sys edge
+	// that first sees a call in flight (either side's busy), as fe_shadow.svh's mb_fl_t0. (The
+	// refresh compare no longer reads it: each read is checked against the RAM at the read.)
 	logic [31:0] mb_hist [int][$];
 	logic        mb_hist_fl = 0;
 	function automatic void mb_hist_add(input int w, input logic [3:0] be, input logic [31:0] wd);
@@ -572,7 +575,7 @@
 			int w;
 			w = int'(mb_fe_a);
 			fe_wr_n++;
-			if (dut.arm_call_busy || u_fe.arm_call_busy) mb_hist_add(w, fu_crb_be, fu_crb_wd);
+			if (mb_inj == 8 && (dut.arm_call_busy || u_fe.arm_call_busy)) mb_hist_add(w, fu_crb_be, fu_crb_wd);
 			if (d_wt[w] == $time) coll_ww_same++;
 			fe_wt[w] = $time;
 		end
@@ -605,7 +608,7 @@
 			int w;
 			w = int'(d_d_addr[14:2]);
 			d_stores++;
-			mb_hist_add(w, d_ram_be, d_ram_wdata);
+			if (mb_inj == 8) mb_hist_add(w, d_ram_be, d_ram_wdata);
 			if (mb_shared_d($time)) d_shared_stores++;
 			if ($time - fe_rt[w] < COLL_PS) coll_d++;
 			if (fe_rt[w] == $time) coll_d_same++;

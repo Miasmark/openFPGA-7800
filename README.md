@@ -49,7 +49,11 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   score cart stays available alongside it, since each has its own file: a
   cart whose header asks for both (such as Triple Punch) gets both.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
-  core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
+  core skips it, as MiSTer does. Turn off *Skip BIOS* to boot 7800 games
+  through it. Unlike on MiSTer, 2600 games always start directly, without
+  the BIOS, whatever the setting: the BIOS recognises a 2600 cartridge by a
+  bus clash that the core does not reproduce, so it would miss some 2600
+  games and never start them.
 - **The BupChip** (from 2.1.1), the Souper cartridge's music co-processor:
   Rikki & Vikki plays its whole soundtrack. On MiSTer it is firmware running
   on a soft ARM7TDMI; this port runs the same, unmodified firmware on
@@ -342,7 +346,7 @@ files go in `/Assets/7800/common/`:
 
 | File | What it is | Size | Without it |
 |---|---|---|---|
-| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. Only one can be installed: to boot PAL carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
+| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. With it, and *Skip BIOS* off, 7800 games boot through the BIOS; 2600 games always start directly, without it. Only one can be installed: to boot PAL 7800 carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
 | `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games load through the core's own loader, without the tape loading screen |
 | `bupchip.bin` | BupChip firmware (CoreTone), from MiSTer's `bupchip.hex`: `python3 tools/hex2bin.py bupchip.hex > bupchip.bin` ([docs/BUPCHIP.md](docs/BUPCHIP.md)) | 7,824 bytes (CRC32 `95b8b4f8`); up to 16 KiB | Souper games run without the BupChip's music |

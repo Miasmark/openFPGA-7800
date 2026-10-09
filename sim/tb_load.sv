@@ -32,6 +32,14 @@ module tb_load;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
+	// +bios=FILE: a 7800 BIOS through its data slot, before the cartridge
+	// (+bioslast: after it). +skipbios=0 turns Skip BIOS off (default 1).
+	// +nocart: no cartridge download, so with +bios the BIOS boots alone.
+	logic bios_download = 1'b0, skip_bios = 1'b1, nocart = 1'b0;
+	initial begin
+		void'($value$plusargs("skipbios=%d", skip_bios));
+		nocart = $test$plusargs("nocart");
+	end
 	logic pokey_irq_on = 1'b0;
 	logic overscan_on = 1'b0;
 	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
@@ -111,12 +119,12 @@ module tb_load;
 		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
 `endif
 		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
-		.cart_download(cart_download), .bios_download(1'b0),
+		.cart_download(cart_download), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.ioctl_wr(ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
 		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
-		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
+		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
@@ -270,6 +278,56 @@ module tb_load;
 		if (!old_wr41 && !dut.RW && dut.bios_addr == 16'h0041) main_writes <= main_writes + 1;
 		old_wr4k <= !dut.RW && dut.bios_addr == 16'h4000;
 		if (!old_wr4k && !dut.RW && dut.bios_addr == 16'h4000) audf_writes <= audf_writes + 1;
+	end
+
+	// ---------------- boot probe ----------------
+	// At each release of the core's reset (top.sv's effective_reset): the
+	// BIOS switch as the core got it (use_bios, and top.sv's bypass_bios,
+	// tia_mode and cart_present). Then the 6502's reset vector, read at
+	// $FFFC/$FFFD, and its first opcode fetch, each with where the bytes came
+	// from: the BIOS ROM (top.sv's bios_sel) or the cartridge slot. Then, 50
+	// ms after the release (or at the next reset), the CPU's reads from the
+	// BIOS ROM so far, and tia_en. run_sim.sh's BIOS tests check these lines.
+	`define BOOT_CPU dut.main.cpu_inst.cpu
+	int boot_n = 0;
+	logic boot_rst_d = 1'b1, boot_on = 1'b0, boot_fetched = 1'b0;
+	logic [1:0] boot_vec_seen = 2'b00, boot_vec_bios = 2'b00;
+	logic [15:0] boot_vec = 16'h0000;
+	longint boot_t0 = 0, boot_bios_rd = 0;
+	function automatic string boot_src(logic [1:0] from_bios);
+		return from_bios == 2'b11 ? "the BIOS ROM" : from_bios == 2'b00 ? "the cartridge slot" : "both";
+	endfunction
+	always @(posedge clk_sys) begin
+		boot_rst_d <= dut.main.effective_reset;
+		if (boot_on && (dut.main.effective_reset || $time - boot_t0 >= 50000000)) begin
+			$display("BOOT %0d after %0d ms: %0d CPU reads from the BIOS ROM, tia_en %0d",
+				boot_n, ($time - boot_t0) / 1000000, boot_bios_rd, dut.main.tia_en);
+			boot_on = 1'b0;
+		end
+		if (boot_rst_d && !dut.main.effective_reset) begin
+			boot_n++;
+			boot_on = 1'b1; boot_fetched = 1'b0; boot_vec_seen = 2'b00; boot_vec_bios = 2'b00;
+			boot_bios_rd = 0; boot_t0 = $time;
+			$display("BOOT %0d at %0d ms: use_bios %0d, bypass_bios %0d, tia_mode %0d, cart_present %0d",
+				boot_n, $time / 1000000, dut.use_bios, dut.main.bypass_bios, dut.main.tia_mode, dut.main.cart_present);
+		end
+		// A read cycle of the CPU's own, at the edge where it takes the byte
+		if (boot_on && `BOOT_CPU.core_phi2_en && `BOOT_CPU.rw_n) begin
+			if (dut.main.bios_sel) boot_bios_rd++;
+			for (int k = 0; k < 2; k++)
+				if (`BOOT_CPU.addr_out == 16'hFFFC + 16'(k) && !boot_vec_seen[k]) begin
+					boot_vec_seen[k] = 1'b1;
+					boot_vec_bios[k] = dut.main.bios_sel;
+					if (k == 0) boot_vec[7:0] = `BOOT_CPU.data_in; else boot_vec[15:8] = `BOOT_CPU.data_in;
+				end
+			// The first SYNC after the vector: the reset sequence raises SYNC
+			// once before it, on its first cycle.
+			if (`BOOT_CPU.sync && boot_vec_seen == 2'b11 && !boot_fetched) begin
+				boot_fetched = 1'b1;
+				$display("BOOT %0d vector: $%04x from %0s, first opcode fetch at $%04x from %0s", boot_n, boot_vec,
+					boot_src(boot_vec_bios), `BOOT_CPU.addr_out, boot_src({2{dut.main.bios_sel}}));
+			end
+		end
 	end
 
 	// ---------------- Supercharger probe (+arprobe) ----------------
@@ -561,6 +619,40 @@ module tb_load;
 	bit have_save = 0;
 	int save_diffs;
 
+	// +bios=FILE: the 7800 BIOS through its data slot (0x103, bridge address
+	// 0x02000000, data.json's), at most 16 KiB.
+	string bios_path;
+	logic [7:0] bios_img [$];
+	task automatic load_bios();
+		int n;
+		if ($value$plusargs("bios=%s", bios_path)) begin
+			bios_img.delete();
+			fd = $fopen(bios_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", bios_path); $finish; end
+			c = $fgetc(fd);
+			while (c != -1) begin bios_img.push_back(c[7:0]); c = $fgetc(fd); end
+			$fclose(fd);
+			n = bios_img.size();
+			while (bios_img.size() % 4) bios_img.push_back(8'hFF);
+			bios_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			for (int i = 0; i < bios_img.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = 32'h02000000 + i;
+				bridge_wr_data = {bios_img[i], bios_img[i+1], bios_img[i+2], bios_img[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			bios_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
+			$display("BIOS slot: %0d byte file, bios_loaded %0d, address mask %04x, skip_bios %0d",
+				n, dut.bios_loaded, dut.bios_mask, skip_bios);
+		end
+	endtask
+
 `ifdef POCKET_BUPCHIP
 	// +bupfw=FILE: the BupChip firmware (bupchip.bin) through its data slot
 	// (0x109, bridge address 0x0A000000), before the cartridge, or after it
@@ -607,10 +699,12 @@ module tb_load;
 	initial begin
 		if (!$value$plusargs("image=%s", path)) path = "load_test.a78";
 		if (!$value$plusargs("audf=%d", audf)) audf = 7;
-		fd = $fopen(path, "rb");
-		if (fd == 0) begin $display("cannot open %s", path); $finish; end
-		while ((c = $fgetc(fd)) != -1) image.push_back(c[7:0]);
-		$fclose(fd);
+		if (!nocart) begin
+			fd = $fopen(path, "rb");
+			if (fd == 0) begin $display("cannot open %s", path); $finish; end
+			while ((c = $fgetc(fd)) != -1) image.push_back(c[7:0]);
+			$fclose(fd);
+		end
 		image_n = image.size();
 		while (image.size() % 4) image.push_back(8'hFF);
 
@@ -653,6 +747,7 @@ module tb_load;
 			end
 			have_save = 1;
 		end
+		if (!$test$plusargs("bioslast")) load_bios();
 		// +hscfw=FILE / +arfw=FILE: load the HSC firmware / Supercharger BIOS
 		// through their data slots first, as the Pocket does at core start.
 		for (int slot = 0; slot < 2; slot++)
@@ -689,27 +784,33 @@ module tb_load;
 		if (!$test$plusargs("bupfwlast")) load_bupfw();
 `endif
 		repeat (100) @(posedge clk_74a);
-		cart_download = 1'b1;
-		repeat (100) @(posedge clk_74a);
-		// One 32 bit bridge write every 80 clk_74a, big endian, as APF does.
-		for (int i = 0; i < image.size(); i += 4) begin
-			@(posedge clk_74a);
-			bridge_addr = i;
-			bridge_wr_data = {image[i], image[i+1], image[i+2], image[i+3]};
-			bridge_wr = 1'b1;
-			@(posedge clk_74a);
-			bridge_wr = 1'b0;
-			repeat (78) @(posedge clk_74a);
+		if (!nocart) begin
+			cart_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			// One 32 bit bridge write every 80 clk_74a, big endian, as APF does.
+			for (int i = 0; i < image.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = i;
+				bridge_wr_data = {image[i], image[i+1], image[i+2], image[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			cart_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
 		end
-		repeat (2000) @(posedge clk_74a);
-		cart_download = 1'b0;
-		repeat (100) @(posedge clk_sys);
 `ifdef POCKET_BUPCHIP
 		if ($test$plusargs("bupfwlast")) begin
 			repeat (100) @(posedge clk_74a);
 			load_bupfw();
 		end
 `endif
+		if ($test$plusargs("bioslast")) begin
+			repeat (100) @(posedge clk_74a);
+			load_bios();
+		end
 
 		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
 		begin

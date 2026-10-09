@@ -149,6 +149,100 @@ echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
 ./obj_load/vtb +image=load_test.a26 +audf=14 | grep -E "LOAD|TONE"
 
+# The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
+# and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
+# 2600 image starts directly, as with Skip BIOS on, whatever the load order.
+# tb_load.sv's BOOT lines give, at each reset release, what the core was
+# told (use_bios, bypass_bios, tia_mode, cart_present), where the 6502's
+# reset vector and first opcode came from (the BIOS ROM or the cartridge
+# slot), and its reads from the BIOS ROM over the next 50 ms. Needs a 7800
+# BIOS image: BIOS=FILE, by default the 7800 OpenBIOS built locally at
+# work/bupchip/bios/7800openbios.bin (docs/daria_fe/lanes/G_step7_resets.md,
+# 8.1). The image is not in this repository and must never be committed.
+# Skipped without it.
+BIOS="${BIOS:-$HERE/work/bupchip/bios/7800openbios.bin}"
+if [ -f "$BIOS" ]; then
+	echo "-- 7800 BIOS loaded ($(basename "$BIOS")): 2600 images start directly, 7800 images and an empty slot boot through it:"
+	BD="$WORK/bios_boot"
+	mkdir -p "$BD"; ln -sfn "$WORK/rtl" "$BD/rtl"
+	cp load_test.a78 load_test.a26 "$BD/"
+	# The BIOS takes a cart as a 7800 one only if $FFF9's low nibble is 3 or 7
+	# (its high nibble: where the ROM starts). load_test.a78 has $FF there, so
+	# the BIOS would start it in 2600 mode; this copy has $C7.
+	python3 -c "import sys; d = bytearray(open(sys.argv[1], 'rb').read()); d[-7] = 0xC7; open(sys.argv[2], 'wb').write(d)" \
+		load_test.a78 "$BD/load_test_c7.a78"
+	bios_ok=1
+	# bios_case <log> <title> <plusargs...>; the regexes its log must match
+	# come on stdin, one per line.
+	bios_case() {
+		local log="$1" title="$2" pat; shift 2
+		echo "  $title:"
+		(cd "$BD" && ./../obj_load/vtb "$@" < /dev/null > "$log.log")
+		grep -E "^(BOOT|TONE|IMAGE2)" "$BD/$log.log" | sed 's/^/    /'
+		while read -r pat; do
+			grep -Eq "$pat" "$BD/$log.log" || { echo "    MISSING: $pat"; bios_ok=0; }
+		done
+	}
+	TONE_OK='^TONE .* ratio (0\.99[0-9]|1\.00[0-9])$'
+	bios_case a26 "2600 image, Skip BIOS off (expect bypass_bios 1, tia_mode 1, the cart's vector \$F000, no BIOS ROM read, its tone)" \
+		+image=load_test.a26 +audf=14 +bios="$BIOS" +skipbios=0 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 0, bypass_bios 1, tia_mode 1, cart_present 1$
+		^BOOT 1 vector: \\\$f000 from the cartridge slot, first opcode fetch at \\\$f000 from the cartridge slot$
+		^BOOT 1 after 50 ms: 0 CPU reads from the BIOS ROM, tia_en 1$
+		$TONE_OK
+		EOF
+	bios_case a26_bioslast "the same, the BIOS loaded after the cartridge" \
+		+image=load_test.a26 +audf=14 +bios="$BIOS" +bioslast +skipbios=0 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 0, bypass_bios 1, tia_mode 1, cart_present 1$
+		^BOOT 1 vector: \\\$f000 from the cartridge slot, first opcode fetch at \\\$f000 from the cartridge slot$
+		^BOOT 1 after 50 ms: 0 CPU reads from the BIOS ROM, tia_en 1$
+		$TONE_OK
+		EOF
+	bios_case a78 "7800 image, Skip BIOS off (expect bypass_bios 0, the vector and first opcode from the BIOS ROM)" \
+		+image=load_test_c7.a78 +audf=7 +bios="$BIOS" +skipbios=0 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 1, bypass_bios 0, tia_mode 0, cart_present 1$
+		^BOOT 1 vector: \\\$[0-9a-f]{4} from the BIOS ROM, first opcode fetch at \\\$[0-9a-f]{4} from the BIOS ROM$
+		^BOOT 1 after 50 ms: [1-9][0-9]* CPU reads from the BIOS ROM, tia_en 0$
+		EOF
+	bios_case nocart "no cartridge, Skip BIOS off (expect the BIOS alone: cart_present 0, the BIOS ROM)" \
+		+nocart +bios="$BIOS" +skipbios=0 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 1, bypass_bios 0, tia_mode 0, cart_present 0$
+		^BOOT 1 vector: \\\$[0-9a-f]{4} from the BIOS ROM, first opcode fetch at \\\$[0-9a-f]{4} from the BIOS ROM$
+		^BOOT 1 after 50 ms: [1-9][0-9]* CPU reads from the BIOS ROM, tia_en 0$
+		EOF
+	bios_case a78_then_a26 "7800 image, then a 2600 image at 150 ms (expect the BIOS, then the 2600 image directly)" \
+		+image=load_test_c7.a78 +bios="$BIOS" +skipbios=0 +wav=300 +image2=load_test.a26 +image2at=150 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 1, bypass_bios 0, tia_mode 0, cart_present 1$
+		^BOOT 1 vector: \\\$[0-9a-f]{4} from the BIOS ROM, first opcode fetch at \\\$[0-9a-f]{4} from the BIOS ROM$
+		^BOOT 1 after 50 ms: [1-9][0-9]* CPU reads from the BIOS ROM, tia_en 0$
+		^BOOT 2 at [0-9]+ ms: use_bios 0, bypass_bios 1, tia_mode 1, cart_present 1$
+		^BOOT 2 vector: \\\$f000 from the cartridge slot, first opcode fetch at \\\$f000 from the cartridge slot$
+		^BOOT 2 after 50 ms: 0 CPU reads from the BIOS ROM, tia_en 1$
+		EOF
+	bios_case a26_then_a78 "2600 image, then a 7800 image at 150 ms (expect the 2600 image directly, then the BIOS)" \
+		+image=load_test.a26 +bios="$BIOS" +skipbios=0 +wav=300 +image2=load_test_c7.a78 +image2at=150 <<-EOF
+		^BOOT 1 at [0-9]+ ms: use_bios 0, bypass_bios 1, tia_mode 1, cart_present 1$
+		^BOOT 1 vector: \\\$f000 from the cartridge slot, first opcode fetch at \\\$f000 from the cartridge slot$
+		^BOOT 1 after 50 ms: 0 CPU reads from the BIOS ROM, tia_en 1$
+		^BOOT 2 at [0-9]+ ms: use_bios 1, bypass_bios 0, tia_mode 0, cart_present 1$
+		^BOOT 2 vector: \\\$[0-9a-f]{4} from the BIOS ROM, first opcode fetch at \\\$[0-9a-f]{4} from the BIOS ROM$
+		^BOOT 2 after 50 ms: [1-9][0-9]* CPU reads from the BIOS ROM, tia_en 0$
+		EOF
+	for img in a26 a78; do
+		[ $img = a26 ] && { what=2600; audf=14; tia=1; vec=f000; } || { what=7800; audf=7; tia=0; vec=c000; }
+		bios_case skip_$img "$what image, Skip BIOS on (expect no BIOS: bypass_bios 1, the cart's vector \$$vec, its tone)" \
+			+image=load_test.$img +audf=$audf +bios="$BIOS" +skipbios=1 <<-EOF
+			^BOOT 1 at [0-9]+ ms: use_bios 0, bypass_bios 1, tia_mode $tia, cart_present 1$
+			^BOOT 1 vector: \\\$$vec from the cartridge slot, first opcode fetch at \\\$$vec from the cartridge slot$
+			^BOOT 1 after 50 ms: 0 CPU reads from the BIOS ROM, tia_en $tia$
+			$TONE_OK
+			EOF
+	done
+	[ "$bios_ok" = 1 ] && echo "BIOS_BOOT pass" || echo "BIOS_BOOT FAIL"
+else
+	echo "-- 7800 BIOS boot rule: skipped (no BIOS image at $BIOS; set BIOS=FILE)"
+fi
+
 # The BupChip end to end in the whole core: its firmware through the
 # bupchip.bin data slot (after the cartridge, in data.json's order, as the
 # Pocket loads them), a Souper cartridge (souper_test.py: a 6502 program

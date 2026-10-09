@@ -869,10 +869,21 @@ always @(posedge clk_sys) rnd <= {rnd[14:0], rnd[15] ^ rnd[13] ^ rnd[12] ^ rnd[1
 wire VBlank_orig;
 wire [7:0] core_r, core_g, core_b;
 
-// As on MiSTer, running the real BIOS and running a 2600 image natively are
-// the two sides of one switch: with the BIOS in charge it finds the 2600
-// cartridge itself, the way the console does.
-wire use_bios = bios_loaded & ~skip_bios;
+// The BIOS runs only when one is loaded and Skip BIOS is off, and then only
+// for a 7800 image or for an empty slot. A 2600 image always starts
+// directly, as with Skip BIOS on (docs/DARIA_CORE.md, decision 11). A
+// console's BIOS recognises a 2600 cartridge by a bus clash: the cartridge
+// decodes only A0-A12, so it also answers at $1BEA, and RAM written there
+// does not read back. The core does not model that clash, so the BIOS
+// decides from its later tests, and for some images (DPC+ revision 1,
+// CDFJ+) it never starts the 2600 game
+// (docs/daria_fe/lanes/G_step7_resets.md, 8.8). MiSTer's wrapper
+// (Atari7800.sv) is different: with Bypass Bios set to No it runs the BIOS
+// for 2600 images too, giving top.sv tia_mode 0 and bypass_bios 0.
+// tia_mode is 0 during a load and settles at its end while old_cart_download
+// still holds the core in reset, so bypass_bios and top.sv's tia_mode
+// change together, before the reset is released.
+wire use_bios = bios_loaded & ~skip_bios & ~tia_mode;
 
 // SRAM side of the system module (POCKET_SRAM)
 wire [17:0] cartram_addr;

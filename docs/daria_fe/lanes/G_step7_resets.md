@@ -277,6 +277,8 @@ All under `sim/work/bupchip/daria/` (game data, not in git):
 
 ## 8. `use_bios`: game runs through the 7800 OpenBIOS
 
+**Decided** (owner, 2026-10-09; `docs/DARIA_CORE.md`, decision 11): the core never runs the BIOS for a 2600 image. With a BIOS loaded and "skip BIOS" off, a 2600 image now starts directly, as with "skip BIOS" on: `use_bios = bios_loaded & ~skip_bios & ~tia_mode` (`atari7800_pocket.sv:886`). The BIOS runs only for a 7800 image or an empty slot. So the finding of 8.8 no longer occurs on the Pocket. This section describes the core before that change: 8.2's `atari7800_pocket.sv` lines are the old ones, and `tb_daria.sv`'s `+bios`, which wires `use_bios` itself, still boots 2600 images through the BIOS. `sim/run_sim.sh` checks the new rule (`BIOS_BOOT`).
+
 ### 8.1 The BIOS image
 
 The image is the 7800 OpenBIOS, built with dasm from `github.com/7800-devtools/7800openbios` at `b8bc745`: `sim/work/bupchip/bios/7800openbios.bin`, 16,384 bytes, md5 `659607f1…`. Its source is CC0, but the image embeds the game KiloParsec, which is all rights reserved. So the image and everything a run derives from it stay in `sim/work`, and nothing of it is in git. The Atari BIOS dump in the same directory (`7800_ntsc.rom`) was not used.
@@ -303,7 +305,7 @@ On the Pocket, `use_bios = bios_loaded & ~skip_bios` (`atari7800_pocket.sv:875`)
   - the end of a run that cannot reach 2600 mode. `bo_stop` is set when the BIOS locks INPTCTRL with `tia_en` 0, which keeps 7800 mode until a reset, or when `tia_en` has not risen `+bios_wait=N` clk_sys after the release (default 100,000,000; 0 for no limit). Without it, such a run never ends: the frame counter counts the TIA's VSYNCs (8.8);
   - the "BIOS" lines of section 8.4. They are printed only with `+bios`, and their `daria_fe` part only in a stage-1 `FE=1` build. Their counts cover the first boot, from the release to the first `tia_en`. In `bios3` the `BIOS pre_lock:` line's two port-A counts (`bf_gr_addr`, `bf_gr_word`) also counted a later boot while its grant count (`bf_gr_up`) did not, so after a console reset the line contradicted itself ("4005 upstream grants before tia_en, 8010 with port A at another word"). The review asked for one scope: `bios4` counts both over the first boot too (`bo_boot` in their condition, `tb_daria.sv:1164`), and the line says "before the first `tia_en`". The second boot's `pre_lock` count is in `fe.csv`, and its port-A condition in `bios3`'s run (8.6).
 
-The existing lines were changed in place, in `bios4` too (three lines changed, none added). No line was added before the `$finish` (line 965), so `run.log`'s "`tb_daria.sv:965: Verilog $finish`" line is unchanged.
+The existing lines were changed in place, in `bios4` too (five lines changed in three places, three of them a comment: `tb_daria.sv:1154-1156`, `:1164` and `:1224`; none added). No line was added before the `$finish` (line 965), so `run.log`'s "`tb_daria.sv:965: Verilog $finish`" line is unchanged.
 
 **Without `+bios`, the DUT sees exactly what it saw before.** `use_bios` stays 0, so `bypass_bios` is 1 and `tia_mode` is the bench's own, as before. The ROM is all zero, so `bios_q` stays 0, the value `bios_out` was tied to. `AB` is an output. `bo_stop` is set only by the new block, and only with `+bios`. No other file was changed: `fe_shadow.svh` already rebuilt `read_DB` with `bios_sel ? bios_out` (`fe_shadow.svh:1372-1373`).
 
