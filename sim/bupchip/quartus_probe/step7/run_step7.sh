@@ -181,6 +181,7 @@ echo "free on /: ${avail} MB"
 	echo "$(date -u +%H:%M:%S) ${s:-?} MB in $TAG, peak $peak MB, $(df -BM --output=avail / | tail -1 | tr -dc 0-9) MB free" >> "$dir/du.log"
 	sleep 30
 done ) &
+dupid=$!
 t0=$(date +%s)
 echo "== compile: started $(date -u '+%H:%M:%S UTC')"
 set +e
@@ -193,14 +194,17 @@ grep -m2 "Quartus Prime" "$dir/quartus.log" | sed 's/^/   /'
 grep -E "Peak virtual memory|Elapsed time" "$dir/quartus.log" | sed 's/^ *//; s/^/   /' | head -12
 if [ "$rc" != 0 ] || [ ! -f "$dir/fpga/output_files/ap_core.fit.summary" ]; then
 	touch "$dir/.done"
-	wait
+	wait "$dupid"
 	echo "run_step7.sh: the compile failed, see $dir/quartus.log" >&2
 	[ "${KEEP_DB:-0}" != 0 ] || rm -rf "$dir/fpga/db" "$dir/fpga/incremental_db"
 	exit 1
 fi
 report
 touch "$dir/.done"
-wait
+# Only the du poller: a bare wait would also wait for the tee of the log's
+# process substitution (bash 5.2), whose input is this script's own output,
+# so it would never return and the Quartus lock would never be released.
+wait "$dupid"
 echo "== disk peak $(tail -1 "$dir/du.log" | sed 's/.*peak \([0-9]*\) MB.*/\1/') MB"
 [ "${KEEP_DB:-0}" != 0 ] || rm -rf "$dir/fpga/db" "$dir/fpga/incremental_db" "$dir/fpga/output_files/ap_core.sof"
 echo "== $TAG done: checks $([ "$crc" = 0 ] && echo PASS || echo FAIL) ($dir/checks_summary.txt); report $([ "$rrc" = 0 ] && echo ran || echo FAILED); database $([ "${KEEP_DB:-0}" != 0 ] && echo kept || echo deleted)"

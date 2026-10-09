@@ -323,11 +323,16 @@ say "\n## (g) no cart2600 path into sram_ctrl or the SRAM pads except through sr
 set c26 [get_nets -nowarn {*|cart2600|*}]
 set n26 [csize $c26]
 say "  nets in cart2600 (*|cart2600|*): $n26"
-set sram_all [get_registers -nowarn {*|sram_ctrl:sram|*}]
+foreach x [names $c26 8] { say "    $x" }
+set c26r [regs "cart2600's registers" {*|cart2600:cart2600|*}]
+set sram_all [regs "sram_ctrl's registers" {*|sram_ctrl:sram|*}]
 set tq [regs "sram|t_*_q" {*|sram_ctrl:sram|t_*_q*}]
-set sram_end [remove_from_collection $sram_all $tq]
+# remove_from_collection fails (a warning, and no removal) when the second
+# collection is empty, as it is on a tree without Fix B.
+set sram_end [expr {[csize $tq] > 0 ? [remove_from_collection $sram_all $tq] : $sram_all}]
 set pads [get_ports -nowarn {sram_a[*] sram_dq[*] sram_oe_n sram_we_n sram_ub_n sram_lb_n}]
-say "  sram_ctrl registers: [csize $sram_all], of them t_*_q: [csize $tq]; SRAM pads: [csize $pads]"
+say "  sram_ctrl registers: [csize $sram_all], of them t_*_q: [csize $tq]; SRAM pads: [csize $pads] (outputs with no output delay: their pad registers are sram_ctrl's)"
+foreach x [names $pads 6] { say "    $x" }
 if {$n26 == 0 || [csize $sram_all] == 0} {
 	check "g" FAIL "no such cell: cart2600's nets or sram_ctrl's registers"
 } else {
@@ -346,6 +351,20 @@ if {$n26 == 0 || [csize $sram_all] == 0} {
 		}
 		say "  paths through cart2600 into $lab: $n"
 		incr ng $n
+		# Of these, the ones that start at a cart2600 register (plan 5.4 (g):
+		# "from cart2600 cells"); the count above also takes in paths that
+		# pass through cart2600's logic from outside it.
+		set nr 0
+		if {[csize $c26r] > 0} {
+			foreach_in_collection p [get_timing_paths -setup -from $c26r -to $coll -npaths 100000 -pairs_only] {
+				if {$nr < 10} {
+					say [format "    from a cart2600 register into %s: slack %.3f %d levels %s -> %s" $lab [get_path_info $p -slack] \
+						[get_path_info $p -num_logic_levels] [get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
+				}
+				incr nr
+			}
+		}
+		say "  of them from cart2600's registers into $lab: $nr"
 		if {$n > 0} { report_timing -setup -through $c26 -to $coll -npaths 20 -detail full_path -append -file fixb.rpt }
 	}
 	set nch 0
@@ -493,20 +512,38 @@ report_timing -setup -to_clock $sdram -npaths 20 -nworst 1 -detail full_path -fi
 }
 # ---- (p) the sample requester's chain (plan 2.2): psram -> cache / daria_smp -> psram, clk_arm ------------------------
 section p {
-set ps [get_registers -nowarn {*|psram:bup_psram|*}]
+# Synthesis folds rx and rd_req into the writer's psram_read_en LUT (Q0: the
+# chain's worst path is read_avail -> writer|psram_read_en -> psram's
+# registers, 3 levels, with no cache net on it), so the chain is found from
+# psram's read_avail through the writer's psram_read_en net, not through the
+# cache's nets.
+say "\n## (p) psram_read_avail -> rx -> rd_req -> psram_read_en (plan 2.2)"
+set ps [regs "psram's registers" {*|psram:bup_psram|*}]
+set ra [regs "psram's read_avail" {*|psram:bup_psram|read_avail}]
+set en [get_nets -nowarn {*|bupchip|writer|psram_read_en}]
+say "  the writer's psram_read_en net (*|bupchip|writer|psram_read_en): [csize $en]"
 set smpn [get_nets -nowarn {*|bupchip|smp|*}]
-if {[csize $ps] == 0} {
-	check "p" FAIL "no such cell: psram:bup_psram"
+say "  daria_smp's nets (*|bupchip|smp|*): [csize $smpn]"
+if {[csize $ps] == 0 || [csize $ra] == 0 || [csize $en] == 0} {
+	check "p" FAIL "no such cell: psram:bup_psram's registers, its read_avail, or the writer's psram_read_en net"
 } else {
-	set v "-"
+	set v ""
 	set lv "-"
-	set thr [expr {[csize $smpn] > 0 ? $smpn : [get_nets -nowarn {*|bupchip|cache|*}]}]
-	if {[csize $thr] == 0} { error "no nets in daria_smp or the cache (*|bupchip|smp|*, *|bupchip|cache|*)" }
-	foreach_in_collection p [get_timing_paths -setup -from $ps -through $thr -to $ps -npaths 1] {
+	foreach_in_collection p [get_timing_paths -setup -from $ra -through $en -to $ps -npaths 1] {
 		set v [format "%.3f" [get_path_info $p -slack]]
 		set lv [get_path_info $p -num_logic_levels]
+		say [format "  worst: slack %s, %s levels, %s -> %s" $v $lv [get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
 	}
-	check "p" INFO "psram_read_avail -> rx -> rd_req (through [expr {[csize $smpn] > 0 ? "daria_smp" : "the cache"}]) -> psram_read_en: worst setup $v ns, $lv levels"
+	set vs "-"
+	if {[csize $smpn] > 0} {
+		foreach_in_collection p [get_timing_paths -setup -from $ra -through $smpn -npaths 1] { set vs [format "%.3f" [get_path_info $p -slack]] }
+		say "  worst from read_avail through daria_smp's nets: $vs"
+	}
+	if {$v eq ""} {
+		check "p" FAIL "no path from psram's read_avail through the writer's psram_read_en into psram's registers"
+	} else {
+		check "p" INFO "psram_read_avail -> rx -> rd_req -> psram_read_en -> psram: worst setup $v ns, $lv levels at $wcond (through daria_smp: $vs)"
+	}
 }
 
 }
