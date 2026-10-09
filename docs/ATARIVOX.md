@@ -197,17 +197,43 @@ starts a game (not during the title animation: a press at 3 s was ignored,
 - **8.63 s:** "wave one", 16 bytes built in RAM (not stored in the ROM):
   `96 21 118 22 64 23 4 WW EYIY VV 0 WW 14 AW 8 NE` (speed 118, pitch 64,
   bend 4; a stressed "one" with a slow AW).
-  - **The leading 96:** every stored phrase starts `20 96` (`VOL=96`), so this
-    one most likely should too. The serial decoder caught every other byte
-    cleanly.
-  - **Why the 20 is probably missing:** the game sends every phrase through
-    one routine (bank 0, $F8E4/$F8EC). It reads `($99),Y` from the index in
-    $93 and sends until $FF, one byte per frame. Phrases that come in at
-    $F8EC start from whatever $93 already holds, and the menu code also
-    writes $93. So the game itself probably skips byte 0.
-  - **Not yet confirmed:** this needs a RAM probe.
-  - **Either way it is harmless:** 96 is a reserved code the chip ignores,
-    and the volume stays where the last phrase left it.
+
+Stella logs the same bytes in real time: the title phrase and "wave one"
+match the simulation byte for byte, the bare 96 included. So the
+simulation's serial decoder is right, and the game itself sends 96 without
+the 20 in front.
+
+- **Why the 20 is missing:** every stored phrase starts `20 96` (`VOL=96`).
+  The game sends each phrase through one routine (bank 0, $F8E4/$F8EC),
+  which reads `($99),Y` from the index in $93 and sends until $FF, one byte
+  per frame. A phrase that comes in at $F8EC starts from whatever $93
+  already holds. The menu code also writes $93, so the built phrases
+  probably skip byte 0.
+- **It is harmless:** 96 is a reserved code the chip ignores, and the
+  volume stays where the last phrase left it.
+
+### Phrases logged with Stella
+
+`tools/atarivox/stella_voxlog.py` runs the logging against Stella 6.7
+instead of the simulation: a game minute takes a minute, not hours. It
+writes the same log format, takes a screenshot as each phrase starts, and
+its docstring has the setup. Three five-minute sessions with no skill
+(hands off; firing without moving; firing while moving) gave:
+
+| When | Phrase | Codes | Says |
+|---|---|---|---|
+| Game start | Stored `$0969` | `JH UW NO OW... RR... SO TT` | "Juno First" (title) |
+| Each wave's start | Built in RAM | `WW EYIY VV`, then the number | "wave one", "wave two" (`8 TT IHWW`, a slow "two") |
+| Black screen after the ship is lost | Stored `$0DA8` | `WW AY` x4, pitch 180 down to 150 | "why why why why" |
+| Same | Stored `$0E00` | `IY OWRR UX`, `DO UX MM`, `DO UX UX UX MM` | "your doom... doooom" |
+| Same | Stored `$0D10` | `IYUW HE AY VV`, `FF`, `EY` x7 with the pitch 210 down to 95, `EYIY LE ED` | "you have failed" |
+
+The screenshots can't tell a lost life from game over, so which of the three
+taunts goes with which isn't known.
+
+The other stored phrases (`$0D4B`, `$0D7C`, `$0E39`, `$0E6B`, `$0E9A`,
+`$0F00`/`$0F08`, `$0F46`) need play that reaches later waves, which blind
+input doesn't.
 
 The chip is never starved: in our model the title phrase lasts 1.60 s from
 its first sound, longer than its bytes take to arrive, so arrival never
@@ -236,7 +262,7 @@ the Pocket depends on DARIA too, beyond homebrews on plain bank switching
 
 | Step | What | FPGA cost |
 |---|---|---|
-| 1 | Log what games send (`+voxlog`): done for the speech tester; Juno First next | None |
+| 1 | Log what games send (`+voxlog`, or Stella with `stella_voxlog.py`): done for the speech tester and Juno First | None |
 | 2 | Prototype the synthesizer and our sound tables in Python (`tools/atarivox/sjsynth.py`), tuned by ear against videos | None |
 | 3 | Test cartridge of our own (`sim/vox_test.py`) | None |
 | 4 | FPGA: serial receiver, 64-byte buffer and DOWN pin; code interpreter; the synthesizer, time-shared; tables in block RAM; behind its own macro and a menu setting | Estimated 600-1,000 ALMs, 4-7 M10K, 1-3 DSP |
