@@ -16,17 +16,28 @@ Reads checks.txt (step7_report.tcl's STA checks) and adds:
   (f) report_metastability: every first flop present in this build heads a
       chain identified "Forced"; no other chain is forced
   (k') every clk_sys <-> clk_arm endpoint is in f3_crossings.txt for this
-      kind of build, and each first flop's paths come from one register with
-      0 logic levels (P21)
+      kind of build, and each first flop's whole fan-in (fanin.tsv: every
+      timed path into it, from any clock) is one register of the other clock;
+      a first flop with a synchronous reset of its own clock (class "reset")
+      may have one more register, of its own clock (P21). The logic levels
+      are listed, not judged: a NOT gate before an inverted register (a
+      power-up value of 1) or a routing cell the router inserts has one input
+      and cannot glitch, while logic with two registers in its fan-in fails
+      whatever its depth
   (m) area: ALMs needed, the share of the device, LABs, peak interconnect
       usage, M10K
   (n) psram's CLOCK_SPEED in the synthesis report: 50.0 with DARIA,
       28.636364 without (P18)
   (o) the PSRAM pins' datasheet figures (reported, not gating)
+  (report) step7_report.tcl ran to its end ("# step7_report.tcl: end" in
+      checks.txt) and quartus_sta exited 0 (fpga/report_rc.txt, written by
+      run_step7.sh)
 Then prints every check with PASS, FAIL or INFO, and the verdict: the checks
 that gate this kind of build (5.4: the chain checks only with DARIA; the Fix B
 checks with Fix B; on aeee6d2, kind base, (g) is the negative control and must
-FAIL). Exit status 0 when every gating check passes.
+FAIL). Every gating check must be present: one that never ran (quartus_sta
+stopped, a report file missing) fails as "not reported". Exit status 0 when
+every gating check passes.
 """
 import os
 import re
@@ -54,9 +65,14 @@ kind = prep.get("kind", "?")
 daria = kind in ("daria", "q5")
 results = []          # (id, verdict, text)
 
+# A section of step7_report.tcl that failed reports every check it makes;
+# older reports named the section instead, so those names stand for them.
+SECTION_IDS = {"ab": ["a", "b", "d"], "kfan": ["k'"], "sdram": ["sdram.files"]}
+
 
 def check(cid, verdict, text):
-    results.append((cid, verdict, text))
+    for c in SECTION_IDS.get(cid, [cid]):
+        results.append((c, verdict, text))
 
 
 def glob_re(pat):
@@ -71,6 +87,9 @@ def strip_suffix(name):
 # ---- checks.txt -----------------------------------------------------------------------
 ct = rd(os.path.join(fpga, "checks.txt"))
 detail = []
+if kind not in ("base", "builda", "daria", "q5"):
+    check("kind", "FAIL", f"unknown kind of build '{kind}' (fpga/step7_prep.txt missing or wrong)")
+rc = (rd(os.path.join(fpga, "report_rc.txt")) or "").strip()
 if ct is None:
     check("report", "FAIL", "checks.txt missing: step7_report.tcl did not run or failed (report.log)")
 else:
@@ -79,6 +98,13 @@ else:
         if m:
             check(m.group(1), m.group(2), m.group(3))
         detail.append(line)
+    ended = "# step7_report.tcl: end" in ct
+    if not ended or rc not in ("", "0"):
+        check("report", "FAIL", ("step7_report.tcl stopped before its end; " if not ended else "")
+              + (f"quartus_sta exited {rc}; " if rc not in ("", "0") else "") + "see report.log")
+    else:
+        check("report", "PASS", "step7_report.tcl ran to its end" + (", quartus_sta exit 0" if rc == "0" else
+                                                                    " (no report_rc.txt: exit status not recorded)"))
 
 # ---- the expected crossing table -------------------------------------------------------------
 table = []
@@ -96,6 +122,7 @@ firsts_here = [t for t in expected_here if t["cls"] in ("first", "reset", "guard
 fit = rd(os.path.join(out, "ap_core.fit.rpt"))
 if fit is None:
     check("c", "FAIL", "ap_core.fit.rpt missing")
+    check("h.retime", "FAIL", "ap_core.fit.rpt missing: the retiming of sram|t_*_q is not known")
 else:
     i = fit.find("; Fitter Netlist Optimizations")
     sec = fit[i:fit.find("\n\n\n", i)] if i >= 0 else ""
@@ -198,14 +225,15 @@ else:
               f"identified automatically, not Forced: {auto or 'none'}; other Forced chains in the BupChip or DARIA: "
               f"{ours or 'none'}; other Forced chains elsewhere (information): {[c for c in other if c not in ours][:6] or 'none'}")
 
-# ---- (k'): the crossing endpoints ---------------------------------------------------------------------------
+# ---- (k'): the crossing endpoints and the first flops' fan-in -----------------------------------------------
 tsv = rd(os.path.join(fpga, "crossings.tsv"))
-if tsv is None:
-    check("k'", "FAIL", "crossings.tsv missing")
+fan = rd(os.path.join(fpga, "fanin.tsv"))
+if tsv is None or fan is None:
+    check("k'", "FAIL", ("crossings.tsv" if tsv is None else "fanin.tsv") + " missing (report.log)")
 else:
     rows = [l.split("\t") for l in tsv.splitlines()[1:] if l.strip()]
     unexpected = []
-    srcs = {}
+    crossing = {}         # first flop pattern -> its crossing sources (from crossings.tsv)
     for r in rows:
         dirn, rel, sl, hrel, hsl, lv, fr, to = r
         ep = strip_suffix(to)
@@ -215,29 +243,44 @@ else:
             continue
         t = hit[0]
         if t["cls"] in ("first", "reset", "guard"):
-            srcs.setdefault(t["ep"], []).append((strip_suffix(fr), int(lv), t))
-    bad_first, review, renamed = [], [], []
+            crossing.setdefault(t["ep"], set()).add(strip_suffix(fr))
+    # fanin.tsv: pattern, to, to_clock, from, from_clock, levels, slack
+    frows = [l.split("\t") for l in fan.splitlines()[1:] if l.strip()]
+    bad_first, levels, renamed = [], [], []
     for t in firsts_here:
-        s = srcs.get(t["ep"], [])
-        if not s:
-            bad_first.append(f"{t['ep']}: no crossing path into it")
+        regs = {}
+        for _, to, tclk, fr, fclk, lv, _sl in frows:
+            if t["re"].match(strip_suffix(to)):
+                regs.setdefault(to, [])
+                if fr != "-":
+                    regs[to].append((strip_suffix(fr), fclk, tclk, int(lv)))
+        if not regs:
+            bad_first.append(f"{t['ep']}: no such cell, or no timed path into it")
             continue
-        froms = sorted(set(x[0] for x in s))
-        lv = max(x[1] for x in s)
-        if len(froms) != 1:
-            bad_first.append(f"{t['ep']}: {len(froms)} sources {froms[:4]}")
-        elif lv > 1 or (lv == 1 and t["cls"] != "reset"):
-            bad_first.append(f"{t['ep']}: {lv} logic levels from {froms[0]}")
-        elif lv == 1:
-            review.append(f"{t['ep']}: 1 level from {froms[0]} (its synchronous reset in a LUT?)")
-        if len(froms) == 1 and t["src_re"] and not t["src_re"].match(froms[0]):
-            renamed.append(f"{t['ep']} <- {froms[0]} (expected {t['src']})")
+        for to, paths in sorted(regs.items()):
+            srcs = {}
+            for fr, fclk, tclk, lv in paths:
+                srcs.setdefault((fr, fclk != tclk), []).append(lv)
+            cross = sorted(f for f, x in srcs if x)
+            same = sorted(f for f, x in srcs if not x)
+            allow = 1 if t["cls"] == "reset" else 0
+            if len(cross) != 1 or len(same) > allow:
+                bad_first.append(f"{to}: fan-in {len(cross)} register(s) of the other clock {cross[:4]}, "
+                                 f"{len(same)} of its own (at most {allow}) {same[:4]}")
+            lv = max(max(v) for v in srcs.values()) if srcs else 0
+            if lv:
+                levels.append(f"{strip_suffix(to).split('|')[-1]} {lv}")
+            if len(cross) == 1 and t["src_re"] and not t["src_re"].match(cross[0]):
+                renamed.append(f"{t['ep']} <- {cross[0]} (expected {t['src']})")
+        if t["ep"] not in crossing:
+            bad_first.append(f"{t['ep']}: no clk_sys <-> clk_arm path into it in crossings.tsv")
     if not daria:
         check("k'", "FAIL", f"no DARIA in this build: {len(rows)} crossing pairs; no DARIA endpoint (no such cell)")
     else:
         check("k'", "FAIL" if unexpected or bad_first or not rows else "PASS",
               f"{len(rows)} pairs; unexpected endpoints: {len(unexpected)} {unexpected[:6]}; first flops wrong: "
-              f"{bad_first or 'none'}; for review: {review or 'none'}; sources named otherwise: {renamed or 'none'}")
+              f"{bad_first or 'none'}; logic levels on a one-register fan-in (not judged): {levels or 'none'}; "
+              f"sources named otherwise: {renamed or 'none'}")
 
 # ---- (m): area ------------------------------------------------------------------------------------------------
 fs = rd(os.path.join(out, "ap_core.fit.summary")) or ""
@@ -287,7 +330,7 @@ check("o", "INFO", f"{len(pins)} datasheet rows for cram0_a, adv_n, oe_n, dq (da
 # ---- verdict -----------------------------------------------------------------------------------------------------
 DARIA_CHECKS = {"a", "b", "c", "c.cells", "e", "f", "k", "k'", "j", "gate.clk_arm"}
 FIXB_CHECKS = {"g", "h", "h.retime"}
-ALL_CHECKS = {"l", "l.clocks", "gate.hold", "n", "report", "i", "p"}
+ALL_CHECKS = {"l", "l.clocks", "gate.hold", "n", "report", "i", "p", "kind"}
 gating = set(ALL_CHECKS)
 if kind in ("daria", "q5"):
     gating |= DARIA_CHECKS | FIXB_CHECKS | {"gate.clk_sdram"}
@@ -296,6 +339,11 @@ elif kind == "builda":
 # Q5's +1.5 ns is reported, not required (P29).
 if kind == "q5":
     gating.discard("gate.clk_sdram")
+# Every gating check, and on aeee6d2 the negative control, must be there: one
+# that never ran fails.
+required = (gating - {"kind"}) | ({"g"} if kind == "base" else set())
+for cid in sorted(required - {c for c, _, _ in results}):
+    results.append((cid, "FAIL", "not reported: the check never ran (report.log, the compile's reports)"))
 print(f"== step-7 checks: {d}")
 print(f"   kind {kind}; " + " ".join(f"{k}={v}" for k, v in prep.items() if k != "kind"))
 fails = []
@@ -303,7 +351,7 @@ for cid, verdict, text in results:
     role = "gating" if cid in gating else "info"
     if kind == "base" and cid == "g":
         role = "negative control (must FAIL on aeee6d2)"
-        if verdict == "PASS":
+        if verdict == "PASS" or text.startswith("not reported") or "no such cell" in text or "Tcl error" in text:
             fails.append(cid)
     elif role == "gating" and verdict == "FAIL":
         fails.append(cid)

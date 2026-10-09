@@ -7,19 +7,22 @@
 #   builds   the kinds of build the endpoint is expected in: daria (Build B,
 #            the release), q5 (DARIA with BUP_DEBUG), or "-" for a chain that
 #            plan 2.7 marks absent from both
-#   class    first: a synchroniser's first flop, which must sample exactly one
-#                   register with 0 logic levels (P21)
-#            reset: a first flop with a synchronous reset of its own clock,
-#                   which Quartus may put in a LUT: 0 levels, or 1 reported
-#                   for review
+#   class    first: a synchroniser's first flop, whose whole fan-in (every
+#                   timed path into it, from any clock: fanin.tsv) must be
+#                   one register, of the other clock (P21). Logic levels are
+#                   listed, not judged: with one register in the fan-in the
+#                   logic is a buffer or an inverter (a NOT before an
+#                   inverted register, a routing cell), which cannot glitch
+#            reset: a first flop with a synchronous reset of its own clock:
+#                   the same, and one more register, of its own clock
 #            guard: the phase detector's receiver (not a synchroniser; the
-#                   SDC holds it to 6 / 1 ns), one register, 0 levels
+#                   SDC holds it to 6 / 1 ns): as first
 #            held:  a held bus taken after its toggle has crossed
 #   endpoint the register's name, '*' matching anything (no other wildcard);
 #            "~DUPLICATE" and similar suffixes are stripped first
-#   source   for first, reset and guard: the one register expected to feed
-#            it ('-' for none named). A different name is reported, not failed:
-#            the rule is one register and no logic.
+#   source   for first, reset and guard: the one register of the other clock
+#            expected to feed it ('-' for none named). A different name is
+#            reported, not failed: the rule is one register.
 #
 # Names are as the RTL declares them (bupchip_pocket.sv, daria_call.sv,
 # daria_mmio.sv, bup_asset_wr.sv, daria_fe_call.sv, daria_fe_audio.sv,

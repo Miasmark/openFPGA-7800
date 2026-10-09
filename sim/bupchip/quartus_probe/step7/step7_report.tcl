@@ -13,6 +13,10 @@
 #                  with the collections and figures
 #   crossings.tsv  every clk_sys <-> clk_arm path pair: direction, setup and
 #                  hold relationship and slack, logic levels, from, to
+#   fanin.tsv      every timed path into each first flop of plan 2.7 that is
+#                  present, from any clock: the register it starts at, its
+#                  clock, the logic levels ((k'): one register in the whole
+#                  fan-in, P21)
 #   sdram_worst.tsv the 20 worst clk_sdram setup paths at the worse slow
 #                  corner, for 5.3's classification
 #   exceptions.rpt, sdc.rpt, metastability.rpt, datasheet.rpt,
@@ -56,11 +60,14 @@ proc say {line} {
 proc check {id verdict text} {
 	say "CHECK $id $verdict: $text"
 }
-# A section runs at global level; a Tcl error in it is a failed check, and
-# the report goes on.
-proc section {id body} {
+# A section runs at global level; a Tcl error in it fails every check the
+# section reports (ids), so that a check that never ran cannot pass, and the
+# report goes on. step7_checks.py also fails a gating check that is missing.
+proc section {id ids body} {
 	if {[catch {uplevel #0 $body} err]} {
-		check $id FAIL "Tcl error in the report script: [string map {"\n" " | "} $err]"
+		foreach i $ids {
+			check $i FAIL "Tcl error in the report script, section $id: [string map {"\n" " | "} $err]"
+		}
 	}
 }
 proc names {coll {max 40}} {
@@ -91,13 +98,40 @@ proc regs {label pattern {nodup 0}} {
 	return $c
 }
 
+# The synchroniser table of plan 2.7, and the guard's receiver. Columns:
+# pattern, present in Build B (daria), present in Q5 (DARIA + BUP_DEBUG).
+set ff_table {
+	{*|bupchip_pocket:bupchip|hold_a[0]} 1 1
+	{*|bupchip_pocket:bupchip|pause_a[0]} 0 0
+	{*|bupchip_pocket:bupchip|prof_a[0]} 1 1
+	{*|bupchip_pocket:bupchip|ram32_a[0]} 1 1
+	{*|bupchip_pocket:bupchip|mres_a[0]} 1 1
+	{*|bupchip_pocket:bupchip|cmd_s[0]} 1 1
+	{*|daria_call:call|tog_s[0]} 1 1
+	{*|daria_mmio:mmio|sn_a[0]} 1 1
+	{*|bup_asset_wr:writer|t1} 1 1
+	{*|daria_smp:*|req_s0} 1 1
+	{*|bup_dbg_snap:*|rq_s0} 0 1
+	{*|bupchip_pocket:bupchip|cap_err_a[0]} 0 1
+	{*|bupchip_pocket:bupchip|ready_s[0]} 1 1
+	{*|bupchip_pocket:bupchip|halted_s[0]} 0 0
+	{*|bupchip_pocket:bupchip|run_s[0]} 1 1
+	{*|bupchip_pocket:bupchip|ftog_s[0]} 1 1
+	{*|daria_mmio:mmio|en_s[0]} 1 1
+	{*|daria_mmio:mmio|w_s[0]} 1 1
+	{*|daria_fe_call:u_call|ret_s1} 1 1
+	{*|daria_fe_audio:u_audio|ack_s1} 1 1
+	{*|bup_dbg_snap:*|ak_s0} 0 1
+	{*|daria_fe_guard:u_guard|pd_rx} 1 1
+}
+
 set slow_corners {}
 set all_corners [get_available_operating_conditions]
 foreach c $all_corners { if {[string match -nocase "*slow*" $c]} { lappend slow_corners $c } }
 say "# corners: $all_corners"
 
 # ---- timing.txt, and the clock table (part of (l)) ------------------------------------------------
-section l {
+section l {l.clocks l gate.clk_sdram gate.clk_arm gate.hold} {
 set tf [open "timing.txt" w]
 set exp_period [dict create 0 69.841 1 17.460 2 69.841 3 [expr {$prep(div) == 19 ? 27.645 : ($prep(div) == 24 ? 34.920 : 26.190)}]]
 set clocks_ok 1
@@ -213,7 +247,7 @@ set arm [get_clocks -nowarn "${pre}3$post"]
 
 }
 # ---- (a), (b), (d): the guard pair ---------------------------------------------------------------------
-section ab {
+section ab {a b d} {
 say "\n## (a) (b) (d) the guard pair pd_tog -> pd_rx (design.md 8.2)"
 set g_tog [regs "pd_tog" {*|daria_fe_guard:u_guard|pd_tog}]
 set g_rx [regs "pd_rx" {*|daria_fe_guard:u_guard|pd_rx}]
@@ -254,34 +288,8 @@ if {[csize $g_tog] == 0 || [csize $g_rx] == 0} {
 
 }
 # ---- (c) and (f) in part: the first flops present or absent ------------------------------------------------
-section c.cells {
-# The synchroniser table of plan 2.7. Columns: pattern, present in Build B
-# (daria), present in Q5 (DARIA + BUP_DEBUG).
+section c.cells {c.cells} {
 say "\n## (c) (f) the first flops of plan 2.7 (registers without duplicates)"
-set ff_table {
-	{*|bupchip_pocket:bupchip|hold_a[0]} 1 1
-	{*|bupchip_pocket:bupchip|pause_a[0]} 0 0
-	{*|bupchip_pocket:bupchip|prof_a[0]} 1 1
-	{*|bupchip_pocket:bupchip|ram32_a[0]} 1 1
-	{*|bupchip_pocket:bupchip|mres_a[0]} 1 1
-	{*|bupchip_pocket:bupchip|cmd_s[0]} 1 1
-	{*|daria_call:call|tog_s[0]} 1 1
-	{*|daria_mmio:mmio|sn_a[0]} 1 1
-	{*|bup_asset_wr:writer|t1} 1 1
-	{*|daria_smp:*|req_s0} 1 1
-	{*|bup_dbg_snap:*|rq_s0} 0 1
-	{*|bupchip_pocket:bupchip|cap_err_a[0]} 0 1
-	{*|bupchip_pocket:bupchip|ready_s[0]} 1 1
-	{*|bupchip_pocket:bupchip|halted_s[0]} 0 0
-	{*|bupchip_pocket:bupchip|run_s[0]} 1 1
-	{*|bupchip_pocket:bupchip|ftog_s[0]} 1 1
-	{*|daria_mmio:mmio|en_s[0]} 1 1
-	{*|daria_mmio:mmio|w_s[0]} 1 1
-	{*|daria_fe_call:u_call|ret_s1} 1 1
-	{*|daria_fe_audio:u_audio|ack_s1} 1 1
-	{*|bup_dbg_snap:*|ak_s0} 0 1
-	{*|daria_fe_guard:u_guard|pd_rx} 1 1
-}
 set ff_ok 1
 set ffl [open "firstflops.tsv" w]
 foreach {pat inb inq5} $ff_table {
@@ -302,7 +310,7 @@ check "c.cells" [expr {$ff_ok ? "PASS" : "FAIL"}] "each first flop of plan 2.7 i
 
 }
 # ---- (e): the SDC and the exceptions -------------------------------------------------------------------------
-section e {
+section e {e.files e} {
 say "\n## (e) report_sdc, report_exceptions (status parsed by step7_checks.py)"
 report_sdc -file sdc.rpt
 report_sdc -ignored -file sdc_ignored.rpt
@@ -311,13 +319,13 @@ check "e.files" INFO "sdc.rpt, sdc_ignored.rpt and exceptions.rpt written; step7
 
 }
 # ---- (f): metastability -----------------------------------------------------------------------------------------
-section f {
+section f {f.files f} {
 report_metastability -nchains 100000 -file metastability.rpt
 check "f.files" INFO "metastability.rpt written (every chain); step7_checks.py checks the Forced first flops"
 
 }
 # ---- (g), (h), (i): Fix B --------------------------------------------------------------------------------------
-section g {
+section g {g} {
 say "\n## (g) no cart2600 path into sram_ctrl or the SRAM pads except through sram|t_*_q"
 # Nets are named by instance path alone (ic|atari|main|cart2600|...).
 set c26 [get_nets -nowarn {*|cart2600|*}]
@@ -382,7 +390,7 @@ if {$n26 == 0 || [csize $sram_all] == 0} {
 }
 
 }
-section h {
+section h {h} {
 say "\n## (h) Fix B checks 2-4: t_*_q"
 if {[csize $tq] == 0} {
 	check "h" FAIL "no such cell: sram|t_*_q"
@@ -412,7 +420,7 @@ if {[csize $tq] == 0} {
 }
 
 }
-section i {
+section i {i} {
 say "\n## (i) open item 12"
 set cr [regs "c_rdata" {*|sram_ctrl:sram|c_rdata[*]}]
 set fb [regs "fbn_*" {*|sram_ctrl:sram|fbn_*}]
@@ -439,7 +447,7 @@ if {[csize $cr] == 0 || [csize $fb] == 0} {
 
 }
 # ---- (j), (k), (k'): the crossings ----------------------------------------------------------------------------
-section j {
+section j {j} {
 say "\n## (j) tripwire: clk_arm <-> clk_sdram, clk_arm <-> clk_sys_90"
 set nj 0
 foreach {label from to} [list "arm->sdram" $arm $sdram "sdram->arm" $sdram $arm "arm->sys90" $arm $sys90 "sys90->arm" $sys90 $arm] {
@@ -451,7 +459,7 @@ foreach {label from to} [list "arm->sdram" $arm $sdram "sdram->arm" $sdram $arm 
 check "j" [expr {$nj == 0 ? "PASS" : "FAIL"}] "$nj path(s) between clk_arm and clk_sdram or clk_sys_90"
 
 }
-section k {
+section k {k k'.files k'} {
 say "\n## (k) (k') clk_sys <-> clk_arm"
 set ct [open "crossings.tsv" w]
 puts $ct "dir\tsetup_rel\tsetup_slack\thold_rel\thold_slack\tlevels\tfrom\tto"
@@ -498,8 +506,41 @@ if {$nk == 0} {
 check "k'.files" INFO "crossings.tsv written; step7_checks.py compares its endpoints with plan F3's list (f3_crossings.txt) and checks each first flop's source"
 
 }
+section kfan {k'} {
+# P21 as 5.4 (k') checks it: a first flop's whole fan-in is one register,
+# from the other clock (one more, of its own clock, for a synchronous reset).
+# The logic levels are listed but not judged: Quartus puts a NOT gate before
+# an inverted register (a power-up value of 1) and the router can insert a
+# routing cell, each with one input, which cannot glitch.
+say "\n## (k') the fan-in of each first flop, from any clock (fanin.tsv)"
+set ff [open "fanin.tsv" w]
+puts $ff "pattern\tto\tto_clock\tfrom\tfrom_clock\tlevels\tslack"
+proc clkname {c} {
+	if {[catch {get_clock_info -name $c} n] || $n eq ""} { return "-" }
+	return $n
+}
+foreach {pat inb inq5} $ff_table {
+	set rc [get_registers -nowarn $pat]
+	if {[csize $rc] == 0} { continue }
+	array unset seen_to
+	foreach_in_collection p [get_timing_paths -setup -to $rc -npaths 1000000 -pairs_only] {
+		set tn [get_node_info -name [get_path_info $p -to]]
+		set seen_to($tn) 1
+		puts $ff [format "%s\t%s\t%s\t%s\t%s\t%d\t%.3f" $pat $tn [clkname [get_path_info $p -to_clock]] \
+			[get_node_info -name [get_path_info $p -from]] [clkname [get_path_info $p -from_clock]] \
+			[get_path_info $p -num_logic_levels] [get_path_info $p -slack]]
+	}
+	foreach_in_collection r $rc {
+		set tn [get_node_info -name $r]
+		if {![info exists seen_to($tn)]} { puts $ff "$pat\t$tn\t-\t-\t-\t-\t-" }
+	}
+}
+close $ff
+check "k'.fanin" INFO "fanin.tsv written; step7_checks.py checks that each first flop's fan-in is one register of the other clock"
+
+}
 # ---- the 20 worst clk_sdram paths, for 5.3 ----------------------------------------------------------------------
-section sdram {
+section sdram {sdram.files} {
 set sw [open "sdram_worst.tsv" w]
 puts $sw "slack\tlevels\tfrom_clock\tfrom\tto"
 foreach_in_collection p [get_timing_paths -setup -to_clock $sdram -npaths 20 -nworst 1] {
@@ -511,7 +552,7 @@ report_timing -setup -to_clock $sdram -npaths 20 -nworst 1 -detail full_path -fi
 
 }
 # ---- (p) the sample requester's chain (plan 2.2): psram -> cache / daria_smp -> psram, clk_arm ------------------------
-section p {
+section p {p} {
 # Synthesis folds rx and rd_req into the writer's psram_read_en LUT (Q0: the
 # chain's worst path is read_avail -> writer|psram_read_en -> psram's
 # registers, 3 levels, with no cache net on it), so the chain is found from
@@ -548,12 +589,13 @@ if {[csize $ps] == 0 || [csize $ra] == 0 || [csize $en] == 0} {
 
 }
 # ---- (o) PSRAM pins: the datasheet ------------------------------------------------------------------------------
-section o {
+section o {o.files} {
 report_datasheet -file datasheet.rpt
 check "o.files" INFO "datasheet.rpt written; step7_checks.py lists cram0_a, cram0_adv_n, cram0_oe_n clock-to-output and cram0_dq setup/hold"
 
 }
-close $tf
+catch {close $tf}
+say "# step7_report.tcl: end"
 close $out
 delete_timing_netlist
 project_close
