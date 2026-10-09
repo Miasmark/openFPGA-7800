@@ -23,7 +23,15 @@
 //      reset (the cache held, the sampler readable) and the Souper profile
 //      (the cache running, the sampler not readable);
 //   4. a second load of another image (+img2kb, default 160) and +loads / 4
-//      more loads on it.
+//      more loads on it;
+//   5. with samples, +reloads more images of 40 to 72 KB, each loaded over
+//      the last while the CPU and the sample client run, with the START
+//      timed on the sampler, in turn: on the clk_sys edge that posts a
+//      request while a cache fill runs, one clk_sys after that edge, and on
+//      the first clk_sys edge after the sampler's start, after its read
+//      waits behind a cache read, and after its read is taken. A CPU load
+//      the START holds is dropped, not checked: it would finish on the next
+//      image.
 // All the time (unless +nosmp), a model of the front end's sample client on
 // clk_sys (daria_fe_audio.sv: req_q toggle, saddr_q, ack_s1/ack_s2, ack_hit,
 // rdat) posts requests 0 to +gap clk_sys after each answer, at random image
@@ -32,7 +40,17 @@
 // Checks (each must be 0):
 //   data     an answer is not what the requester owed: the image byte, or
 //            $FF when it was not readable at its first chance to start (the
-//            first clock daria_smp's start is high for the request)
+//            first clock daria_smp's start is high for the request). At or
+//            beyond the readable image's size (img_size at that start: a
+//            request drawn for the last image and started once the next one
+//            is ready, which the real front end never makes) the byte owed
+//            is the one psram_model holds there at that start. A request
+//            raced by a load (readable at its start, then a START before its
+//            halfword arrived) is owed that byte or the new image's
+//   sync     a request started fewer than three clk_arm edges after its
+//            toggle: smp_req's synchroniser is two flops
+//   image    a halfword of a loaded image that psram_model does not hold,
+//            checked over the whole image as each load's img_ready rises
 //   check    an answered image byte, read again as a byte load through the
 //            cache, differs from the cache's own asset_q
 //   load     a CPU load returns other than the image bytes
@@ -51,8 +69,9 @@
 // $FF answers in a hold, in a load and in the Souper profile, image bytes,
 // a sampler read wanted while the cache asks for the port, and while a cache
 // read is in flight, the sampler's read taken on the clock a cache read
-// arrives, sampler reads while the cache is held. The maximum answer times
-// are reported.
+// arrives, sampler reads while the cache is held; and with +reloads, a START
+// while the sampler's read is wanted (pend) and while it is in flight (fl),
+// and raced answers. The maximum answer times are reported.
 //
 // +stream=FILE writes one line per CPU load of the two main streams (index,
 // offset, size, the bytes it returned). run_smp.sh compares the file of a run
@@ -60,8 +79,9 @@
 // must not change.
 //
 // Plusargs: +seed=N (1) +phase=PS (0; -1 random) +loads=N (40000) +imgkb=K
-// (512) +img2kb=K (160) +gap=N (60) +nosmp +stream=FILE. The last line is
-// "result: PASS ..." or "result: FAIL ..."; a failure also ends in $fatal.
+// (512) +img2kb=K (160) +reloads=N (16; 0 for none) +gap=N (60) +nosmp
+// +stream=FILE. The last line is "result: PASS ..." or "result: FAIL ...";
+// a failure also ends in $fatal.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -74,13 +94,15 @@ module tb_daria_smp;
 	int          n_loads = 40000;
 	int          img_kb = 512, img2_kb = 160;
 	int          smp_gap = 60;
+	int          n_reloads = 16;
 	int          max_ms = 3000;                   // watchdog, simulated ms
 	bit          nosmp = 0;
 	int          fd_stream = 0;
 	// Separate streams, so that the CPU's loads and the episodes are the same
 	// with and without samples: rs_load the loads and their gaps, rs_ep the
-	// episodes, rs_smp the requests, rs_misc the rest.
-	int unsigned rs_load = 1, rs_ep = 1, rs_smp = 1, rs_misc = 1;
+	// episodes, rs_smp the requests, rs_misc the rest; rs_rl the reloads
+	// (stage 5), so that stages 1-4 are the same with and without them.
+	int unsigned rs_load = 1, rs_ep = 1, rs_smp = 1, rs_misc = 1, rs_rl = 1;
 	function automatic int unsigned xs(input int unsigned s);
 		s ^= s << 13;
 		s ^= s >> 17;
@@ -103,6 +125,10 @@ module tb_daria_smp;
 		rs_misc = xs(rs_misc);
 		return int'(rs_misc % n);
 	endfunction
+	function automatic int r_rl(input int n);
+		rs_rl = xs(rs_rl);
+		return int'(rs_rl % n);
+	endfunction
 
 	// ---- clocks ------------------------------------------------------------------------
 	logic clk_sys = 1'b0;
@@ -115,6 +141,7 @@ module tb_daria_smp;
 		void'($value$plusargs("imgkb=%d", img_kb));
 		void'($value$plusargs("img2kb=%d", img2_kb));
 		void'($value$plusargs("gap=%d", smp_gap));
+		void'($value$plusargs("reloads=%d", n_reloads));
 		void'($value$plusargs("maxms=%d", max_ms));
 		nosmp = $test$plusargs("nosmp");
 		if ($value$plusargs("stream=%s", f)) fd_stream = $fopen(f, "w");
@@ -123,10 +150,11 @@ module tb_daria_smp;
 		rs_ep   = xs(seed * 32'h85EBCA6B + 32'h0000_2002);
 		rs_smp  = xs(seed * 32'hC2B2AE35 + 32'h0000_3003);
 		rs_misc = xs(seed * 32'h27D4EB2F + 32'h0000_4004);
+		rs_rl   = xs(seed * 32'h165667B1 + 32'h0000_5005);
 		if (phase < 0) phase = r_misc(26190);
 		if (img_kb < 64 || img_kb > 512 || img2_kb < 64 || img2_kb > 512) $fatal(1, "imgkb and img2kb: 64 to 512");
-		$display("tb_daria_smp: seed %0d phase %0d ps loads %0d image %0d KB then %0d KB gap %0d%s",
-			seed, phase, n_loads, img_kb, img2_kb, smp_gap, nosmp ? " (no samples)" : "");
+		$display("tb_daria_smp: seed %0d phase %0d ps loads %0d image %0d KB then %0d KB, %0d reloads, gap %0d%s",
+			seed, phase, n_loads, img_kb, img2_kb, nosmp ? 0 : n_reloads, smp_gap, nosmp ? " (no samples)" : "");
 		#(phase);
 		forever #13095 clk_arm = ~clk_arm;
 	end
@@ -222,6 +250,10 @@ module tb_daria_smp;
 	longint c_coinc = 0, c_wait_fl = 0, c_take_rx = 0, c_held_rd = 0, c_mres_rd = 0, c_odd = 0;
 	longint t_byte_max = 0, t_ff_max = 0, t_byte_sum = 0;
 	longint c_miss = 0, c_pf = 0, c_pre = 0;
+	longint e_sync = 0, e_img = 0, n_img_hw = 0, n_beyond = 0, n_race_old = 0, n_race_new = 0;
+	longint c_rl_pend = 0, c_rl_fl = 0, n_rl = 0, n_rl_to = 0, n_rl_loads = 0, n_abandon = 0;
+	longint n_rl_mode [5] = '{0, 0, 0, 0, 0};
+	int     sync_min = 1 << 30;
 
 	// ---- the image loads (clk_sys) ---------------------------------------------------------
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
@@ -232,13 +264,34 @@ module tb_daria_smp;
 		msg_tog <= ~msg_tog;
 		repeat (3) @(posedge clk_sys);
 	endtask
-	task automatic load_image(input int kb, input int e);
+	// The writes and END of an image; load_image sends its START first.
+	task automatic load_body(input int kb, input int e);
 		int n;
 		n = kb * 1024;
-		send(M_START, 44'd0);
 		for (int h = 0; h < n / 2; h++)
 			send(M_WRITE, {3'd0, 1'b1, 2'b11, 22'(h), pat(2 * h + 1, e), pat(2 * h, e)});
 		send(M_END, {19'd0, 1'b1, 24'(n)});
+	endtask
+	task automatic load_image(input int kb, input int e);
+		send(M_START, 44'd0);
+		load_body(kb, e);
+	endtask
+	// Every halfword of the image just loaded, in psram_model.
+	task automatic check_image(input int kb, input int e);
+		int bad;
+		bad = 0;
+		for (int h = 0; h < kb * 512; h++) begin
+			logic [15:0] w, x;
+			w = chip.bd_read(0, h);
+			x = {pat(2 * h + 1, e), pat(2 * h, e)};
+			if (chip.bd_written(0, h) != 2'b11 || w !== x) begin
+				if (bad < 3) $display("%0t: image %0d (%0d KB): halfword %05x is %04x (written %b), expected %04x",
+					$time, e, kb, h, w, chip.bd_written(0, h), x);
+				bad++;
+			end
+		end
+		n_img_hw += kb * 512;
+		e_img += bad;
 	endtask
 
 	// ---- episodes (requested by the CPU driver, applied on clk_sys) ----------------------------
@@ -273,12 +326,16 @@ module tb_daria_smp;
 	logic  [7:0] rdat = 8'h00;
 	wire         ack_hit = busy_r && (ack_s2 == req_q);
 	bit          smp_on = 0;
+	bit          force_post = 0;                   // stage 5: post on the next clk_sys edge
 	int          smp_wait = 0, open_clk = 0;
+	int          arm_since = 0;                    // clk_arm edges since the open request's toggle
 	longint      t_go = 0;
 	int          recent [8] = '{0, 0, 0, 0, 0, 0, 0, 0};
 	// What the requester owes the open request, from its first start (clk_arm).
 	bit          seen_start = 0, exp_ff = 0, cls_hold = 0, cls_load = 0, cls_souper = 0, cls_race = 0;
+	bit          cls_beyond = 0;
 	int          exp_epoch = 0;
+	logic  [7:0] exp_byte = 8'h00;                 // the byte owed, if readable at the first start
 	typedef struct { int off; logic [7:0] v; int e; } chk_t;
 	chk_t        chkq [$];
 
@@ -308,18 +365,26 @@ module tb_daria_smp;
 		ack_s2 <= ack_s1;
 		if (ack_hit) begin
 			longint t;
-			logic [7:0] want;
+			logic [7:0] want, alt;
 			t = $time - t_go;
 			rdat <= smp_data;
 			busy_r <= 1'b0;
 			n_ans++;
 			smp_wait = r_smp(10) < 3 ? 0 : r_smp(smp_gap + 1);
-			want = exp_ff ? 8'hFF : pat(int'(saddr_q), exp_epoch);
+			want = exp_ff ? 8'hFF : exp_byte;
+			alt = pat(int'(saddr_q), epoch);           // a raced answer may be the new image's byte
 			if (!seen_start) begin
 				if (e_data < 10) $display("%0t: an answer before daria_smp started the request", $time);
 				e_data++;
 			end else if (cls_race) begin
-				n_race++;                          // readable at the start, a load before the read: any byte
+				n_race++;                          // readable at the start, a START before the halfword
+				if (smp_data === want) n_race_old++;
+				else if (smp_data === alt) n_race_new++;
+				else begin
+					if (e_data < 10) $display("%0t: request at %05x raced by a load answered %02x, expected %02x or the new image's %02x",
+						$time, saddr_q, smp_data, want, alt);
+					e_data++;
+				end
 			end else if (smp_data !== want) begin
 				if (e_data < 10) $display("%0t: request at %05x answered %02x, expected %02x (%0s)", $time,
 					saddr_q, smp_data, want, exp_ff ? "not readable" : "the image byte");
@@ -337,6 +402,7 @@ module tb_daria_smp;
 				end
 			end else if (!cls_race) begin
 				n_byte++;
+				if (cls_beyond) n_beyond++;
 				if (saddr_q[0]) c_odd++;
 				t_byte_sum += t;
 				if (t > t_byte_max) t_byte_max = t;
@@ -350,15 +416,17 @@ module tb_daria_smp;
 				busy_r <= 1'b0;                    // give up on it, so that the run ends
 			end
 		end else if (smp_on && img_bytes > 32768) begin
-			if (smp_wait > 0) smp_wait--;
+			if (smp_wait > 0 && !force_post) smp_wait--;
 			else begin
 				req_q <= ~req_q;
 				saddr_q <= smp_pick();
 				busy_r <= 1'b1;
 				open_clk = 0;
 				t_go = $time;
+				arm_since = 0;
 				seen_start = 0;
 				n_go++;
+				force_post = 0;
 			end
 		end
 	end
@@ -367,14 +435,44 @@ module tb_daria_smp;
 	logic       ack_m = 1'b0;
 	logic [7:0] data_m = 8'hFF;
 	logic       ir_q = 1'b0;
+	int         rl_trig = 0, rl_wait = 0;      // stage 5's trigger, armed by the sequence
+	bit         rl_hit = 0;
 	always @(posedge clk_arm) begin
-		if (ir_q && !img_ready) epoch++;           // a new image's START
+		if (ir_q && !img_ready) begin              // a new image's START
+			epoch++;
+			if (dut.pend) c_rl_pend++;
+			else if (dut.fl) c_rl_fl++;
+		end
 		ir_q = img_ready;
+		// Edges after the toggle's clk_sys edge (an edge shared with it does
+		// not count: the first flop takes the old level there).
+		if ($time > t_go) arm_since++;
 		// The first start of the open request decides what it is owed.
 		if (busy_r && !seen_start && dut.start) begin
 			seen_start = 1;
+			if (arm_since < sync_min) sync_min = arm_since;
+			if (arm_since < 3) begin
+				if (e_sync < 10) $display("%0t: request at %05x started %0d clk_arm edges after its toggle", $time,
+					saddr_q, arm_since);
+				e_sync++;
+			end
 			exp_ff = !readable;
 			exp_epoch = epoch;
+			exp_byte = pat(int'(saddr_q), epoch);
+			cls_beyond = 0;
+			if (readable && 20'(saddr_q) >= img_size) begin
+				// Past the readable image: the byte the PSRAM holds there now.
+				logic [15:0] w;
+				logic  [1:0] m;
+				w = chip.bd_read(0, int'(saddr_q) >> 1);
+				m = chip.bd_written(0, int'(saddr_q) >> 1);
+				exp_byte = saddr_q[0] ? w[15:8] : w[7:0];
+				cls_beyond = 1;
+				if (!m[saddr_q[0]]) begin
+					if (e_data < 10) $display("%0t: request at %05x, past the image, for a byte never written", $time, saddr_q);
+					e_data++;
+				end
+			end
 			cls_hold = hold_a[1];
 			cls_load = !hold_a[1] && !img_ready;
 			cls_souper = !hold_a[1] && img_ready && !prof_a[1];
@@ -383,6 +481,20 @@ module tb_daria_smp;
 		// Readable at the start, but a new image started before the read: the
 		// PSRAM may hold either image's byte (the front end is reset by the load).
 		if (busy_r && seen_start && !exp_ff && (dut.pend || dut.fl) && !img_ready) cls_race = 1;
+		// Stage 5's trigger.
+		if (rl_trig != 0 && !rl_hit) begin
+			rl_wait++;
+			case (rl_trig)
+				2: rl_hit = busy_r && dut.start && readable;
+				3: rl_hit = dut.pend && cache.f_fl;
+				4: rl_hit = dut.take;
+				default: ;
+			endcase
+			if (!rl_hit && rl_wait >= 50000) begin
+				rl_hit = 1;
+				n_rl_to++;
+			end
+		end
 		// The held-bus contract, from the values each edge leaves: the byte may
 		// change only while an answer is owed (fewer toggles than requests),
 		// and never on the edge the toggle flips.
@@ -424,6 +536,7 @@ module tb_daria_smp;
 	int     st = 0, gap = 0, wait_clk = 0;
 	int     main_i = 0, main_n = 0, next_ep = 0;
 	bit     main_on = 0, ep_wait = 0, chk_pause = 0;
+	bit     rl_on = 0;                             // stage 5
 	int     vptr [16], vstep [16];
 	ld_t    lq [$];
 
@@ -502,10 +615,12 @@ module tb_daria_smp;
 				gap = 2;
 			end
 		end else if (!run) begin
-			if (st == 2) begin
+			if (st == 2 && rl_on) n_abandon++;      // a reload's START: dropped
+			else if (st == 2) begin
 				$display("%0t: the cache was held during a load", $time);
 				e_stuck++;
 			end
+			if (st != 0 && rl_on && cur.chk) n_chk_drop++;
 			w_asset <= 1'b0;
 			d_addr <= other_addr();
 			st = 0;
@@ -551,7 +666,8 @@ module tb_daria_smp;
 					end
 				end else begin
 					logic [31:0] got;
-					n_loads_done++;
+					if (rl_on) n_rl_loads++;
+					else n_loads_done++;
 					for (int k = 0; k < 4; k++) got[8 * k +: 8] = m[k] ? asset_q[8 * k +: 8] : 8'h00;
 					for (int k = 0; k < 4; k++)
 						if (m[k] && asset_q[8 * k +: 8] !== e[8 * k +: 8]) begin
@@ -560,8 +676,8 @@ module tb_daria_smp;
 							e_load++;
 							break;
 						end
-					if (fd_stream != 0) $fdisplay(fd_stream, "%0d %0d %0d %08x", n_loads_done, cur.off, cur.sz, got);
-					recent[n_loads_done % 8] = cur.off;
+					if (fd_stream != 0 && !rl_on) $fdisplay(fd_stream, "%0d %0d %0d %08x", n_loads_done, cur.off, cur.sz, got);
+					recent[(n_loads_done + n_rl_loads) % 8] = cur.off;
 				end
 				w_asset <= 1'b0;
 				gap = cur.chk ? r_misc(4) : (r_load(10) < 4 ? 0 : r_load(10) < 8 ? r_load(4) : r_load(41));
@@ -600,6 +716,7 @@ module tb_daria_smp;
 		repeat (200) @(posedge clk_sys);           // no image yet
 		load_image(img_kb, 0);
 		wait (img_ready);
+		check_image(img_kb, 0);
 		next_ep = 200 + r_ep(800);
 		main_i = 0;
 		main_n = n_loads;
@@ -613,6 +730,7 @@ module tb_daria_smp;
 		repeat (4) @(posedge clk_sys);
 		load_image(img2_kb, 1);
 		wait (img_ready);
+		check_image(img2_kb, 1);
 		img_bytes = img2_kb * 1024;
 		for (int v = 0; v < 16; v++) vptr[v] = vptr[v] % img_bytes;
 		lq.delete();
@@ -622,6 +740,62 @@ module tb_daria_smp;
 		chk_pause = 0;
 		main_on = 1;
 		wait (main_i == main_n && st == 0 && !ep_wait && !ep_act);
+		// 5. Reloads, each START timed on the sampler (with samples only): the
+		// CPU's loads and the requests go on throughout, with no episodes.
+		if (!nosmp && n_reloads > 0) begin
+			rl_on = 1;
+			next_ep = -1;
+			main_i = 0;
+			main_n = 1 << 30;
+			for (int k = 0; k < n_reloads; k++) begin
+				int kb, mode, w, e;
+				mode = k % 5;
+				kb = 40 + r_rl(33);
+				repeat (200 + r_rl(1200)) @(posedge clk_sys);
+				#1;                                // after the edge, so that the choices below see its values
+				if (mode <= 1) begin
+					// While a cache fill has reads to issue and no request is
+					// open: a request posted on the START's clk_sys edge (mode
+					// 0) or on the edge before it (mode 1).
+					w = 0;
+					while ((busy_r || !(cache.f_act && cache.f_rq_n > 4'd2)) && w < 20000) begin
+						@(posedge clk_sys);
+						#1;
+						w++;
+					end
+					if (w == 20000) n_rl_to++;
+					force_post = 1;
+					if (mode == 1) begin
+						@(posedge clk_sys);
+						#1;
+					end
+				end else begin
+					// On the first clk_sys edge after the sampler's start (2),
+					// its read waiting behind a cache read (3), its read taken (4).
+					rl_wait = 0;
+					rl_hit = 0;
+					rl_trig = mode;
+					wait (rl_hit);
+					rl_trig = 0;
+					#1;
+				end
+				n_rl_mode[mode]++;
+				e = epoch + 1;
+				send(M_START, 44'd0);
+				force_post = 0;
+				load_body(kb, e);
+				wait (img_ready);
+				if (epoch != e) $fatal(1, "tb_daria_smp: reload %0d: epoch %0d, expected %0d", k, epoch, e);
+				img_bytes = kb * 1024;
+				for (int v = 0; v < 16; v++) vptr[v] = vptr[v] % img_bytes;
+				lq.delete();
+				check_image(kb, e);
+				n_rl++;
+			end
+			main_n = main_i;
+			wait (st == 0);
+			rl_on = 0;
+		end
 		// Drain: no new requests; the open one answered; its check load done.
 		smp_on = 0;
 		wait (!busy_r);
@@ -639,23 +813,30 @@ module tb_daria_smp;
 		chip.report();
 		$display("cache: demand misses %0d, prefetches %0d, pre-emptions %0d; episodes: hold %0d, mapper reset %0d, Souper %0d",
 			c_miss, c_pf, c_pre, n_ep[EP_HOLD], n_ep[EP_MRES], n_ep[EP_SOUPER]);
-		$display("requests %0d: image bytes %0d (odd offsets %0d), $FF %0d (hold %0d, load %0d, Souper %0d), load races %0d",
-			n_go, n_byte, c_odd, n_ff, n_ff_hold, n_ff_load, n_ff_souper, n_race);
+		$display("requests %0d: image bytes %0d (odd offsets %0d, past the image %0d), $FF %0d (hold %0d, load %0d, Souper %0d), load races %0d (the old byte %0d, the new image's %0d)",
+			n_go, n_byte, c_odd, n_beyond, n_ff, n_ff_hold, n_ff_load, n_ff_souper, n_race, n_race_old, n_race_new);
 		$display("answer time: image byte max %0d ps, mean %0d ps; $FF max %0d ps",
 			t_byte_max, n_byte != 0 ? t_byte_sum / n_byte : 0, t_ff_max);
 		$display("coverage: wanted while the cache asks %0d, while a cache read is in flight %0d, taken on a cache read's arrival %0d, reads while the cache is held %0d (mapper reset %0d)",
 			c_coinc, c_wait_fl, c_take_rx, c_held_rd, c_mres_rd);
-		$display("loads %0d, check loads %0d (dropped with the first image %0d)", n_loads_done, n_check, n_chk_drop);
+		$display("loads %0d, check loads %0d (dropped with an earlier image %0d)", n_loads_done, n_check, n_chk_drop);
+		$display("sync: fewest clk_arm edges from a request's toggle to its start %0d; images checked: %0d halfwords",
+			sync_min, n_img_hw);
+		$display("reloads %0d (START on a request's post %0d, a clk_sys after it %0d, after the start %0d, the read behind a cache read %0d, the read taken %0d; timeouts %0d): START while the sampler's read is wanted %0d, in flight %0d; loads %0d, dropped by a START %0d",
+			n_rl, n_rl_mode[0], n_rl_mode[1], n_rl_mode[2], n_rl_mode[3], n_rl_mode[4], n_rl_to, c_rl_pend, c_rl_fl,
+			n_rl_loads, n_abandon);
 		fail = e_data != 0 || e_check != 0 || e_load != 0 || e_spur != 0 || e_lost != 0 || e_proto != 0 ||
-			e_bothfl != 0 || e_ownack != 0 || e_ffslow != 0 || e_stuck != 0 ||
+			e_bothfl != 0 || e_ownack != 0 || e_ffslow != 0 || e_stuck != 0 || e_sync != 0 || e_img != 0 ||
 			chip.n_viol != 0 || chip.late_reads != 0 || overrun ||
 			n_loads_done != longint'(n_loads + n_loads / 4);
 		if (!nosmp)
 			fail = fail || n_ff_hold == 0 || n_ff_load == 0 || n_ff_souper == 0 || n_byte < 1000 ||
 				c_coinc == 0 || c_wait_fl == 0 || c_take_rx == 0 || c_held_rd == 0 || n_check + n_chk_drop != n_byte;
-		$display("result: %0s data %0d check %0d load %0d spur %0d lost %0d proto %0d both_fl %0d own_ack %0d ff_slow %0d stuck %0d psram_viol %0d late %0d overrun %0d byte_max_ps %0d ff_max_ps %0d",
+		if (!nosmp && n_reloads > 0)
+			fail = fail || n_rl != n_reloads || c_rl_pend == 0 || c_rl_fl == 0 || n_race == 0;
+		$display("result: %0s data %0d check %0d load %0d spur %0d lost %0d proto %0d both_fl %0d own_ack %0d ff_slow %0d stuck %0d sync %0d image %0d psram_viol %0d late %0d overrun %0d byte_max_ps %0d ff_max_ps %0d",
 			fail ? "FAIL" : "PASS", e_data, e_check, e_load, e_spur, e_lost, e_proto, e_bothfl, e_ownack,
-			e_ffslow, e_stuck, chip.n_viol, chip.late_reads, overrun, t_byte_max, t_ff_max);
+			e_ffslow, e_stuck, e_sync, e_img, chip.n_viol, chip.late_reads, overrun, t_byte_max, t_ff_max);
 		if (fail) $fatal(1, "tb_daria_smp failed");
 		$finish;
 	end

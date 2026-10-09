@@ -3,6 +3,10 @@
 # (src/fpga/core/bupchip/daria_smp.sv; docs/daria_step7/plan.md 3.3 gate
 # item 3). Verilator 5.040 (set VERILATOR to override), --binary --timing.
 #   ./run_smp.sh one [+plusarg ...]   build (x-initial fast) and run once
+#   ./run_smp.sh sweep fast|unique FIRST LAST [+plusarg ...]
+#                                     one run per seed FIRST..LAST, random
+#                                     phases (unique: +verilator+rand+reset+2);
+#                                     exit 0 iff every run passes
 #   ./run_smp.sh gate                 the unit gate, below; exit 0 iff it passes
 # The gate:
 #   1. --x-initial fast: phases 0, 8,730 and 17,460 ps (the shared edge on each
@@ -11,8 +15,12 @@
 #      stream (+stream) must be the same file with and without samples;
 #   2. --x-initial unique with +verilator+rand+reset+2, seeds 1-5, random
 #      phases: each must pass;
-#   3. the five mutants of daria_smp.sv, each built from a copy (the tree is
-#      not touched) and run at phase 0: each must fail.
+#   3. seeds 22 and 24 (fast) and 22 (unique) at +loads=15000, random phases:
+#      a request drawn for the 512 KB image and started on the 160 KB one,
+#      past its end (the bench's own error the review found); each must pass
+#      and answer at least one such request;
+#   4. the mutants of daria_smp.sv, each built from a copy (the tree is not
+#      touched) and run at phase 0: each must fail.
 #        ack_early   the toggle flips with the halfword's arrival (or with the
 #                    $FF decision) and the byte follows a clock later
 #        lane        the other byte of the halfword
@@ -20,6 +28,9 @@
 #        no_mask     the cache's rd_req and rd_ack not masked while the
 #                    sampler owns the read port
 #        ack_reset   ack reset while not readable (the hold)
+#        sync1       smp_req through one flop, not two
+#        race_ff     a read in flight when readable falls answers $FF
+#        drop_unread readable falling drops the wanted or in-flight read
 # Environment: WORK (default sim/work/bupchip/daria/smp), JOBS (build
 # parallelism, default 2), LOADS (+loads for the gate's runs, default 40000).
 # Every log starts with the tree's HEAD and status, the Verilator path and
@@ -130,10 +141,23 @@ elif name == "no_mask":
     rep("assign c_rd_ack = rd_ack && !own;", "assign c_rd_ack = rd_ack;")
 elif name == "ack_reset":
     rep(dn, dn + "		if (!readable) ack <= 1'b0;\n")
+elif name == "sync1":
+    rep("wire asked = req_s1 != ack;", "wire asked = req_s0 != ack;")
+elif name == "race_ff":
+    rep("data <= addr[0] ? rd_data[15:8] : rd_data[7:0];",
+        "data <= !readable ? 8'hFF : addr[0] ? rd_data[15:8] : rd_data[7:0];")
+elif name == "drop_unread":
+    rep(dn, dn + "		if (!readable) begin\n			pend <= 1'b0;\n			fl <= 1'b0;\n		end\n")
 else:
     sys.exit("no mutant " + name)
 open(out, "w").write(s)
 EOF
+}
+
+# cover LOG: the bench's coverage lines that the gate's evidence quotes
+cover() {
+	sed -n -E 's/.*past the image ([0-9]+)\).*load races ([0-9]+) .*/past the image \1, load races \2/p' "$1"
+	sed -n -E 's/.*: START while the sampler.s read is wanted ([0-9]+), in flight ([0-9]+);.*/START while pend \1, while fl \2/p' "$1"
 }
 
 case "${1:-}" in
@@ -141,6 +165,24 @@ one)
 	shift
 	build fast fast "$B/daria_smp.sv" || exit 1
 	run fast "$WORK/one.log" "$@"
+	;;
+sweep)
+	kind="${2:-}" first="${3:-}" last="${4:-}"
+	case "$kind" in fast|unique) ;; *) echo "usage: run_smp.sh sweep fast|unique FIRST LAST [+plusarg ...]" >&2; exit 2 ;; esac
+	shift 4 || exit 2
+	fail=0
+	header
+	build "$kind" "$kind" "$B/daria_smp.sv" || exit 1
+	echo "binary $kind $(md5sum < "$WORK/obj_$kind/vtb" | cut -c1-32), plusargs $*"
+	for s in $(seq "$first" "$last"); do
+		extra=()
+		[ "$kind" = unique ] && extra=(+verilator+rand+reset+2 +verilator+seed+$s)
+		r="$(run "$kind" "$WORK/sweep_${kind}_$s.log" "${extra[@]}" +seed=$s +phase=-1 "$@")"
+		echo "seed $s: $r; $(cover "$WORK/sweep_${kind}_$s.log" | paste -sd ';' -)"
+		case "$r" in *FAIL*) fail=1 ;; esac
+	done
+	[ $fail = 0 ] && echo "SWEEP PASS" || echo "SWEEP FAIL"
+	exit $fail
 	;;
 gate)
 	fail=0
@@ -153,7 +195,7 @@ gate)
 		r1="$(run fast "$WORK/ph$ph.log" +seed=7 +phase=$ph +loads=$LOADS +stream="$WORK/ph$ph.stream")"
 		r2="$(run fast "$WORK/ph${ph}_nosmp.log" +seed=7 +phase=$ph +loads=$LOADS +nosmp +stream="$WORK/ph${ph}_nosmp.stream")"
 		if cmp -s "$WORK/ph$ph.stream" "$WORK/ph${ph}_nosmp.stream" && [ -s "$WORK/ph$ph.stream" ]; then same=same; else same=DIFFERENT; fail=1; fi
-		echo "phase $ph: $r1"
+		echo "phase $ph: $r1; $(cover "$WORK/ph$ph.log" | paste -sd ';' -)"
 		echo "phase $ph +nosmp: $r2"
 		echo "phase $ph: CPU load stream with and without samples: $same ($(wc -l < "$WORK/ph$ph.stream") loads)"
 		case "$r1$r2" in *FAIL*) fail=1 ;; esac
@@ -161,12 +203,22 @@ gate)
 	echo "== x-initial unique, +verilator+rand+reset+2, random phases"
 	for s in 1 2 3 4 5; do
 		r="$(run unique "$WORK/unique$s.log" +verilator+rand+reset+2 +verilator+seed+$s +seed=$s +phase=-1 +loads=$((LOADS / 2)))"
-		echo "seed $s: $r"
+		echo "seed $s: $r; $(cover "$WORK/unique$s.log" | paste -sd ';' -)"
+		case "$r" in *FAIL*) fail=1 ;; esac
+	done
+	echo "== requests started past the image (+loads=15000, random phases)"
+	for k in fast:22 fast:24 unique:22; do
+		b=${k%%:*} s=${k#*:} extra=()
+		[ "$b" = unique ] && extra=(+verilator+rand+reset+2 +verilator+seed+$s)
+		r="$(run "$b" "$WORK/past_${b}_$s.log" "${extra[@]}" +seed=$s +phase=-1 +loads=15000)"
+		c="$(cover "$WORK/past_${b}_$s.log" | paste -sd ';' -)"
+		case "$c" in "past the image 0,"*|"") r="$r (FAIL: no request past the image)"; fail=1 ;; esac
+		echo "$b seed $s: $r; $c"
 		case "$r" in *FAIL*) fail=1 ;; esac
 	done
 	echo "== mutants (each must fail)"
 	mkdir -p "$WORK/mut"
-	for m in ack_early lane no_ff no_mask ack_reset; do
+	for m in ack_early lane no_ff no_mask ack_reset sync1 race_ff drop_unread; do
 		mutate $m "$WORK/mut/daria_smp_$m.sv" || { fail=1; continue; }
 		build "mut_$m" fast "$WORK/mut/daria_smp_$m.sv" || { fail=1; continue; }
 		echo "mutant $m: binary $(md5sum < "$WORK/obj_mut_$m/vtb" | cut -c1-32)"
