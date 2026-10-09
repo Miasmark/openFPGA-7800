@@ -247,16 +247,21 @@ for key in ("Logic utilization", "Total RAM Blocks", "Total registers"):
     if m:
         area.append(f"{key}: {m.group(1).strip()}")
 if fit:
-    for key in (r"ALMs needed \[=A-B\+C\]", r"Total LABs:\s+partially or completely used"):
+    # The fit report's Fitter Resource Usage Summary: plan 5.1's "peak
+    # interconnect usage (fit report, routing usage)" is its total/H/V row.
+    for key, label in ((r"ALMs needed \[=A-B\+C\]", "ALMs needed"),
+                       (r"Total LABs:\s+partially or completely used", "LABs"),
+                       (r"M10K blocks", "M10K blocks"),
+                       (r"Peak interconnect usage \(total/H/V\)", "peak interconnect usage (total/H/V)"),
+                       (r"Average interconnect usage \(total/H/V\)", "average interconnect usage (total/H/V)")):
         m = re.search(r";\s*" + key + r"\s*;\s*([^;]+);", fit)
         if m:
-            area.append(f"{key.split(':')[0].replace(chr(92), '')}: {m.group(1).strip()}")
+            area.append(f"{label}: {m.group(1).strip()}")
+    # The router's own estimate, for one region of the device (a different
+    # figure from the summary's: Q0 seed 2 had 36% here and 40.4% there).
     pk = re.findall(r"[Pp]eak interconnect usage is (\d+)%[^\n]*", fit)
-    av = re.findall(r"[Aa]verage interconnect usage is (\d+)%", fit)
     if pk:
-        area.append(f"peak interconnect usage {max(int(x) for x in pk)}%")
-    if av:
-        area.append(f"average interconnect usage {av[-1]}%")
+        area.append(f"router's estimate of the peak in one region {max(int(x) for x in pk)}%")
 check("m", "INFO" if area else "FAIL", "; ".join(area) if area else "no fit summary")
 
 # ---- (n): psram's CLOCK_SPEED -------------------------------------------------------------------------------------------
