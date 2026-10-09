@@ -27,7 +27,10 @@ row 6 and 3.6.
                              [--profile P] [--only NAME,...]
       every mapper image with Flicker Blend off and on (60 ms each), the
       Supercharger's full load (blend off and on, with the RAM dump check)
-      and multiload, and the 7800 RAM cartridge; then the verdicts.
+      and multiload, the 7800 RAM cartridge, and a synthetic DPC+ image
+      (fe_dir/mkimg.py) that must make no cart-RAM access at all; with
+      --arfw FILE (the Supercharger BIOS) also the full load from tape
+      (artape, 22 simulated seconds); then the verdicts.
   cartram2600_test.py s19 [--work DIR] [--build] [--rtl-tree DIR]
                           [--profile P] [--images e7,...]
       the directed s19 run: +inject=sweep places a BIOS download write at
@@ -53,6 +56,7 @@ SPDX-License-Identifier: MIT
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -75,7 +79,7 @@ EXPECT = {
     "arfull": (232458, 6144, 6144), "armulti": (1516502, 512, 256),
 }
 RUN_MS = {m: 60 for m in MAPPERS}
-RUN_MS.update(arfull=300, armulti=1300)
+RUN_MS.update(arfull=300, armulti=1300, artape=22000, armimg=60)
 BUCKETS = {   # (profile, blend): (normal, repeated address)
     ("base", 0): ({11}, {7}), ("base", 1): ({11, 14}, {9}),
     ("fixb", 0): ({15}, {11}), ("fixb", 1): ({15}, {11, 14}),
@@ -283,6 +287,13 @@ def check(log, name, blend, profile="auto", expect_counts=True):
     prof = profile_of(r, profile)
     if prof is None:
         bad.append("no CARTRAM sram_ctrl line (not tb_cartram, or no +cartram)")
+    if name == "armimg":
+        if not r["reads"] or not r["writes"]:
+            bad.append("CARTRAM lines missing")
+        elif r["reads"][0] or r["writes"][0] or r["writes"][1]:
+            bad.append(f"an ARM image reached the SRAM's cart RAM: reads {r['reads'][0]}, strobes {r['writes'][0]}, "
+                       f"writes issued {r['writes'][1]} (all must be 0)")
+        return not bad, bad, f"reads {r['reads'][0] if r['reads'] else '-'} strobes {r['writes'][0] if r['writes'] else '-'}"
     if not r["reads"] or r["hist"] is None or not r["writes"] or r["mid"] is None:
         bad.append("CARTRAM lines missing")
         return False, bad, "-"
@@ -315,7 +326,7 @@ def check(log, name, blend, profile="auto", expect_counts=True):
         fails = [v for v in r["audf"] if 2 <= v < 16]
         if fails: bad.append(f"fail code AUDF0 {fails[0]}")
         if not [v for v in r["audf"] if 16 <= v <= 23]: bad.append("no pass code (AUDF0 16-23)")
-    elif name == "arfull":
+    elif name in ("arfull", "artape"):
         if 5 not in r["audf"] or "54" not in r["colubk"]: bad.append("no magenta $54 / AUDF0 5")
         if r["archeck"] is None: bad.append("no ARCHECK line")
         elif r["archeck"][1]: bad.append(f"ARCHECK {r['archeck'][1]} RAM bytes differ")
@@ -359,18 +370,24 @@ def images(a):
         out = subprocess.run([sys.executable, os.path.join(HERE, "ar_test.py"), mode], capture_output=True, check=True).stdout
         open(os.path.join(d, f"ar{mode}.bin"), "wb").write(out)
     write_ram7800(os.path.join(d, "ram7800.a78"))
+    # a synthetic DPC+ image (fe_dir/mkimg.py): an ARM scheme never reaches
+    # the SRAM's cart RAM (Fix A, decision 4)
+    subprocess.run([sys.executable, os.path.join(HERE, "bupchip", "daria", "fe_dir", "mkimg.py"),
+                    os.path.join(d, "arm"), "smoke_dpc"], capture_output=True, check=True)
+    shutil.copy(os.path.join(d, "arm", "smoke_dpc.bin"), os.path.join(d, "armimg.bin"))
     return d
 
 
-def cases_matrix(only):
-    c = [(m, b) for m in MAPPERS for b in (0, 1)] + [("arfull", 0), ("arfull", 1), ("armulti", 0), ("ram7800", 0)]
+def cases_matrix(only, tape=False):
+    c = [(m, b) for m in MAPPERS for b in (0, 1)] + [("arfull", 0), ("arfull", 1), ("armulti", 0), ("ram7800", 0),
+                                                       ("armimg", 0)] + ([("artape", 0)] if tape else [])
     return [x for x in c if not only or x[0] in only]
 
 
 def case_args(img, name, blend, extra=()):
     if name == "ram7800":
         return [f"+image={img}/ram7800.a78", "+audf=7"]
-    args = [f"+image={img}/{name}.bin", "+arprobe", "+cartram", f"+wav={RUN_MS[name]}"]
+    args = [f"+image={img}/{'arfull' if name == 'artape' else name}.bin", "+arprobe", "+cartram", f"+wav={RUN_MS[name]}"]
     if name in BS and BS[name]:
         args.append(f"+bs={BS[name]}")
     if blend:
@@ -386,15 +403,17 @@ def cmd_matrix(a):
     os.makedirs(logs, exist_ok=True)
     ok_all = True
     only = set(a.only.split(",")) if a.only else None
-    for name, blend in cases_matrix(only):
+    for name, blend in cases_matrix(only, bool(a.arfw)):
         log = os.path.join(logs, f"{name}_b{blend}.log")
         extra = []
-        if name == "arfull":
-            extra = [f"+ardump={logs}/ram_arfull_b{blend}.bin"]
+        if name in ("arfull", "artape"):
+            extra = [f"+ardump={logs}/ram_{name}_b{blend}.bin"]
+        if name == "artape":
+            extra.append(f"+arfw={os.path.abspath(a.arfw)}")
         run(a, name, case_args(img, name, blend, extra), log)
-        if name == "arfull":
+        if name in ("arfull", "artape"):
             ck = subprocess.run([sys.executable, os.path.join(HERE, "ar_test.py"), "check",
-                                 f"{logs}/ram_arfull_b{blend}.bin", f"{img}/arfull.bin"], capture_output=True, text=True)
+                                 f"{logs}/ram_{name}_b{blend}.bin", f"{img}/arfull.bin"], capture_output=True, text=True)
             open(log, "a").write(ck.stdout)
         ok, bad, summ = check(log, name, blend, a.profile)
         ok_all &= ok
@@ -463,6 +482,7 @@ def main():
         s.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
         if name == "matrix":
             s.add_argument("--only")
+            s.add_argument("--arfw", help="the Supercharger BIOS: adds the full load from tape (artape, 22 s)")
         else:
             s.add_argument("--images", default="e7")
     a = p.parse_args()
