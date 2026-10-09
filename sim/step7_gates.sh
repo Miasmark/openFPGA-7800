@@ -13,13 +13,18 @@
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
 #                the qsf has POCKET_DARIA, else --qsf comments)
 #   cartram      cartram2600_test.py matrix and the directed s19 run
-#   run_sim      run_sim.sh (the build the qsf names) and its checker; with
-#                POCKET_DARIA in the qsf also the plain build (DARIA=0), both
-#                with FP=1, and every non-BupChip case's fingerprints equal
-#                between the two (plan 7.5 row 5)
-#   extra_tests  extra_tests.sh on run_sim's WORK, checked against EXTRA_REF
-#                (the reference build's extra_tests.sh log); AR_TAPE=1 passes
-#                through (the tape path, which the checker then requires)
+#   run_sim      run_sim.sh (the build the qsf names) with FP=1 and its
+#                checker (with RUN_SIM_REF=LOG, every measurement and verdict
+#                line also equal to that log's, a run of the same build type);
+#                with POCKET_DARIA in the qsf also the plain build (DARIA=0),
+#                and every non-BupChip case's fingerprints equal between the
+#                two (plan 7.5 row 5); with FP_REF=DIR every run_sim.sh
+#                fingerprint there (DIR/<case>.csv, e.g. another tree's
+#                WORK/fp) equal to this run's (frame_gate.py --strict)
+#   extra_tests  extra_tests.sh with FP=1 on run_sim's WORK, checked against
+#                EXTRA_REF (the reference build's extra_tests.sh log); AR_TAPE=1
+#                passes through (the tape path, which the checker then
+#                requires); with FP_REF=DIR its extra_<case>.csv there too
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh and cartram logs and
 #                fingerprints (so it runs after them), and the guards'
@@ -29,6 +34,10 @@
 #   lint         sim/lint_step7.sh (lane I1's three macro sets)
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
+#   frames       the frame gate on game images (plan P13, 7.4): tb_frames
+#                (lane I4c, not yet in the tree) against R1's tb_daria runs,
+#                GAMES=DIR and R1_DIR=DIR; until tb_frames exists it is NOT
+#                AVAILABLE
 # A gate whose script or input does not exist yet is NOT AVAILABLE, which is
 # not a pass. --list prints the gates and whether each is available.
 # Environment: VERILATOR (default /opt/verilator-5.040/bin/verilator when it
@@ -36,7 +45,9 @@
 # under flock FILE, niced: the machine's simulation slot), BIOS=FILE and
 # BUPFW=FILE (run_sim.sh's BIOS and BupChip sections; without them those
 # sections are skipped, which fails run_sim), GAMES=DIR (game images by path;
-# they are never copied into the tree).
+# they are never copied into the tree), R1_DIR=DIR (the reference runs),
+# S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), RUN_SIM_REF=LOG,
+# FP_REF=DIR (above).
 # Every log starts with the tree's HEAD and status and the Verilator path
 # and version (plan P23); the run scripts add the md5 of each binary they
 # build. Output in --out DIR (default sim/work/step7/gates): <gate>.log and
@@ -64,7 +75,7 @@ OUT="$(cd "$OUT" && pwd)"
 QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
-GATES=(hygiene pp_equiv pp_guards cartram run_sim extra_tests selftest s4_check lint daria_smp dbg_snap)
+GATES=(hygiene pp_equiv pp_guards cartram run_sim extra_tests selftest s4_check lint daria_smp dbg_snap frames)
 
 header() {   # the P23 header of every gate log
 	echo "HEAD $(git -C "$REPO" rev-parse HEAD)"
@@ -86,6 +97,9 @@ avail() {
 		lint) [ -f "$HERE/lint_step7.sh" ] || echo "sim/lint_step7.sh does not exist yet (lane I1)" ;;
 		daria_smp) [ -f "$HERE/bupchip/daria/smp/run_smp.sh" ] || echo "sim/bupchip/daria/smp/run_smp.sh does not exist yet (lane I1)" ;;
 		dbg_snap) [ -f "$HERE/bupchip/dbgsnap/run_dbgsnap.sh" ] || echo "sim/bupchip/dbgsnap/run_dbgsnap.sh does not exist yet (lane I3)" ;;
+		frames) if [ ! -f "$HERE/tb_frames.sv" ]; then echo "sim/tb_frames.sv does not exist yet (lane I4c)"
+			elif [ -z "${GAMES:-}" ] || [ ! -d "${GAMES:-}" ]; then echo "GAMES (the directory of game images) not given"
+			elif [ -z "${R1_DIR:-}" ] || [ ! -d "${R1_DIR:-}" ]; then echo "R1_DIR (the reference runs) not given"; fi ;;
 	esac
 }
 
@@ -101,6 +115,23 @@ if [ "$LIST" = 1 ]; then
 	done
 	exit 0
 fi
+
+# fp_compare GLOB: every FP_REF/GLOB fingerprint equal to this run's (rs/fp)
+fp_compare() {
+	local f d rc=0 n=0
+	[ -n "${FP_REF:-}" ] || return 0
+	for f in "$FP_REF"/$1; do
+		[ -f "$f" ] || continue
+		d="$(basename "$f")"
+		case "$1:$d" in "*.csv:extra_"*) continue ;; esac
+		n=$((n + 1))
+		echo "-- fingerprints $d against FP_REF"
+		if [ -f "$OUT/rs/fp/$d" ]; then python3 "$HERE/check/frame_gate.py" --strict "$f" "$OUT/rs/fp/$d" || rc=1
+		else echo "  FAIL: $OUT/rs/fp/$d missing"; rc=1; fi
+	done
+	[ $n -gt 0 ] || { echo "  FAIL: no fingerprints matching $1 in FP_REF=$FP_REF"; rc=1; }
+	return $rc
+}
 
 # gate functions: run, write the log, return 0 (pass) or 1 (fail)
 g_hygiene() { bash "$HERE/check/hygiene.sh" --base "${HYGIENE_BASE:-aeee6d2}" --names "$HYGIENE_NAMES"; }
@@ -124,7 +155,8 @@ g_run_sim() {
 	local rc=0 d
 	FP=1 WORK="$OUT/rs" slot bash "$HERE/run_sim.sh" > "$OUT/run_sim.out" 2>&1; echo "exit $?" >> "$OUT/run_sim.out"
 	cat "$OUT/run_sim.out"
-	python3 "$HERE/check/run_sim_check.py" "$OUT/run_sim.out" || rc=1
+	python3 "$HERE/check/run_sim_check.py" "$OUT/run_sim.out" ${RUN_SIM_REF:+--ref "$RUN_SIM_REF"} || rc=1
+	fp_compare '*.csv' || rc=1
 	if [ "$QSF_DARIA" = 1 ]; then
 		echo "== the plain build (DARIA=0), for the fingerprints of 7.5 row 5"
 		DARIA=0 FP=1 WORK="$OUT/rs_plain" slot bash "$HERE/run_sim.sh" > "$OUT/run_sim_plain.out" 2>&1; echo "exit $?" >> "$OUT/run_sim_plain.out"
@@ -148,11 +180,13 @@ g_selftest() {
 }
 g_extra_tests() {
 	[ -x "$OUT/rs/obj_load/vtb" ] || { echo "no run_sim build in $OUT/rs: run the run_sim gate first"; return 1; }
-	WORK="$OUT/rs" slot bash "$HERE/extra_tests.sh" > "$OUT/extra_tests.out" 2>&1; echo "exit $?" >> "$OUT/extra_tests.out"
+	local tape=() rc=0
+	FP=1 WORK="$OUT/rs" slot bash "$HERE/extra_tests.sh" > "$OUT/extra_tests.out" 2>&1; echo "exit $?" >> "$OUT/extra_tests.out"
 	cat "$OUT/extra_tests.out"
-	local tape=()
 	[ "${AR_TAPE:-0}" = 1 ] && tape=(--ar-tape)
-	python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests.out" --ref "$EXTRA_REF" "${tape[@]}"
+	python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests.out" --ref "$EXTRA_REF" "${tape[@]}" || rc=1
+	fp_compare 'extra_*.csv' || rc=1
+	return $rc
 }
 g_s4_check() {
 	local game=()
@@ -162,6 +196,7 @@ g_s4_check() {
 g_lint() { bash "$HERE/lint_step7.sh"; }
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
+g_frames() { echo "the frame gate's runs arrive with tb_frames (lane I4c); this runner has none yet"; return 1; }
 
 declare -A RES
 for g in "${GATES[@]}"; do
