@@ -42,7 +42,11 @@ echo "-- extra_tests.sh: WORK $WORK, obj_load/vtb md5 $(md5sum < "$WORK/obj_load
 # Then the directed s19 run: another client's access placed at every
 # clk_sdram edge of the 6507 cycle in turn.
 echo "-- 2600 cartridge RAM (cartram2600_test.py: 8 RAM mappers x Flicker Blend, Supercharger, 7800 RAM cart, s19 sweep)"
-[ -x "$WORK/obj_cartram/vtb" ] && [ ! "$HERE/tb_cartram.sv" -nt "$WORK/obj_cartram/vtb" ] && [ ! "$HERE/tb_load.sv" -nt "$WORK/obj_cartram/vtb" ] \
+# (re)built unless it is newer than run_sim.sh's own tb_load build, which
+# run_sim.sh makes afresh on every run: a tb_cartram older than that may be
+# of other RTL
+[ -x "$WORK/obj_cartram/vtb" ] && [ ! "$WORK/obj_load/vtb" -nt "$WORK/obj_cartram/vtb" ] \
+	&& [ ! "$HERE/tb_cartram.sv" -nt "$WORK/obj_cartram/vtb" ] \
 	|| WORK="$WORK" BUILD_TOP=tb_cartram VL_JOBS="${VL_JOBS:-2}" bash "$HERE/run_sim.sh" | sed 's/^/  /'
 python3 "$HERE/cartram2600_test.py" matrix --work "$WORK" || true
 python3 "$HERE/cartram2600_test.py" s19 --work "$WORK" || true
