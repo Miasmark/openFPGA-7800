@@ -411,11 +411,33 @@ Other constraints already in the file:
 - SDRAM read data to `clk_sys` is a 2-cycle path (as in MiSTer's SDC).
 - The data loader's address and data into `clk_sys` have a hold multicycle
   (they are held for ten `clk_sdram` cycles around the strobe).
+- The SRAM's cartridge / BIOS byte (`sram|c_rdata`) into `clk_sys` is a
+  2-cycle path; with Fix B a 2600 byte has no `clk_sdram` to spare against
+  it (the comment above the lines has the budget).
+- A fitter-only block asks the fitter, not the Timing Analyzer, for 1.5 ns
+  more setup into `clk_sdram` and 0.1 ns more hold into `clk_sys` and from
+  `clk_sys` into `clk_sdram`.
+
+DARIA (`POCKET_DARIA`) adds two files through its own lines in
+`ap_core.qsf`, so that a build without it reads exactly the constraints
+above: `core/daria_constraints.sdc` (an `SDC_FILE` line after the
+`QIP_FILE` lines, so it is read after the PLL clocks exist), which bounds
+the `clk_sys` <-> `clk_arm` crossings at ±20 ns and holds the front end's
+phase detector pair (`pd_tog` -> `pd_rx`) to 6 / 1 ns; and
+`core/daria.qip`, which marks the first flop of each synchroniser that
+shares its declaration `SYNCHRONIZER_IDENTIFICATION FORCED`, bit by bit.
+DARIA's new files mark theirs in the RTL, on scalar first stages. Padding for
+the DARIA build alone goes in `daria_constraints.sdc`'s own fitter-only
+block, never in `core_constraints.sdc`, which then stays the same in both
+builds.
 
 The tightest path is on `clk_sdram`: the cartridge-RAM request from MARIA
 or the 6502, through the mappers and `sram_ctrl`'s arbiter, into the SRAM's
 pad registers. Its margin moves with placement (+0.44 ns in 2.1.1, +1.32 in
-2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes.
+2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes; Fix B
+([DARIA_CORE.md](DARIA_CORE.md), "Fix B") registers the 2600 mappers'
+request, which leaves the 7800's in that cone. The release gate is +1.5 ns
+on each of seeds 1, 2 and 3.
 
 ## Resource budget
 
@@ -437,9 +459,11 @@ RAM, Flicker Blend frame, SaveKey and BIOS live in the SRAM
 (14,595), 86 M10K blocks and 95% of the LABs. At that fill the worst
 `clk_sdram` path (MARIA and 2600 mapper address into `sram_ctrl`'s pad
 registers) depends on placement: `core_constraints.sdc` asks the fitter alone
-for 1 ns of extra setup margin there, and `ap_core.qsf` sets the fitter seed
-that gave the best result (3, +1.26 ns). After any change, check the
-`clk_sdram` slack again and try other seeds if it drops below +1.0 ns. Up to 2.0.20 all
+for 1.5 ns of extra setup margin there, and `ap_core.qsf` sets the fitter
+seed, one already fitted on the release tree, with the margins of the seeds
+tried in its comment. After any change, check the `clk_sdram` slack again
+on seeds 1, 2 and 3; the release gate is +1.5 ns at the worse slow corner
+on each ([DARIA_CORE.md](DARIA_CORE.md), "Fix B", 5). Up to 2.0.20 all
 308 blocks were in use (75% ALMs), and a 16 KiB diagnostic RAM did not fit.
 The SRAM's last 16 KiB (words 0x1E000-0x1FFFF) is free.
 Before adding memory, check the M10K count in `ap_core.fit.summary`.
