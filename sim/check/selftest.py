@@ -183,6 +183,8 @@ def cartram_cases(log, w):
         "past_s19": sub1(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):.*)$", r"\g<1> 20:1"),
         "read_count": sub1(r"^CARTRAM reads: (\d+)", lambda m: "CARTRAM reads: " + str(int(m.group(1)) + 1)),
         "fail_code": lambda t: t + "AR 70 ms: AUDF0 = 3\n",
+        "p2_fatal": lambda t: t + "[41000000] %Fatal: tb_load.sv:263: Assertion failed in tb_cartram.tb: "
+                                  "P2: sram_ctrl m_new and t_new in the same clk_sdram cycle at 41.000 us\n",
     }
     for c, fn in cases.items():
         expect(c, [ct, "check", plant(log, os.path.join(w, f"cartram_{c}.log"), fn), "--image", "e7", "--blend", "0"], False)

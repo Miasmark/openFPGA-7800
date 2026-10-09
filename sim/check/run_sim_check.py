@@ -142,7 +142,7 @@ def check(log, build, audfs):
             bad.append("FAIL: " + x.strip())
         if "MISSING:" in x:
             bad.append(x.strip())
-        if re.match(r"^%(Error|Fatal)|Assertion failed|\$fatal", x.strip()):
+        if re.search(r"^(\[\d+\] )?%(Error|Fatal)|Assertion failed", x.strip()):
             bad.append("simulator: " + x.strip()[:160])
         m = re.match(r"^exit (\d+)$", x.strip())
         if m and m.group(1) != "0":

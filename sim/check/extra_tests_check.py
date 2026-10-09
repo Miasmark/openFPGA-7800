@@ -28,8 +28,9 @@ turns every section into rules:
                 the reset, then yellow $1e / AUDF0 20; with AR_TAPE=1 (or
                 --ar-tape, which requires it): the tape full load's ARCHECK 0
                 differ and the tape multiload red then green
-  cartridge RAM the CARTRAM_MATRIX verdict (cartram2600_test.py), in logs of
-                the step-7 script, which runs it before the network clones
+  cartridge RAM the CARTRAM_MATRIX and CARTRAM_S19 verdicts
+                (cartram2600_test.py), in logs of the step-7 script, which
+                runs them before the network clones
 and fails on any "FAIL", "skipped" or simulator error, and on "exit N" with
 N != 0 when the log records the exit status.
 Exit status: 0 pass, 1 fail, 2 usage.
@@ -106,7 +107,7 @@ def check(a):
     for x in lines:
         if re.search(r"skipped", x): bad.append("skipped: " + x.strip())
         if re.search(r"\bFAIL\b", x): bad.append("FAIL: " + x.strip())
-        if re.match(r"^%(Error|Fatal)|Assertion failed", x.strip()): bad.append("simulator: " + x.strip()[:160])
+        if re.search(r"^(\[\d+\] )?%(Error|Fatal)|Assertion failed", x.strip()): bad.append("simulator: " + x.strip()[:160])
         m = re.match(r"^exit (\d+)$", x.strip())
         if m and m.group(1) != "0": bad.append("extra_tests.sh exit status " + m.group(1))
 
@@ -278,10 +279,12 @@ def check(a):
             bad.append("cartridge RAM: section missing")
         else:
             notes.append("cartridge RAM: absent (a log from before step 7)")
-    elif not any(x.strip() == "CARTRAM_MATRIX pass" for x in b):
-        bad.append("cartridge RAM: no 'CARTRAM_MATRIX pass'")
     else:
-        notes.append("cartridge RAM: CARTRAM_MATRIX pass")
+        for v in ("CARTRAM_MATRIX pass", "CARTRAM_S19 pass"):
+            if not any(x.strip() == v for x in b):
+                bad.append(f"cartridge RAM: no '{v}'")
+        if not [x for x in bad if x.startswith("cartridge RAM")]:
+            notes.append("cartridge RAM: CARTRAM_MATRIX pass, CARTRAM_S19 pass")
     return bad, notes
 
 

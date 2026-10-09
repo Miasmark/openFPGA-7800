@@ -259,7 +259,7 @@ def parse(log):
     r["tone"] = (int(m.group(1)), float(m.group(2))) if m else None
     r["inject"] = [(int(d), int(n), int(a), int(b)) for d, n, a, b in
                    re.findall(r"^CARTRAM inject phase s(\d+): (\d+) reads, c_rdata at E0\+(-?\d+)\.\.(-?\d+)$", t, re.M)]
-    r["fatal"] = re.findall(r"^%(?:Error|Fatal).*$", t, re.M)
+    r["fatal"] = re.findall(r"^(?:\[\d+\] )?%(?:Error|Fatal).*$", t, re.M)
     return r
 
 
