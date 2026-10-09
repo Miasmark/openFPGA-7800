@@ -17,7 +17,8 @@
 #    takes d_arm instead of hold, the raw sampling of open item 11),
 #    raw_every_clock, hold_every_clock (the held bus changes under clk_sys),
 #    ack_one_flop and req_one_flop (one synchroniser flop), no_wait (q_sys
-#    takes hold without waiting for the ack).
+#    takes hold without waiting for the ack), half_rate (a request every
+#    second PERIOD: the bench's rate check).
 # Environment: SNAPS (words per control run, 300), WORK (default
 # sim/work/bupchip/dbgsnap), MUTATIONS (1; 0 skips them), VERILATOR.
 # The log starts with the tree's HEAD and status, the tool and the md5 of
@@ -97,7 +98,7 @@ if [ "${MUTATIONS:-1}" = 1 ]; then
 	echo "-- 3. mutations (each must fail in at least one run)"
 	MW="$WORK/mut"
 	mkdir -p "$MW"
-	MUTS="raw raw_every_clock hold_every_clock ack_one_flop req_one_flop no_wait"
+	MUTS="raw raw_every_clock hold_every_clock ack_one_flop req_one_flop no_wait half_rate"
 	caught=0
 	total=0
 	for m in $MUTS; do
@@ -120,6 +121,10 @@ M = {
 	"\t\tif (rq_s0 != ack) begin\n\t\t\thold <= d_arm;\n\t\t\tack <= rq_s0;\n")],
 	# q_sys takes hold as soon as it has asked, before the copy.
 	"no_wait": [("wire take    = waiting && ak_s1 == req;", "wire take    = waiting;")],
+	# A request every second PERIOD: every word still whole, but half as often.
+	"half_rate": [("\tlogic          seen = 1'b0;", "\tlogic          half = 1'b0;\n\tlogic          seen = 1'b0;"),
+	              ("\t\tif (!waiting && cnt == CW'(PERIOD - 1))\n\t\t\treq <= ~req;\n",
+	               "\t\tif (cnt == CW'(PERIOD - 1)) half <= ~half;\n\t\tif (!waiting && cnt == CW'(PERIOD - 1) && half)\n\t\t\treq <= ~req;\n")],
 }
 for a, b in M[m]:
 	assert s.count(a) == 1, (m, a)

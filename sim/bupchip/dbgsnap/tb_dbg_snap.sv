@@ -31,7 +31,11 @@
 //     destination clock, as the other DARIA benches check);
 //   - the take comes at the third clk_sys edge after dut.ack changed or
 //     later, and dut.ack changes at the third clk_arm edge after dut.req or
-//     later: two synchroniser flops each way.
+//     later: two synchroniser flops each way;
+//   - the rate (once past power-up, from the second request on): dut.req
+//     flips exactly every PERIOD clk_sys edges, each take comes 3 to 6
+//     clk_sys edges after the flip it answers (the round trip), and so
+//     consecutive takes are PERIOD +- 3 clk_sys edges apart (else "rate").
 // The run must reach +snaps words, one every PERIOD clk_sys.
 //
 // +rand_init: at time 1 ps every DUT register gets a random value (Power-Up
@@ -72,7 +76,7 @@ module tb_dbg_snap;
 	bup_dbg_snap #(.N(N), .PERIOD(PERIOD)) dut (.clk_sys, .clk_arm, .d_arm, .q_sys);
 
 	// ---- errors -------------------------------------------------------------------------
-	longint errors = 0, n_torn = 0, n_order = 0, n_stale = 0, n_gap = 0, n_lat = 0, n_pair = 0;
+	longint errors = 0, n_torn = 0, n_order = 0, n_stale = 0, n_gap = 0, n_lat = 0, n_pair = 0, n_rate = 0;
 	task automatic fail(input string s);
 		errors++;
 		if (errors <= 20) $display("ERROR %0t ps: %s", $time, s);
@@ -221,10 +225,26 @@ module tb_dbg_snap;
 			t_ack = $time - 2;
 		end
 	end
+	// The rate: req's flips, PERIOD clk_sys edges apart once past power-up
+	// (the first flip after it may come early, from a random cnt).
+	longint n_flips = 0, flip_gap_min = 64'h7FFF_FFFF_FFFF_FFFF, flip_gap_max = 0;
 	always @(posedge clk_sys) begin
 		#2;
 		if (dut.req !== req_q) begin
 			req_q = dut.req;
+			if ($time - 2 >= T0 + 8 * T_SYS) begin
+				n_flips++;
+				if (n_flips >= 2) begin
+					longint g;
+					g = sys_edges($time - 2) - sys_edges(t_req);
+					if (g < flip_gap_min) flip_gap_min = g;
+					if (g > flip_gap_max) flip_gap_max = g;
+					if (g != PERIOD) begin
+						n_rate++;
+						fail($sformatf("req flipped %0d clk_sys edges after the last flip (PERIOD %0d)", g, PERIOD));
+					end
+				end
+			end
 			t_req = $time - 2;
 		end
 	end
@@ -232,6 +252,7 @@ module tb_dbg_snap;
 	// ---- the words q_sys takes ---------------------------------------------------------------------------------
 	logic [N-1:0] q_prev;
 	longint       k_last = -1, n_snaps = 0, n_takes = 0, n_powerup = 0;
+	longint       n_post = 0, te_prev = 0, rt_min = 1000, rt_max = 0, tg_min = 64'h7FFF_FFFF_FFFF_FFFF, tg_max = 0;
 	longint       gap_min = 64'h7FFF_FFFF_FFFF_FFFF, age_max = 0, lat_sys_min = 1000;
 	initial begin
 		#2;
@@ -297,15 +318,38 @@ module tb_dbg_snap;
 						fail($sformatf("take %0d clk_sys edges after ack changed", n));
 					end
 				end
+				// the rate, from the second take past power-up on (the first
+				// may answer a request left by the power-up state)
+				n_post++;
+				if (n_post >= 2) begin
+					n = sys_edges(te) - sys_edges(t_req);      // the round trip of this take's request
+					if (n < rt_min) rt_min = n;
+					if (n > rt_max) rt_max = n;
+					if (n < 3 || n > 6) begin
+						n_rate++;
+						fail($sformatf("take %0d clk_sys edges after its request (3 to 6)", n));
+					end
+				end
+				if (n_post >= 3) begin
+					n = sys_edges(te) - sys_edges(te_prev);
+					if (n < tg_min) tg_min = n;
+					if (n > tg_max) tg_max = n;
+					if (n < PERIOD - 3 || n > PERIOD + 3) begin
+						n_rate++;
+						fail($sformatf("takes %0d clk_sys edges apart (PERIOD %0d)", n, PERIOD));
+					end
+				end
+				te_prev = te;
 			end
 		end
 		if (n_snaps >= snaps) finish_run();
 	end
 
 	task automatic finish_run();
-		$display("result: errors=%0d snaps=%0d takes=%0d torn=%0d order=%0d stale=%0d gap=%0d lat=%0d pair=%0d gap_min_ps=%0d age_max_ps=%0d lat_sys_min=%0d powerup_loads=%0d words=%0d div=%0d phase=%0d seed=%0d period=%0d n=%0d",
-			errors, n_snaps, n_takes, n_torn, n_order, n_stale, n_gap, n_lat, n_pair, gap_min, age_max, lat_sys_min,
-			n_powerup, k_now, div, phase, seed, PERIOD, N);
+		if (n_post < 4 || n_flips < 3) fail($sformatf("too few takes (%0d) or request flips (%0d) past power-up to check the rate", n_post, n_flips));
+		$display("result: errors=%0d snaps=%0d takes=%0d torn=%0d order=%0d stale=%0d gap=%0d lat=%0d pair=%0d rate=%0d gap_min_ps=%0d age_max_ps=%0d lat_sys_min=%0d round_trip=%0d..%0d take_gap=%0d..%0d flip_gap=%0d..%0d powerup_loads=%0d words=%0d div=%0d phase=%0d seed=%0d period=%0d n=%0d",
+			errors, n_snaps, n_takes, n_torn, n_order, n_stale, n_gap, n_lat, n_pair, n_rate, gap_min, age_max, lat_sys_min,
+			rt_min, rt_max, tg_min, tg_max, flip_gap_min, flip_gap_max, n_powerup, k_now, div, phase, seed, PERIOD, N);
 		$finish;
 	endtask
 
