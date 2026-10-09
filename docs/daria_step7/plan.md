@@ -442,7 +442,7 @@ No commit contains game data, firmware or anything from `sim/work/`; `hygiene.sh
 
 ### 4.2 Phases
 
-Two simulation slots unless the owner allows three (6.2 question 1). Simulations run at `nice -n 10`; Quartus runs un-niced beside them.
+Three simulation slots while no Quartus job runs, two while one does (the owner's answer to 6.2 question 1, 2026-10-09). The third slot's runs start only while Quartus is idle and are stopped (`SIGSTOP` on the run's process group) for as long as a Quartus job runs, then continued; a job counts as running while it holds `/tmp/daria_quartus.lock` or a container runs. Simulations run at `nice -n 10`; Quartus runs un-niced beside them.
 
 | Phase | Days | Work | Machine | Reviews |
 |---|---|---|---|---|
@@ -498,7 +498,7 @@ Those were measured one fit at a time. This machine has 4 cores and 15 GB (`npro
 
 **CPU.**
 
-- Rules: at most two simulations at once (`ENVIRONMENT.md:423-426`), `nice -n 10`, and one Quartus job. `s4/check.sh` runs with `JOBS=2` (its default 3 breaks the rule, `ENVIRONMENT.md:426`). While Quartus runs, `run_sim.sh` builds with `VL_JOBS=2`.
+- Rules: at most three simulations at once while no Quartus job runs, two while one does (4.2; `ENVIRONMENT.md:423-426` still says two and is updated with the docs commit), `nice -n 10`, and one Quartus job. `s4/check.sh` runs with `JOBS=2` (its default 3 breaks the rule, `ENVIRONMENT.md:426`). While Quartus runs, `run_sim.sh` builds with `VL_JOBS=2`.
 - Budget [E]:
 
 | Item | CPU |
@@ -640,7 +640,7 @@ The guard's real-clock behaviour (lock, the phase-B edge, relock after a retune)
 
 Only what the documents do not settle. Each has a default, so no lane waits for the answer.
 
-1. **Simulation slots.** May the two-simulation rule (`ENVIRONMENT.md:423`) rise to three while no Quartus job runs? R2 would drop from about 13-15 h of wall time to about 9-10 h. Default: two.
+1. **Simulation slots.** May the two-simulation rule (`ENVIRONMENT.md:423`) rise to three while no Quartus job runs? R2 would drop from about 13-15 h of wall time to about 9-10 h. **Answered 2026-10-09: yes, three simulations while no Quartus job runs** (4.2).
 2. **What "the same frames" requires** (P13). Default: video and frame length equal on every frame; RIOT RAM and audio equal, or a difference classed `release_shift` by 7.4's rule, because DARIA's calls end at different times than upstream's and the 6507 is held for the call. The stricter reading (every RIOT and audio difference outside Spiders blocks step 7) may not be reachable for any image whose code stores a timer value right after a call.
 3. **Spiders after frame 573.** If Spiders' frames do not match again from 573, because DARIA's 16 late calls end later or earlier than upstream's and the game's state diverges for good, is that "overruns as on upstream" (`DARIA_CORE.md:1779`)? Default: accepted, and recorded, if the divergence starts in the overrun frames, every one of the 16 calls returns the same registers and RAM writes as upstream's (as step 5 showed, `DARIA_CORE.md:454-456`), and frames 1-556 match; otherwise a gate failure.
 4. **F6 after a PAL/NTSC retune** (P20). Default: F6 runs once when the retune ends, so the restarted game starts from the same cart RAM as after a console reset. The alternative keeps the RAM through the retune, as `DARIA_CORE.md:1103` says; the restarted 6507 would then boot over RAM the game had already changed.
