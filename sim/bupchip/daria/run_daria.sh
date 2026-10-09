@@ -28,9 +28,22 @@
 # FE_STAGE0=1 builds the reference alone (-DFE_STAGE0, no daria_fe sources):
 # obj..._fe_s0, runs/..._fe_s0/. FE_POISON=1 adds -DDARIA_RAM_POISON (the
 # poisoned daria_ram model): obj..._fe_poison, runs/..._fe_poison/.
+# MODE_B=1 builds mode B of the front-end shadow (docs/daria_fe/spec/bench.md
+# 7.1; design.md 12.2 step 8; -DFE_MODE_B): daria_fe posts the calls to DARIA's
+# own CPU (dcall) and shares DARIA's cart RAM (dmem), clk_d is on the PLL's
+# lattice (+d_ofs=PS), the 6507 is held for daria_fe's calls too. It sets
+# SHADOW=1 and FE=1 itself, and refuses WRAPPER=1 and FE_STAGE0=1:
+# obj_shadow<WIN_KB>_fe_modeB, runs/shadow<WIN_KB>_fe_modeB/ (with FE_POISON=1
+# _fe_modeB_poison). Every other build is as before.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ "${MODE_B:-0}" != 0 ]; then
+	[ "${WRAPPER:-0}" = 0 ] || { echo "run_daria.sh: MODE_B=1 does not combine with WRAPPER=1" >&2; exit 1; }
+	[ "${FE_STAGE0:-0}" = 0 ] || { echo "run_daria.sh: MODE_B=1 does not combine with FE_STAGE0=1" >&2; exit 1; }
+	SHADOW=1
+	FE=1
+fi
 FPGA="$(cd "$HERE/../../../src/fpga" && pwd)"
 RTL="$FPGA/mister/rtl"
 WORK="${WORK:-$HERE/../../work/bupchip/daria}"
@@ -109,6 +122,10 @@ if [ "${FE:-0}" != 0 ]; then
 			FE_SUF="_poison"
 			DEFS+=(-DDARIA_RAM_POISON)
 		fi
+	fi
+	if [ "${MODE_B:-0}" != 0 ]; then
+		FE_SUF="_modeB${FE_SUF}"
+		DEFS+=(-DFE_MODE_B)
 	fi
 	OBJ="${OBJ}${FE_SUF}"
 fi

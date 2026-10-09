@@ -44,6 +44,80 @@
 // reference's RAM tap check compares port A's byte only with pause low (top.sv
 // masks it to $FF in a pause).
 //
+// MODE B (stage 1 with -DFE_MODE_B: run_daria.sh MODE_B=1, which builds
+// SHADOW=1 FE=1; bench.md 6.3, 6.4, 7.1; design 8.4, 12.2 step 8). daria_fe
+// posts the calls to DARIA's own CPU (dcall) and shares DARIA's memories
+// (dmem: fe_mem is not built; `FE_MEM names the memory the taps read); u_fe's
+// clk_arm is DARIA's clk_d, on the PLL's lattice (+d_ofs), so the phase
+// detector locks and the guard acts; cpu_ready is daria_ready; ret_tog is
+// dcall's; the merge hook is off. The 6507 is held with the same force as
+// 7.4.2, plus u_fe.arm_call_busy (H1 follows). Upstream's ARM and front ends
+// run on beside it as the reference. What changes against mode A, and why:
+//   - no ARM-write mirror, no emulated returns, no ret_tog per call number
+//     (so no ret_late): DARIA's CPU writes the RAM and returns the words;
+//   - the CDF merge window runs from the first to the last of upstream's M and
+//     daria_fe's X+1 (xq), to M_fe+1. After it the frequencies must be
+//     upstream's, and the counters may differ only by bench.md 7.6's rule for
+//     the k > 0 ticks between the two merges, the step taken from upstream's
+//     returned frequency and its own take (return != seed): merge_race
+//     (counted, resynced); anything else, any difference with k = 0
+//     included, is audio_bad. merge_late becomes M_fe - X = 7 (design 6.3),
+//     daria_fe's own timing;
+//   - call_amp (counted, replica masked and resynced): a refresh in progress
+//     while either side's call is in flight reads a cart RAM the two ARMs are
+//     writing at different times; guard_shift (counted, the same): an audio
+//     read held for phase B by the guard (design 3.5). Those masks only move
+//     the every-clock compare: every refresh is still compared by value at
+//     its end, upstream's n-th against daria_fe's n-th, AMPLITUDE and the sum
+//     (refresh_bad, must be 0), and read by read: the same words with the
+//     same values. A pair is excused (counted) only when either refresh ran
+//     under another class's mask, or at its first read whose values differ:
+//     a read in a flight of a word either ARM wrote since the flight began
+//     (up_wt, d_wt), daria_fe's value one its RAM held in the flight (the
+//     rest of that pair may follow the value). Under another class too,
+//     every read daria_fe makes in a flight of a word DARIA stored in it
+//     must return a value that word held there (an undefined read).
+//     At a quiet point the two sides must have run as many refreshes
+//     (refresh_count_bad), and a resync that overwrites any difference with
+//     no excused pair or other class since the last resync is deposit_bad;
+//   - K2 waits for both sides' calls to end (each ARM writes its RAM at its
+//     own pace mid-call); K1 stays (at upstream's call start nothing of
+//     DARIA's call has run); daria_shadow.svh adds K1d at DARIA's call_go;
+//   - the guard checks (design 8.4): det_bad (pd_same against the edge
+//     arithmetic, after lock), phb_bad (phb_next likewise), lock_late (not
+//     locked by clk_sys edge 24), lock_edge_bad (locked at another edge than
+//     a zero-delay model of 8.1 with its 12 matches predicts for the
+//     detector's clock), det_unlock, gwin_bad (guard_on against
+//     locked & (call_win | !cpu_ready)); port B on a shared edge: a non-F6
+//     write or a consumed read in the guard window (wr_shared_guard,
+//     rd_shared_guard) or while DARIA runs a call (wr_shared_daria,
+//     rd_shared_daria); daria_shadow.svh's coincidences (coll_d_same,
+//     coll_d_ld_same, coll_ww_same) and K1d, and DARIA's call compare
+//     (daria_call_bad), each must be 0. det_lock_a is mode A's only.
+// The self-tests (+mb_inj=K, off by default; each must FAIL):
+//   1 the guard forced off at its consumers (u_fe.guard_on 0 into u_core and
+//     u_arb) while its window is held open (u_fe.call_win 1): daria_fe's own
+//     6507-side writes land on shared edges in the window (wr_shared_guard);
+//   2 the detector on the wrong phase: u_fe's clk_arm is clk_d +mb_det_ofs ps
+//     (default 8,730) later (daria_shadow.svh), so it locks on another
+//     clk_sys class (det_bad, phb_bad);
+//   3 a front-end read on a shared edge: u_arb's phb_next forced 1, so in the
+//     guard window the audio is granted on any edge (rd_shared_guard);
+//   4 coll_d_same's positive control (daria_shadow.svh): on each shared edge
+//     with a DARIA store, the counters see a consumed daria_fe read of that
+//     word as well (nothing reaches u_fe);
+//   5 coll_d_ld_same's and coll_ww_same's (daria_shadow.svh): on each shared
+//     edge, the counters see a daria_fe write of the cart RAM word DARIA's
+//     port A is at (its loads and stores there);
+//   6 a returned frequency word wrong: state RAM word FB (voice 0's
+//     frequency) has bit 8 flipped in dmem while u_call reads the returns,
+//     every CDF call (audio_bad after the merge window);
+//   7 an undefined read: $A5A5A5A5, what the poisoned daria_ram returns to a
+//     read that meets a write of its word at one time step, forced into
+//     daria_fe's port-B q for each audio read in a flight of a word DARIA
+//     has stored in that flight (refresh_bad: a value the RAM never held).
+// Run.log: "FE mode B:" and "MODE B result:" after the stage-1 lines.
+//
 // STAGE 0 (alone with -DFE_STAGE0, run_daria.sh FE_STAGE0=1, as built before
 // daria_fe existed; the text below):
 //
@@ -948,6 +1022,11 @@
 	// the calls; u_fe's stall outputs never drive the 6507, except through the
 	// forced arm_call_stall of the hold (7.4.2).
 	// =================================================================================
+`ifdef FE_MODE_B
+	`define FE_MEM dmem		// mode B: DARIA's daria_mem (daria_shadow.svh)
+`else
+	`define FE_MEM fe_mem
+`endif
 	int          fe_slat = 40, fe_merge_hook = 0, fe_hold = 1, fe_resync = 1, fe_full = 1;
 	int          fe_ticks = 0, fe_pcm = 0;
 
@@ -979,9 +1058,14 @@
 		f1_cw_q = cart_download;
 	end
 	wire         f1_cart_win = cart_download || f1_c_open || f1_c_drain > 7'd1;
+`ifdef FE_MODE_B
+	// cpu_ready, mode B: daria_ready (daria_shadow.svh, design 1.2)
+	wire         f1_cpu_ready = d_ready_b;
+`else
 	// cpu_ready, design 6.6 (critic 8): upstream's call_ready without call_busy
 	wire         f1_cpu_ready = dut.cart2600.arm_mappers.call_controller.arm_online_sync2 &&
 		dut.cart2600.arm_mappers.call_controller.shadow_ready_sync2 && !dut.effective_reset;
+`endif
 	// The ARM-write mirror (7.4.3): upstream's CPU writes into fe_mem's cart RAM
 	// port A at the clk_arm edge cart_ram_tdp takes them; the writeback and DMA
 	// writes (init, DPC+ service) are left out: daria_fe makes those itself.
@@ -998,7 +1082,11 @@
 	// The front-end ROM takes the cartridge's bytes as the wrapper does (bupchip_pocket.sv:354)
 	wire         f1_cap_we = ioctl_wr && cart_download && ioctl_addr[24:15] == 10'd0;
 	// The merge hook (+fe_merge_hook=1; design 6.6): upstream's call_done and returns
+`ifdef FE_MODE_B
+	wire         f1_hk_en = 1'b0;			// mode B: daria_fe merges DARIA's returns
+`else
 	wire         f1_hk_en = fe_merge_hook != 0;
+`endif
 	wire         f1_hk_stb = dut.cart2600.arm_call_done;
 	wire [191:0] f1_hk_ret = {dut.cart2600.arm_audio_frequency2_return, dut.cart2600.arm_audio_frequency1_return,
 		dut.cart2600.arm_audio_frequency0_return, dut.cart2600.arm_audio_counter2_return,
@@ -1023,6 +1111,7 @@
 		else if (dut.cart2600.arm_mappers.mapper_reset_arm)
 			f1_ctog_model <= dut.cart2600.arm_mappers.call_controller.complete_ack_sync2;
 		else if (f1_up_cmp) f1_ctog_model <= ~f1_ctog_model;
+`ifndef FE_MODE_B
 		if (dut.effective_reset || dut.cart2600.arm_mappers.mapper_reset_arm) begin
 			f1_up_done <= 0;			// a call cut by a console reset is abandoned on both sides
 			f1_ret_n <= 0;
@@ -1036,6 +1125,7 @@
 				if (!(f1_up_cmp && f1_ret_n + 1 == done)) f1_ret_late_n <= f1_ret_late_n + 1;
 			end
 		end
+`endif
 	end
 
 	// The digital-sample port (7.4.5): answer smp_req with img[smp_addr] after
@@ -1059,6 +1149,26 @@
 	end
 
 	// ---- fe_mem and u_fe ----------------------------------------------------------------
+`ifdef FE_MODE_B
+	// Mode B: u_fe on dmem's ports (the fu_* wires are daria_shadow.svh's), its clk_arm
+	// DARIA's clk_d (fb_clk_arm: clk_d, or the +mb_inj=2 copy), its call port dcall's.
+	daria_fe u_fe (
+		.clk_sys, .clk_arm(fb_clk_arm),
+		.cart_reset(dut.effective_reset), .pause(dut.pause),
+		.a_in(dut.cart2600.a_in), .d_in(dut.write_DB), .rw(dut.RW),
+		.pclk1(dut.pclk1), .pclk0(dut.pclk0), .access(dut.cart2600.arm_access),
+		.scheme(force_bs), .revision(mapper_revision), .cdf_ldx, .cdf_ldy,
+		.fetch_off_en(cdf_fetch_offset_enable), .fetch_off(cdf_fetch_offset), .cdfj_entry, .cdfj_stack,
+		.audio_size_addr(arm_audio_size_addr), .rom_size(cart_size), .ram32(dut.mapper_ram_size == 16'd32768),
+		.load_start(f1_load_start), .load_end(f1_load_end), .cart_win(f1_cart_win),
+		.cpu_ready(f1_cpu_ready), .ret_tog(d_ret_tog), .call_tog(d_call_tog),
+		.smp_req(), .smp_addr(), .smp_ack(f1_smp_ack), .smp_data(f1_smp_data),
+		.fe_do(), .fe_oe(), .arm_call_busy(), .arm_dma_busy(), .init_busy(),
+		.fea_addr(fu_fea_addr), .fea_q(fu_fea_q), .feb_addr(fu_feb_addr), .feb_q(fu_feb_q),
+		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
+		.stb_addr(fu_stb_addr), .stb_we(fu_stb_we), .stb_be(fu_stb_be), .stb_wd(fu_stb_wd), .stb_q(fu_stb_q),
+		.hk_en(f1_hk_en), .hk_stb(f1_hk_stb), .hk_ret(f1_hk_ret));
+`else
 	wire  [12:0] fu_fea_addr, fu_feb_addr, fu_crb_addr;
 	wire  [31:0] fu_fea_q, fu_feb_q, fu_crb_q, fu_stb_q, fu_crb_wd, fu_stb_wd;
 	wire         fu_crb_we, fu_stb_we;
@@ -1092,6 +1202,7 @@
 		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
 		.stb_addr(fu_stb_addr), .stb_we(fu_stb_we), .stb_be(fu_stb_be), .stb_wd(fu_stb_wd), .stb_q(fu_stb_q),
 		.hk_en(f1_hk_en), .hk_stb(f1_hk_stb), .hk_ret(f1_hk_ret));
+`endif
 
 `include "fe_taps.svh"
 
@@ -1122,7 +1233,13 @@
 	// u_fe's DPC+ copy/fill (arm_dma_busy) while upstream's has fallen.
 	logic        f1_forced = 1'b0;
 	always @(negedge clk_sys) begin
+`ifdef FE_MODE_B
+		// Mode B (bench.md 7.1): the same force, plus u_fe's call busy: the 6507 waits
+		// for DARIA's call too (top.sv's own assign keeps upstream's).
+		if (fe_hold != 0 && dut.tia_en && (u_fe.arm_call_busy || (!dut.mapper_init_busy && u_fe.arm_dma_busy))) begin
+`else
 		if (fe_hold != 0 && dut.tia_en && !dut.mapper_init_busy && u_fe.arm_dma_busy) begin
+`endif
 			if (!f1_forced) begin
 				force dut.arm_call_stall = 1'b1;
 				f1_forced = 1'b1;
@@ -1156,6 +1273,19 @@
 		G_MERGE_LATE, G_DMA_COVER, G_MASK_STUCK, G_MASKED, G_DIG_VAL_BAD, G_DIG_VAL_N, G_DIG_VAL_MRG,
 		// the lead's decisions (docs/daria_fe/lanes/F1_fixes.md): F1-3, and F1-1's system check
 		G_OBUS_FFE, G_COMMIT_PCLK1,
+`ifdef FE_MODE_B
+		// mode B (design 8.4, 12.2 step 8; bench.md 6.4, 7.1): the guard and the detector,
+		// port B on shared edges, the coincidences, DARIA's calls; then the counted classes
+		// and information
+		G_MB_DET_BAD, G_MB_PHB_BAD, G_MB_LOCK_LATE, G_MB_UNLOCK, G_MB_GWIN_BAD,
+		G_MB_WR_SH_G, G_MB_RD_SH_G, G_MB_WR_SH_D, G_MB_RD_SH_D,
+		G_MB_COLL_SAME, G_MB_COLL_LD, G_MB_COLL_WW, G_MB_K1D_BAD, G_MB_CALL_BAD,
+		G_MB_GSHIFT, G_MB_CALL_AMP, G_MB_LOCKED, G_MB_GON, G_MB_WR_SH, G_MB_RD_SH, G_MB_DCALLS,
+		// added by the lane's verification: the lock edge against the model, every refresh by
+		// value (pairs in order) and what each resync overwrites; then their information
+		G_MB_LOCK_EDGE, G_MB_REF_BAD, G_MB_REF_CNT, G_MB_DEP_BAD,
+		G_MB_REF_N, G_MB_REF_FL, G_MB_REF_XARM, G_MB_REF_XCLS, G_MB_REF_XDIFF, G_MB_REF_UNP, G_MB_DEP_DIFF,
+`endif
 		G_N
 	} f1_cnt_t;
 	string       f1_nm [G_N];
@@ -1223,6 +1353,225 @@
 	int          f1_w = 0;
 	longint      f1_w_m = 0, f1_late_until = -1;
 	logic        f1_rmw_merge = 0, f1_w_rmw = 0, f1_rmw_chk = 0;
+`ifdef FE_MODE_B
+	// Mode B's merge window (bench.md 7.6 and question 7): upstream merges at U (its M,
+	// call_done high pre-edge), daria_fe as if at D = its X+1 (xq high pre-edge; design 5.6:
+	// the ticks it defers to M_fe+1 come out as if added after a merge at X+1). The window
+	// opens at the first of U and D and closes after both U and M_fe (cp_apply). After it the
+	// frequencies must be upstream's, and the counters may differ only by the k > 0 ticks T in
+	// (min(U,D), max(U,D)]: per voice, up - fe = s * k * (take ? f_ret : f_ret - f_old), s = +1
+	// when U < D, else -1, with f_ret upstream's returned frequency and take upstream's own
+	// (return != seed, captured at U) (merge_race). With k = 0 both merges leave the same
+	// state, so any difference then is audio_bad, as is any other.
+	longint      mb_t_u = -1, mb_t_d = -1, mb_t_m = -1;	// U, D (= the xq edge), M_fe
+	longint      mb_ticks [$];				// tick edges while the window is open
+	logic [95:0] mb_f_old = 0;				// the frequencies before either merge
+	logic  [2:0] mb_take_up = 0;				// upstream's take per voice, at U
+	int          mb_i6_n = 0;				// self-test 6's flips
+	logic        mb_i6_done = 0;
+	int          mb_i7_n = 0;				// self-test 7's poisoned reads
+	logic        mb_i7_arm = 0, mb_i7_on = 0;
+	logic        mb_chk = 0;				// the first compare after the window
+	logic        mb_in_fl = 0;				// a call in flight on either side
+	longint      mb_clk = 0, mb_lock_edge = -1;
+	int          mb_lock_exp = -1;			// the model's lock edge (mb_lock_model)
+	logic        mb_sh_prev = 0;			// the last clk_sys edge was a shared one
+	longint      mb_cds = 0, mb_cld = 0, mb_cww = 0, mb_k1db = 0, mb_shb = 0;	// daria_shadow.svh's counts, seen
+	logic        mb_up_disp_fl = 0;
+	longint      mb_du_n = 0, mb_du_lo = 0, mb_du_hi = 0;	// D - U over the merges (clk_sys)
+	// each call's busy falls, daria_fe's less upstream's (the 6507 waits for the later one)
+	longint      mb_bf_up = -1, mb_bf_fe = -1, mb_bf_n = 0, mb_bf_lo = 0, mb_bf_hi = 0, mb_bf_fel = 0;
+	logic        mb_ucb_q = 0, mb_fcb_q = 0;
+	function automatic logic mb_shared_sys(input longint t);	// a clk_sys edge that is a clk_d edge
+		return t >= longint'(d_ofs) + 26190 && (t - longint'(d_ofs)) % 26190 == 0;
+	endfunction
+	// The merge_race rule (above): the frequencies equal, k > 0, and every voice's counter
+	// difference explained by the k ticks
+	function automatic logic mb_race_ok(output string why);
+		logic [31:0] u, f, fr, fo, step, d;
+		int k;
+		k = 0;
+		foreach (mb_ticks[i])
+			if (mb_ticks[i] > (mb_t_u < mb_t_d ? mb_t_u : mb_t_d) && mb_ticks[i] <= (mb_t_u < mb_t_d ? mb_t_d : mb_t_u)) k++;
+		why = $sformatf("U %0d, D %0d (M_fe %0d), %0d ticks between", mb_t_u, mb_t_d, mb_t_m, k);
+		for (int v = 0; v < 3; v++) begin
+			fr = v == 0 ? dut.cart2600.mapper_audio.frequency0 : (v == 1 ? dut.cart2600.mapper_audio.frequency1 :
+				dut.cart2600.mapper_audio.frequency2);
+			if (u_fe.u_audio.freq[v] != fr) begin
+				why = {why, $sformatf("; voice %0d: frequency daria_fe %08x, upstream %08x", v, u_fe.u_audio.freq[v], fr)};
+				return 0;
+			end
+		end
+		if (k == 0) begin
+			why = {why, "; with no tick between the merges the counters must agree"};
+			return 0;
+		end
+		for (int v = 0; v < 3; v++) begin
+			u  = v == 0 ? dut.cart2600.mapper_audio.counter0 : (v == 1 ? dut.cart2600.mapper_audio.counter1 :
+				dut.cart2600.mapper_audio.counter2);
+			fr = v == 0 ? dut.cart2600.mapper_audio.frequency0 : (v == 1 ? dut.cart2600.mapper_audio.frequency1 :
+				dut.cart2600.mapper_audio.frequency2);
+			f  = u_fe.u_audio.counter[v];
+			fo = mb_f_old[32 * v +: 32];
+			step = mb_take_up[v] ? fr : fr - fo;
+			d = u - f;
+			if (mb_t_u < mb_t_d ? d != 32'(k) * step : d != -(32'(k) * step)) begin
+				why = {why, $sformatf("; voice %0d: upstream %08x, daria_fe %08x, take up %0d / fe %0d, f %08x -> %08x", v, u, f,
+					mb_take_up[v], u_fe.u_audio.take[v], fo, fr)};
+				return 0;
+			end
+		end
+		return 1;
+	endfunction
+	// The lock edge of design 8.1's detector and flywheel (lock after 12 consecutive matches
+	// that follow the first) in zero delay on the bench's clocks: the detector's clock starts
+	// high and rises at ofs + 26,190 m (m >= 1), and Verilator also sees a rising edge at time 0
+	// on u_fe's clk_arm wire (G_modeB.md 3), so pd_tog starts as if toggled once; the clk_sys
+	// edge n at 34,920 + 69,840 (n - 1) ps takes the toggles launched before it, never one
+	// launched on it. Returns the edge that sets locked, or -1 if none by edge 64.
+	function automatic int mb_lock_model(input longint ofs);
+		logic tog, rx, rx1, lk, same, mism;
+		int ph, good, ph_n, good_n;
+		longint t, nr;
+		rx = 0; rx1 = 0; lk = 0; ph = 1; good = 0;
+		for (int n = 1; n <= 64; n++) begin
+			t = 34920 + 69840 * longint'(n - 1);
+			nr = t - ofs > 0 ? (t - ofs - 1) / 26190 : 0;	// rises before t
+			tog = (nr % 2) == 0;				// with the time-0 edge: 1 + nr toggles
+			same = rx == rx1;
+			mism = same != (ph == 0);
+			ph_n = mism ? 1 : (ph == 2 ? 0 : ph + 1);
+			good_n = good;
+			if (mism || good != 12) good_n = mism ? 0 : good + 1;
+			if (mism || good == 12) begin
+				if (!mism && !lk) return n;
+				lk = !mism;
+			end
+			rx1 = rx;
+			rx = tog;
+			ph = ph_n;
+			good = good_n;
+		end
+		return -1;
+	endfunction
+	// Every refresh by value (header): each side's refresh from its dispatch clock to the clock
+	// whose pre-edge state is IDLE again, closed at the falling edge before that clock (so the
+	// resync, at the same falling edge, sees it). Per refresh: AMPLITUDE and the sum at its end;
+	// each cart RAM read its grants made, in order, as {word, the 32-bit word the capture clock
+	// took} (mb_r*_r; n per refresh); whether a call was in flight on any of its clocks; whether
+	// another class's mask was set on any of them. A pair is compared read by read: the same
+	// words, and the same values, up to the first read of a word an ARM wrote in the flight
+	// (up_wt, d_wt from mb_fl_t0) whose values differ; that read excuses the rest of the pair
+	// (the two ARMs write it at different times; what follows, addresses included, may follow
+	// the value), provided daria_fe's value is one its memory held in the flight: the word as
+	// the flight found it or after one of its stores there (mb_hist, daria_shadow.svh), never an
+	// undefined read. Without such a read the two AMPLITUDEs and sums must be equal. A pair under
+	// another class's mask is not compared, except for that last rule: every read daria_fe's
+	// refreshes make in a flight of a word DARIA stored in it must return a value it held.
+	logic        mb_m_oth = 0;			// a mask other than call_amp/guard_shift since the last resync
+	string       mb_oth_why = "";		// (the last such class)
+	logic        mb_x_arm = 0;			// a pair excused by an ARM-written word since the last resync
+	longint      mb_fl_t0 = -1;			// $time (ps) of the clk_sys edge that first saw the latest flight
+	logic        mb_fl_q = 0;
+	logic        mb_ru_on = 0, mb_rf_on = 0, mb_ru_fl = 0, mb_rf_fl = 0, mb_ru_ot = 0, mb_rf_ot = 0;
+	logic        mb_ru_pend = 0, mb_rf_pend = 0;	// a grant at the last edge: its word comes now
+	logic [12:0] mb_ru_pa = 0, mb_rf_pa = 0;
+	longint      mb_ru_t0 = 0, mb_rf_t0 = 0;
+	int          mb_ru_nw = 0, mb_rf_nw = 0;
+	logic [44:0] mb_ru_r [$], mb_rf_r [$];	// {word, value} of every read, all refreshes in order
+	// one entry per finished refresh: {fl, other, nreads[7:0], amplitude, sum, t0[39:0], t1[39:0]}
+	logic [105:0] mb_ru_q [$], mb_rf_q [$];
+	// a value daria_fe's memory held for word w during the flight
+	function automatic logic mb_val_ok(input logic [12:0] w, input logic [31:0] v);
+		if (!mb_hist.exists(int'(w))) return v == `FE_MEM.cart_ram.mem_q[w];
+		foreach (mb_hist[int'(w)][k]) if (mb_hist[int'(w)][k] == v) return 1;
+		return 0;
+	endfunction
+	// Close a refresh that has ended (current values: called at the falling edge), then compare
+	// the pairs that are complete.
+	task automatic mb_ref_close();
+		logic [105:0] eu, ef;
+		logic [44:0]  ru [$], rf [$];
+		logic [12:0]  w;
+		logic         xarm, xcls, diff, fl, aw;
+		string        ws, bad, hb;
+		if (mb_ru_on && dut.cart2600.mapper_audio.state == 4'd0) begin
+			mb_ru_on = 0;
+			mb_ru_q.push_back({mb_ru_fl, mb_ru_ot, 8'(mb_ru_nw), dut.cart2600.mapper_audio.amplitude,
+				dut.cart2600.mapper_audio.sample_sum[7:0], 40'(mb_ru_t0), 40'(f1_clk)});
+		end
+		if (mb_rf_on && u_fe.u_audio.st == 12'd1) begin
+			mb_rf_on = 0;
+			mb_rf_q.push_back({mb_rf_fl, mb_rf_ot, 8'(mb_rf_nw), u_fe.u_audio.amplitude, u_fe.u_audio.ssum,
+				40'(mb_rf_t0), 40'(f1_clk)});
+		end
+		while (mb_ru_q.size() > 0 && mb_rf_q.size() > 0) begin
+			eu = mb_ru_q.pop_front();
+			ef = mb_rf_q.pop_front();
+			fl = eu[105] || ef[105];
+			xcls = eu[104] || ef[104];
+			ru.delete();
+			rf.delete();
+			for (int i = 0; i < int'(eu[103:96]); i++) ru.push_back(mb_ru_r.pop_front());
+			for (int i = 0; i < int'(ef[103:96]); i++) rf.push_back(mb_rf_r.pop_front());
+			xarm = 0;
+			bad = "";
+			ws = "";
+			// whatever the pair's class: daria_fe never takes a value its RAM did not hold in the
+			// flight from a word DARIA stored there (an undefined read meets a store of its word)
+			hb = "";
+			if (fl)
+				foreach (rf[i]) if (hb == "" && mb_hist.exists(int'(rf[i][44:32])) && !mb_val_ok(rf[i][44:32], rf[i][31:0]))
+					hb = $sformatf("read %0d of word %04x: %08x, a value daria_fe's memory never held in the flight", i, rf[i][44:32],
+						rf[i][31:0]);
+			for (int i = 0; i < (ru.size() > rf.size() ? ru.size() : rf.size()); i++) begin
+				if (i < ru.size()) ws = {ws, $sformatf(" %04x:%08x", ru[i][44:32], ru[i][31:0])};
+				else ws = {ws, " -"};
+				if (i < rf.size()) ws = {ws, $sformatf("/%04x:%08x", rf[i][44:32], rf[i][31:0])};
+				else ws = {ws, "/-"};
+				if (xarm || bad != "") continue;
+				if (i >= ru.size() || i >= rf.size()) bad = $sformatf("read %0d on one side only", i);
+				else if (ru[i][44:32] != rf[i][44:32]) bad = $sformatf("read %0d: word %04x, upstream %04x", i, rf[i][44:32], ru[i][44:32]);
+				else if (ru[i][31:0] != rf[i][31:0]) begin
+					w = ru[i][44:32];
+					aw = fl && mb_fl_t0 >= 0 && (up_wt[w] >= mb_fl_t0 || d_wt[w] >= mb_fl_t0);
+					if (!aw) bad = $sformatf("read %0d of word %04x: %08x, upstream %08x, and no ARM wrote it in the flight", i, w,
+						rf[i][31:0], ru[i][31:0]);
+					else if (!mb_val_ok(w, rf[i][31:0])) bad = $sformatf("read %0d of word %04x: %08x, a value daria_fe's memory never held in the flight (upstream %08x)",
+						i, w, rf[i][31:0], ru[i][31:0]);
+					else begin
+						xarm = 1;
+						ws = {ws, $sformatf(" (word %04x written in the flight: upstream's ARM at %0d ps, DARIA at %0d ps)", w,
+							up_wt[w] >= mb_fl_t0 ? up_wt[w] : -1, d_wt[w] >= mb_fl_t0 ? d_wt[w] : -1)};
+					end
+				end
+			end
+			diff = eu[95:80] != ef[95:80];
+			if (bad == "" && !xarm && diff) bad = "AMPLITUDE or the sum differ with every read equal";
+			f1_inc(G_MB_REF_N);
+			if (fl) f1_inc(G_MB_REF_FL);
+			if (xcls && hb == "") f1_inc(G_MB_REF_XCLS);
+			else if (!xcls && xarm && bad == "") begin
+				f1_inc(G_MB_REF_XARM);
+				mb_x_arm = 1;
+			end
+			if (diff && hb == "" && (xcls || (xarm && bad == ""))) begin
+				string xw;
+				xw = "a word an ARM wrote in the flight";
+				if (xcls) xw = {"another class, ", mb_oth_why};
+				f1_inc(G_MB_REF_XDIFF);
+				if (f1_tot[G_MB_REF_XDIFF] <= 5)
+					$display("FE mode B refresh excused (%s): daria_fe's ended with AMPLITUDE %02x sum %02x (clk_sys %0d..%0d), upstream's %02x %02x (%0d..%0d); the flight from %0d ps; reads (upstream/daria_fe):%s",
+						xw, ef[95:88], ef[87:80], ef[79:40], ef[39:0],
+						eu[95:88], eu[87:80], eu[79:40], eu[39:0], mb_fl_t0, ws);
+			end
+			if (hb != "") bad = hb;
+			`F1_CHK(bad != "" && (!xcls || hb != ""), G_MB_REF_BAD,
+				$sformatf("refresh_bad: %s; the refresh ended with AMPLITUDE %02x sum %02x (clk_sys %0d..%0d), upstream's %02x %02x (%0d..%0d); in flight %0d; reads (upstream/daria_fe):%s",
+					bad, ef[95:88], ef[87:80], ef[79:40], ef[39:0], eu[95:88], eu[87:80], eu[79:40], eu[39:0], fl, ws))
+		end
+	endtask
+`endif
 	longint      f1_dig_chk = -1, f1_up_disp_t = -1, f1_fe_disp_t = -1, f1_up_ncap_t = -1;
 	logic        f1_up_busy_q = 0, f1_fe_busy_q = 0;
 	longint      f1_up_busy_fall = -1;
@@ -1231,6 +1580,12 @@
 		f1_m_rep = 1;
 		if (cf) f1_m_cf = 1;
 		f1_m_why = why;
+`ifdef FE_MODE_B
+		if (why != "call_amp" && why != "guard_shift") begin	// excuses the refresh compare
+			mb_m_oth = 1;
+			mb_oth_why = why;
+		end
+`endif
 	endfunction
 	// How long the masks stay set: a mask that never meets a quiet point would
 	// leave A1 blind for the rest of the run (mask_stuck, +fe_mask_max clk_sys).
@@ -1453,7 +1808,9 @@
 		// pclk1 & ~in_phase2 and pclk0 & in_phase2 (1421-1422, 1434-1435), never both. This
 		// checks it on the system's own phases, pause, stall and reset included.
 		`F1_CHK(u_fe.u_seq.commit && dut.pclk1, G_COMMIT_PCLK1, "commit_pclk1: a commit in a pclk1 clock")
+`ifndef FE_MODE_B
 		if (u_fe.u_guard.locked) `F1_CHK(1, G_DET_LOCK_A, "det_lock_a: the guard locked on mode A's 5x clk_arm")
+`endif
 		// A2: the replica of sel_ram_sel, every clock
 		if (scheme_ok)
 			`F1_CHK(u_fe.sel_up != dut.cart2600.sel_ram_sel, G_A2_BAD,
@@ -1480,7 +1837,12 @@
 		// ---- H1, the hold's self-check (7.4.2), while running ---------------------------------
 		if (running) begin
 			logic exp;
+`ifdef FE_MODE_B
+			exp = dut.tia_en && (dut.arm_call_busy || u_fe.arm_call_busy ||
+				(!dut.mapper_init_busy && (dut.arm_dma_busy || u_fe.arm_dma_busy)));
+`else
 			exp = dut.tia_en && (dut.arm_call_busy || (!dut.mapper_init_busy && (dut.arm_dma_busy || u_fe.arm_dma_busy)));
+`endif
 			`F1_CHK(dut.arm_call_stall != exp || (exp && dut.RDY) ||
 				dut.mapper_phi2 != (dut.pclk0 && (!exp || !dut.stall_cycle_taken)), G_HOLD_BAD,
 				$sformatf("H1: arm_call_stall %0d, expected %0d, RDY %0d, mapper_phi2 %0d", dut.arm_call_stall, exp,
@@ -1494,6 +1856,76 @@
 			!dut.effective_reset, G_DMA_COVER,
 			$sformatf("dma_cover: arm_dma_busy 0 with run %0d, svc_hold %0d", u_fe.u_copy.run, u_fe.u_core.svc_hold))
 
+`ifdef FE_MODE_B
+		// ---- mode B: the detector, the guard, port B on shared edges (design 8.4) -----------
+		// Every clk_sys edge from time 0 (mb_clk counts them; the first, at 34,920 ps, is 1).
+		// Pre-edge values: pd_same and phb_next are those of the clock (last edge, this edge],
+		// so after lock each must equal "the last edge was shared". The edge arithmetic is the
+		// real clk_d's (d_ofs), whatever clock u_fe's detector is fed (+mb_inj=2).
+		mb_clk++;
+		begin
+			logic sh, gwin;
+			sh = mb_shared_sys($time);
+			if (u_fe.u_guard.lk) begin
+				if (mb_lock_edge < 0) begin
+					mb_lock_edge = mb_clk - 1;			// the edge that set locked
+					mb_lock_exp = mb_lock_model(mb_inj == 2 ? longint'(d_ofs) + longint'(mb_det_ofs) : longint'(d_ofs));
+					$display("FE mode B: the guard locked at clk_sys edge %0d (+d_ofs=%0d; the shared edge is clk_sys edge k with k mod 3 = %0d); the zero-delay model of 8.1: edge %0d",
+						mb_lock_edge, d_ofs, d_ofs == 0 ? 1 : (d_ofs == 8730 ? 0 : (d_ofs == 17460 ? 2 : -1)), mb_lock_exp);
+					`F1_CHK(mb_lock_edge != longint'(mb_lock_exp), G_MB_LOCK_EDGE,
+						$sformatf("lock_edge_bad: the guard locked at clk_sys edge %0d, the model of 8.1 at %0d", mb_lock_edge,
+							mb_lock_exp))
+				end
+				f1_inc(G_MB_LOCKED);
+				`F1_CHK(u_fe.u_guard.pd_same != mb_sh_prev, G_MB_DET_BAD,
+					$sformatf("det_bad: pd_same %0d, the last clk_sys edge (%0d ps) %s shared", u_fe.u_guard.pd_same,
+						$time - 69840, mb_sh_prev ? "was" : "was not"))
+				`F1_CHK(u_fe.u_guard.phb_next != mb_sh_prev, G_MB_PHB_BAD,
+					$sformatf("phb_bad: phb_next %0d, the last clk_sys edge %s shared", u_fe.u_guard.phb_next,
+						mb_sh_prev ? "was" : "was not"))
+			end
+			`F1_CHK(mb_clk == 25 && mb_lock_edge < 0, G_MB_LOCK_LATE, "lock_late: the guard is not locked 24 clk_sys after the start")
+			`F1_CHK(u_fe.u_guard.ev_unlock, G_MB_UNLOCK, "det_unlock: the guard lost its lock")
+			// the guard's window as the bench forms it (design 3.5): locked & (call_win | !cpu_ready)
+			gwin = u_fe.u_guard.lk && (u_fe.call_win || !f1_cpu_ready);
+			if (u_fe.u_guard.guard_on) f1_inc(G_MB_GON);
+			if (mb_inj != 1 && mb_inj != 3)			// (those two force the guard's nets)
+				`F1_CHK(gwin != u_fe.u_guard.guard_on, G_MB_GWIN_BAD,
+					$sformatf("gwin_bad: guard_on %0d, locked %0d, call_win %0d, cpu_ready %0d", u_fe.u_guard.guard_on,
+						u_fe.u_guard.lk, u_fe.call_win, f1_cpu_ready))
+			// port B at this edge (daria_shadow.svh's mb_fe_rd/mb_fe_wr): on a shared edge, a non-F6
+			// write or a consumed read, in the guard's window or while DARIA runs a call
+			if (sh && mb_fe_wr) begin
+				f1_inc(G_MB_WR_SH);
+				`F1_CHK(gwin && !u_fe.f6_act, G_MB_WR_SH_G,
+					$sformatf("wr_shared_guard: a port-B write of word $%04x on a shared edge in the guard's window", mb_fe_a))
+				`F1_CHK(d_in_call && !u_fe.f6_act, G_MB_WR_SH_D,
+					$sformatf("wr_shared_daria: a port-B write of word $%04x on a shared edge while DARIA runs a call", mb_fe_a))
+			end
+			if (sh && mb_fe_rd) begin
+				f1_inc(G_MB_RD_SH);
+				`F1_CHK(gwin, G_MB_RD_SH_G,
+					$sformatf("rd_shared_guard: a consumed port-B read of word $%04x on a shared edge in the guard's window", mb_fe_a))
+				`F1_CHK(d_in_call, G_MB_RD_SH_D,
+					$sformatf("rd_shared_daria: a consumed port-B read of word $%04x on a shared edge while DARIA runs a call", mb_fe_a))
+			end
+			// daria_shadow.svh's coincidences, K1d and call compare, as they come
+			while (mb_cds < coll_d_same) begin mb_cds++; `F1_CHK(1, G_MB_COLL_SAME, "coll_d_same: a DARIA store and a consumed daria_fe read of one word on one edge") end
+			while (mb_cld < coll_d_ld_same) begin mb_cld++; `F1_CHK(1, G_MB_COLL_LD, "coll_d_ld_same: a daria_fe write and a DARIA load of one word on one edge") end
+			while (mb_cww < coll_ww_same) begin mb_cww++; `F1_CHK(1, G_MB_COLL_WW, "coll_ww_same: a daria_fe write and a DARIA store of one word on one edge") end
+			while (mb_k1db < mb_k1d_bad) begin mb_k1db++; `F1_CHK(1, G_MB_K1D_BAD, "ram_dcall_bad: DARIA's cart RAM at call_go differs from upstream's at its call start") end
+			while (mb_shb < shadow_bad) begin mb_shb++; `F1_CHK(1, G_MB_CALL_BAD, "daria_call_bad: a DARIA call differs from upstream's (DARIA call line in run.log)") end
+			// guard_shift (design 3.5, 9.5; mode B and hardware only): the audio would be granted
+			// on upstream's rule but waits for phase B. Its grant edges move from here on, so the
+			// replica (state, grant, address, the values) is masked until a quiet point.
+			if (u_fe.aud_issue && !u_fe.aud_take && u_fe.guard_on && !u_fe.phb_next && !u_fe.sel_up && !u_fe.f6_act &&
+					!(u_fe.cr_fix && !u_fe.guard_on)) begin
+				f1_inc(G_MB_GSHIFT);
+				f1_mask(0, "guard_shift");
+			end
+			mb_sh_prev = sh;
+		end
+`endif
 		// ---- A1 and T1/T2 (every clock from the first reset): the state the last edge left ----
 		if (f1_rst_seen) begin
 			why = ft_a1_tick();
@@ -1504,6 +1936,18 @@
 			if (dut.cart2600.mapper_audio.audio_tick && !f1_m_cf && f1_w == 0) f1_inc(G_TICKS);
 			if (!f1_m_cf && f1_w == 0) begin
 				why = ft_a1_cf();
+`ifdef FE_MODE_B
+				// the first compare after a merge window: bench.md 7.6's rule, or audio_bad
+				if (why != "" && mb_chk) begin
+					string rw;
+					if (mb_race_ok(rw)) begin
+						f1_inc(G_MERGE_RACE);
+						why = "";
+						f1_mask(1, "merge_race");
+					end else
+						why = {why, " (after a merge window: ", rw, ")"};
+				end
+`endif
 				if (why != "") begin
 					if (f1_clk < f1_late_until) f1_inc(G_MERGE_RACE);	// only after a ret_late (7.6)
 					else if (f1_rmw_chk && u_fe.u_audio.freq[0] == dut.cart2600.mapper_audio.frequency0 &&
@@ -1516,6 +1960,9 @@
 					f1_mask(1, "audio_bad");
 				end
 			end
+`ifdef FE_MODE_B
+			if (f1_w == 0) mb_chk = 0;			// used by the first compare after the window, or masked
+`endif
 			f1_rmw_chk = 0;
 			// pause_lane's mask ends once the sum and AMPLITUDE agree again (a different byte
 			// leaves a fixed nonzero difference in both until they are rewritten from new bytes)
@@ -1587,6 +2034,54 @@
 			f1_mask(0, "merge_amp");
 		end
 		// the merge window
+`ifdef FE_MODE_B
+		// Mode B: from the first of U (upstream's M) and D (daria_fe's X+1) to after both U
+		// and M_fe; the ticks inside are kept for mb_race_ok. merge_late here is daria_fe's
+		// own timing: M_fe = X+7, i.e. 6 clocks after the xq edge (design 6.3).
+		if (fe_is_cdf && (f1_w != 0 || dut.cart2600.arm_call_done || u_fe.u_call.xq)) begin
+			if (f1_w == 0) begin
+				f1_w = 1;
+				f1_w_m = f1_clk;
+				mb_t_u = -1;
+				mb_t_d = -1;
+				mb_t_m = -1;
+				mb_ticks.delete();
+				mb_f_old = {dut.cart2600.mapper_audio.frequency2, dut.cart2600.mapper_audio.frequency1,
+					dut.cart2600.mapper_audio.frequency0};
+				f1_inc(G_MERGES);
+			end
+			if (f1_w == 1) begin
+				if (dut.cart2600.mapper_audio.audio_tick) mb_ticks.push_back(f1_clk);
+				if (dut.cart2600.arm_call_done && mb_t_u < 0) begin
+					mb_t_u = f1_clk;
+					mb_take_up = {dut.cart2600.mapper_audio.counter2_return != dut.cart2600.mapper_audio.call_seed_counter[2],
+						dut.cart2600.mapper_audio.counter1_return != dut.cart2600.mapper_audio.call_seed_counter[1],
+						dut.cart2600.mapper_audio.counter0_return != dut.cart2600.mapper_audio.call_seed_counter[0]};
+				end
+				if (u_fe.u_call.xq && mb_t_d < 0) mb_t_d = f1_clk;
+				if (u_fe.cp_apply && mb_t_m < 0) begin
+					mb_t_m = f1_clk;
+					`F1_CHK(mb_t_d < 0 || mb_t_m - mb_t_d != 6, G_MERGE_LATE,
+						$sformatf("merge_late: M_fe %0d clocks after daria_fe's X+1, design 6.3: 6", mb_t_m - mb_t_d))
+					if (mb_t_d >= 0) f1_h_merge[f1_bin(mb_t_m - mb_t_d + 1)]++;	// M_fe - X
+				end
+				if (mb_t_u >= 0 && mb_t_m >= 0) begin
+					f1_w = 2;
+					if (mb_du_n == 0 || mb_t_d - mb_t_u < mb_du_lo) mb_du_lo = mb_t_d - mb_t_u;
+					if (mb_du_n == 0 || mb_t_d - mb_t_u > mb_du_hi) mb_du_hi = mb_t_d - mb_t_u;
+					mb_du_n++;
+				end else if (f1_clk - f1_w_m > 1000000) begin
+					`F1_CHK(1, G_AUDIO_BAD, $sformatf("merge: no %s within 10^6 clocks", mb_t_u < 0 ? "upstream merge" :
+						"daria_fe apply (cp_apply)"))
+					f1_w = 0;
+					f1_mask(1, "audio_bad");
+				end
+			end else begin
+				f1_w = 0;				// this edge is max(U, M_fe)+1: compared from the next clock
+				mb_chk = 1;
+			end
+		end
+`else
 		if (f1_w == 0) begin
 			if (dut.cart2600.arm_call_done && fe_is_cdf) begin
 				if (f1_hk_en) f1_inc(G_HK_MERGES);
@@ -1616,6 +2111,7 @@
 			f1_rmw_chk = f1_w_rmw;
 			f1_w_rmw = 0;
 		end
+`endif
 		if (f1_hk_en && dut.cart2600.arm_call_done && fe_is_cdf) f1_h_merge[0]++;
 		// grant_steal (short_phase1): the replica is a clock behind; NOTE loads may move
 		if (u_fe.u_arb.ev_grant_steal) f1_mask(1, "grant_steal");
@@ -1652,6 +2148,36 @@
 			`F1_CHK(u_fe.u_audio.dig_addr != dut.cart2600.mapper_audio.digital_address, G_DIG_BAD,
 				$sformatf("T4: sample address %08x, upstream %08x", u_fe.u_audio.dig_addr,
 					dut.cart2600.mapper_audio.digital_address))
+`ifdef FE_MODE_B
+		// call_amp (mode B): a refresh in progress on either engine while either side's call is
+		// in flight (upstream's or daria_fe's busy) reads a cart RAM the two ARMs write at
+		// different times; the replica is masked until a quiet point (resync). Counted per
+		// refresh dispatched in flight, and once for one already running when a flight starts.
+		mb_in_fl = dut.arm_call_busy || u_fe.arm_call_busy;
+		begin
+			logic busy_a;
+			busy_a = dut.cart2600.mapper_audio.state != 4'd0 || u_fe.u_audio.st != 12'd1;
+			if (mb_in_fl && (up_disp || fe_disp || (!mb_up_disp_fl && busy_a))) f1_inc(G_MB_CALL_AMP);
+			if (mb_in_fl && (up_disp || fe_disp || busy_a)) f1_mask(0, "call_amp");
+		end
+		mb_up_disp_fl = mb_in_fl;			// (the last clock was in flight)
+		if (u_fe.arm_call_busy && !mb_fcb_q) begin	// a call starts (C): its two busy falls
+			mb_bf_up = -1;
+			mb_bf_fe = -1;
+		end
+		if (mb_ucb_q && !dut.arm_call_busy) mb_bf_up = f1_clk;
+		if (mb_fcb_q && !u_fe.arm_call_busy) mb_bf_fe = f1_clk;
+		if (mb_bf_up >= 0 && mb_bf_fe >= 0) begin
+			if (mb_bf_n == 0 || mb_bf_fe - mb_bf_up < mb_bf_lo) mb_bf_lo = mb_bf_fe - mb_bf_up;
+			if (mb_bf_n == 0 || mb_bf_fe - mb_bf_up > mb_bf_hi) mb_bf_hi = mb_bf_fe - mb_bf_up;
+			if (mb_bf_fe > mb_bf_up) mb_bf_fel++;
+			mb_bf_n++;
+			mb_bf_up = -1;
+			mb_bf_fe = -1;
+		end
+		mb_ucb_q = dut.arm_call_busy;
+		mb_fcb_q = u_fe.arm_call_busy;
+`endif
 		// grants: svc_audio_race, pre_lock
 		gr = dut.cart2600.audio_ram_grant || u_fe.aud_take;
 		if (gr) begin
@@ -1703,6 +2229,69 @@
 		if (u_fe.u_audio.ev_size_hi || (dut.cart2600.mapper_audio.state == 4'd5 &&
 				dut.cart2600.mapper_audio.ram_addr[16:15] != 2'd0))
 			f1_mask(0, "size_over32k");
+`ifdef FE_MODE_B
+		// ---- mode B: each refresh's bookkeeping for the compare by value (mb_ref_close) ------
+		// Every class of this clock has set its mask by now, and mb_in_fl is this clock's. A
+		// refresh still open at its side's next dispatch ended at the last edge and was closed
+		// at the falling edge before this clock.
+		if (mb_in_fl && !mb_fl_q) mb_fl_t0 = $time;	// (daria_shadow.svh empties mb_hist at this edge)
+		mb_fl_q = mb_in_fl;
+		if (dut.effective_reset) begin			// a console reset abandons both engines' refreshes
+			mb_ru_on = 0;
+			mb_rf_on = 0;
+			mb_ru_q.delete();
+			mb_rf_q.delete();
+			mb_ru_r.delete();
+			mb_rf_r.delete();
+			mb_ru_pend = 0;
+			mb_rf_pend = 0;
+		end else begin
+			// the word a grant at the last edge read, as the capture takes it (upstream's engine
+			// takes ram_word_data, daria_fe's crb_q, in the clock after the grant)
+			if (mb_ru_pend && mb_ru_nw < 255) begin
+				mb_ru_r.push_back({mb_ru_pa, dut.cart2600.mapper_audio.ram_word_data});
+				mb_ru_nw++;
+			end
+			if (mb_rf_pend && mb_rf_nw < 255) begin
+				mb_rf_r.push_back({mb_rf_pa, u_fe.crb_q});
+				mb_rf_nw++;
+			end
+			mb_ru_pend = 0;
+			mb_rf_pend = 0;
+			if (up_disp) begin
+				mb_ru_on = 1;
+				mb_ru_t0 = f1_clk;
+				mb_ru_nw = 0;
+				mb_ru_fl = 0;
+				mb_ru_ot = 0;
+			end
+			if (mb_ru_on) begin
+				if (mb_in_fl) mb_ru_fl = 1;
+				if (mb_m_oth || f1_m_amp) mb_ru_ot = 1;
+				if (dut.cart2600.audio_ram_grant) begin
+					mb_ru_pend = 1;
+					mb_ru_pa = dut.cart2600.mapper_audio.ram_addr[14:2];
+				end
+			end
+			if (fe_disp) begin
+				mb_rf_on = 1;
+				mb_rf_t0 = f1_clk;
+				mb_rf_nw = 0;
+				mb_rf_fl = 0;
+				mb_rf_ot = 0;
+			end
+			if (mb_rf_on) begin
+				if (mb_in_fl) mb_rf_fl = 1;
+				if (mb_m_oth || f1_m_amp) mb_rf_ot = 1;
+				if (u_fe.aud_take) begin
+					mb_rf_pend = 1;
+					mb_rf_pa = u_fe.aud_addr[14:2];
+					// self-test 7: this read's q poisoned if DARIA has stored its word in the flight
+					if (mb_inj == 7 && mb_in_fl && mb_fl_t0 >= 0 && d_wt[u_fe.aud_addr[14:2]] >= mb_fl_t0) mb_i7_arm = 1;
+				end
+			end
+		end
+`endif
 		// T3 and the NOTE-capture offset (histograms)
 		if (f1_up_disp_t >= 0 && dut.cart2600.mapper_audio.state == 4'd0) begin
 			f1_h_rup[f1_bin(f1_clk - f1_up_disp_t)]++;
@@ -1858,8 +2447,15 @@
 				end
 				// K2: the whole cart RAM once a frame, at an E0 with the writeback idle
 				// and nothing of daria_fe's in flight
+`ifdef FE_MODE_B
+				// mode B: also no call in flight on either side (each ARM writes its RAM at its pace)
+				if (f1_k2_arm && dut.cart2600.mapper_wb_idle && !u_fe.u_core.wb_v && !u_fe.u_copy.run &&
+						!u_fe.u_core.svc_pend && !(dut.arm_dma_busy && !dut.mapper_init_busy) &&
+						!dut.arm_call_busy && !u_fe.arm_call_busy && !d_in_call) begin
+`else
 				if (f1_k2_arm && dut.cart2600.mapper_wb_idle && !u_fe.u_core.wb_v && !u_fe.u_copy.run &&
 						!u_fe.u_core.svc_pend && !(dut.arm_dma_busy && !dut.mapper_init_busy)) begin
+`endif
 					f1_k2_arm = 0;
 					f1_inc(G_K2);
 					n = f1_ram_cmp("K2", f1_ram_words()) + f1_tbl_cmp("K2");
@@ -2099,12 +2695,12 @@
 					f1_inj_done = 1;
 				end
 				4: begin
-					fe_mem.cart_ram.mem_q[13'h100] = ~fe_mem.cart_ram.mem_q[13'h100];
+					`FE_MEM.cart_ram.mem_q[13'h100] = ~`FE_MEM.cart_ram.mem_q[13'h100];
 					f1_inj_done = 1;
 				end
 				5: begin
-					if (fe_is_dpc) fe_mem.state_ram.mem_q[0] = fe_mem.state_ram.mem_q[0] + 32'd1;
-					else fe_mem.cart_ram.mem_q[13'(ft_pb())] = fe_mem.cart_ram.mem_q[13'(ft_pb())] + 32'h0010_0000;
+					if (fe_is_dpc) `FE_MEM.state_ram.mem_q[0] = `FE_MEM.state_ram.mem_q[0] + 32'd1;
+					else `FE_MEM.cart_ram.mem_q[13'(ft_pb())] = `FE_MEM.cart_ram.mem_q[13'(ft_pb())] + 32'h0010_0000;
 					f1_inj_done = 1;
 				end
 				6: if (!f1_m_rep && ft_aud_quiet()) begin
@@ -2116,11 +2712,11 @@
 					f1_inj_done = 1;
 				end
 				9: if (u_fe.call_tog != f1_tog2) begin		// the post is complete, R1 reads it next edge
-					fe_mem.state_ram.mem_q[8'hF5] = fe_mem.state_ram.mem_q[8'hF5] ^ 32'h0000_0100;
+					`FE_MEM.state_ram.mem_q[8'hF5] = `FE_MEM.state_ram.mem_q[8'hF5] ^ 32'h0000_0100;
 					f1_inj_done = 1;
 				end
 				10: if (u_fe.u_call.st[4] && fe_is_cdf) begin	// RD: F8 was read, F9-FD follow
-					fe_mem.state_ram.mem_q[8'hFB] = fe_mem.state_ram.mem_q[8'hFB] + 32'd1;
+					`FE_MEM.state_ram.mem_q[8'hFB] = `FE_MEM.state_ram.mem_q[8'hFB] + 32'd1;
 					f1_inj_done = 1;
 				end
 				8: if (dut.tia_en && !dut.arm_call_busy && !dut.arm_dma_busy) begin
@@ -2145,11 +2741,57 @@
 
 	// ---- the resync (falling edge): upstream's audio state into u_fe at a quiet point -------
 	always @(negedge clk_sys) begin
+`ifdef FE_MODE_B
+		// mode B: close the refreshes that ended at the last edge and compare the pairs, before
+		// the resync below writes u_fe's replica; at a quiet point both sides have run as many
+		if (!dut.effective_reset) begin
+			mb_ref_close();
+			if (ft_aud_quiet() && (mb_ru_q.size() != 0 || mb_rf_q.size() != 0)) begin
+				if (mb_m_oth || f1_m_amp)
+					for (int i = 0; i < mb_ru_q.size() + mb_rf_q.size(); i++) f1_inc(G_MB_REF_UNP);
+				else `F1_CHK(1, G_MB_REF_CNT, $sformatf("refresh_count_bad: at a quiet point upstream has %0d refreshes unpaired, daria_fe %0d",
+					mb_ru_q.size(), mb_rf_q.size()))
+				mb_ru_q.delete();
+				mb_rf_q.delete();
+				mb_ru_r.delete();
+				mb_rf_r.delete();
+			end
+		end
+`endif
 		if (f1_m_rep || f1_m_cf) begin
 			if (dut.effective_reset) begin
 				f1_m_rep = 0;				// both engines are in reset
 				f1_m_cf = 0;
+`ifdef FE_MODE_B
+				mb_m_oth = 0;
+				mb_x_arm = 0;
+`endif
 			end else if (fe_resync != 0 && f1_w == 0 && ft_aud_quiet()) begin
+`ifdef FE_MODE_B
+				// what the resync overwrites: nothing, unless a class other than call_amp and
+				// guard_shift, or a refresh pair excused by an ARM-written word, came since the
+				// last resync (call_amp and guard_shift move timing only)
+				begin
+					string dw;
+					dw = ft_a1_rep(0);
+					if (dw == "" && f1_m_cf) dw = ft_a1_cf();
+					if (dw != "") begin
+						if (mb_m_oth || mb_x_arm || f1_m_amp) begin
+							f1_inc(G_MB_DEP_DIFF);
+							if (f1_tot[G_MB_DEP_DIFF] <= 5) begin
+								string xw;
+								xw = "an excused refresh pair";
+								if (f1_m_amp) xw = "another class, pause_lane";
+								if (mb_m_oth) xw = {"another class, the last ", mb_oth_why};
+								$display("FE mode B resync at clk_sys %0d overwrites %s (excused: %s)", f1_clk, dw, xw);
+							end
+						end else `F1_CHK(1, G_MB_DEP_BAD, {"deposit_bad: the resync overwrites ", dw, " (mask ", f1_m_why,
+							"; no other class and no excused refresh since the last resync)"})
+					end
+					mb_m_oth = 0;
+					mb_x_arm = 0;
+				end
+`endif
 				fe_deposit_audio(f1_m_cf);
 				if (f1_m_cf) f1_inc(G_DEPOSIT_CF);
 				f1_inc(G_RESYNC);
@@ -2158,6 +2800,39 @@
 			end
 		end
 	end
+
+`ifdef FE_MODE_B
+	// ---- self-test 6: a wrong returned frequency word (header). DARIA wrote F8-FD before its
+	// ret_tog flip; u_call reads F9-FD from X+1 on, FB at X+3 at the earliest, so a change at
+	// the falling edge after X (RD's first clock) is what it reads. DARIA's own record (FIQ
+	// r8-r13) and upstream are untouched.
+	always @(negedge clk_sys) if (mb_inj == 6) begin
+		if (u_fe.u_call.st[daria_fe_pkg::CS_RD] && fe_is_cdf) begin
+			if (!mb_i6_done) begin
+				`FE_MEM.state_ram.mem_q[8'hFB] = `FE_MEM.state_ram.mem_q[8'hFB] ^ 32'h0000_0100;
+				mb_i6_done = 1;
+				mb_i6_n++;
+			end
+		end else
+			mb_i6_done = 0;
+	end
+	// ---- self-test 7: an undefined read (header). The poisoned daria_ram returns $A5A5A5A5 to a
+	// port that reads a word the other port writes at the same time step (design 12.1); here that
+	// value is forced into daria_fe's cart RAM port-B q for the clock its audio capture takes it,
+	// on each audio read in a flight of a word DARIA has stored in that flight.
+	always @(negedge clk_sys) if (mb_inj == 7) begin
+		if (mb_i7_on) begin
+			release fu_crb_q;
+			mb_i7_on = 0;
+		end
+		if (mb_i7_arm) begin
+			force fu_crb_q = 32'hA5A5_A5A5;
+			mb_i7_on = 1;
+			mb_i7_arm = 0;
+			mb_i7_n++;
+		end
+	end
+`endif
 
 	// ---- K1: the whole cart RAM at each upstream call start (clk_arm) ---------------------------
 	logic f1_run_arm_q = 0;
@@ -2218,6 +2893,9 @@
 					if (cl.len() == 0) sep = "";
 					cl = {cl, sep, $sformatf("%s %0d", f1_nm[c], f1_tot[c])};
 				end
+`ifdef FE_MODE_B
+		cl = {cl, $sformatf(", guard_shift %0d, call_amp %0d (mode B)", f1_tot[G_MB_GSHIFT], f1_tot[G_MB_CALL_AMP])};
+`endif
 		$display("FE classes: %s", cl);
 		$display("FE counts: %0d read latches compared (%0d AMPLITUDE), %0d hidden pclk0 (%0d differ, information; %0d the last of a stall), %0d cycles compared (%s), %0d pointer writes (C3), %0d 6507 RAM writes (C4), %0d inits (I1/I2), %0d call starts (K1), %0d frames (K2), %0d CDF merges own path / %0d through the hook, %0d crb_use clocks, mode A guard locked %0d clocks; %0d services' RAM compared (R3), %0d clocks of the stall forced by the hold",
 			f1_tot[G_READS], f1_tot[G_AMP_READS], f1_tot[G_HIDDEN], f1_tot[G_DOUT_HID], f1_tot[G_HID_LAST],
@@ -2236,6 +2914,28 @@
 			f1_tot[G_DIG_LOCAL], f1_tot[G_DIG_REMOTE], f1_tot[G_DIG_RAM], f1_tot[G_DIG_NONE], f1_tot[G_DIG_VAL_N],
 			f1_tot[G_DIG_VAL_BAD], f1_tot[G_DIG_VAL_MRG]);
 		$display("FE result: %s (%0d bad)", res, nbad);
+`ifdef FE_MODE_B
+		$display("FE mode B: +d_ofs=%0d ps (shared edges: clk_sys k mod 3 = %0s), +mb_inj=%0d; guard locked at clk_sys edge %0d (bound 24; the model of 8.1: %0d, lock_edge_bad %0d), locked %0d of %0d clk_sys, guard_on %0d (%.2f%%), unlocks %0d; det_bad %0d, phb_bad %0d, gwin_bad %0d",
+			d_ofs, d_ofs == 0 ? "1" : (d_ofs == 8730 ? "0" : (d_ofs == 17460 ? "2" : "none")), mb_inj, mb_lock_edge,
+			mb_lock_exp, f1_tot[G_MB_LOCK_EDGE], f1_tot[G_MB_LOCKED], mb_clk, f1_tot[G_MB_GON], mb_clk > 0 ? 100.0 * real'(f1_tot[G_MB_GON]) / real'(mb_clk) : 0.0,
+			f1_tot[G_MB_UNLOCK], f1_tot[G_MB_DET_BAD], f1_tot[G_MB_PHB_BAD], f1_tot[G_MB_GWIN_BAD]);
+		$display("FE mode B port B: daria_fe writes %0d (%0d on a shared edge: %0d in the guard's window, %0d while DARIA runs a call), consumed reads %0d (%0d on a shared edge: %0d in the window, %0d while DARIA runs); coll_d_same %0d, coll_d_ld_same %0d, coll_ww_same %0d; DARIA stores %0d (%0d on a shared edge), loads %0d (%0d on a shared edge); audio reads held for phase B (guard_shift) %0d clocks",
+			fe_wr_n, f1_tot[G_MB_WR_SH], f1_tot[G_MB_WR_SH_G], f1_tot[G_MB_WR_SH_D], fe_rd_n, f1_tot[G_MB_RD_SH],
+			f1_tot[G_MB_RD_SH_G], f1_tot[G_MB_RD_SH_D], coll_d_same, coll_d_ld_same, coll_ww_same, d_stores,
+			d_shared_stores, d_loads, d_shared_loads, f1_tot[G_MB_GSHIFT]);
+		$display("FE mode B calls: DARIA %0d calls compared with upstream's, %0d differ, %0d skipped; K1d %0d (%0d differ, %0d not compared); CDF merges %0d, D - U %0d..%0d clk_sys over %0d, merge_race %0d, merge_late %0d; call_amp %0d refreshes; busy falls daria_fe - upstream %0d..%0d clk_sys over %0d calls, daria_fe's later in %0d",
+			shadow_calls, shadow_bad, shadow_skip, mb_k1d, mb_k1d_bad, mb_k1d_skip, f1_tot[G_MERGES], mb_du_lo, mb_du_hi,
+			mb_du_n, f1_tot[G_MERGE_RACE], f1_tot[G_MERGE_LATE], f1_tot[G_MB_CALL_AMP], mb_bf_lo, mb_bf_hi, mb_bf_n, mb_bf_fel);
+		$display("FE mode B refreshes: %0d pairs compared by value, %0d of them during a call in flight; excused: %0d by a word either ARM wrote in the flight, %0d by another class (%0d of the excused differ); refresh_bad %0d, refresh_count_bad %0d (%0d unpaired under another class); resyncs that overwrote a difference: %0d excused, deposit_bad %0d",
+			f1_tot[G_MB_REF_N], f1_tot[G_MB_REF_FL], f1_tot[G_MB_REF_XARM], f1_tot[G_MB_REF_XCLS], f1_tot[G_MB_REF_XDIFF],
+			f1_tot[G_MB_REF_BAD], f1_tot[G_MB_REF_CNT], f1_tot[G_MB_REF_UNP], f1_tot[G_MB_DEP_DIFF], f1_tot[G_MB_DEP_BAD]);
+		if (mb_inj >= 4)
+			$display("FE mode B self-test %0d: %0d injected", mb_inj, mb_inj == 7 ? longint'(mb_i7_n) :
+				(mb_inj == 6 ? longint'(mb_i6_n) : mb_pc_n));
+		$display("MODE B result: %s (FE %0d bad; DARIA %0d calls differ or halted, %0d skipped; lock %0s)",
+			nbad == 0 && shadow_bad == 0 && shadow_skip == 0 && mb_lock_edge >= 0 && mb_lock_edge <= 24 ? "PASS" : "FAIL",
+			nbad, shadow_bad, shadow_skip, mb_lock_edge >= 0 && mb_lock_edge <= 24 ? "in time" : "late or never");
+`endif
 		if (fd_f1 != 0) $fclose(fd_f1);
 		if (fd_f1_ticks != 0) $fclose(fd_f1_ticks);
 		if (fd_amp_up != 0) begin
@@ -2284,6 +2984,21 @@
 		f1_nm[G_MASK_STUCK] = "mask_stuck";     f1_nm[G_MASKED] = "masked_clocks";
 		f1_nm[G_DIG_VAL_BAD] = "dig_val_bad";   f1_nm[G_DIG_VAL_N] = "dig_val_n";      f1_nm[G_DIG_VAL_MRG] = "dig_val_merge";
 		f1_nm[G_OBUS_FFE] = "obus_ffe";         f1_nm[G_COMMIT_PCLK1] = "commit_pclk1";
+`ifdef FE_MODE_B
+		f1_nm[G_MB_DET_BAD] = "det_bad";        f1_nm[G_MB_PHB_BAD] = "phb_bad";       f1_nm[G_MB_LOCK_LATE] = "lock_late";
+		f1_nm[G_MB_UNLOCK] = "det_unlock";      f1_nm[G_MB_GWIN_BAD] = "gwin_bad";
+		f1_nm[G_MB_WR_SH_G] = "wr_shared_guard"; f1_nm[G_MB_RD_SH_G] = "rd_shared_guard";
+		f1_nm[G_MB_WR_SH_D] = "wr_shared_daria"; f1_nm[G_MB_RD_SH_D] = "rd_shared_daria";
+		f1_nm[G_MB_COLL_SAME] = "coll_d_same";  f1_nm[G_MB_COLL_LD] = "coll_d_ld_same"; f1_nm[G_MB_COLL_WW] = "coll_ww_same";
+		f1_nm[G_MB_K1D_BAD] = "ram_dcall_bad";  f1_nm[G_MB_CALL_BAD] = "daria_call_bad";
+		f1_nm[G_MB_GSHIFT] = "guard_shift";     f1_nm[G_MB_CALL_AMP] = "call_amp";     f1_nm[G_MB_LOCKED] = "locked_clocks";
+		f1_nm[G_MB_GON] = "guard_on_clocks";    f1_nm[G_MB_WR_SH] = "fe_wr_shared";    f1_nm[G_MB_RD_SH] = "fe_rd_shared";
+		f1_nm[G_MB_DCALLS] = "daria_calls";
+		f1_nm[G_MB_LOCK_EDGE] = "lock_edge_bad"; f1_nm[G_MB_REF_BAD] = "refresh_bad"; f1_nm[G_MB_REF_CNT] = "refresh_count_bad";
+		f1_nm[G_MB_DEP_BAD] = "deposit_bad";    f1_nm[G_MB_REF_N] = "refresh_pairs";   f1_nm[G_MB_REF_FL] = "refresh_pairs_fl";
+		f1_nm[G_MB_REF_XARM] = "refresh_x_arm"; f1_nm[G_MB_REF_XCLS] = "refresh_x_class"; f1_nm[G_MB_REF_XDIFF] = "refresh_x_differ";
+		f1_nm[G_MB_REF_UNP] = "refresh_unpaired"; f1_nm[G_MB_DEP_DIFF] = "deposit_differ";
+`endif
 		foreach (f1_bad[c]) f1_bad[c] = 0;
 		foreach (f1_tot[c]) begin f1_tot[c] = 0; f1_frm[c] = 0; end
 		foreach (f1_h_post[b]) begin
@@ -2301,6 +3016,15 @@
 				G_DIG_VAL_BAD, G_COMMIT_PCLK1: f1_bad[c] = 1;
 				default: ;
 			endcase
+`ifdef FE_MODE_B
+		foreach (f1_bad[c])
+			case (c)
+				G_MB_DET_BAD, G_MB_PHB_BAD, G_MB_LOCK_LATE, G_MB_UNLOCK, G_MB_GWIN_BAD, G_MB_WR_SH_G, G_MB_RD_SH_G,
+				G_MB_WR_SH_D, G_MB_RD_SH_D, G_MB_COLL_SAME, G_MB_COLL_LD, G_MB_COLL_WW, G_MB_K1D_BAD,
+				G_MB_CALL_BAD, G_MB_LOCK_EDGE, G_MB_REF_BAD, G_MB_REF_CNT, G_MB_DEP_BAD: f1_bad[c] = 1;
+				default: ;
+			endcase
+`endif
 		void'($value$plusargs("fe_slat=%d", fe_slat));
 		void'($value$plusargs("fe_merge_hook=%d", fe_merge_hook));
 		void'($value$plusargs("fe_hold=%d", fe_hold));
@@ -2312,9 +3036,34 @@
 		void'($value$plusargs("fe1_inj_at=%d", fe1_inj_at));
 		void'($value$plusargs("fe_mask_max=%d", fe_mask_max));
 		if (fe_slat < 0) fe_slat = 0;
+`ifdef FE_MODE_B
+		$display("FE stage 1: daria_fe on DARIA's dmem, mode B (+d_ofs=%0d, +mb_inj=%0d); +fe_merge_hook=%0d (off in mode B) +fe_slat=%0d +fe_hold=%0d +fe_resync=%0d +fe_full=%0d",
+			d_ofs, mb_inj, fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full);
+`else
 		$display("FE stage 1: daria_fe on fe_mem, mode A; +fe_merge_hook=%0d +fe_slat=%0d +fe_hold=%0d +fe_resync=%0d +fe_full=%0d",
 			fe_merge_hook, fe_slat, fe_hold, fe_resync, fe_full);
+`endif
 		#1;
+`ifdef FE_MODE_B
+		// the self-tests (header): each must make the run FAIL
+		if (mb_inj == 1) begin
+			force u_fe.call_win = 1'b1;		// the guard's window held open ...
+			force u_fe.guard_on = 1'b0;		// ... and its effect at u_core and u_arb forced off
+			$display("FE mode B self-test 1: guard_on forced 0 into u_core and u_arb, call_win forced 1 into u_guard");
+		end else if (mb_inj == 2)
+			$display("FE mode B self-test 2: u_fe's clk_arm is clk_d %0d ps later (the detector on the wrong phase)", mb_det_ofs);
+		else if (mb_inj == 3) begin
+			force u_fe.phb_next = 1'b1;		// u_arb grants the audio on every edge in the window
+			$display("FE mode B self-test 3: phb_next forced 1 into u_arb");
+		end else if (mb_inj == 4)
+			$display("FE mode B self-test 4: the coincidence counters see a consumed daria_fe read of the word each DARIA store on a shared edge writes");
+		else if (mb_inj == 5)
+			$display("FE mode B self-test 5: the coincidence counters see a daria_fe write, on each shared edge, of the cart RAM word DARIA's port A is at");
+		else if (mb_inj == 6)
+			$display("FE mode B self-test 6: state RAM word FB (voice 0's returned frequency) bit 8 flipped in dmem while u_call reads the returns, every CDF call");
+		else if (mb_inj == 7)
+			$display("FE mode B self-test 7: $A5A5A5A5 (the poisoned RAM's undefined read) forced into daria_fe's port-B q for each audio read in a flight of a word DARIA has stored in it");
+`endif
 		fd_f1 = $fopen({out, "fe.csv"}, "w");
 		$fwrite(fd_f1, "frame");
 		for (int c = 0; c < G_N; c++) $fwrite(fd_f1, ",%s", f1_nm[c]);

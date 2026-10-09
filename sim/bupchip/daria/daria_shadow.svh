@@ -40,6 +40,37 @@
 // Plusargs: +shadow_stop=N stops comparing after N bad calls (default 20);
 // +d_await=P (default 0).
 //
+// MODE B (-DFE_MODE_B, run_daria.sh MODE_B=1, with the front-end shadow;
+// docs/daria_fe/spec/bench.md 6.3, 6.4, 7.1; design.md 12.2 step 8). daria_fe
+// (u_fe, fe_shadow.svh) posts the calls to dcall itself and shares dmem: its
+// front-end ROM (the cartridge's first 32 KB through cap_we, as the wrapper),
+// its cart RAM port B and its state RAM port B are u_fe's, call_tog comes from
+// u_fe and ret_tog goes to it. Step 5's poster and its per-call snapshot copy
+// are gone. What stays here:
+//   - clk_d on the PLL's lattice: it starts high and toggles every 13,095 ps
+//     from +d_ofs=PS (default 0), so it rises at d_ofs + 26,190 n (n >= 1).
+//     0, 8,730 and 17,460 put the shared edge (one clk_sys in three) on
+//     clk_sys edges k = 1, 0, 2 (mod 3); 13,095 is step 5's phase (none shared).
+//   - DARIA's reset follows the console reset (daria_mreset, design 6.5).
+//   - DARIA's record of each call (its accesses from call_go, FIQ r8-r13 from
+//     the readout), compared in order with upstream's by shadow_compare, as in
+//     step 5; daria.csv's e2e_sys is daria_fe's C (busy rise) to X+1.
+//   - K1d: DARIA's cart RAM at each call_go against up_snap (upstream's at the
+//     start of the same call): DARIA starts from the RAM upstream started from.
+//   - The coincidences on dmem's cart RAM (bench.md 6.4), exact to the ps:
+//     coll_d_same (a DARIA store and a consumed daria_fe read of one word at one
+//     time step), coll_d_ld_same (a daria_fe write and a DARIA load), coll_ww_same
+//     (two writes); d_shared_stores / d_shared_loads (DARIA's on shared edges,
+//     information). The 69.84 ns window (coll_d) uses daria_fe's consumed reads.
+//     fe_shadow.svh turns them into must-be-0 checks.
+//   - The self-tests' clock: +mb_inj=2 feeds u_fe's clk_arm from a copy of clk_d
+//     +mb_det_ofs=PS (default 8,730) later (fe_shadow.svh has the others), and
+//     the coincidence counters' positive controls: +mb_inj=4 adds, on each
+//     shared edge with a DARIA store, a consumed daria_fe read of the word it
+//     writes (coll_d_same); +mb_inj=5, on each shared edge, a daria_fe write of
+//     the cart RAM word DARIA's port A is at (coll_d_ld_same for its loads,
+//     coll_ww_same for its stores). Only the counters see these accesses.
+//
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 
@@ -51,8 +82,43 @@
 `endif
 
 	// ---- DARIA's clock ---------------------------------------------------------
+`ifdef FE_MODE_B
+`ifdef DARIA_WRAPPER
+	initial begin
+		$display("mode B (FE_MODE_B) runs on dcall and dmem, not the wrapper");
+		$finish;
+	end
+`endif
+	// On the PLL's lattice (bench.md 6.3): high from time 0, toggling from +d_ofs
+	// on, so the rising edges fall at d_ofs + 26,190 n (n >= 1), 8 per 3 clk_sys.
+	logic clk_d = 1'b1;
+	int   d_ofs = 0;
+	initial begin
+		void'($value$plusargs("d_ofs=%d", d_ofs));
+		#(d_ofs);
+		forever #13095 clk_d = ~clk_d;
+	end
+	// The self-tests (+mb_inj=K, fe_shadow.svh). K = 2: u_fe's clk_arm is a copy
+	// of clk_d +mb_det_ofs ps later, so the phase detector locks on another
+	// clk_sys class than the one DARIA's edges share (det_bad).
+	int   mb_inj = 0, mb_det_ofs = 8730;
+	logic clk_d_inj = 1'b1;
+	initial begin
+		int o;
+		o = 0;
+		void'($value$plusargs("d_ofs=%d", o));		// (this block may run before clk_d's)
+		void'($value$plusargs("mb_inj=%d", mb_inj));
+		void'($value$plusargs("mb_det_ofs=%d", mb_det_ofs));
+		if (mb_inj == 2) begin
+			#(o + mb_det_ofs);
+			forever #13095 clk_d_inj = ~clk_d_inj;
+		end
+	end
+	wire  fb_clk_arm = mb_inj == 2 ? clk_d_inj : clk_d;
+`else
 	logic clk_d = 0;
 	always #13095 clk_d = ~clk_d;		// 26.19 ns, 8 per 3 clk_sys
+`endif
 	localparam real D_HZ = 687272727.0 / 18.0;
 
 `ifdef DARIA_WRAPPER
@@ -132,7 +198,15 @@
 	end
 `else
 	// ---- the core and its memories --------------------------------------------------
+`ifdef FE_MODE_B
+	// Mode B: DARIA is held until the window is loaded, and then whenever the console
+	// is in reset, as daria_mreset holds it on the Pocket (design 6.5): a console
+	// reset abandons a call on both sides.
+	logic        d_rst = 1, d_loaded = 0;
+	wire         d_rst_sys = !d_loaded || dut.effective_reset;
+`else
 	logic        d_rst = 1, d_rst_sys = 1;
+`endif
 	logic [19:0] d_img_size = 0;
 	wire         d_ram32 = dut.mapper_ram_size == 16'd32768;
 	wire  [14:0] d_rom_addr;
@@ -178,6 +252,31 @@
 	logic        d_stb_we = 0;
 	logic [31:0] d_stb_wd = 0;
 
+`ifdef FE_MODE_B
+	// Mode B: dmem's front-end ports are u_fe's (fe_shadow.svh instantiates u_fe on
+	// these wires; mode A's fe_mem and the step-5 poster's port B are not built).
+	// The front-end ROM takes the cartridge's bytes as the wrapper does
+	// (bupchip_pocket.sv: load_valid in the cartridge window, below 32 KB).
+	wire  [12:0] fu_fea_addr, fu_feb_addr, fu_crb_addr;
+	wire  [31:0] fu_fea_q, fu_feb_q, fu_crb_q, fu_stb_q, fu_crb_wd, fu_stb_wd;
+	wire         fu_crb_we, fu_stb_we;
+	wire   [3:0] fu_crb_be, fu_stb_be;
+	wire   [7:0] fu_stb_addr;
+	daria_mem #(.WIN_KB(`DARIA_WIN_KB)) dmem (
+		.clk_arm(clk_d), .clk_sys,
+		.rom_addr(d_rom_addr), .win_qa(d_rom_q), .d_addr(d_d_addr), .win_qb(d_rom_dq),
+		.ram_we(d_ram_we), .ram_be(d_ram_be), .ram_wdata(d_ram_wdata), .ram_q(d_ram_q),
+		.img_ready(1'b1), .win_we(1'b0), .win_wa(15'd0), .win_wd(32'd0), .win_be(4'd0),
+		.sta_addr(d_sta_addr), .sta_we(d_sta_we), .sta_wd(d_sta_wd), .sta_q(d_sta_q),
+		.cap_we(ioctl_wr && cart_download && ioctl_addr[24:15] == 10'd0), .cap_addr(ioctl_addr[14:0]),
+		.cap_data(ioctl_dout), .fea_addr(fu_fea_addr), .fea_q(fu_fea_q), .feb_addr(fu_feb_addr), .feb_q(fu_feb_q),
+		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
+		.stb_addr(fu_stb_addr), .stb_we(fu_stb_we), .stb_be(fu_stb_be), .stb_wd(fu_stb_wd), .stb_q(fu_stb_q));
+	assign d_stb_q = fu_stb_q;
+
+	wire  d_call_tog;			// u_fe's call_tog (fe_shadow.svh)
+	wire  d_ret_tog;
+`else
 	daria_mem #(.WIN_KB(`DARIA_WIN_KB)) dmem (
 		.clk_arm(clk_d), .clk_sys,
 		.rom_addr(d_rom_addr), .win_qa(d_rom_q), .d_addr(d_d_addr), .win_qb(d_rom_dq),
@@ -190,6 +289,7 @@
 
 	logic d_call_tog = 0;
 	wire  d_ret_tog;
+`endif
 	daria_call dcall (
 		.clk(clk_d), .rst(d_rst), .call_tog(d_call_tog), .ret_tog(d_ret_tog),
 		.parked(d_parked), .call_go(d_call_go), .clr_e(d_clr_e), .clr_wd(d_clr_wd), .clr_pc(d_clr_pc),
@@ -205,6 +305,23 @@
 	`define D_CART_RAM dmem.cart_ram
 
 	// ---- the image, when the run starts ---------------------------------------------------
+`ifdef FE_MODE_B
+	always @(posedge clk_sys) if (running && !d_loaded) begin
+		d_img_size <= 20'(rom_size > 32'h80000 ? 32'h80000 : rom_size);
+		d_loaded <= 1;
+	end
+	// The window's RAMs, as many as daria_mem has.
+	genvar d_w;
+	generate for (d_w = 0; d_w < (`DARIA_WIN_KB + 31) / 32; d_w = d_w + 1) begin : g_d_load
+		always @(posedge clk_sys) if (running && !d_loaded)
+			for (int i = 0; i < 8192; i++) dmem.g_win[d_w].win.mem_q[i] = img_word(32768 * d_w + 4 * i);
+	end endgenerate
+	// daria_ready (bupchip_pocket.sv: parked & img_ready through two clk_sys flops), u_fe's
+	// cpu_ready in mode B (design 1.2)
+	logic [1:0] d_ready_s = 2'b00;
+	always @(posedge clk_sys) d_ready_s <= {d_ready_s[0], d_parked};
+	wire        d_ready_b = d_ready_s[1];
+`else
 	always @(posedge clk_sys) if (running && d_rst_sys) begin
 		d_img_size <= 20'(rom_size > 32'h80000 ? 32'h80000 : rom_size);
 		d_rst_sys <= 0;
@@ -215,6 +332,7 @@
 		always @(posedge clk_sys) if (running && d_rst_sys)
 			for (int i = 0; i < 8192; i++) dmem.g_win[d_w].win.mem_q[i] = img_word(32768 * d_w + 4 * i);
 	end endgenerate
+`endif
 	logic [1:0] d_rst_s = 2'b11;
 	always @(posedge clk_d) begin
 		d_rst_s <= {d_rst_s[0], d_rst_sys};
@@ -293,6 +411,7 @@
 	longint      shadow_writes = 0, shadow_io = 0;
 	int          MMIO_TOL = 200;
 	int          tc_n = 0, tc_lo = 0, tc_hi = 0;     // T1TC reads compared, DARIA - upstream
+`ifndef FE_MODE_B
 	always @(posedge clk_sys) begin
 		d_post_s <= {d_post_s[1:0], up_post};
 		d_ret_s <= {d_ret_s[1:0], d_ret_tog};
@@ -347,10 +466,12 @@
 			d_done <= 0;
 		end
 	end
+`endif
 
 	logic   d_acc_clear_q = 0;
 	longint d_cyc = 0;
 	logic   d_in_call = 0;
+`ifndef FE_MODE_B
 	always @(posedge clk_d) begin
 		d_acc_clear_q <= d_acc_clear;
 		if (d_acc_clear != d_acc_clear_q) d_acc.delete();
@@ -363,6 +484,7 @@
 			d_acc.push_back('{d_w_addr, lanes(d_w_size, d_w_addr[1:0]),
 				d_reg_write ? d_reg_wdata : d_reg_rdata, 1'b1, !d_reg_write});
 	end
+`endif
 
 	// ---- cart RAM collisions (open item 7) -------------------------------------------------
 	localparam longint COLL_PS = 69840;
@@ -373,6 +495,7 @@
 		d_wt[i] = -COLL_PS;
 		fe_rt[i] = -COLL_PS;
 	end
+`ifndef FE_MODE_B
 	always @(posedge clk_sys) if (running && dut.cartram_rd && !dut.cartram_wr && dut.cartram_addr[17:15] == 3'd0) begin
 		int w;
 		w = int'(dut.cartram_addr[14:2]);
@@ -389,6 +512,221 @@
 		if ($time - fe_rt[d_d_addr[14:2]] < COLL_PS) coll_d++;
 		d_wt[d_d_addr[14:2]] = $time;
 	end
+`else
+	// ---- mode B: dmem's cart RAM, DARIA's port A (clk_d) against daria_fe's port B (clk_sys)
+	// The reads that matter are daria_fe's own (bench.md 6.4): a port-B read whose q u_fe
+	// consumes, i.e. the clock before crb_use (design 3.1: the core's fixed read with
+	// cr_fix_use, the P32 read, the audio). fe_rt holds their times; upstream's console-side
+	// reads (cartram_rd) keep their own array, so coll_up is step 5's count. Times are ps:
+	// a clk_d edge t is shared iff ((t - 34,920) % 69,840) == 0, exactly. Each coincidence
+	// is counted once, by whichever of the two blocks runs second in the time step.
+	longint mb_up_rt [0:8191], fe_wt [0:8191];
+	longint coll_d_same = 0, coll_d_ld_same = 0, coll_ww_same = 0;
+	longint d_stores = 0, d_shared_stores = 0, d_loads = 0, d_shared_loads = 0, fe_rd_n = 0, fe_wr_n = 0;
+	longint mb_d_prev_t = -1;		// the last clk_d rising edge (ps)
+	longint mb_pc_n = 0;			// the positive controls' injected accesses (+mb_inj=4/5)
+	// The values each word of this RAM held during a call's flight, for fe_shadow.svh's refresh
+	// compare (mb_val_ok): at the first store to a word, its value before it, then its value
+	// after each store, DARIA's and daria_fe's (the latter while a call is in flight).
+	// Emptied at the clk_sys edge that first sees a call in flight (either side's busy), as
+	// fe_shadow.svh's mb_fl_t0.
+	logic [31:0] mb_hist [int][$];
+	logic        mb_hist_fl = 0;
+	function automatic void mb_hist_add(input int w, input logic [3:0] be, input logic [31:0] wd);
+		logic [31:0] v;
+		v = `D_CART_RAM.mem_q[w];
+		if (!mb_hist.exists(w)) mb_hist[w].push_back(v);
+		for (int b = 0; b < 4; b++) if (be[b]) v[8 * b +: 8] = wd[8 * b +: 8];
+		mb_hist[w].push_back(v);
+	endfunction
+	initial for (int i = 0; i < 8192; i++) begin
+		mb_up_rt[i] = -COLL_PS;
+		fe_wt[i] = -COLL_PS;
+	end
+	wire        mb_fe_rd = (u_fe.u_arb.own_r[daria_fe_pkg::OR_FIX] && u_fe.cr_fix_use) ||
+		u_fe.u_arb.own_r[daria_fe_pkg::OR_P32] || u_fe.u_arb.own_r[daria_fe_pkg::OR_AUD];
+	wire        mb_fe_wr = fu_crb_we;
+	wire [12:0] mb_fe_a  = fu_crb_addr;
+	function automatic logic mb_shared_d(input longint t);	// a clk_d edge that is a clk_sys edge
+		return t >= 34920 && (t - 34920) % 69840 == 0;
+	endfunction
+	always @(posedge clk_sys) begin
+		if (running && dut.cartram_rd && !dut.cartram_wr && dut.cartram_addr[17:15] == 3'd0) begin
+			int w;
+			w = int'(dut.cartram_addr[14:2]);
+			fe_reads++;
+			if ($time - up_wt[w] < COLL_PS) coll_up++;
+			mb_up_rt[w] = $time;
+		end
+		if ((dut.arm_call_busy || u_fe.arm_call_busy) && !mb_hist_fl) mb_hist.delete();
+		mb_hist_fl = dut.arm_call_busy || u_fe.arm_call_busy;
+		if (mb_fe_rd) begin
+			int w;
+			w = int'(mb_fe_a);
+			fe_rd_n++;
+			if ($time - d_wt[w] < COLL_PS) coll_d++;
+			if (d_wt[w] == $time) coll_d_same++;
+			fe_rt[w] = $time;
+		end
+		if (mb_fe_wr) begin
+			int w;
+			w = int'(mb_fe_a);
+			fe_wr_n++;
+			if (dut.arm_call_busy || u_fe.arm_call_busy) mb_hist_add(w, fu_crb_be, fu_crb_wd);
+			if (d_wt[w] == $time) coll_ww_same++;
+			fe_wt[w] = $time;
+		end
+		// The positive controls (+mb_inj=4/5), on a shared edge (this clk_sys edge is a clk_d
+		// edge) where DARIA's port A is in cart RAM: the access is counted here exactly as a
+		// real one, and the clk_d block below pairs it with DARIA's store or (one clk_d later)
+		// load of the same edge.
+		if ((mb_inj == 4 || mb_inj == 5) && $time >= longint'(d_ofs) + 26190 && ($time - longint'(d_ofs)) % 26190 == 0 &&
+				d_d_addr[31:15] == 17'h08000) begin
+			int w;
+			w = int'(d_d_addr[14:2]);
+			if (mb_inj == 4 && d_ram_we) begin	// a consumed read of the word the store writes
+				mb_pc_n++;
+				if (d_wt[w] == $time) coll_d_same++;
+				fe_rt[w] = $time;
+			end
+			if (mb_inj == 5) begin			// a write of the word port A registers
+				mb_pc_n++;
+				if (d_wt[w] == $time) coll_ww_same++;
+				fe_wt[w] = $time;
+			end
+		end
+	end
+	always @(posedge clk_arm) if (up_running && m_req && m_rdy && !m_fetch && arm_ce_run && m_wr && m_addr[31:28] == 4'h4) begin
+		if ($time - mb_up_rt[m_addr[14:2]] < COLL_PS) coll_up++;
+		up_wt[m_addr[14:2]] = $time;
+	end
+	always @(posedge clk_d) begin
+		if (d_ram_we) begin
+			int w;
+			w = int'(d_d_addr[14:2]);
+			d_stores++;
+			mb_hist_add(w, d_ram_be, d_ram_wdata);
+			if (mb_shared_d($time)) d_shared_stores++;
+			if ($time - fe_rt[w] < COLL_PS) coll_d++;
+			if (fe_rt[w] == $time) coll_d_same++;
+			if (fe_wt[w] == $time) coll_ww_same++;
+			d_wt[w] = $time;
+		end
+		// A cart RAM load: port A registered its address at the last edge, and the core
+		// takes the word in W now (bup_cpu: chk_v, acc_load, acc_addr in the 2600 map's
+		// cart RAM, 0x4000_0000-0x4000_7FFF). Seen one clk_d late, so only this block counts
+		// it; a daria_fe write is at a clk_sys edge, never in between.
+		if (dcpu.chk_v && dcpu.acc_load && dcpu.acc_addr[31:15] == 17'h08000 && mb_d_prev_t >= 0) begin
+			int w;
+			w = int'(dcpu.acc_addr[14:2]);
+			d_loads++;
+			if (mb_shared_d(mb_d_prev_t)) d_shared_loads++;
+			if (fe_wt[w] == mb_d_prev_t) coll_d_ld_same++;
+		end
+		mb_d_prev_t = $time;
+	end
+
+	// ---- mode B: DARIA's record of each call, compared with upstream's (shadow_compare) ------
+	// DARIA's calls are numbered from 1 in the order they start (call_go), as up_call numbers
+	// upstream's; DARIA's call n is upstream's call n + mb_up_ofs (0, re-aligned while the
+	// console is in reset: a reset abandons a call on both sides). The record is complete one
+	// clk_d after `returned` (FIQ r13 is written at that edge).
+	logic [191:0] mb_res_by [int];
+	longint       mb_cyc_by [int];
+	acc_t         mb_acc_by [int][$];
+	int           mb_dn = 0, mb_dk = 1, mb_up_ofs = 0, mb_drop = 0;
+	logic         mb_fin = 0;
+	longint       mb_e2e_q [$], mb_c_t = -1;
+	logic         mb_cb_q = 0;
+	// what shadow_compare reads in mode B (`D_RES etc. below)
+	logic  [31:0] mb_cmp_res [0:5];
+	acc_t         mb_cmp_acc [$];
+	longint       mb_cmp_cyc = 0, mb_cmp_e2e = 0;
+	// K1d: DARIA's cart RAM at each call_go against upstream's when its call started (up_snap)
+	longint       mb_k1d = 0, mb_k1d_bad = 0, mb_k1d_skip = 0;
+	always @(posedge clk_d) begin
+		if (d_call_go) begin
+			d_acc.delete();
+			d_in_call <= 1;
+			d_cyc <= 0;
+			mb_dn = mb_dn + 1;
+			if (up_call == mb_dn + mb_up_ofs) begin
+				int bad, nw;
+				bad = 0;
+				nw = d_ram32 ? 8192 : 2048;
+				for (int i = 0; i < nw; i++) if (`D_CART_RAM.mem_q[i] != up_snap[i]) bad++;
+				mb_k1d++;
+				if (bad != 0) begin
+					mb_k1d_bad++;
+					if (mb_k1d_bad <= 5)
+						$display("DARIA mode B: call %0d (frame %0d) starts on a cart RAM with %0d words unlike upstream's at the start of its call",
+							mb_dn + mb_up_ofs, frame, bad);
+				end
+			end else
+				mb_k1d_skip++;			// upstream's call has not started yet: up_snap is the last one's
+		end else if (d_in_call) d_cyc <= d_cyc + 1;
+		if (d_returned) d_in_call <= 0;
+		if (d_ram_we)
+			d_acc.push_back('{{d_d_addr[31:2], 2'b00}, d_ram_be, d_ram_wdata, 1'b0, 1'b0});
+		if (d_reg_sel)
+			d_acc.push_back('{d_w_addr, lanes(d_w_size, d_w_addr[1:0]),
+				d_reg_write ? d_reg_wdata : d_reg_rdata, 1'b1, !d_reg_write});
+		if (d_ro_valid) d_res[d_ro_idx] <= d_ro_data;
+		mb_fin <= d_returned;
+		if (mb_fin) begin
+			mb_res_by[mb_dn] = {d_res[5], d_res[4], d_res[3], d_res[2], d_res[1], d_res[0]};
+			mb_cyc_by[mb_dn] = d_cyc;
+			mb_acc_by[mb_dn] = d_acc;
+		end
+	end
+	always @(posedge clk_sys) begin
+		// e2e_sys: daria_fe's busy rise (the CALLFN commit, C) to X+1 (xq: u_call saw ret_tog)
+		if (u_fe.arm_call_busy && !mb_cb_q) mb_c_t = now;
+		mb_cb_q = u_fe.arm_call_busy;
+		if (u_fe.u_call.xq && mb_c_t >= 0) begin
+			mb_e2e_q.push_back(now - mb_c_t);
+			mb_c_t = -1;
+		end
+		if (dut.effective_reset) begin			// re-align; calls in flight are dropped
+			foreach (mb_res_by[k]) mb_drop++;
+			mb_res_by.delete();
+			mb_cyc_by.delete();
+			mb_acc_by.delete();
+			mb_e2e_q.delete();
+			mb_c_t = -1;
+			mb_up_ofs = up_call - mb_dn;
+			mb_dk = mb_dn + 1;
+		end
+		if (d_halted && !shadow_off) begin
+			$display("DARIA halted: code %0d at %08x (call %0d, frame %0d)", d_halt_code, d_halt_pc, d_call, frame);
+			shadow_bad++;
+			shadow_off = 1;
+		end
+		if (mb_res_by.exists(mb_dk) && up_res_by.exists(mb_dk + mb_up_ofs) && mb_e2e_q.size() > 0) begin
+			d_call = mb_dk + mb_up_ofs;
+			for (int v = 0; v < 6; v++) mb_cmp_res[v] = mb_res_by[mb_dk][32 * v +: 32];
+			mb_cmp_acc = mb_acc_by[mb_dk];
+			mb_cmp_cyc = mb_cyc_by[mb_dk];
+			mb_cmp_e2e = mb_e2e_q.pop_front();
+			shadow_compare();
+			mb_res_by.delete(mb_dk);
+			mb_cyc_by.delete(mb_dk);
+			mb_acc_by.delete(mb_dk);
+			mb_dk++;
+		end
+	end
+`endif
+`ifdef FE_MODE_B
+	`define D_RES mb_cmp_res
+	`define D_ACC mb_cmp_acc
+	`define D_CYC mb_cmp_cyc
+	`define D_E2E mb_cmp_e2e
+`else
+	`define D_RES d_res
+	`define D_ACC d_acc
+	`define D_CYC d_cyc
+	`define D_E2E d_e2e
+`endif
 
 	// ---- compare, once both have returned ------------------------------------------------
 	task automatic shadow_compare();
@@ -401,11 +739,11 @@
 		nw = 0;
 		ni = 0;
 		for (int v = 0; v < 6 && why == ""; v++)
-			if (d_res[v] != r[32 * v +: 32])
-				why = $sformatf("return r%0d %08x, upstream %08x", 8 + v, d_res[v], r[32 * v +: 32]);
-		for (int i = 0; i < d_acc.size() && i < up_acc_by[d_call].size() && why == ""; i++) begin
+			if (`D_RES[v] != r[32 * v +: 32])
+				why = $sformatf("return r%0d %08x, upstream %08x", 8 + v, `D_RES[v], r[32 * v +: 32]);
+		for (int i = 0; i < `D_ACC.size() && i < up_acc_by[d_call].size() && why == ""; i++) begin
 			logic [31:0] m;
-			a = d_acc[i];
+			a = `D_ACC[i];
 			b = up_acc_by[d_call][i];
 			if (a.io) ni++; else nw++;
 			m = {{8{a.be[3]}}, {8{a.be[2]}}, {8{a.be[1]}}, {8{a.be[0]}}};
@@ -425,13 +763,13 @@
 				why = $sformatf("access %0d, %s %08x: %08x, upstream %08x", i,
 					a.io ? (a.rd ? "io rd" : "io wr") : "ram wr", a.addr, a.data & m, b.data & m);
 		end
-		if (why == "" && d_acc.size() != up_acc_by[d_call].size())
-			why = $sformatf("%0d accesses, upstream %0d", d_acc.size(), up_acc_by[d_call].size());
+		if (why == "" && `D_ACC.size() != up_acc_by[d_call].size())
+			why = $sformatf("%0d accesses, upstream %0d", `D_ACC.size(), up_acc_by[d_call].size());
 		shadow_calls++;
 		shadow_writes += nw;
 		shadow_io += ni;
-		$fwrite(fd_dar, "%0d,%0d,%0d,%.3f,%0d,%0d,%0d,%0d,%s\n", d_call, frame, d_cyc,
-			real'(d_cyc) * 1.0e6 / D_HZ, d_e2e, up_cyc_by[d_call], nw, ni, why == "" ? "ok" : why);
+		$fwrite(fd_dar, "%0d,%0d,%0d,%.3f,%0d,%0d,%0d,%0d,%s\n", d_call, frame, `D_CYC,
+			real'(`D_CYC) * 1.0e6 / D_HZ, `D_E2E, up_cyc_by[d_call], nw, ni, why == "" ? "ok" : why);
 		if (why != "") begin
 			shadow_bad++;
 			if (!shadow_off) $display("DARIA call %0d (frame %0d): %s", d_call, frame, why);
@@ -460,7 +798,15 @@
 		if (shadow_off) stopped = ", stopped comparing";
 		$display("DARIA shadow: %0d calls compared, %0d differ or halted, %0d skipped (DARIA busy)%s; %0d RAM writes and %0d MMIO accesses compared",
 			shadow_calls, shadow_bad, shadow_skip, stopped, shadow_writes, shadow_io);
+`ifdef FE_MODE_B
+		$display("DARIA collisions: upstream %0d in %0d console-side cart RAM reads; DARIA %0d in %0d daria_fe port-B reads consumed (within 69.84 ns, either order)",
+			coll_up, fe_reads, coll_d, fe_rd_n);
+		$display("DARIA mode B: clk_d +d_ofs=%0d ps; coincidences (same time step, same word): coll_d_same %0d, coll_d_ld_same %0d, coll_ww_same %0d; DARIA stores %0d (%0d on a shared edge), cart RAM loads %0d (%0d on a shared edge); daria_fe port-B writes %0d, consumed reads %0d; K1d %0d call starts compared, %0d differ, %0d not compared (upstream's call not started); %0d DARIA records dropped by a reset",
+			d_ofs, coll_d_same, coll_d_ld_same, coll_ww_same, d_stores, d_shared_stores, d_loads, d_shared_loads,
+			fe_wr_n, fe_rd_n, mb_k1d, mb_k1d_bad, mb_k1d_skip, mb_drop);
+`else
 		$display("DARIA collisions: upstream %0d, DARIA %0d, in %0d console-side cart RAM reads", coll_up, coll_d, fe_reads);
+`endif
 		if (tc_n > 0)
 			$display("DARIA T1TC: %0d reads compared, DARIA - upstream %0d to %0d counts (bound %0d)", tc_n, tc_lo, tc_hi, MMIO_TOL);
 `ifdef DARIA_WRAPPER

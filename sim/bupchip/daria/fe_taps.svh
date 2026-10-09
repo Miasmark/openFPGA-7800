@@ -20,6 +20,9 @@
 //   flip-flops  u_fe.u_core (scheme state), u_fe.u_audio (the replica),
 //               u_fe.u_call, u_fe.u_copy, u_fe.u_arb, u_fe.u_guard (1.7)
 //
+// The memory is `FE_MEM (fe_shadow.svh): fe_mem in mode A, DARIA's dmem in
+// mode B (daria_shadow.svh), with the same layout.
+//
 // Upstream (the oracle): dut.cart2600.{dpcplus, cdf, mapper_audio,
 // stream_tables}, and dut.cart_ram (cart_ram_tdp's four byte lanes).
 //
@@ -34,14 +37,14 @@
 
 	// ---- memories --------------------------------------------------------------------
 	function automatic logic [31:0] ft_sw(input int w);           // fe_mem state RAM word
-		return fe_mem.state_ram.mem_q[w[7:0]];
+		return `FE_MEM.state_ram.mem_q[w[7:0]];
 	endfunction
 	function automatic logic [31:0] ft_cw(input int w);           // fe_mem cart RAM word
-		return fe_mem.cart_ram.mem_q[w[12:0]];
+		return `FE_MEM.cart_ram.mem_q[w[12:0]];
 	endfunction
 	function automatic logic [7:0] ft_cb(input int a);            // fe_mem cart RAM byte
 		logic [31:0] w;
-		w = fe_mem.cart_ram.mem_q[a[14:2]];
+		w = `FE_MEM.cart_ram.mem_q[a[14:2]];
 		return w[8 * a[1:0] +: 8];
 	endfunction
 	function automatic logic [31:0] ft_uw(input int w);           // upstream cart RAM word (cart_ram_tdp)
@@ -49,7 +52,7 @@
 			dut.cart_ram.ram_lane[1].lane_ram.mem_q[w[14:0]], dut.cart_ram.ram_lane[0].lane_ram.mem_q[w[14:0]]};
 	endfunction
 	function automatic logic [31:0] ft_rom(input int w);          // fe_mem front-end ROM word
-		return fe_mem.fe_rom.mem_q[w[12:0]];
+		return `FE_MEM.fe_rom.mem_q[w[12:0]];
 	endfunction
 
 	// ---- CDF table layout (design 2.4, 4.3; arm_mapper_tables.sv:104-121) --------------
