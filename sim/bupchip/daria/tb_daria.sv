@@ -36,7 +36,7 @@
 //               its length in clk_sys and FNV-1a 64 hashes of the RIOT RAM,
 //               the visible pixels and the sound ("Frame fingerprint" below)
 //
-// Plusargs:
+// Plusargs (and +bios=FILE: the "+bios" block at the end of this file):
 //   +rom=FILE      2600 image (.bin)                         (required)
 //   +out=PREFIX    output path prefix, e.g. dir/              (default ./)
 //   +frames=N      frames to run after reset release          (default 1500)
@@ -90,7 +90,7 @@ module tb_daria;
 	logic        ioctl_wr = 0;
 	logic [24:0] ioctl_addr = 0;
 	logic  [7:0] ioctl_dout = 0;
-	logic        tia_mode = 0;
+	logic        tia_mode = 0; logic use_bios = 0, bo_stop = 0; logic [7:0] bios_q = 8'h00; wire [15:0] bios_ab;	// +bios: the end of this file
 	logic        reset = 1; `ifdef FE_SHADOW logic fe_hold_reset = 0; /* fe_shadow.svh: the sticky hold (bench.md 7.4.2) */ `endif
 	wire         mapper_load_wait, mapper_init_busy;
 	wire  [31:0] cart_size;
@@ -193,10 +193,10 @@ module tb_daria;
 		.RED(R), .GREEN(G), .BLUE(B), .HSync, .VSync, .HBlank, .VBlank, .VBlank_orig(),
 		.ce_pix, .PAL(1'b0), .pal_temp(2'd0), .hsc_en(1'b0), .hsc_ram_cs(),
 		.hsc_ram_dout(8'd0), .dout(), .cpu_ce(), .AUDIO_R, .AUDIO_L,
-		.show_border(1'b1), .show_overscan(1'b0), .bypass_bios(1'b1), .cart_present(1'b1),
-		.tia_mode, .cpu_driver(1'b1),
+		.show_border(1'b1), .show_overscan(1'b0), .bypass_bios(!use_bios), .cart_present(1'b1),
+		.tia_mode(tia_mode && !use_bios), .cpu_driver(1'b1),
 		.cart_xm(8'd0), .cart_read(), .cart_out(cart_download ? ioctl_dout : cart_q),
-		.bios_out(8'd0), .AB(), .cart_addr_out(cart_addr), .cart_flags(16'd0),
+		.bios_out(bios_q), .AB(bios_ab), .cart_addr_out(cart_addr), .cart_flags(16'd0),
 		.cart_mapper(8'd0), .cart_save(8'd0), .cart_size, .cart_din(), .RW(),
 		.loading(cart_download || mapper_init_busy),
 		.cartram_addr(), .cartram_wr(), .cartram_rd(), .cartram_wrdata(), .cartram_data(8'hFF),
@@ -950,7 +950,7 @@ module tb_daria;
 		while (reset) @(posedge clk_sys);
 		$display("reset released at %0d clk_sys (mapper init done)", now);
 		running = 1;
-		while (frame < frames) @(posedge clk_sys);
+		while (frame < frames && !bo_stop) @(posedge clk_sys);
 		running = 0;
 		secs = real'(now) / SYS_HZ;
 		$display("ran %0d frames, %0d calls", frame, sys_calls);
@@ -1011,4 +1011,219 @@ module tb_daria;
 `ifdef FE_SHADOW
 `include "fe_shadow.svh"
 `endif
+
+	// ------------------------------------------------------------------ +bios
+	// +bios=FILE boots the console through a 7800 BIOS image, as the Pocket does
+	// with a BIOS loaded and "skip BIOS" off (atari7800_pocket.sv:875 use_bios,
+	// :933-935): bypass_bios 0, tia_mode 0 (the BIOS finds the 2600 cartridge
+	// and locks 2600 mode itself), the cartridge present. bios_out is served the
+	// way atari7800_pocket.sv:366-377 serves it: an spram (bram.v, a registered
+	// read), so one clk_sys of latency, read at AB[13:0] & bios_mask, where
+	// bios_mask is the last download address (:219-221), the file's size less
+	// one. The file must hold 1 to 16384 bytes, the spram's size. Without +bios,
+	// use_bios stays 0: bypass_bios 1 and tia_mode as before, and bios_out stays
+	// 0, the value it was tied to (the ROM is all zero), so the DUT sees exactly
+	// the inputs it saw before and the bench behaves as it did.
+	// A BIOS image and anything a run derives from it stay in sim/work.
+	// With +bios the bench also prints "BIOS ..." lines: each INPTCTRL change up
+	// to the lock, the hand-over to 2600 mode, what the 2600 slot (cart2600's
+	// a_in, phi2) saw in 7800 mode, and with FE=1 (stage 1) daria_fe against
+	// upstream over the same interval: C1/C2 at every pclk1, the commits on
+	// either side, and design 9.5's pre_lock condition at each audio grant.
+	// The run ends early (bo_stop: the frame loop stops, the summaries are written)
+	// if the BIOS locks INPTCTRL with tia_en 0, i.e. keeps 7800 mode until a reset,
+	// or if tia_en has not risen +bios_wait=N clk_sys (default 100000000, 0: no
+	// limit) after the release.
+	logic  [7:0] bios_rom [0:16383];
+	logic [13:0] bios_mask = 14'd0;
+	int          bios_wait = 100000000;
+	always @(posedge clk_sys) bios_q <= bios_rom[bios_ab[13:0] & bios_mask];
+	initial begin
+		string bf;
+		int fd, n;
+		logic [7:0] b [0:16384];
+		foreach (bios_rom[i]) bios_rom[i] = 8'h00;
+		if ($value$plusargs("bios=%s", bf)) begin
+			fd = $fopen(bf, "rb");
+			if (fd == 0) begin $display("cannot open %s", bf); $finish; end
+			n = $fread(b, fd);
+			$fclose(fd);
+			if (n < 1 || n > 16384) begin
+				$display("+bios: %s holds %0d bytes; 1 to 16384 expected", bf, n);
+				$finish;
+			end
+			for (int i = 0; i < n; i++) bios_rom[i] = b[i];
+			bios_mask = 14'(n - 1);
+			use_bios = 1;
+			void'($value$plusargs("bios_wait=%d", bios_wait));
+			$display("BIOS %s: %0d bytes, address mask %04x; bypass_bios 0, tia_mode 0", bf, n, bios_mask);
+		end
+	end
+
+	// The boot: from the first reset release (running) to the first tia_en.
+	logic        bo_boot = 1;
+	logic  [3:0] bo_ctl_q = 4'h0;		// {tia_en, bios_en_b, maria_en, lock_ctrl}
+	longint      bo_t_tia = -1, bo_t_480 = -1, bo_t_game = -1, bo_bios_rd = 0, bo_ctl_wr = 0, bo_t_rel = -1;
+	longint      bo_slot_rd = 0, bo_slot_wr = 0, bo_slot_cs = 0, bo_up_acc = 0;
+	int          bo_nchg = 0;
+	logic [15:0] bo_game_pc = 0;
+	int          bo_slot_a [int];
+`ifdef FE_SHADOW
+`ifndef FE_STAGE0
+	longint      bf_cyc = 0, bf_state = 0, bf_fe_commit = 0, bf_gr_up = 0, bf_gr_fe = 0, bf_gr_any = 0;
+	longint      bf_gr_addr = 0, bf_gr_word = 0, bf_disp = 0, bf_amp_boot = 0, bf_rep_boot = 0;
+	longint      bf_amp_post = 0, bf_rep_post = 0, bf_t_ref = -1, bf_t_ref_end = -1;
+	longint      bf_win = 0, bf_rep_win = 0, bf_cf_win = 0, bf_t_call = -1;
+	string       bf_first = "";
+	logic        bf_cap = 0, bf_ref = 0;
+	logic [14:0] bf_cap_w = 0, bf_cap_pw = 0;
+`endif
+`endif
+	always @(posedge clk_sys) if (use_bios && running) begin
+		logic [3:0] c;
+		c = {dut.tia_en, dut.bios_en_b, dut.maria_en, dut.lock_ctrl};
+		if (bo_t_rel < 0) bo_t_rel = now;
+		if (bo_boot && !dut.effective_reset && !bo_stop) begin
+			if (dut.lock_ctrl && !dut.tia_en) begin
+				$display("BIOS: INPTCTRL locked with tia_en 0 at clk_sys %0d, 6507 pc %04x: 7800 mode until a reset, so no hand-over to 2600 mode; the run ends",
+					now, op_pc);
+				bo_stop = 1;
+			end else if (bios_wait != 0 && now - bo_t_rel >= bios_wait) begin
+				$display("BIOS: no hand-over to 2600 mode within +bios_wait=%0d clk_sys of the release; the run ends", bios_wait);
+				bo_stop = 1;
+			end
+		end
+		if (bo_boot && !dut.effective_reset) begin
+			if (c != bo_ctl_q || bo_nchg == 0) begin
+				bo_nchg++;
+				if (bo_nchg <= 16)
+					$display("BIOS: INPTCTRL lock %0d maria_en %0d bios_en_b %0d tia_en %0d from clk_sys %0d, 6507 pc %04x",
+						c[0], c[1], c[2], c[3], now, op_pc);
+			end
+			if (dut.pclk0 && dut.RW && dut.bios_sel) bo_bios_rd++;
+			if (dut.pclk0 && !dut.RW && dut.cs_tia && !dut.lock_ctrl) bo_ctl_wr++;
+			if (c_sync && dut.cpu_AB == 16'h0480 && bo_t_480 < 0) begin
+				bo_t_480 = now;
+				$display("BIOS: the 2600 loader starts at $0480 at clk_sys %0d", now);
+			end
+			// The 2600 slot's view of a 7800-mode cycle: cart2600 sees a_in and phi2.
+			if (dut.mapper_phi2 && !dut.tia_en && dut.cart2600.a_in[12]) begin
+				if (dut.RW) bo_slot_rd++;
+				else bo_slot_wr++;
+				if (dut.cs_cart) bo_slot_cs++;
+				if (bo_slot_a.exists(int'(dut.cart2600.a_in))) bo_slot_a[int'(dut.cart2600.a_in)]++;
+				else bo_slot_a[int'(dut.cart2600.a_in)] = 1;
+			end
+			if (dut.cart2600.arm_access) bo_up_acc++;
+			if (dut.tia_en) begin
+				bo_boot = 0;
+				bo_t_tia = now;
+				$display("BIOS: tia_en at clk_sys %0d (frame %0d) with lock_ctrl %0d, 6507 pc %04x; %0d BIOS ROM reads, %0d INPTCTRL writes",
+					now, frame, dut.lock_ctrl, op_pc, bo_bios_rd, bo_ctl_wr);
+			end
+		end
+		bo_ctl_q <= c;
+		// The game's first opcode in the cartridge after the lock (the reset vector's target)
+		if (!bo_boot && bo_t_game < 0 && c_sync && dut.cpu_AB[12] && dut.tia_en) begin
+			bo_t_game = now;
+			bo_game_pc = dut.cpu_AB;
+			$display("BIOS: the game's first opcode at $%04x, clk_sys %0d, %0d clk_sys after tia_en", dut.cpu_AB, now,
+				now - bo_t_tia);
+		end
+`ifdef FE_SHADOW
+`ifndef FE_STAGE0
+		// daria_fe through the boot: C1/C2 at every pclk1, no commit on either side
+		if (bo_boot && !dut.effective_reset) begin
+			if (dut.pclk1 && (fe_is_dpc || fe_is_cdf)) begin
+				string why;
+				bf_cyc++;
+				why = fe_is_dpc ? ft_c1() : ft_c2();
+				if (why != "") begin
+					bf_state++;
+					if (bf_first == "") bf_first = $sformatf("clk_sys %0d: %s", now, why);
+				end
+			end
+			if (u_fe.u_seq.commit) bf_fe_commit++;
+			if (dut.cart2600.audio_ram_grant) bf_gr_up++;
+			if (u_fe.aud_take) bf_gr_fe++;
+			if (dut.cart2600.audio_ram_grant || u_fe.aud_take) bf_gr_any++;
+			if (ft_up_dispatch()) bf_disp++;
+			if (u_fe.u_audio.amplitude != dut.cart2600.mapper_audio.amplitude) bf_amp_boot++;
+			if (ft_a1_rep(0) != "") bf_rep_boot++;
+		end
+		// pre_lock's condition (design 9.5), over the first boot as bf_gr_up: at an upstream grant
+		// before tia_en the RAM's port A has the 7800 path's address (top.sv:756-757), not the
+		// engine's, so the word the engine captures at the next clock is that address's.
+		if (bf_cap) begin
+			bf_cap = 0;
+			if (dut.cart2600.cartram_word_data != ft_uw(int'(bf_cap_w))) bf_gr_word++;
+			if (bf_gr_up <= 3)
+				$display("BIOS pre_lock grant %0d: the engine's word $%04x holds %08x; port A had word $%04x (the 7800 path's address), and the engine captured %08x; u_fe read %08x",
+					bf_gr_up, bf_cap_w, ft_uw(int'(bf_cap_w)), bf_cap_pw, dut.cart2600.cartram_word_data, ft_cw(int'(bf_cap_w)));
+		end
+		if (bo_boot && dut.cart2600.audio_ram_grant && !dut.tia_en && !dut.effective_reset && !dut.mapper_init_busy) begin
+			if (dut.cartram_addr[16:2] != dut.cart2600.cartram_addr[16:2]) bf_gr_addr++;
+			bf_cap = 1;
+			bf_cap_w = dut.cart2600.cartram_addr[16:2];
+			bf_cap_pw = dut.cartram_addr[16:2];
+		end
+		// From tia_en to the end of the first refresh dispatched after it
+		if (!bo_boot && bf_t_ref_end < 0) begin
+			if (u_fe.u_audio.amplitude != dut.cart2600.mapper_audio.amplitude) bf_amp_post++;
+			if (ft_a1_rep(0) != "") bf_rep_post++;
+			if (!bf_ref && ft_up_dispatch()) begin
+				bf_ref = 1;
+				bf_t_ref = now;
+			end else if (bf_ref && dut.cart2600.mapper_audio.state == 4'd0) begin
+				bf_t_ref_end = now;
+				$display("BIOS: the first refresh after tia_en from clk_sys %0d to %0d; from tia_en to its end AMPLITUDE differed on %0d clk_sys, the replica on %0d",
+					bf_t_ref, now, bf_amp_post, bf_rep_post);
+			end
+		end
+		// From there to the game's first call (no class can arise before it): with
+		// +fe_resync=0 the classes' masks are never cleared, so this shows what the
+		// two engines do without the bench's deposits.
+		if (!bo_boot && bf_t_ref_end >= 0 && bf_t_call < 0) begin
+			if (call_req) begin
+				bf_t_call = now;
+				$display("BIOS: the game's first call at clk_sys %0d; from the end of the first refresh after tia_en to it (%0d clk_sys) the replica differed on %0d clk_sys, the counters and frequencies on %0d",
+					now, bf_win, bf_rep_win, bf_cf_win);
+			end else begin
+				bf_win++;
+				if (ft_a1_rep(0) != "") bf_rep_win++;
+				if (ft_a1_cf() != "") bf_cf_win++;
+			end
+		end
+`endif
+`endif
+	end
+	final if (use_bios) begin
+		int k, a0, a1, cnt;
+		string s;
+		$display("BIOS boot: from the release at clk_sys %0d, tia_en at %0d, the 2600 loader at %0d, the game's first opcode $%04x at %0d (-1: none); %0d BIOS ROM reads, %0d INPTCTRL writes, %0d INPTCTRL changes",
+			bo_t_rel, bo_t_tia, bo_t_480, bo_game_pc, bo_t_game, bo_bios_rd, bo_ctl_wr, bo_nchg);
+		// the slot's addresses as runs of consecutive a_in: start-end:count
+		s = "";
+		k = 0; a1 = -2; a0 = -2; cnt = 0;
+		foreach (bo_slot_a[a]) begin
+			if (a != a1 + 1) begin
+				if (a0 >= 0) s = {s, $sformatf(" %04x-%04x:%0d", a0, a1, cnt)};
+				a0 = a; cnt = 0; k++;
+			end
+			a1 = a;
+			cnt += bo_slot_a[a];
+		end
+		if (a0 >= 0) s = {s, $sformatf(" %04x-%04x:%0d", a0, a1, cnt)};
+		$display("BIOS slot: before tia_en cart2600 saw %0d reads and %0d writes with a_in[12] (%0d with the cartridge selected on the bus), %0d addresses in %0d runs:%s; upstream's access (commits) %0d",
+			bo_slot_rd, bo_slot_wr, bo_slot_cs, bo_slot_a.num(), k, s, bo_up_acc);
+`ifdef FE_SHADOW
+`ifndef FE_STAGE0
+		$display("BIOS FE: before tia_en %0d pclk1 compared (C1/C2), %0d differ%s; daria_fe commits %0d; audio grants up %0d / fe %0d (%0d clk_sys with either), %0d upstream refreshes dispatched; AMPLITUDE differs on %0d clk_sys, the replica on %0d",
+			bf_cyc, bf_state, bf_first == "" ? "" : {" (first ", bf_first, ")"}, bf_fe_commit, bf_gr_up, bf_gr_fe, bf_gr_any,
+			bf_disp, bf_amp_boot, bf_rep_boot);
+		$display("BIOS pre_lock: %0d upstream grants before the first tia_en, %0d with port A at another word than the engine's (the 7800 path's address), %0d capturing a word other than the one at the engine's address; after tia_en AMPLITUDE differed on %0d clk_sys up to the end of the first refresh (at %0d), the replica on %0d; from there to the first call (at %0d) the replica on %0d clk_sys of %0d, the counters and frequencies on %0d",
+			bf_gr_up, bf_gr_addr, bf_gr_word, bf_amp_post, bf_t_ref_end, bf_rep_post, bf_t_call, bf_rep_win, bf_win, bf_cf_win);
+`endif
+`endif
+	end
 endmodule
