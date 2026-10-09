@@ -1,0 +1,81 @@
+# Plan contract F3 (docs/daria_step7/plan.md 2.7, 5.4 (k')): the expected
+# endpoints of every clk_sys <-> clk_arm timing path in a DARIA build, read by
+# step7_checks.py against step7_report.tcl's crossings.tsv.
+#
+# Columns, whitespace separated:
+#   dir      s2a (launched by clk_sys, latched by clk_arm) or a2s
+#   builds   the kinds of build the endpoint is expected in: daria (Build B,
+#            the release), q5 (DARIA with BUP_DEBUG), or "-" for a chain that
+#            plan 2.7 marks absent from both
+#   class    first: a synchroniser's first flop, which must sample exactly one
+#                   register with 0 logic levels (P21)
+#            reset: a first flop with a synchronous reset of its own clock,
+#                   which Quartus may put in a LUT: 0 levels, or 1 reported
+#                   for review
+#            guard: the phase detector's receiver (not a synchroniser; the
+#                   SDC holds it to 6 / 1 ns), one register, 0 levels
+#            held:  a held bus taken after its toggle has crossed
+#   endpoint the register's name, '*' matching anything (no other wildcard);
+#            "~DUPLICATE" and similar suffixes are stripped first
+#   source   for first, reset and guard: the one register expected to feed
+#            it ('-' for none named). A different name is reported, not failed:
+#            the rule is one register and no logic.
+#
+# Names are as the RTL declares them (bupchip_pocket.sv, daria_call.sv,
+# daria_mmio.sv, bup_asset_wr.sv, daria_fe_call.sv, daria_fe_audio.sv,
+# daria_fe_guard.sv; daria_smp.sv and the atari7800_pocket.sv registers of P21
+# as lane I1 names them; bup_dbg_snap.sv).
+
+# ---- clk_sys -> clk_arm: first flops --------------------------------------------------------------------
+s2a daria,q5 first *|bupchip_pocket:bupchip|hold_a[0]              *|bupchip_pocket:bupchip|hold_sys
+s2a -        first *|bupchip_pocket:bupchip|pause_a[0]             -
+s2a daria,q5 first *|bupchip_pocket:bupchip|prof_a[0]              *|atari7800_pocket:atari|daria_profile
+s2a daria,q5 first *|bupchip_pocket:bupchip|ram32_a[0]             *|atari7800_pocket:atari|daria_ram32_r
+s2a daria,q5 first *|bupchip_pocket:bupchip|mres_a[0]              *|atari7800_pocket:atari|daria_mres_r
+s2a daria,q5 first *|bupchip_pocket:bupchip|cmd_s[0]               *|bupchip_pocket:bupchip|cmd_tog
+s2a daria,q5 first *|daria_call:call|tog_s[0]                      *|daria_fe_call:u_call|tog_q
+s2a daria,q5 reset *|daria_mmio:mmio|sn_a[0]                       *|daria_mmio:mmio|sn_tog
+s2a daria,q5 first *|bup_asset_wr:writer|t1                        *|bup_capture:capture|msg_tog
+s2a daria,q5 first *|daria_smp:smp|req_s0                          *|daria_fe_audio:u_audio|req_q
+s2a q5       first *|bup_dbg_snap:*|rq_s0                          *|bup_dbg_snap:*|req
+s2a q5       first *|bupchip_pocket:bupchip|cap_err_a[0]           *|bupchip_pocket:bupchip|cap_err_sys
+
+# ---- clk_sys -> clk_arm: held buses ----------------------------------------------------------------------
+# the $8007 byte (cmd_byte)
+s2a daria,q5 held  *|bupchip_pocket:bupchip|cmd_data_arm[*]        -
+# the capture's message (msg_type, msg_pl)
+s2a daria,q5 held  *|bup_asset_wr:writer|m_type[*]                 -
+s2a daria,q5 held  *|bup_asset_wr:writer|m_pl[*]                   -
+# daria_mmio's TC snapshot (hold, hold_tok): the mirror, and through snap_ok
+# the next write's launch
+s2a daria,q5 held  *|daria_mmio:mmio|mirror[*]                     -
+s2a daria,q5 held  *|daria_mmio:mmio|w_data[*]                     -
+s2a daria,q5 held  *|daria_mmio:mmio|w_strb[*]                     -
+s2a daria,q5 held  *|daria_mmio:mmio|q_strb[*]                     -
+s2a daria,q5 held  *|daria_mmio:mmio|w_tog                         -
+s2a daria,q5 held  *|daria_mmio:mmio|busy                          -
+# the sample address (daria_fe_audio's saddr_q)
+s2a daria,q5 held  *|daria_smp:smp|addr[*]                         -
+
+# ---- clk_arm -> clk_sys: first flops --------------------------------------------------------------------
+a2s daria,q5 first *|bupchip_pocket:bupchip|ready_s[0]             *|bupchip_pocket:bupchip|ready_a
+a2s -        first *|bupchip_pocket:bupchip|halted_s[0]            -
+a2s daria,q5 first *|bupchip_pocket:bupchip|run_s[0]               *|bupchip_pocket:bupchip|cpu_run
+a2s daria,q5 first *|bupchip_pocket:bupchip|ftog_s[0]              *|bupchip_pocket:bupchip|frame_tog
+a2s daria,q5 reset *|daria_mmio:mmio|en_s[0]                       *|daria_mmio:mmio|tcr[0]
+a2s daria,q5 reset *|daria_mmio:mmio|w_s[0]                        *|daria_mmio:mmio|w_tog
+a2s daria,q5 first *|daria_fe_call:u_call|ret_s1                   *|daria_call:call|ret_q
+a2s daria,q5 first *|daria_fe_audio:u_audio|ack_s1                 *|daria_smp:smp|ack
+a2s q5       first *|bup_dbg_snap:*|ak_s0                          *|bup_dbg_snap:*|ack
+a2s daria,q5 guard *|daria_fe_guard:u_guard|pd_rx                  *|daria_fe_guard:u_guard|pd_tog
+
+# ---- clk_arm -> clk_sys: held buses ----------------------------------------------------------------------
+# the audio frame (frame_arm)
+a2s daria,q5 held  *|bupchip_pocket:bupchip|audio_l[*]             -
+a2s daria,q5 held  *|bupchip_pocket:bupchip|audio_r[*]             -
+# daria_mmio's TC write (w_data, w_strb)
+a2s daria,q5 held  *|daria_mmio:mmio|tc[*]                         -
+# the sample byte (daria_smp's data)
+a2s daria,q5 held  *|daria_fe_audio:u_audio|rdat[*]                -
+# the debug snapshot word (hold)
+a2s q5       held  *|bup_dbg_snap:*|q_sys[*]                       -
