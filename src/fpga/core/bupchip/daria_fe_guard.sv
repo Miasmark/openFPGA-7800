@@ -54,7 +54,7 @@ module daria_fe_guard (
 	/* verilator lint_on PROCASSINIT */
 	logic       pd_same;           // in (E, E+1): pd_rx did not change at E, so E was shared
 	/* verilator lint_off UNUSEDSIGNAL */
-	logic       ev_unlock;         // pulse: the clock whose edge drops locked (read only by the bench)
+	logic       ev_unlock;         // pulse: the clock whose edge drops locked (the bench's tap; unlock since P22)
 	/* verilator lint_on UNUSEDSIGNAL */
 
 	// ---- the detector ------------------------------------------------------------------

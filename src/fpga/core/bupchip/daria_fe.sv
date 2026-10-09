@@ -173,7 +173,7 @@ module daria_fe (
 
 	// ---- u_guard outputs --------------------------------------------------------------
 	/* verilator lint_off UNUSEDSIGNAL */
-	logic locked;                     // tap only
+	logic locked;                     // the bench's tap, and dbg_locked (step 7 P22)
 	/* verilator lint_on UNUSEDSIGNAL */
 	logic phb_next, guard_on;
 
