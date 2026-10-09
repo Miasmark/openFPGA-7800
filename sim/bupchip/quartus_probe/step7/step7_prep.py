@@ -10,7 +10,12 @@ Usage: step7_prep.py FPGA_COPY [--nodaria] [--pin-id] [--oldpad] [--div 18|19]
   --nodaria     delete the three DARIA lines of ap_core.qsf (the macro
                 POCKET_DARIA, QIP_FILE core/daria.qip, SDC_FILE
                 core/daria_constraints.sdc); a tree without them (aeee6d2,
-                commit F) is left as it is, and says so
+                commit F) is left as it is, and says so. Refused when an
+                active qsf line names POCKET_DARIA, daria.qip or
+                daria_constraints.sdc and is not one of the three lines
+                exactly (a changed or extra line would leave DARIA in the
+                build while the kind says base), and checked afterwards:
+                no active line of the copy's qsf names any of them
   --pin-id      no PRE_FLOW_SCRIPT_FILE (apf/build_id_gen.tcl stamps
                 apf/build_id.mif with the date, the time and a random word on
                 every compile) and a fixed apf/build_id.mif, so that two
@@ -27,7 +32,11 @@ Usage: step7_prep.py FPGA_COPY [--nodaria] [--pin-id] [--oldpad] [--div 18|19]
   --seed N      the SEED line
 Writes FPGA_COPY/step7_prep.txt: the settings and the kind of build
 (base: no Fix B, no DARIA; builda: Fix B, no DARIA; daria; q5: DARIA and
-BUP_DEBUG), which step7_report.tcl and step7_checks.py read.
+BUP_DEBUG), which step7_report.tcl and step7_checks.py read. The kind is
+read from the edited copy, not from the options: DARIA when the copy's
+qsf has the three DARIA lines, BUP_DEBUG when it defines that macro. Any
+other place that defines POCKET_DARIA (a .qip, or a `define in a source
+file) is refused.
 """
 import argparse
 import difflib
@@ -97,6 +106,16 @@ def show(path, before, after, root):
     print("\n".join(d) if d else f"(no change to {rel})")
 
 
+def active(lines):
+    """The qsf lines Quartus reads: not blank, not a comment."""
+    return [l for l in lines if l.strip() and not l.lstrip().startswith("#")]
+
+
+def daria_named(lines):
+    """Active qsf lines that name POCKET_DARIA, daria.qip or daria_constraints.sdc."""
+    return [l for l in active(lines) if re.search(r"POCKET_DARIA|daria\.qip|daria_constraints\.sdc", l)]
+
+
 def sdc_code(s):
     """The SDC's lines with comments and blank lines dropped."""
     out = []
@@ -131,10 +150,15 @@ def main():
 
     # ---- the DARIA lines ----------------------------------------------------------------------
     lines = qsf.splitlines()
+    named = daria_named(lines)
     present = [l for l in DARIA_LINES if lines.count(l) == 1]
     for l in DARIA_LINES:
         if lines.count(l) > 1:
             die(f"ap_core.qsf has '{l}' {lines.count(l)} times")
+    other = [l for l in named if l not in DARIA_LINES]
+    if other:
+        die("ap_core.qsf has active lines that name POCKET_DARIA, daria.qip or daria_constraints.sdc but are not "
+            f"one of the three DARIA lines exactly (whitespace, quotes and order count): {other}")
     if present and len(present) != 3:
         die(f"ap_core.qsf has {len(present)} of the 3 DARIA lines: {present}")
     if present:
@@ -142,18 +166,34 @@ def main():
         isdc = lines.index(DARIA_LINES[2])
         if isdc < iq:
             die("the SDC_FILE core/daria_constraints.sdc line comes before a QIP_FILE line (P9)")
-    daria = bool(present)
     if a.nodaria:
         if present:
             lines = [l for l in lines if l not in DARIA_LINES]
             notes.append("NODARIA: the 3 DARIA lines deleted")
         else:
             notes.append("NODARIA: the tree has none of the 3 DARIA lines; nothing to delete")
-        daria = False
+        left = daria_named(lines)
+        if left:
+            die(f"NODARIA: active qsf lines still name POCKET_DARIA, daria.qip or daria_constraints.sdc: {left}")
     elif not present:
         notes.append("the tree has no DARIA lines: a build without DARIA")
+    daria = bool(present) and not a.nodaria      # as planned; checked against the copy below
     qsf = "\n".join(lines) + ("\n" if qsf.endswith("\n") else "")
-    debug = bool(re.search(r'(?m)^set_global_assignment -name VERILOG_MACRO "BUP_DEBUG=1"$', qsf))
+    # POCKET_DARIA from anywhere else would build DARIA under another kind.
+    elsewhere = []
+    for dp, _, fs in os.walk(root):
+        for f in fs:
+            p = os.path.join(dp, f)
+            if f.endswith(".qip"):
+                elsewhere += [f"{os.path.relpath(p, root)}: {l.strip()}" for l in read(p).splitlines()
+                              if not l.lstrip().startswith("#") and "POCKET_DARIA" in l]
+            elif f.endswith((".v", ".sv", ".svh", ".vh")):
+                elsewhere += [f"{os.path.relpath(p, root)}: {l.strip()}" for l in read(p).splitlines()
+                              if re.match(r"\s*`define\s+POCKET_DARIA\b", l)]
+    if elsewhere:
+        die(f"POCKET_DARIA is defined outside ap_core.qsf's macro line: {elsewhere[:4]}")
+    debug = any(re.match(r'\s*set_global_assignment\s+-name\s+VERILOG_MACRO\s+"?BUP_DEBUG(=1)?"?\s*$', l)
+                for l in active(qsf.splitlines()))
 
     # ---- PIN_ID ------------------------------------------------------------------------------------
     if a.pin_id:
@@ -221,7 +261,14 @@ def main():
         show(pll_p, pll0, pll, root)
         notes.append("DIV=19: pll_core.v's POCKET_DARIA counter 3 is ip-generate's C3 = 19, with its display strings")
 
-    # ---- what kind of build -------------------------------------------------------------------------------
+    # ---- what kind of build: from the copy as written -----------------------------------------------------
+    final = read(qsf_p).splitlines()
+    have = [l for l in DARIA_LINES if final.count(l) == 1]
+    if len(have) not in (0, 3) or len(daria_named(final)) != len(have):
+        die(f"the copy's qsf has {len(have)} of the 3 DARIA lines and {len(daria_named(final))} lines naming DARIA")
+    daria = len(have) == 3
+    if a.nodaria and daria:
+        die("NODARIA: the copy's qsf still has the DARIA lines")
     sram = read(os.path.join(root, "core", "sram_ctrl.sv"))
     fixb = bool(re.search(r"\bt_(rd|wr)_q\b", sram))
     kind = ("q5" if debug else "daria") if daria else ("builda" if fixb else "base")
