@@ -271,10 +271,13 @@ port has already had:
 ### Regenerate the PLL
 
 `src/fpga/core/pll/` is generated. Don't edit the parameter list by hand.
-From the repository root (this is the `POCKET_DARIA` setting, C3 = 18):
+The tool writes a scratch file, never the tree's `pll_core.v`, which holds
+two settings (below). From the repository root, for the `POCKET_DARIA`
+setting, C3 = 18 (`sim/work/` is not tracked):
 
 ```sh
-docker run --rm -v "$PWD/src/fpga/core/pll:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
+mkdir -p sim/work/pll/c18
+docker run --rm -v "$PWD/sim/work/pll/c18:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
  ip-generate --remove-qsys-generate-warning --project-directory=/tmp --output-directory=/tmp/pll_core \
   --file-set=QUARTUS_SYNTH --component-name=altera_pll --output-name=pll_core \
   --system-info=DEVICE_FAMILY="Cyclone V" --system-info=DEVICE=5CEBA4F23C8 --system-info=DEVICE_SPEEDGRADE=8_H6 \
@@ -298,11 +301,14 @@ docker run --rm -v "$PWD/src/fpga/core/pll:/out" raetro/quartus:21.1 bash -c 'cd
 POCKET_DARIA`: C3 = 18 (38.18 MHz) for DARIA, and C3 = 24 (28.64 MHz,
 2 × `clk_sys`) otherwise. Each is the tool's output; only the selection is
 by hand. To regenerate, run the command once as above and once with
-`gui_divide_factor_c3=24` and `gui_output_clock_frequency3=28.636363`,
-writing to two scratch directories rather than over the tree's file. Diff
-each against the tree: only counter 3's lines (`output_clock_frequency3`,
-`c_cnt_*3`) may differ. Copy those into the matching `ifdef` branch and put
-back the explanatory header comment. With advanced parameters on, the tool
+`gui_divide_factor_c3=24` and `gui_output_clock_frequency3=28.636363` into
+`sim/work/pll/c24`. Diff each against the tree's file: only counter 3's
+lines (`output_clock_frequency3`, `c_cnt_*3`) may differ. Copy only those
+lines into the matching `ifdef` branch, C3 = 18 under `POCKET_DARIA` and
+C3 = 24 in its `else`; the rest of the tree's file, the selection and the
+explanatory header comment included, stays as it is. Copying a whole
+generated file over it would drop the selection, and a build without
+DARIA would then run `clk_arm` at the other setting. With advanced parameters on, the tool
 takes the counters from the `gui_divide_factor_*` values; the frequency
 strings it writes are computed from them. The ÷19 fallback (C3 = 19,
 36.17 MHz) is generated the same way. Its counter 3 is `c_cnt_hi_div3(10)`,
