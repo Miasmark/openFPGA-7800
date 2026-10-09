@@ -7,6 +7,9 @@ don't repeat them.
 
 Related documents:
 
+- [ENVIRONMENT.md](ENVIRONMENT.md): setting up a fresh container (tools,
+  Quartus in Docker, simulators, where data lives, every bench and its
+  command, working conventions and pitfalls).
 - [README.md](../README.md): features, installing, credits, test results.
 - [src/fpga/mister/POCKET_CHANGES.md](../src/fpga/mister/POCKET_CHANGES.md):
   every change made to the vendored MiSTer sources, and how to update them.
