@@ -3,7 +3,7 @@
 (DARIA step 7, docs/daria_step7/plan.md 3.6 unit gate 1, 7.1 and 7.2 for I4).
 
   selftest.py --work DIR [--run-sim LOG] [--extra LOG --extra-ref REF
-              [--extra-dir DIR]] [--fp FILE] [--cartram LOG]
+              [--extra-dir DIR]] [--fp FILE] [--cartram LOG] [--tools]
 
 DIR receives the planted copies. Every case prints "ok" when the checker
 gave the expected verdict, "WRONG" otherwise; the last line is SELFTEST
@@ -24,6 +24,18 @@ pass or FAIL, and so is the exit status (0 or 1).
   --cartram LOG    a passing tb_cartram log (cartram2600_test.py's, E7 blend
                    off): a wrong byte, a lost write, a bucket past s19, a
                    changed read count
+  --tools          the guards on scratch git repositories in DIR:
+                   pp_guards.py (a directive in an added comment, an
+                   attribute in a comment, a .vhd and a .mif change, an extra
+                   and a missing DARIA qsf line, an SDC code change; and the
+                   changes it must let through), hygiene.sh (a cartridge
+                   image, a PNG, a firmware file, a path into the temporary
+                   directory, a listed name, no list, a list inside the
+                   repository, a binary and an oversized file) and
+                   pp_equiv.py on a small Quartus tree (a comment, a layout
+                   and a dead-ifdef edit keep the hash; a code edit, a live
+                   ifdef edit and a removed macro change it; --expect and
+                   --max-token fail); needs git and VERILATOR
   always           frame_gate on synthetic R1/R2 run directories: identical;
                    a release_shift that is excused; one that lasts too long;
                    a RIOT difference with no shifted release; a video, a
@@ -46,13 +58,13 @@ SIM = os.path.dirname(HERE)
 results = []
 
 
-def run(cmd):
-    r = subprocess.run([sys.executable] + cmd, capture_output=True, text=True)
-    return r.returncode, r.stdout
+def run(cmd, py=True, env=None):
+    r = subprocess.run(([sys.executable] if py else []) + cmd, capture_output=True, text=True, env=env)
+    return r.returncode, r.stdout + (r.stderr if r.returncode not in (0, 1) else "")
 
 
-def expect(name, cmd, want_pass):
-    rc, out = run(cmd)
+def expect(name, cmd, want_pass, py=True, env=None):
+    rc, out = run(cmd, py, env)
     ok = (rc == 0) == want_pass and rc in (0, 1)
     results.append(ok)
     last = out.strip().splitlines()[-1] if out.strip() else "(no output)"
@@ -195,6 +207,188 @@ def cartram_cases(log, w):
         expect(c, [ct, "check", plant(log, os.path.join(w, f"cartram_{c}.log"), fn), "--image", "e7", "--blend", "0"], False)
 
 
+# ---------------------------------------------------------------- the guards (--tools)
+def git_repo(d):
+    """A scratch git repository at d with one commit 'base'; returns a helper."""
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    env = dict(os.environ, GIT_AUTHOR_NAME="selftest", GIT_AUTHOR_EMAIL="selftest@localhost",
+               GIT_COMMITTER_NAME="selftest", GIT_COMMITTER_EMAIL="selftest@localhost")
+
+    def g(*a):
+        return subprocess.run(["git", "-C", d] + list(a), capture_output=True, text=True, check=True, env=env).stdout
+    g("init", "-q")
+    return g
+
+
+def write(d, rel, text, mode="w"):
+    p = os.path.join(d, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, mode) as f:
+        f.write(text)
+
+
+QSF = """# test project
+set_global_assignment -name VERILOG_MACRO "POCKET_SRAM=1"
+set_global_assignment -name QIP_FILE core/core.qip
+set_global_assignment -name SDC_FILE core/core_constraints.sdc
+set_global_assignment -name SEED 1
+"""
+SV_A = """// a.sv: test module
+module a(input logic clk, output logic q);
+	// a comment
+	always_ff @(posedge clk) q <= ~q;
+`ifdef POCKET_SRAM
+	logic live;
+`endif
+`ifdef SOMETHING_ELSE
+	logic dead;
+`endif
+endmodule
+"""
+SV_B = """module b(input logic d, output logic e);
+	assign e = d;
+endmodule
+"""
+QIP = """set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) a.sv ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) b.sv ]
+"""
+SDC = """# clocks
+create_clock -name clk -period 69.841 [get_ports clk]
+"""
+
+
+def tree(d):
+    write(d, "src/fpga/ap_core.qsf", QSF)
+    write(d, "src/fpga/core/core.qip", QIP)
+    write(d, "src/fpga/core/a.sv", SV_A)
+    write(d, "src/fpga/core/b.sv", SV_B)
+    write(d, "src/fpga/core/core_constraints.sdc", SDC)
+    write(d, "src/fpga/mister/rtl/dpram.vhd", "-- vhdl\nentity dpram is end;\n")
+    write(d, "src/fpga/apf/build_id.mif", "DEPTH = 1;\n")
+
+
+def guard_cases(w):
+    pg = os.path.join(SIM, "tools", "pp_guards.py")
+    d = os.path.join(w, "guards_repo")
+    g = git_repo(d)
+    tree(d)
+    g("add", "-A")
+    g("commit", "-q", "-m", "base")
+    g("tag", "base")
+    print("pp_guards.py on a scratch repository:")
+    edit = lambda rel, old, new: write(d, rel, open(os.path.join(d, rel)).read().replace(old, new, 1))
+    daria3 = ('set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"\n'
+              'set_global_assignment -name QIP_FILE core/daria.qip\n'
+              'set_global_assignment -name SDC_FILE core/daria_constraints.sdc\n')
+    cases = [
+        ("comment only", "comments", lambda: edit("src/fpga/core/a.sv", "// a comment", "// another comment"), True),
+        ("SDC comment only", "comments", lambda: edit("src/fpga/core/core_constraints.sdc", "# clocks", "# the clocks"), True),
+        ("the three DARIA qsf lines, SEED and a comment", "daria",
+         lambda: write(d, "src/fpga/ap_core.qsf", QSF.replace("SEED 1", "SEED 2").replace("# test project", "# seed 2 chosen") + daria3), True),
+        ("directive in an added comment", "comments", lambda: edit("src/fpga/core/a.sv", "// a comment", "// synthesis translate_off"), False),
+        ("attribute inside a comment", "comments", lambda: edit("src/fpga/core/a.sv", "// a comment", "/* (* keep *) */"), False),
+        ("altera_attribute in a comment", "comments", lambda: edit("src/fpga/core/b.sv", "assign e = d;", "assign e = d; // altera_attribute -name X"), False),
+        (".vhd change", "comments", lambda: edit("src/fpga/mister/rtl/dpram.vhd", "-- vhdl", "-- vhdl changed"), False),
+        (".mif change", "comments", lambda: edit("src/fpga/apf/build_id.mif", "DEPTH = 1;", "DEPTH = 2;"), False),
+        ("an extra qsf line", "daria", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3 + 'set_global_assignment -name VERILOG_MACRO "X=1"\n'), False),
+        ("a DARIA qsf line missing", "daria", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3.split("\n", 1)[1]), False),
+        ("an SDC code change", "comments", lambda: edit("src/fpga/core/core_constraints.sdc", "69.841", "69.000"), False),
+        ("a qsf code change", "comments", lambda: edit("src/fpga/ap_core.qsf", "SEED 1", "SEED 3"), False),
+    ]
+    for name, q, fn, want in cases:
+        g("checkout", "-q", "-f", "base")
+        fn()
+        g("add", "-A")
+        g("commit", "-q", "-m", name)
+        expect(name, [pg, "--repo", d, "--from", "base", "--to", "HEAD", "--qsf", q], want)
+        g("checkout", "-q", "-f", "base")
+
+
+def hygiene_cases(w):
+    hy = os.path.join(HERE, "hygiene.sh")
+    d = os.path.join(w, "hygiene_repo")
+    g = git_repo(d)
+    write(d, "README", "test\n")
+    g("add", "-A")
+    g("commit", "-q", "-m", "base")
+    g("tag", "base")
+    # a made-up name stands in for the real list, which is never written in a tracked file
+    names = os.path.join(w, "hygiene_names.txt")
+    open(names, "w").write("# test list\nQuuxbot\n")
+    env = {k: v for k, v in os.environ.items() if k != "HYGIENE_NAMES"}
+    print("hygiene.sh on a scratch repository:")
+    tmp = "/" + "tmp/x.log"          # spelled in pieces: hygiene.sh would flag this file
+    big = "".join("%07d\n" % i for i in range(40000))
+    cases = [
+        ("clean change", lambda: write(d, "sim/x.py", "print('ok')\n"), True, ["--names", names]),
+        ("cartridge image", lambda: write(d, "sim/game.a26", "x" * 64), False, ["--names", names]),
+        ("PNG", lambda: write(d, "docs/shot.png", "x" * 64), False, ["--names", names]),
+        ("user firmware", lambda: write(d, "src/fpga/mister/rtl/bupchip.hex", "00\n"), False, ["--names", names]),
+        ("path into the temporary directory", lambda: write(d, "sim/x.sh", "cat " + tmp + "\n"), False, ["--names", names]),
+        ("scratch directory", lambda: write(d, "sim/x.sh", "see scratch" + "pad/notes\n"), False, ["--names", names]),
+        ("listed name", lambda: write(d, "docs/x.md", "written with quuxbot\n"), False, ["--names", names]),
+        ("no name list", lambda: write(d, "sim/x.py", "print('ok')\n"), False, []),
+        ("name list inside the repository", lambda: (write(d, "names.txt", "Quuxbot\n"), write(d, "sim/x.py", "1\n")), False,
+         ["--names", os.path.join(d, "names.txt")]),
+        ("binary file", lambda: write(d, "sim/blob.dat", bytes(range(256)) * 4, "wb"), False, ["--names", names]),
+        ("file over the size limit", lambda: write(d, "sim/big.txt", big), False, ["--names", names]),
+    ]
+    for name, fn, want, extra in cases:
+        g("checkout", "-q", "-f", "base")
+        fn()
+        g("add", "-A")
+        g("commit", "-q", "-m", name)
+        expect(name, ["bash", hy, "--repo", d, "--base", "base"] + extra, want, py=False, env=env)
+        g("checkout", "-q", "-f", "base")
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def pp_equiv_cases(w):
+    pe = os.path.join(SIM, "tools", "pp_equiv.py")
+    d = os.path.join(w, "pp_tree")
+    shutil.rmtree(d, ignore_errors=True)
+    tree(d)
+    fpga = os.path.join(d, "src", "fpga")
+
+    def h(*extra):
+        rc, out = run([pe, fpga, os.path.join(w, "pp_out")] + list(extra))
+        m = re.match(r"([0-9a-f]{64}) ", out)
+        return m.group(1) if m else None
+    print("pp_equiv.py on a small Quartus tree:")
+    h0 = h()
+    results.append(h0 is not None)
+    print(f"  {'ok   ' if h0 else 'WRONG'} base hash {h0}")
+    edit = lambda rel, old, new: write(fpga, rel, open(os.path.join(fpga, rel)).read().replace(old, new, 1))
+
+    def same(name, fn, want_same, *extra):
+        keep = {r: open(os.path.join(fpga, r)).read() for r in ("core/a.sv", "core/b.sv", "ap_core.qsf")}
+        fn()
+        h1 = h(*extra)
+        ok = h1 is not None and (h1 == h0) == want_same
+        results.append(ok)
+        print(f"  {'ok   ' if ok else 'WRONG'} {name}: hash {'unchanged' if h1 == h0 else 'changed'}, expected "
+              f"{'unchanged' if want_same else 'changed'}")
+        for r, v in keep.items():
+            write(fpga, r, v)
+    same("comment edit", lambda: edit("core/a.sv", "// a comment", "// a different comment"), True)
+    same("spacing and blank lines", lambda: edit("core/b.sv", "assign e = d;", "\n\n  assign   e\t=  d;   \n"), True)
+    # a statement split over two lines changes the stream: line breaks are kept
+    # (conservative: a false difference, never a false identity)
+    same("a statement split over two lines", lambda: edit("core/b.sv", "assign e = d;", "assign e =\n d;"), False)
+    same("edit inside an ifdef that is off", lambda: edit("core/a.sv", "logic dead;", "logic dead2;"), True)
+    same("code edit", lambda: edit("core/b.sv", "assign e = d;", "assign e = ~d;"), False)
+    same("edit inside an ifdef that is on", lambda: edit("core/a.sv", "logic live;", "logic live2;"), False)
+    same("a qsf macro removed (-U)", lambda: None, False, "-U", "POCKET_SRAM")
+    expect("--expect another hash", [pe, fpga, os.path.join(w, "pp_out"), "--expect", "0" * 64], False)
+    write(fpga, "core/b.sv", SV_B.replace("assign e = d;", "logic daria_x; assign e = d;"))
+    expect("--max-token 0 with a daria identifier", [pe, fpga, os.path.join(w, "pp_out"), "--max-token", "0"], False)
+    expect("--max-token 0 with that file excluded", [pe, fpga, os.path.join(w, "pp_out"), "--max-token", "0",
+                                                      "--exclude", "core/b\\.sv"], True)
+    write(fpga, "core/b.sv", SV_B)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- synthetic R1/R2
 def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked"):
     rnd = random.Random(1)
@@ -299,6 +493,7 @@ def main():
     p.add_argument("--extra-dir")
     p.add_argument("--fp")
     p.add_argument("--cartram")
+    p.add_argument("--tools", action="store_true", help="the guards: pp_guards.py, hygiene.sh, pp_equiv.py")
     a = p.parse_args()
     w = os.path.abspath(a.work)
     os.makedirs(w, exist_ok=True)
@@ -310,6 +505,10 @@ def main():
         fp_cases(a.fp, w)
     if a.cartram:
         cartram_cases(a.cartram, w)
+    if a.tools:
+        guard_cases(w)
+        hygiene_cases(w)
+        pp_equiv_cases(w)
     gate_cases(w)
     print(f"SELFTEST {'pass' if all(results) else 'FAIL'} ({sum(results)} of {len(results)} cases as expected)")
     sys.exit(0 if all(results) else 1)

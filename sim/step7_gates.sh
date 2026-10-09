@@ -18,11 +18,12 @@
 #                with FP=1, and every non-BupChip case's fingerprints equal
 #                between the two (plan 7.5 row 5)
 #   extra_tests  extra_tests.sh on run_sim's WORK, checked against EXTRA_REF
-#                (the reference build's extra_tests.sh log); AR_TAPE passes
-#                through
+#                (the reference build's extra_tests.sh log); AR_TAPE=1 passes
+#                through (the tape path, which the checker then requires)
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh and cartram logs and
-#                fingerprints (so it runs after them)
+#                fingerprints (so it runs after them), and the guards'
+#                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=2 (with S4_GAME=FILE and
 #                REFDIR, its game jobs)
 #   lint         sim/lint_step7.sh (lane I1's three macro sets)
@@ -138,7 +139,7 @@ g_run_sim() {
 	return $rc
 }
 g_selftest() {
-	local args=(--work "$OUT/selftest")
+	local args=(--work "$OUT/selftest" --tools)
 	[ -f "$OUT/run_sim.out" ] && args+=(--run-sim "$OUT/run_sim.out")
 	[ -f "$OUT/rs/fp/load_a26.csv" ] && args+=(--fp "$OUT/rs/fp/load_a26.csv")
 	[ -f "$OUT/cartram_work/cartram/logs/e7_b0.log" ] && args+=(--cartram "$OUT/cartram_work/cartram/logs/e7_b0.log")
@@ -149,7 +150,9 @@ g_extra_tests() {
 	[ -x "$OUT/rs/obj_load/vtb" ] || { echo "no run_sim build in $OUT/rs: run the run_sim gate first"; return 1; }
 	WORK="$OUT/rs" slot bash "$HERE/extra_tests.sh" > "$OUT/extra_tests.out" 2>&1; echo "exit $?" >> "$OUT/extra_tests.out"
 	cat "$OUT/extra_tests.out"
-	python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests.out" --ref "$EXTRA_REF" ${AR_TAPE:+--ar-tape}
+	local tape=()
+	[ "${AR_TAPE:-0}" = 1 ] && tape=(--ar-tape)
+	python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests.out" --ref "$EXTRA_REF" "${tape[@]}"
 }
 g_s4_check() {
 	local game=()

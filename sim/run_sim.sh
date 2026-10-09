@@ -133,8 +133,10 @@ if [ "${BUPCHIP:-1}" = 1 ] && [ "${DARIA:-$QSF_DARIA}" = 1 ]; then
 	SRCS+=("$B/daria_fe_pkg.sv" "$B/daria_mem.sv" "$B/daria_call.sv" "$B/daria_mmio.sv")
 	for f in daria_smp bup_dbg_snap; do [ -f "$B/$f.sv" ] && SRCS+=("$B/$f.sv"); done
 	SRCS+=($(ls "$B"/daria_fe_*.sv | grep -v daria_fe_pkg.sv) "$B/daria_fe.sv")
-	# The DARIA section's taps need daria_fe in the wrapper as u_fe (plan P14)
-	grep -qE '^\s*daria_fe\b[^;]*\bu_fe\b' "$FPGA/core/atari7800_pocket.sv" && BUP_DEFS="$BUP_DEFS -DSIM_DARIA_FE"
+	# The DARIA section's taps need daria_fe in the wrapper as u_fe (plan P14):
+	# an instance "daria_fe [#(...)] u_fe (", on one line or over several
+	sed 's,//.*,,' "$FPGA/core/atari7800_pocket.sv" | tr '\n' ' ' \
+		| grep -qE '(^|[^A-Za-z0-9_$.])daria_fe\s*(#[^;]*)?[^A-Za-z0-9_$]u_fe\s*\(' && BUP_DEFS="$BUP_DEFS -DSIM_DARIA_FE"
 fi
 # Fix B's P2 assertion in the benches (docs/daria_step7/plan.md P2): on when
 # sram_ctrl.sv has Fix B's two requests, m_new and t_new.

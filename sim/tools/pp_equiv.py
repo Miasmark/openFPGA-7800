@@ -5,8 +5,10 @@ Walks ap_core.qsf -> QIP_FILE (recursively) in Quartus's order, collects the
 Verilog/SystemVerilog files, and runs Verilator's preprocessor over them as
 one stream (so a `define in one file reaches the later ones, as in Quartus),
 with the qsf's VERILOG_MACROs plus ALTERA_RESERVED_QIS (Quartus defines it
-during synthesis). Comments are dropped by -E; whitespace is collapsed and
-blank lines removed, so comment-only and layout-only edits do not count.
+during synthesis). Comments are dropped by -E; whitespace within a line is
+collapsed and blank lines removed, so comment-only, spacing and blank-line
+edits do not count. Line breaks are kept: a statement split or joined
+across lines changes the hash (a false difference, never a false identity).
 
 What the hash does not see, and the guards in pp_guards.py cover (plan 7.5):
 comments (a `// synthesis translate_off` is a directive to Quartus), VHDL

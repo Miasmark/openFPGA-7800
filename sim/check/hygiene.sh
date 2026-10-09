@@ -14,6 +14,8 @@
 #     did not happen.
 # Commit messages are not files and are not checked here.
 #   sim/check/hygiene.sh [--base REV] [--names FILE] [--allow PATH]... [--limit BYTES]
+#                        [--repo DIR]
+# --repo checks another checkout (default: the one this script is in).
 # Exit status 0 when nothing is found, 1 otherwise, 2 on a usage error.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
@@ -29,6 +31,7 @@ while [ $# -gt 0 ]; do
 		--names) NAMES="$2"; shift 2 ;;
 		--allow) ALLOW+=("$2"); shift 2 ;;
 		--limit) LIMIT="$2"; shift 2 ;;
+		--repo) REPO="$(git -C "$2" rev-parse --show-toplevel)" || exit 2; shift 2 ;;
 		*) echo "hygiene.sh: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
