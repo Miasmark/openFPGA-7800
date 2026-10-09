@@ -367,8 +367,10 @@ How to read the table:
 
 | Family | Run command | Runtime | Needs | Pass criterion |
 |---|---|---|---|---|
-| Core simulation | `VERILATOR=/opt/verilator-5.040/bin/verilator sim/run_sim.sh` | a few minutes | Verilator 5.040; GHDL for `POKEY=watson`; firmware for the BupChip end-to-end test; OpenBIOS for BIOS_BOOT | Not recorded. The BupChip and BIOS_BOOT tests are skipped, not failed, when their input is missing. |
-| Extra tests | `sim/extra_tests.sh` | not recorded | a finished `run_sim.sh`; network access to GitHub; git, a C compiler, libpng-dev, flex, Pillow | Not recorded. |
+| Core simulation | `VERILATOR=/opt/verilator-5.040/bin/verilator sim/run_sim.sh` | about 24 min (aeee6d2, 4 build jobs) | Verilator 5.040; GHDL for `POKEY=watson`; firmware for the BupChip end-to-end test (`BUPFW=FILE`); OpenBIOS for BIOS_BOOT (`BIOS=FILE`) | `sim/check/run_sim_check.py LOG`: exit 0, and a skipped section fails there. The script itself exits 0 whatever its verdicts say. |
+| Extra tests | `sim/extra_tests.sh` | about 1 h; 2 h 34 min with `AR_TAPE=1` (aeee6d2, on a machine with all four cores busy; the two tape runs simulate 34 s) | a finished `run_sim.sh`; network access to GitHub; git, a C compiler, libpng-dev, flex, Pillow | `sim/check/extra_tests_check.py LOG --ref REF_LOG` (the reference build's log, for the POKEY and DLI statistics): exit 0. |
+| 2600 cartridge RAM | `sim/cartram2600_test.py matrix --build` and `s19` | about 8 min, plus a 4-minute build | a `WORK` with `run_sim.sh`'s `rtl/` links | `CARTRAM_MATRIX pass`, `CARTRAM_S19 pass`, exit 0 (header of the script). |
+| Step 7 gates | `sim/step7_gates.sh` (`--list` shows what is available) | hours | as its header: `SIM_LOCK`, `BIOS`, `BUPFW`, `HYGIENE_NAMES`, `PP_EXPECT`, `PP_GUARD_FROM`, `EXTRA_REF` | `STEP7_GATES pass`, exit 0; exit 3 when a gate is not available yet. |
 | BupChip whole chip | `sim/bupchip/run_bupchip.sh GAME.a78 SONG` (DEVELOPING.md:95) | not recorded | Verilator 5.040 (the default) | Not recorded. |
 | Jukebox | `sim/bupchip/run_jukebox.sh` | about 7 min game-free, 10 with a game (lines 13-14) | firmware; a `tb_load` build from `run_sim.sh` | Exits with status 2 without firmware or the `tb_load` build (lines 20-21); otherwise not recorded. |
 | verif | `sim/bupchip/verif/run_all.sh` | about 3 min | firmware for steps 2-3; the venv | Prints a PASS/FAIL/SKIP line per step and exits non-zero on any FAIL (lines 60-61). |
@@ -378,7 +380,7 @@ How to read the table:
 | s4 | `JOBS=2 sim/bupchip/s4/check.sh` | 30-40 min without a game; 53 min with the game at the default `JOBS=3`, which exceeds the 2-job rule | iverilog; arm-none-eabi-gcc (checked at line 91) | Prints "N of M passed" (check.sh:223-224). Recorded: 28 of 28 with the game, 16 of 16 without (s4/README.md:8-9). |
 | s4 stress | `sim/bupchip/s4/stress/run_tick.sh`, `sim/bupchip/s4/stress/run_bounds.sh`, `sim/bupchip/s4/stress/run_pophead.sh` | not recorded | iverilog (`run_tick`), arm-none-eabi-gcc (`run_bounds`, `run_pophead`) | Not recorded. |
 | model | `sim/bupchip/model/check.sh` | about 15 s (model/README.md:33) | firmware | Exits with status 2 without firmware; otherwise not recorded. |
-| DARIA whole core | `sim/bupchip/daria/run_daria.sh` | about 1 min of wall time per emulated second | [not recorded]; `sim/work/bupchip/daria/roms` holds game copies | Not recorded. |
+| DARIA whole core | `sim/bupchip/daria/run_daria.sh` | 79-104 s of wall time per emulated second for a plain build; mode B about 286 s (3.5 simulated ms per wall second) | [not recorded]; `sim/work/bupchip/daria/roms` holds game copies | Not recorded. |
 | DARIA regression | `sim/bupchip/daria/run_all.sh` | not recorded | builds once, then exports `NOBUILD=1`; `JOBS` defaults to 2 | Not recorded. |
 | DARIA front-end unit | `sim/bupchip/daria/fe_unit/run_unit.sh` | not recorded | none beyond Verilator 5.040 | Not recorded. |
 | DARIA front-end directed | `sim/bupchip/daria/fe_dir/run_dir.sh` | not recorded | `FLAVOR=s0` builds the stage-0 bench from git `d729ba7` | Not recorded. |
