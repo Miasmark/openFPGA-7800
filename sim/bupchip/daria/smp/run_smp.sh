@@ -144,8 +144,10 @@ one)
 	;;
 gate)
 	fail=0
+	header
 	build fast fast "$B/daria_smp.sv" || exit 1
 	build unique unique "$B/daria_smp.sv" || exit 1
+	echo "binaries: fast $(md5sum < "$WORK/obj_fast/vtb" | cut -c1-32), unique $(md5sum < "$WORK/obj_unique/vtb" | cut -c1-32)"
 	echo "== x-initial fast: phases, with and without samples (+loads=$LOADS)"
 	for ph in 0 8730 17460 13095 -1; do
 		r1="$(run fast "$WORK/ph$ph.log" +seed=7 +phase=$ph +loads=$LOADS +stream="$WORK/ph$ph.stream")"
@@ -167,6 +169,7 @@ gate)
 	for m in ack_early lane no_ff no_mask ack_reset; do
 		mutate $m "$WORK/mut/daria_smp_$m.sv" || { fail=1; continue; }
 		build "mut_$m" fast "$WORK/mut/daria_smp_$m.sv" || { fail=1; continue; }
+		echo "mutant $m: binary $(md5sum < "$WORK/obj_mut_$m/vtb" | cut -c1-32)"
 		r="$(run "mut_$m" "$WORK/mut_$m.log" +seed=7 +phase=0 +loads=$LOADS +maxms=400)"
 		case "$r" in *FAIL*) v=caught ;; *) v=MISSED; fail=1 ;; esac
 		echo "mutant $m: $v: $r"
