@@ -1470,8 +1470,10 @@
 	// as it was before E's writes: the expected word, exactly. A store on E itself would be a
 	// coincidence: coll_d_same in dmem; upstream's ARM never writes on the mapper's edge
 	// (cart_ram_tdp's arm_allow). The word is the engine's own address (aud_addr[14:2];
-	// upstream's ram_addr[16:2], its lanes' 15-bit index), so a wrong address at the port, a
-	// stale or undefined q, or a capture on the wrong clock all fail (read_bad, up_read_bad).
+	// upstream's ram_addr[16:2], its lanes' 15-bit index), so a wrong address at the port or a
+	// stale or undefined q fails (read_bad, up_read_bad). It checks the port's q, not what the
+	// engine captures, so an engine that captures on the wrong clock passes it; the A1 replica
+	// and the refresh compare catch that (a scratch fault of that kind failed audio_bad 4,642).
 	logic        mb_cu_pend = 0, mb_cf_pend = 0, mb_cf_fl = 0;
 	logic [14:0] mb_cu_w = 0;
 	logic [12:0] mb_cf_w = 0;

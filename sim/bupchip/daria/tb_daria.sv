@@ -1013,10 +1013,11 @@ module tb_daria;
 `endif
 
 	// ------------------------------------------------------------------ +bios
-	// +bios=FILE boots the console through a 7800 BIOS image, as the Pocket does
-	// with a BIOS loaded and "skip BIOS" off (atari7800_pocket.sv:875 use_bios,
-	// :933-935): bypass_bios 0, tia_mode 0 (the BIOS finds the 2600 cartridge
-	// and locks 2600 mode itself), the cartridge present. bios_out is served the
+	// +bios=FILE boots the console through a 7800 BIOS image, as the Pocket did
+	// with a BIOS loaded and "skip BIOS" off before decision 11 (DARIA_CORE.md;
+	// since then atari7800_pocket.sv:886 never runs the BIOS for a 2600 image, as
+	// upstream MiSTer still does): bypass_bios 0, tia_mode 0 (the BIOS finds the
+	// 2600 cartridge and locks 2600 mode itself), the cartridge present. bios_out is served the
 	// way atari7800_pocket.sv:366-377 serves it: an spram (bram.v, a registered
 	// read), so one clk_sys of latency, read at AB[13:0] & bios_mask, where
 	// bios_mask is the last download address (:219-221), the file's size less
