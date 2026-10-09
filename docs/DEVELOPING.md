@@ -433,7 +433,12 @@ itself and stops Analysis & Synthesis (it tags a qip's assignments with
 DARIA's new files mark theirs in the RTL, on scalar first stages. Padding for
 the DARIA build alone goes in `daria_constraints.sdc`'s own fitter-only
 block, never in `core_constraints.sdc`, which then stays the same in both
-builds.
+builds. A later `set_clock_uncertainty` on a clock transfer replaces the
+earlier one rather than adding to it (the last line wins, setup and hold
+each on their own; `-add` adds to the derived uncertainty only), so a line
+there states the total padding for the transfers it names, 2.0 ns into
+`clk_sdram` for 0.5 ns more than `core_constraints.sdc`'s 1.5, and names
+no other transfer.
 
 The tightest path is on `clk_sdram`: the cartridge-RAM request from MARIA
 or the 6502, through the mappers and `sram_ctrl`'s arbiter, into the SRAM's

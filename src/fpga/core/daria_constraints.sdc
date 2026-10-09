@@ -50,6 +50,23 @@ set_min_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
 # for the DARIA build alone, which the Timing Analyzer does not check. Empty
 # at first; the rungs of the step-7 timing ladder (docs/daria_step7/plan.md
 # 5.2 and 5.3: clk_arm setup, then clk_sdram setup) go here when a seed
-# misses.
+# misses. This block is read after core_constraints.sdc's, and a later
+# set_clock_uncertainty on a clock transfer REPLACES the earlier value for
+# that transfer instead of adding to it: the last line wins, setup and hold
+# each on their own, and -add adds only to the uncertainty Quartus derives
+# (measured on Q0, plan 3.5 test 6: clk_sys -> clk_sdram setup, derived
+# 0.12 ns; 1.0 ns padding, 1.12; that padding then a later -add 0.3, 0.42).
+# So every rung here:
+#   - states the TOTAL padding for the transfers it names, core_constraints'
+#     part included: for 0.5 ns more setup into clk_sdram than its 1.5 ns,
+#     write 2.0, never 0.5 (0.5 would cut the padding to a third);
+#   - keeps -add, or the derived part is lost as well;
+#   - names only the transfers it means to change: a setup line from all
+#     four core clocks into clk_sdram replaces the setup padding of each of
+#     them (a -setup line leaves the hold padding alone, and the reverse);
+#   - is reviewed against core_constraints.sdc's fitter block, line by line,
+#     for every transfer both name.
+# clk_arm -> clk_arm (plan 5.2) has no padding in core_constraints.sdc, so
+# its rung is the whole amount there.
 if {$::TimeQuestInfo(nameofexecutable) eq "quartus_fit"} {
 }
