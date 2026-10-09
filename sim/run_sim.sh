@@ -309,8 +309,9 @@ fi
 # pushes it and as it returns to clk_sys, must equal the Python model's
 # (sim/bupchip/model/armemu.py), and its audio must reach top.sv's mixer.
 # Without the firmware, the same cartridge must leave the BupChip held and
-# silent. Needs the user's firmware at src/fpga/mister/rtl/bupchip.hex
-# (docs/BUPCHIP.md); skipped without it. BUPMS sets the run (ms after reset).
+# silent. Needs the user's firmware, src/fpga/mister/rtl/bupchip.hex or
+# BUPFW=FILE (docs/BUPCHIP.md); skipped without it. BUPMS sets the run (ms
+# after reset).
 BUPFW="${BUPFW:-$RTL/bupchip.hex}"
 if [ "${BUPCHIP:-1}" = 1 ]; then
 	if [ -f "$BUPFW" ]; then
@@ -320,8 +321,14 @@ if [ "${BUPCHIP:-1}" = 1 ]; then
 		python3 "$HERE/../tools/hex2bin.py" "$BUPFW" > "$B/bupchip.bin"
 		python3 "$HERE/bupchip/verif/make_synth_arsc.py" "$B/synth.a78" --arsc "$B/synth.arsc" > /dev/null
 		python3 "$HERE/souper_test.py" "$B/souper.a78" --arsc "$B/synth.arsc" > /dev/null
+		# The model reads the firmware from armdec.HEX, the tree's own
+		# bupchip.hex; point it at BUPFW, so that a tree without the firmware
+		# (a clean clone, another worktree) runs this section too.
 		[ -s "$B/song0_model.pcm" ] && [ "$B/song0_model.pcm" -nt "$B/synth.arsc" ] || \
-			(cd "$HERE/bupchip/model" && python3 armemu.py "$B/synth.arsc" --song 0 --secs 1 --pcm "$B/song0_model.pcm" > "$B/armemu.log")
+			(cd "$HERE/bupchip/model" && BUPFW="$BUPFW" python3 -c 'import os, runpy, sys, armdec
+armdec.HEX = os.environ["BUPFW"]
+sys.argv = ["armemu.py"] + sys.argv[1:]
+runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --secs 1 --pcm "$B/song0_model.pcm" > "$B/armemu.log")
 		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupfwlast +bupms="${BUPMS:-250}" +bupout=e2e $(fp bupchip_e2e) > e2e.log)
 		grep -E "^(LOAD|BUPCHIP)" "$B/e2e.log"
 		PS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\1/p' "$B/e2e.log")"
