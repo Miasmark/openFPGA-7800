@@ -13,12 +13,39 @@
 #   supercharger Supercharger loads without the BIOS (POCKET_SUPERCHARGER's
 #                stub), from ar_test.py's images; AR_TAPE=1 adds the
 #                tape path with the BIOS (long: about 20 simulated seconds)
+#   cartram      2600 cartridge RAM on every RAM mapper, Flicker Blend off and
+#                on, the Supercharger and a 7800 RAM cart, through
+#                tb_cartram's +cartram monitor (cartram2600_test.py), and
+#                the directed s19 run; first, as it needs no download
+# FP=1 writes each run's per-frame fingerprint to $WORK/fp/extra_<case>.csv
+# (tb_load +fp), for comparing two builds frame by frame. The checker
+# sim/check/extra_tests_check.py turns this script's output into one exit
+# code (with --ref, the reference build's log, for the POKEY and DLI
+# statistics).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$HERE/work}"
 X="$WORK/extra"
 mkdir -p "$X"
 [ -x "$WORK/obj_load/vtb" ] || { echo "run ./run_sim.sh first"; exit 1; }
+fp() { [ "${FP:-0}" = 1 ] && printf '%s' "+fp=$WORK/fp/extra_$1.csv"; true; }
+[ "${FP:-0}" = 1 ] && mkdir -p "$WORK/fp"
+echo "-- extra_tests.sh: WORK $WORK, obj_load/vtb md5 $(md5sum < "$WORK/obj_load/vtb" | cut -d' ' -f1), AR_TAPE ${AR_TAPE:-0}"
+
+# 2600 cartridge RAM (docs/DARIA_CORE.md, "Fix B"; docs/daria_step7/plan.md
+# 1.2 row 6): tb_cartram (tb_load + the +cartram monitor) is built in WORK
+# from run_sim.sh's source list when missing. Every RAM mapper's test image
+# with Flicker Blend off and on, the Supercharger's full load and multiload
+# and a 7800 RAM cart: no fail code, 0 wrong bytes, 0 reads without a fresh
+# access, writes = strobes, shadow = SRAM, the per-image read and write
+# counts, and each build's latency buckets (cartram2600_test.py's header).
+# Then the directed s19 run: another client's access placed at every
+# clk_sdram edge of the 6507 cycle in turn.
+echo "-- 2600 cartridge RAM (cartram2600_test.py: 8 RAM mappers x Flicker Blend, Supercharger, 7800 RAM cart, s19 sweep)"
+[ -x "$WORK/obj_cartram/vtb" ] && [ ! "$HERE/tb_cartram.sv" -nt "$WORK/obj_cartram/vtb" ] && [ ! "$HERE/tb_load.sv" -nt "$WORK/obj_cartram/vtb" ] \
+	|| WORK="$WORK" BUILD_TOP=tb_cartram VL_JOBS="${VL_JOBS:-2}" bash "$HERE/run_sim.sh" | sed 's/^/  /'
+python3 "$HERE/cartram2600_test.py" matrix --work "$WORK" || true
+python3 "$HERE/cartram2600_test.py" s19 --work "$WORK" || true
 
 if [ ! -x "$X/dasm/bin/dasm" ]; then
 	git clone -q --depth 1 https://github.com/dasm-assembler/dasm "$X/dasm"
@@ -54,7 +81,7 @@ PY
 
 echo "-- multisprite (holey DMA)"
 ms="$X/multisprite"; build multisprite multisprite ""
-(cd "$ms" && "$WORK/obj_load/vtb" +image=multisprite.bas.a78 +audf=0 +dump=3 | grep LOAD)
+(cd "$ms" && "$WORK/obj_load/vtb" +image=multisprite.bas.a78 +audf=0 +dump=3 $(fp multisprite) | grep LOAD)
 python3 - "$ms" <<'PY'
 import sys
 from PIL import Image
@@ -63,22 +90,25 @@ for i in range(1, 3):
     im.resize((im.size[0] * 2, im.size[1] * 2), Image.NEAREST).save(f"{sys.argv[1]}/multisprite_{i}.png")
     print(f"  wrote {sys.argv[1]}/multisprite_{i}.png")
 PY
+# The header's rule, as a check: frame 1 is the background, frame 2 has the
+# 24 sprites (sim/check/multisprite_check.py prints MULTISPRITE pass or FAIL).
+python3 "$HERE/check/multisprite_check.py" "$ms" | sed -n 's/^\(MULTISPRITE.*\|  FAIL.*\)$/\1/p'
 
 echo "-- POKEY at \$450"
 build pokey450 pokey 's/ set pokeysupport on/ set pokeysupport $450/'
-(cd "$X/pokey450" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 | grep -E "LOAD")
+(cd "$X/pokey450" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 $(fp pokey450) | grep -E "LOAD")
 audio_stats "$X/pokey450"
 
 echo "-- POKEY at \$4000"
 build pokey4000 pokey 's/ set pokeysupport on/ set pokeysupport $4000/'
-(cd "$X/pokey4000" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 | grep -E "LOAD")
+(cd "$X/pokey4000" && "$WORK/obj_load/vtb" +image=pokey.bas.a78 +wav=2000 $(fp pokey4000) | grep -E "LOAD")
 audio_stats "$X/pokey4000"
 
 echo "-- DLI + WSYNC + POKEY sweep at \$4000 (Ballblazer's siren pattern)"
 mkdir -p "$X/dli"; ln -sfn "$WORK/rtl" "$X/dli/rtl"
 dasm "$HERE/dli_pokey_test.asm" -f3 -o"$X/dli/dli.bin" >/dev/null
 python3 "$HERE/make_a78.py" --bin "$X/dli/dli.bin" --type 0x0001 > "$X/dli/dli.a78"
-(cd "$X/dli" && "$WORK/obj_load/vtb" +image=dli.a78 +wav=1000 | grep -E "LOAD|PROBE")
+(cd "$X/dli" && "$WORK/obj_load/vtb" +image=dli.a78 +wav=1000 $(fp dli) | grep -E "LOAD|PROBE")
 echo "  expect: 60 NMIs, main loop writes in the hundreds of thousands, 61 AUDF1 writes"
 audio_stats "$X/dli"
 
@@ -88,16 +118,19 @@ dasm "$HERE/savekey_test.asm" -f3 -I"$X/7800basic/includes" -o"$X/savekey/sk.bin
 python3 "$HERE/make_a78.py" --bin "$X/savekey/sk.bin" --save 2 > "$X/savekey/sk_auto.a78"
 python3 "$HERE/make_a78.py" --bin "$X/savekey/sk.bin" --save 3 > "$X/savekey/sk_both.a78"
 python3 "$HERE/make_a78.py" --bin "$X/savekey/sk.bin" > "$X/savekey/sk_plain.a78"
-python3 -c "import os; open('$X/savekey/random.bin','wb').write(os.urandom(32768))"
+# A fixed save file (it was os.urandom's: now and then a random byte already
+# held what the cart writes, and the round trip below showed 7 differences,
+# not 8): pseudo-random, with the 8 bytes the cart writes at $1234 changed.
+python3 -c "import random; d = bytearray(random.Random(7800).randbytes(32768)); w = bytes.fromhex('a55a0102807fff00'); d[0x1234:0x123c] = bytes(b ^ 0xff for b in w); open('$X/savekey/random.bin','wb').write(d)"
 cd "$X/savekey"
 echo "  Auto, header declares a SaveKey (expect pass tone ~1962 Hz, bytes match):"
-"$WORK/obj_load/vtb" +image=sk_auto.a78 +audf=7 +sk_auto +skcheck | grep -E "TONE|SAVEKEY"
+"$WORK/obj_load/vtb" +image=sk_auto.a78 +audf=7 +sk_auto +skcheck $(fp sk_auto) | grep -E "TONE|SAVEKEY"
 echo "  Auto, header declares HSC and SaveKey (byte 58 = 3, as Triple Punch; expect pass tone):"
-"$WORK/obj_load/vtb" +image=sk_both.a78 +audf=7 +sk_auto +skcheck | grep -E "TONE|SAVEKEY"
+"$WORK/obj_load/vtb" +image=sk_both.a78 +audf=7 +sk_auto +skcheck $(fp sk_both) | grep -E "TONE|SAVEKEY"
 echo "  Auto, header declares none (expect fail tone ~490 Hz):"
-"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=31 +sk_auto | grep TONE
+"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=31 +sk_auto $(fp sk_plain) | grep TONE
 echo "  32 KiB save round trip, APF read protocol (expect exactly the 8 bytes the cart wrote to differ):"
-"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=7 +sk_on +sksave=random.bin | grep -E "SAVEKEY"
+"$WORK/obj_load/vtb" +image=sk_plain.a78 +audf=7 +sk_on +sksave=random.bin $(fp sk_roundtrip) | grep -E "SAVEKEY"
 cd - >/dev/null
 
 echo "-- Firmware slots: HSC firmware and Supercharger BIOS (not in this repository;"
@@ -108,15 +141,15 @@ UP="https://raw.githubusercontent.com/MiSTer-unstable-nightlies/Atari7800_MiSTer
 [ -s "$X/fw/supercharger.bin" ] || curl -fsSL "$UP/ar.hex" | python3 "$HERE/../tools/hex2bin.py" > "$X/fw/supercharger.bin"
 python3 "$HERE/make_a78.py" 7 > "$X/fw/tone.a78"
 python3 "$HERE/make_a78.py" --bin "$X/fw/highscor.rom" > "$X/fw/hsc.a78"   # the same firmware as an A78
-python3 -c "import os; open('$X/fw/random.sav','wb').write(os.urandom(2048))"
+python3 -c "import random; open('$X/fw/random.sav','wb').write(random.Random(2048).randbytes(2048))"
 cd "$X/fw"
 echo "  No firmware file, HSC On (expect HSC_EN 0):"
-"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on | grep -E "HSC_EN|TONE"
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on $(fp fw_none) | grep -E "HSC_EN|TONE"
 echo "  Both files loaded (expect 0 bytes differ, HSC_EN 1, save intact):"
-"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=highscor.rom +arfw=supercharger.bin +save=random.sav \
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=highscor.rom +arfw=supercharger.bin +save=random.sav $(fp fw_both) \
 	| grep -E "FIRMWARE|HSC_EN|TONE|SAVE after"
 echo "  HSC firmware as hsc.a78 (expect its header skipped: 0 bytes differ from the payload, HSC_EN 1):"
-"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=hsc.a78 | grep -E "FIRMWARE|HSC_EN"
+"$WORK/obj_load/vtb" +image=tone.a78 +audf=7 +hsc_on +hscfw=hsc.a78 $(fp fw_a78) | grep -E "FIRMWARE|HSC_EN"
 cd - >/dev/null
 
 echo "-- Supercharger without the BIOS: the core's loader stub (POCKET_SUPERCHARGER)"
@@ -126,16 +159,16 @@ python3 "$HERE/ar_test.py" multi > ar_multi.bin
 python3 "$HERE/ar_test.py" tape > ar_tape.bin
 python3 "$HERE/ar_test.py" full > ar_full.bin
 echo "  Full 24-page load (expect magenta \$54 / AUDF0 5 within about 0.1 s, 0 RAM bytes differ):"
-"$WORK/obj_load/vtb" +image=ar_full.bin +arprobe +wav=400 +ardump=ram.bin | grep -E "^AR "
-python3 "$HERE/ar_test.py" check ram.bin ar_full.bin
+"$WORK/obj_load/vtb" +image=ar_full.bin +arprobe +wav=400 +ardump=ram.bin $(fp ar_full) | grep -E "^AR "
+python3 "$HERE/ar_test.py" check ram.bin ar_full.bin || echo "ARCHECK FAIL"
 echo "  Multiload (expect red \$44 / AUDF0 7, then at about 1 s the stub's clear and green \$c4 / AUDF0 14):"
-"$WORK/obj_load/vtb" +image=ar_multi.bin +arprobe +wav=1500 | grep -E "^AR "
+"$WORK/obj_load/vtb" +image=ar_multi.bin +arprobe +wav=1500 $(fp ar_multi) | grep -E "^AR "
 echo "  Two loads numbered 0, reset after the first (expect blue \$84 / AUDF0 3, then after the reset yellow \$1e / AUDF0 20):"
-"$WORK/obj_load/vtb" +image=ar_tape.bin +arprobe +wav=1000 +resetat=500 | grep -E "^AR |RESET"
+"$WORK/obj_load/vtb" +image=ar_tape.bin +arprobe +wav=1000 +resetat=500 $(fp ar_tape) | grep -E "^AR |RESET"
 if [ "${AR_TAPE:-0}" = 1 ]; then
 	echo "  With the BIOS, from tape: full load (expect 0 RAM bytes differ) and multiload (expect red, then green):"
-	"$WORK/obj_load/vtb" +image=ar_full.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=22000 +ardump=ram_tape.bin | grep -E "^AR "
-	python3 "$HERE/ar_test.py" check ram_tape.bin ar_full.bin
-	"$WORK/obj_load/vtb" +image=ar_multi.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=12000 | grep -E "^AR "
+	"$WORK/obj_load/vtb" +image=ar_full.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=22000 +ardump=ram_tape.bin $(fp ar_tape_full) | grep -E "^AR "
+	python3 "$HERE/ar_test.py" check ram_tape.bin ar_full.bin || echo "ARCHECK FAIL"
+	"$WORK/obj_load/vtb" +image=ar_multi.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=12000 $(fp ar_tape_multi) | grep -E "^AR "
 fi
 cd - >/dev/null
