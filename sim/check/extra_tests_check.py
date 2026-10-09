@@ -27,7 +27,10 @@ turns every section into rules:
                 14 after about 1 s; two loads numbered 0: blue $84 / AUDF0 3,
                 the reset, then yellow $1e / AUDF0 20; with AR_TAPE=1 (or
                 --ar-tape, which requires it): the tape full load's ARCHECK 0
-                differ and the tape multiload red then green
+                differ and its tone, the multiload's two loads in order (their
+                tones), and the colours equal to the reference build's (on
+                aeee6d2 both tape loads show white, not the header's red and
+                green: reported as a note)
   cartridge RAM the CARTRAM_MATRIX and CARTRAM_S19 verdicts
                 (cartram2600_test.py), in logs of the step-7 script, which
                 runs them before the network clones
@@ -258,17 +261,46 @@ def check(a):
             bad.append(f"Supercharger two loads: {ev}, resets {rs}; expect blue $84 / AUDF0 3, the reset, yellow $1e / AUDF0 20")
     tape = hit["With the BIOS, from tape"]
     if tape:
+        # With the BIOS the tape loads take seconds, and the BIOS plays its
+        # own tones (AUDF0 counting down) while it loads. A load has run when
+        # its tone follows the tape stopping: the full load's 5; the
+        # multiload's 7, then (after the tape stops again) 14. The colour
+        # each program sets depends on what the BIOS leaves in $80
+        # (ar_test.py): it is compared with the reference build's, and a
+        # colour other than the header's (red, then green) is reported.
         b = tape[0][1]
         need(b, r"ARCHECK 24 pages, 0 of 6144 RAM bytes differ from the image", "Supercharger tape full load")
-        ev = ar_events(b)
         idx = max((i for i, x in enumerate(b) if x.startswith("ARCHECK")), default=None)
-        after = ar_events(b[idx + 1:]) if idx is not None else []
-        au = [e[2] for e in after if e[1] == "audf" and e[2] != "0"]
-        co = [e[2] for e in after if e[1] == "colubk" and e[2] != "00"]
-        if "7" not in au or "14" not in au or au.index("7") > au.index("14") or "44" not in co or "c4" not in co:
-            bad.append(f"Supercharger tape multiload: {after}, expect red $44 / AUDF0 7, then green $c4 / AUDF0 14")
-        else:
-            notes.append("Supercharger tape path (AR_TAPE=1): full load and multiload pass")
+        full = b[:idx] if idx is not None else b
+        multi = b[idx + 1:] if idx is not None else []
+
+        def loads(part):
+            out, stopped = [], False
+            for x in part:
+                if re.match(r"^AR \d+ ms: tape stops", x):
+                    stopped = True
+                m = re.match(r"^AR (\d+) ms: AUDF0 = (\d+)$", x)
+                if m and stopped and m.group(2) != "0":
+                    out.append(int(m.group(2)))
+                    stopped = False
+            return out
+        if loads(full)[:1] != [5]:
+            bad.append(f"Supercharger tape full load: tones after the tape {loads(full)}, expect 5")
+        if loads(multi)[:2] != [7, 14]:
+            bad.append(f"Supercharger tape multiload: tones after the tape {loads(multi)}, expect 7, then 14")
+        colours = [e[2] for e in ar_events(multi) if e[1] == "colubk" and e[2] != "00"]
+        if colours[:2] != ["44", "c4"]:
+            notes.append(f"Supercharger tape multiload: colours {colours}, not red $44 then green $c4 as the header "
+                         f"expects (white $0e: the program did not find its control byte in $80)")
+        if ref is not None:
+            rt = [c for c in cases(section(ref, "-- Supercharger without the BIOS")) if c[0].startswith("With the BIOS")]
+            if rt:
+                mine = [e for e in ar_events(b) if e[1] == "colubk"]
+                theirs = [e for e in ar_events(rt[0][1]) if e[1] == "colubk"]
+                if [e[2] for e in mine] != [e[2] for e in theirs]:
+                    bad.append(f"Supercharger tape: colours {[e[2] for e in mine]} differ from the reference's {[e[2] for e in theirs]}")
+        if not [x for x in bad if x.startswith("Supercharger tape")]:
+            notes.append("Supercharger tape path (AR_TAPE=1): full load 0 bytes differ, multiload loads 0 then 1")
     elif a.ar_tape:
         bad.append("Supercharger tape path: AR_TAPE=1 section missing")
 

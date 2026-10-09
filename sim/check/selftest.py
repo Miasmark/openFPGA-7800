@@ -16,7 +16,8 @@ pass or FAIL, and so is the exit status (0 or 1).
                    extra/ directory (--extra-dir): an ARCHECK mismatch, a
                    POKEY statistic changed, a multisprite row shift (on a
                    copy of the frames), a SaveKey byte lost, the multiload
-                   out of order
+                   out of order; with AR_TAPE=1 in the log, the tape
+                   multiload's second load and the tape full load's ARCHECK
   --fp FILE        a tb_load/tb_system fp.csv: frame_gate --strict on a
                    truncated copy, a one-frame shift, one RIOT hash, one
                    pixel (video) hash and a one-clock len_sys change
@@ -103,6 +104,10 @@ def extra_cases(log, ref, xdir, w):
         "multiload_order": lambda t: t.replace("AUDF0 = 14\n", "AUDF0 = 13\n", 1),
         "no_ref": None,
     }
+    if "With the BIOS, from tape" in open(log, errors="replace").read():
+        last = lambda a, b: (lambda t: t[::-1].replace(a[::-1], b[::-1], 1)[::-1])
+        cases["tape_multiload_tone"] = last("AUDF0 = 14\n", "AUDF0 = 13\n")
+        cases["tape_archeck"] = last("ARCHECK 24 pages, 0 of", "ARCHECK 24 pages, 9 of")
     for k, fn in cases.items():
         if fn is None:
             expect(k, [chk, log] + (["--extra-dir", xdir] if xdir else []), False)
