@@ -217,23 +217,40 @@ the 20 in front.
 `tools/atarivox/stella_voxlog.py` runs the logging against Stella 6.7
 instead of the simulation: a game minute takes a minute, not hours. It
 writes the same log format, takes a screenshot as each phrase starts, and
-its docstring has the setup. Three five-minute sessions with no skill
-(hands off; firing without moving; firing while moving) gave:
+its docstring has the setup. Four sessions with no skill (hands off, twice; firing without moving;
+firing while moving) gave:
 
 | When | Phrase | Codes | Says |
 |---|---|---|---|
 | Game start | Stored `$0969` | `JH UW NO OW... RR... SO TT` | "Juno First" (title) |
 | Each wave's start | Built in RAM | `WW EYIY VV`, then the number | "wave one", "wave two" (`8 TT IHWW`, a slow "two") |
-| Black screen after the ship is lost | Stored `$0DA8` | `WW AY` x4, pitch 180 down to 150 | "why why why why" |
-| Same | Stored `$0E00` | `IY OWRR UX`, `DO UX MM`, `DO UX UX UX MM` | "your doom... doooom" |
-| Same | Stored `$0D10` | `IYUW HE AY VV`, `FF`, `EY` x7 with the pitch 210 down to 95, `EYIY LE ED` | "you have failed" |
+| Game over | One of 8 stored taunts, at random (below) | | |
 
-The screenshots can't tell a lost life from game over, so which of the three
-taunts goes with which isn't known.
+The four sessions ended on three different taunts. Both hands-off games
+ended on "why why why why": with the same input, the game ends on the same
+frame.
 
-The other stored phrases (`$0D4B`, `$0D7C`, `$0E39`, `$0E6B`, `$0E9A`,
-`$0F00`/`$0F08`, `$0F46`) need play that reaches later waves, which blind
-input doesn't.
+**How the taunt is picked** (bank 0, $F715): `LDA $81 / AND #7 / TAX`,
+then the pointer comes from `$FD00,X` (high bytes) and `$FD08,X` (low
+bytes). $81 is an 8-bit LFSR (`ASL`, then `EOR #$CF` on carry, at $F1B1),
+seeded with $0F at power-on and stepped as the game runs. So the taunt
+depends on exactly when the game ends.
+
+The table, in index order:
+
+| X | Phrase | Sounds (controls left out) | Says |
+|---|---|---|---|
+| 0 | `$0D10` | `IYUW HE AY VV`, `FF`, `EY` x6 with the pitch 210 down to 95, `EYIY LE ED` | "you have failed" |
+| 1 | `$0D4B` | `FF UW LE IH SH`, `HO IYUW MM UX`... `NE` | "foolish human" (the clip measured above) |
+| 2 | `$0D7C` | `IYUW SE LE EH SE SE`, `MM AY MM UX LE` | "useless mammal" |
+| 3 | `$0DA8` | `WW AY` x4, pitch 180 down to 150 | "why why why why" |
+| 4 | `$0E00` | `IY OWRR UX`, `DO UX MM`, `DO UX UX UX MM` | "your doom... doooom" |
+| 5 | `$0E39` | `IYUW`, `GO AW TT`, `OW` x5 `NE DO` | "you got owned" |
+| 6 | `$0E6B` | `PO UX TH EH TT IH KE`, `AXRR TH TH LE IH IH NGE` | "pathetic earthling" |
+| 7 | `$0E9A` | `IYUW LO UW` x7 `ZZ ZZ SO` x3 | "you lose" |
+
+The remaining stored phrases (`$0F00`/`$0F08`, `$0F46`) still need play
+that reaches later in the game, which blind input doesn't.
 
 The chip is never starved: in our model the title phrase lasts 1.60 s from
 its first sound, longer than its bytes take to arrive, so arrival never
