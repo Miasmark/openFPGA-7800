@@ -426,6 +426,10 @@ the `clk_sys` <-> `clk_arm` crossings at ±20 ns and holds the front end's
 phase detector pair (`pd_tog` -> `pd_rx`) to 6 / 1 ns; and
 `core/daria.qip`, which marks the first flop of each synchroniser that
 shares its declaration `SYNCHRONIZER_IDENTIFICATION FORCED`, bit by bit.
+The marks are in `core/daria_sync.tcl`, which `daria.qip` sources
+(`SOURCE_TCL_SCRIPT_FILE`): Quartus refuses that assignment in a qip
+itself and stops Analysis & Synthesis (it tags a qip's assignments with
+`-qip`, an option this one does not take).
 DARIA's new files mark theirs in the RTL, on scalar first stages. Padding for
 the DARIA build alone goes in `daria_constraints.sdc`'s own fitter-only
 block, never in `core_constraints.sdc`, which then stays the same in both

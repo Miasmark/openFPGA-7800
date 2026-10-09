@@ -14,8 +14,9 @@
 # derived from the edges can be as little as one VCO period. Every crossing
 # between the two goes through a synchroniser (two or three flops on a level
 # or a toggle), and the buses that go with a toggle are held until the far
-# side has taken them (DARIA_CORE.md 7.1-7.2; core/daria.qip, and the RTL
-# attributes of the files written for DARIA, mark the first flops). clk_arm
+# side has taken them (DARIA_CORE.md 7.1-7.2; core/daria.qip, through
+# core/daria_sync.tcl, and the RTL attributes of the files written for DARIA
+# mark the first flops). clk_arm
 # stays in core_constraints.sdc's synchronous group, so these paths are
 # timed, but against a bound instead of the edges: at most 20 ns of data
 # delay both ways, under one clk_arm period, and set_min_delay -20 so that a
