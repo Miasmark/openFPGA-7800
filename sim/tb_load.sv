@@ -52,8 +52,9 @@ module tb_load;
 		arm_ph = ~arm_ph;
 		if (clk_run) clk_arm = ~clk_arm;
 	end
-	always @(clk_arm) begin
-		automatic longint t = longint'($realtime * 1000.0 + 0.5) - arm_ofs;
+	// (a real-to-integer cast rounds; the initial value is no edge)
+	always @(clk_arm) if ($realtime > 0) begin
+		automatic longint t = longint'($realtime * 1000.0) - arm_ofs;
 		automatic longint p = arm_div == 19 ? 27645 : 26190;
 		if (t % p != (clk_arm ? 0 : (arm_div == 19 ? 13823 : 13095)))
 			$fatal(1, "clk_arm %0s edge at %0d ps is off its VCO/%0d lattice", clk_arm ? "rising" : "falling", t, arm_div);
@@ -215,7 +216,7 @@ module tb_load;
 			lcm = arm_div == 19 ? 1326960 : 209520;
 `endif
 `endif
-			now_ps = longint'($realtime * 1000.0 + 0.5);
+			now_ps = longint'($realtime * 1000.0);
 			t_ps = (now_ps / lcm + 1) * lcm + 1;
 			// stop and restart between edges, never on one
 			while (t_ps % 8730 == 0
@@ -228,6 +229,8 @@ module tb_load;
 				) t_ps++;
 			w_ps = (longint'(rt_us) * 1000000 + lcm - 1) / lcm * lcm;
 			#((t_ps - now_ps) * 0.001);
+			if (longint'($realtime * 1000.0) != t_ps)
+				$fatal(1, "+retune: the stop landed at %0d ps, not %0d", longint'($realtime * 1000.0), t_ps);
 			clk_run = 1'b0;
 			pll_locked_tb = 1'b0;
 			t_stop = $realtime;
