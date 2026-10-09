@@ -194,9 +194,20 @@ starts a game (not during the title animation: a press at 3 s was ignored,
 
 - **6.03 s:** the title phrase, 75 bytes, exactly the codes in the demo ROM's
   phrase table, one byte a frame (16.7 ms), 1.23 s to send.
-- **8.63 s:** "wave ...", assembled in code (not stored whole), starting with
-  `96 21 118 22 64 23 4 WW EYIY VV`. The leading `20` of `VOL=96` either was
-  not sent or not caught; a lone 96 is a reserved code the chip ignores.
+- **8.63 s:** "wave one", 16 bytes built in RAM (not stored in the ROM):
+  `96 21 118 22 64 23 4 WW EYIY VV 0 WW 14 AW 8 NE` (speed 118, pitch 64,
+  bend 4; a stressed "one" with a slow AW).
+  - **The leading 96:** every stored phrase starts `20 96` (`VOL=96`), so this
+    one most likely should too. The serial decoder caught every other byte
+    cleanly.
+  - **Why the 20 is probably missing:** the game sends every phrase through
+    one routine (bank 0, $F8E4/$F8EC). It reads `($99),Y` from the index in
+    $93 and sends until $FF, one byte per frame. Phrases that come in at
+    $F8EC start from whatever $93 already holds, and the menu code also
+    writes $93. So the game itself probably skips byte 0.
+  - **Not yet confirmed:** this needs a RAM probe.
+  - **Either way it is harmless:** 96 is a reserved code the chip ignores,
+    and the volume stays where the last phrase left it.
 
 The chip is never starved: in our model the title phrase lasts 1.60 s from
 its first sound, longer than its bytes take to arrive, so arrival never
