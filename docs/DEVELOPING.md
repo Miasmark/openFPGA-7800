@@ -271,7 +271,7 @@ port has already had:
 ### Regenerate the PLL
 
 `src/fpga/core/pll/` is generated. Don't edit the parameter list by hand.
-From the repository root:
+From the repository root (this is the `POCKET_DARIA` setting, C3 = 18):
 
 ```sh
 docker run --rm -v "$PWD/src/fpga/core/pll:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
@@ -284,24 +284,41 @@ docker run --rm -v "$PWD/src/fpga/core/pll:/out" raetro/quartus:21.1 bash -c 'cd
   --component-parameter=gui_en_reconf=true --component-parameter=gui_number_of_clocks=4 \
   --component-parameter=gui_output_clock_frequency0=14.318181 --component-parameter=gui_output_clock_frequency1=57.272727 \
   --component-parameter=gui_output_clock_frequency2=14.318181 --component-parameter=gui_ps_units2=degrees \
-  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=28.636363 \
+  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=38.181818 \
   --component-parameter=gui_en_adv_params=true \
   --component-parameter=gui_multiply_factor=9 --component-parameter=gui_frac_multiply_factor=1100363522 \
   --component-parameter=gui_divide_factor_n=1 --component-parameter=gui_divide_factor_c0=48 \
   --component-parameter=gui_divide_factor_c1=12 --component-parameter=gui_divide_factor_c2=48 \
-  --component-parameter=gui_divide_factor_c3=24 \
+  --component-parameter=gui_divide_factor_c3=18 \
   --component-parameter=gui_pll_auto_reset=Off &&
  cp /tmp/pll_core/pll_core.v /out/'
 ```
 
-Then put back the explanatory header comment at the top of `pll_core.v`.
+`pll_core.v` holds two settings of counter 3, selected by `ifdef
+POCKET_DARIA`: C3 = 18 (38.18 MHz) for DARIA, and C3 = 24 (28.64 MHz,
+2 × `clk_sys`) otherwise. Each is the tool's output; only the selection is
+by hand. To regenerate, run the command once as above and once with
+`gui_divide_factor_c3=24` and `gui_output_clock_frequency3=28.636363`,
+writing to two scratch directories rather than over the tree's file. Diff
+each against the tree: only counter 3's lines (`output_clock_frequency3`,
+`c_cnt_*3`) may differ. Copy those into the matching `ifdef` branch and put
+back the explanatory header comment. With advanced parameters on, the tool
+takes the counters from the `gui_divide_factor_*` values; the frequency
+strings it writes are computed from them. The ÷19 fallback (C3 = 19,
+36.17 MHz) is generated the same way. Its counter 3 is `c_cnt_hi_div3(10)`,
+`c_cnt_lo_div3(9)` and `c_cnt_odd_div_duty_en3("true")`; the tool then also
+prints the C0-C2 and VCO frequency strings rounded differently (VCO
+687.272644 against 687.272687 MHz), with M, N, K and the other counters
+unchanged.
 The reconfiguration controller (`pll/pll_cfg/`) comes from
 `--component-name=altera_pll_reconfig --output-name=pll_cfg`.
 
 The PLL has four outputs: `clk_sys` (C0 = 48), `clk_sdram` (C1 = 12),
-`clk_sys_90` (C2 = 48, 90 degrees) and `clk_arm` (C3 = 24, 2 x `clk_sys`,
-28.636 MHz: the BupChip's CPU, ARIA; [BUPCHIP_CORE.md](BUPCHIP_CORE.md),
-"Clocking"). The clock plan has four rules:
+`clk_sys_90` (C2 = 48, 90 degrees) and `clk_arm`, the BupChip's CPU
+([BUPCHIP_CORE.md](BUPCHIP_CORE.md), "Clocking"): C3 = 18 (VCO/18,
+38.18 MHz) with `POCKET_DARIA` ([DARIA_CORE.md](DARIA_CORE.md), decision 7),
+otherwise C3 = 24 (2 × `clk_sys`, 28.636 MHz, ARIA). The clock plan has four
+rules:
 
 - `clk_sdram` must be exactly 4 × `clk_sys`, from the same VCO and
   edge-aligned. The data loader holds each byte for four `clk_sdram` cycles
@@ -317,9 +334,17 @@ The PLL has four outputs: `clk_sys` (C0 = 48), `clk_sdram` (C1 = 12),
   Adding or changing a C counter alone (as C3 was added) leaves M, N and
   both values as they are.
 - `clk_arm` comes from the same VCO, so every BupChip crossing to and from
-  `clk_sys` is timed. Its 48 kHz pop runs from `clk_74a`, and `psram.sv`
-  keeps `CLOCK_SPEED = 28.636364` whatever the divider; a retune scales
-  `clk_arm` with the rest (28.375 MHz in PAL) and holds the BupChip.
+  `clk_sys` is timed. At C3 = 24 its edges are `clk_sys`'s; at C3 = 18 they
+  meet every 3 `clk_sys` (8 `clk_arm`), and every crossing is a
+  synchroniser with held data, bounded at ±20 ns in
+  `core/daria_constraints.sdc`. Its 48 kHz pop runs from `clk_74a`.
+  `psram.sv`'s `CLOCK_SPEED` is 50.0 under `POCKET_DARIA` and 28.636364
+  otherwise: it sets the controller's read and write state sequence, and
+  50.0 adds a clock after `oe_n` falls ([DARIA_CORE.md](DARIA_CORE.md),
+  7.4); it is the value for both C3 = 18 and 19. A retune scales `clk_arm`
+  with the rest (in PAL, 28.375 MHz at C3 = 24 or 37.83 MHz at C3 = 18) and
+  holds the BupChip. `pll_region.v` writes only the fraction and the start
+  register, so C3 is kept.
 
 ### Change the PAL/NTSC switch
 
