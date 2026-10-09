@@ -55,6 +55,17 @@
 //   cartridge would each break the budget without any functional failure
 //   in simulation.
 //
+//   One read is a clk_sys later: the 6507's first bus cycle after a console
+//   reset, a dummy read of its reset sequence. The cartridge's a_in[12]
+//   (AB[12] & bios_en_b, top.sv) follows the reset's release by one
+//   clk_sys, so a RAM strobe for that address is valid at E2, t_*_q loads
+//   at E3 = s12, and c_rdata lands at s19 with nothing in the way. Another
+//   client's access starting at s9 to s12 would put it at s20 to s23, past
+//   the multicycle (Flicker Blend's accesses, locked to the 6507 cycle,
+//   rarely start there; the SaveKey model's and the bridge's can start at
+//   any phase), but the 6507 discards that byte: reset forces BRK into its
+//   instruction register.
+//
 //   The 7800 or BIOS request (c_*) and the 2600 request (t_*) never meet:
 //   top.sv drives its 7800 request only while its 2600 select is low and
 //   t_* only while it is high, and the BIOS read needs the BIOS running,
