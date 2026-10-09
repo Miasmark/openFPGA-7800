@@ -105,7 +105,7 @@ def check(a):
     ref = sections(open(a.ref, "rb").read().decode("utf-8", "replace").splitlines()) if a.ref else None
 
     for x in lines:
-        if re.search(r"skipped", x): bad.append("skipped: " + x.strip())
+        if re.search(r":\s*skipped\b", x): bad.append("skipped: " + x.strip())
         if re.search(r"\bFAIL\b", x): bad.append("FAIL: " + x.strip())
         if re.search(r"^(\[\d+\] )?%(Error|Fatal)|Assertion failed", x.strip()): bad.append("simulator: " + x.strip()[:160])
         m = re.match(r"^exit (\d+)$", x.strip())

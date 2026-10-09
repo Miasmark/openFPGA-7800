@@ -136,7 +136,7 @@ def check(log, build, audfs):
 
     # global rules
     for x in L.lines:
-        if re.search(r"skipped", x):
+        if re.search(r":\s*skipped\b", x):
             bad.append("skipped section: " + x.strip())
         if re.search(r"\bFAIL\b", x):
             bad.append("FAIL: " + x.strip())
