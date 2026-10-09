@@ -185,6 +185,24 @@ A clip of Juno First saying its title is clean too (the game silences
 everything else for that one phrase) but sounds quite different: its
 codes (above) hold and bend the vowels with repeats and pitch steps.
 
+## A retail game in simulation: Juno First
+
+The full Juno First (plain bank switching) runs in `tb_load` with the SaveKey
+on (`+sk_on`): it finds the AtariVox's EEPROM (150 SCL edges) and, once fire
+starts a game (not during the title animation: a press at 3 s was ignored,
+6 s worked), speaks:
+
+- **6.03 s:** the title phrase, 75 bytes, exactly the codes in the demo ROM's
+  phrase table, one byte a frame (16.7 ms), 1.23 s to send.
+- **8.63 s:** "wave ...", assembled in code (not stored whole), starting with
+  `96 21 118 22 64 23 4 WW EYIY VV`. The leading `20` of `VOL=96` either was
+  not sent or not caught; a lone 96 is a reserved code the chip ignores.
+
+The chip is never starved: in our model the title phrase lasts 1.60 s from
+its first sound, longer than its bytes take to arrive, so arrival never
+holds up a sound and the timing comparisons above hold. Speaking on
+real-time arrival is still how the FPGA version will work.
+
 ## Which AtariVox games the core can run
 
 Several AtariVox games are ARM cartridges, which the Pocket build leaves out
