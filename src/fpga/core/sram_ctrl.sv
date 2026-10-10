@@ -71,8 +71,8 @@
 //   read beside it) only while its 2600 select (mapper_init_busy | tia_en)
 //   is low, and t_* only while it is high, but t_*_q lags the select by one
 //   clk_sys. In 2600 mode the select falls only at a console reset, from
-//   any source of the wrapper's reset register (the Pocket's Reset, a load,
-//   a PLL retune): ctrl_reg clears tia_en and bios_en_b on one edge, and
+//   any source of the wrapper's reset register (the Pocket's Reset, a PLL
+//   retune, a load): ctrl_reg clears tia_en and bios_en_b on one edge, and
 //   from it bios_sel = AB[15]. If that edge is also where t_*_q loads a new
 //   2600 strobe (the reset register rose at E1 of a cycle the mapper
 //   decodes as cart RAM, so the select falls at E2), the 6507 reads at
@@ -80,17 +80,19 @@
 //   RW, atari7800_pocket.sv) rises there too: m_new and t_new in the same
 //   clk_sdram cycle, s9. Code at $F000-$FFFF meets this with a RAM read, a
 //   Superchip write port's dummy read or a Supercharger RAM write, all
-//   6507 reads. It is the only way the two meet, and m_new yields to
-//   t_new: the 2600 access goes ahead as in any cycle (s9, c_rdata at s15,
-//   s19 behind another client), and that BIOS read, one clk_sys wide like
-//   mclk1, is not served (a 7800 cartridge-RAM strobe would yield the same
-//   way). The core is in reset, nothing uses that byte, and the BIOS reads
-//   after it are served as before. So m_new and t_new are never high
-//   together, and the testbenches stop if they are. Rejected: a retry
-//   (t_last not loaded when m_new wins) puts the 2600 access behind the
-//   BIOS read, c_rdata at s20; gating the BIOS read with the wrapper's
-//   tia_mode misses a load, which clears tia_mode on the edge where the
-//   reset register rises.
+//   6507 reads. (A load meets it only with the bank-switch override set:
+//   otherwise detect2600 clears the mapper on the load's first edge, and
+//   there is no strobe at E1.) It is the only way the two meet, and m_new
+//   yields to t_new: the 2600 access goes ahead as in any cycle (s9,
+//   c_rdata at s15, s19 behind another client), and that BIOS read, one
+//   clk_sys wide like mclk1, is not served (a 7800 cartridge-RAM strobe
+//   would yield the same way). The core is in reset, nothing uses that
+//   byte, and the BIOS reads after it are served as before. So m_new and
+//   t_new are never high together, and the testbenches stop if they are.
+//   Rejected: a retry (t_last not loaded when m_new wins) puts the 2600
+//   access behind the BIOS read, c_rdata at s20; gating the BIOS read with
+//   the wrapper's tia_mode misses a load, which clears tia_mode on the edge
+//   where the reset register rises.
 //
 //   The rest, in order: the APF bridge (SaveKey save and load), the SaveKey
 //   EEPROM model, the BIOS download, and the power-up clear.
@@ -305,10 +307,11 @@ wire        t_new = (t_rd_q | t_wr_q) & (~t_last_v | (t_key != t_last));
 
 // 7800 and BIOS: the rising strobe only (MARIA's slot timing, served at A),
 // unless a new 2600 request arrives in the same clk_sdram cycle. That
-// happens only in the clk_sys after a console reset clears the 2600 select
-// (header, "The two requests"): the 2600 request is served, and the BIOS
-// read beside it, one clk_sys wide like mclk1, is not. So m_new and t_new
-// are never high together. t_new comes from registers only.
+// happens only when a console reset clears the 2600 select on the edge
+// where t_*_q loads a new 2600 strobe (header, "The two requests"): the
+// 2600 request is served, and the BIOS read beside it, one clk_sys wide
+// like mclk1, is not. So m_new and t_new are never high together. t_new
+// comes from registers only.
 wire [16:0] c_word = c_bios ? (BIOS_BASE | {4'd0, c_addr[13:1]}) : {1'b0, c_addr[16:1]};
 wire        m_new  = ((c_rd & ~c_rd_q) | (c_wr & ~c_wr_q)) & ~t_new;
 

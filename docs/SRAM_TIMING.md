@@ -134,8 +134,33 @@ This is the proposal. The design as built (`DARIA_CORE.md`, "Fix B")
 settles its choices: the register sits at the top of `sram_ctrl`, on
 `clk_sys`; `top.sv` keeps upstream's select (`mapper_init_busy` or
 `tia_en`) for the split; and a 2600 read's byte now lands 15 `clk_sdram`
-after the edge that loads the 6507's address (19 at worst, the last edge
-the `c_rdata` multicycle allows), against 11 (15) before.
+after the edge that loads the 6507's address, against 11 before. Behind
+another client's access it lands at 19 (against 15), the last edge the
+`c_rdata` multicycle allows. One read is later: the 6507's first bus
+cycle after a console reset raises its strobe a `clk_sys` late
+(`bios_en_b`, which feeds the cartridge's A12, rises a `clk_sys` after the
+reset's release), so its byte lands at 19 with nothing in the way and up
+to 23 behind another client. It is a dummy read of the reset sequence,
+and the 6507 discards it.
+
+The split leaves one moment when the two requests can arrive together.
+`sram_ctrl` registers the 2600 request one `clk_sys` after `top.sv`'s
+select, and a console reset (the Pocket's Reset, a PLL retune, a load)
+clears `tia_en` and `bios_en_b` on one edge, which maps the BIOS at
+A15 = 1 for the rest of the reset. If the reset register rises at E1 of a
+6507 read cycle that a mapper decodes as cartridge RAM at an A15 = 1
+address (Superchip or Supercharger code at $F000-$FFFF: a RAM read, the
+write port's dummy read, or a Supercharger RAM write), the BIOS read
+rises on the edge where the 2600 strobe is registered. A load meets this
+only with the bank-switch override set; otherwise the mapper is cleared
+on the load's first edge and there is no strobe. There the 2600 request
+wins: it is served as in any other cycle, with its own data, and that one
+BIOS read, which nothing uses while the core is in reset, is dropped.
+Every bench that builds `sram_ctrl` stops if the two ever arrive in the
+same `clk_sdram` cycle. Two other answers were rejected: a retry puts the
+2600 access behind the BIOS read and its byte at 20, past the multicycle;
+and gating the BIOS read with the wrapper's `tia_mode` misses a load,
+which clears `tia_mode` on the edge where the reset register rises.
 
 - **`top.sv`** (`ifdef POCKET_SRAM`, beside the existing Pocket port groups):
   export the 2600 request (`cartram_addr26`, `cartram_rd26`,
