@@ -434,6 +434,7 @@ Every merge waits for its unit gate **and** its reviewer's sign-off (7.1).
 | **S** (port shell) | `bupchip_pocket.sv`'s new ports with tied-off outputs (F1) | lint of the three macro sets; `pp_equiv` non-DARIA identity |
 | **F** (Fix B) | I2's RTL; I3's `core_constraints.sdc` hunk (P11's padding and hold line, the `c_rdata` and fitter comments) | I2's unit gate passes, and I3's reviewer signs the SDC hunk. Build A's result is a step gate, not a merge gate; a structural failure there is fixed forward. |
 | **B1** (sim only) | I4b and I4c | its unit gate (3.6 4-5) passes; needs S |
+| **M** (merge `origin/main`, 2.1.3) | the NTSC picture window (`video_sync.sv`, lines 27-250) and main's docs and tools; one docs conflict with I3's `DEVELOPING.md` hunk (keep I3's paragraph, take main's margin list) | after Q1, Q1r, Q1b and F's behavioural runs against `aeee6d2` are on record, and after B1; before D. Decided 2026-10-10: the change leaves every 2600-mode output unchanged (whole-core Galagon `fp.csv` byte-identical to R1's), so R1 stays the reference for R2 |
 | **D** (DARIA) | I1, I3; the three `ap_core.qsf` lines | I1's and I3's unit gates pass; then the integration gate (4.2 phase 2) and a whole-commit review |
 | **Fix-ups** | as needed | each re-runs the gates its change touches (7.6) |
 | **Docs** | the lead's updates (section 8), `DARIA_CORE.md` "Step 7 work", section 9's hand-over | all gates in 1.2 hold on one tree; the numbers audit of 7.1 |
@@ -469,7 +470,8 @@ All fits run one at a time under `flock /tmp/daria_quartus.lock` (`ENVIRONMENT.m
 | Q2 | D (Build B), ÷18 | 1, 2, 3; seed 1 with `KEEP_DB=1` | the step gates of 5.1-5.4 | 3 × 18-25 min |
 | Q-mut | D with two mutants: one `daria.qip` line removed, and `ready_a` bypassed | 1 | (f) and (k') each catch their mutant | 18-25 min |
 | Q3 | D with a ladder rung (5.2, 5.3), or ÷19 | 1, 2, 3 | only on a 5.2 or 5.3 trigger | 3 × 18-25 min each round |
-| Q4 | final tree, `NODARIA=1`, `PIN_ID=1` | 2 | bitstream identity with Q1 seed 2 (7.5) | 12 min |
+| Q1' | M, `NODARIA=1`, `PIN_ID=1` | 2 | the non-DARIA reference after the merge of main: Q4 is compared with Q1', not Q1 (`video_sync.sv` differs) | 12 min |
+| Q4 | final tree, `NODARIA=1`, `PIN_ID=1` | 2 | bitstream identity with Q1' seed 2 (7.5) | 12 min |
 | Q5 | final tree + `BUP_DEBUG` | 1, 2, 3 | the step-8 test configuration (P29) | 3 × 20 min |
 
 Measured inputs for these estimates, from the step-3 probe logs (`$S7/timing-fit/fullprobe_measurements.tsv`):
@@ -565,6 +567,7 @@ Those were measured one fit at a time. This machine has 4 cores and 15 GB (`npro
 
 - **Gate:** worst setup ≥ +1.5 ns at the worse of the two slow corners on seeds 1, 2 and 3, and the worst hold over all clocks > 0 at every corner (`DARIA_CORE.md:1645`).
 - **Known margins:**
+  - 2.1.2 and 2.1.3 refitted on seeds 1-3 (2026-10-10, worse slow corner): 2.1.2 +1.198 / +1.806 / +2.303 ns, 2.1.3 +1.148 / +1.596 / +1.165 ns. Neither base meets +1.5 ns on every seed, and one design's seeds spread by up to 1.1 ns. In 5 of the 6 fits the worst path is the 2600 data leg: the cartridge size or type registers → `cart2600`'s data mux → `read_DB` → `cart_din` (`top.sv:1112`) → `cartram_wrdata26` → the merged write data (`top.sv:758-759`) → `sram` → `dq_out`. Fix B registers that write data into `t_*_q` on `clk_sys`, so it should leave the `clk_sdram` cone; check (g) on Q1 must show it. Judge every margin on three-seed distributions, never one seed.
   - Fix A's seeds: +1.17, +1.76 and +2.31 ns;
   - the ÷18 probe (no front end, no Fix B): +1.852, +2.210 and +2.998 ns;
   - 2.1.1, with the 1.0 ns fitter padding already in: +0.26, +0.44 and +0.28 ns at 79% (`SRAM_TIMING.md:77-82`);
@@ -726,11 +729,13 @@ Each scenario has its pass criteria; all run in `tb_load` (the real wrapper, `at
 | Step | Proof | Against |
 |---|---|---|
 | Fix B (F) | Behavioural: the cartram matrix on `aeee6d2` and F; `run_sim.sh` and `extra_tests.sh` `+fp` fingerprints frame by frame (no difference outside 2600 RAM-mapper `c_rdata` latency), and `extra_tests.sh`'s POKEY and DLI statistics equal; Q0 against Q1 (area within −10 to +20 ALMs, `DARIA_CORE.md:1649-1651`) | `aeee6d2` |
-| DARIA (D and later), text | `pp_equiv.py` with the qsf macro set minus `POCKET_DARIA`, over Quartus's file order, `ALTERA_RESERVED_QIS` defined: the stream hash equals F's, with 0 `daria` tokens once the new files (proved unreferenced) are excluded. The WRAPPER set's `top.sv` and `cart2600.sv` equal `aeee6d2`'s. Because `pp_equiv` drops comments and covers neither VHDL nor memory files (`$S7/rtl-wiring/pp_equiv.py:8-9,61`; `mister/rtl/dpram.vhd`), three guards go with it: the diff since F has no added comment containing `synthesis`, `altera_attribute`, `translate_off` or `(*`; `git diff --stat` shows no `.vhd`, `.mif` or `.hex` change; the `ap_core.qsf` diff is exactly the three DARIA lines, the seed comment and `SEED` | F |
+| DARIA (D and later), text | `pp_equiv.py` with the qsf macro set minus `POCKET_DARIA`, over Quartus's file order, `ALTERA_RESERVED_QIS` defined: the stream hash equals M's (F's before the merge of main; `PP_EXPECT` and `PP_GUARD_FROM` set to M), with 0 `daria` tokens once the new files (proved unreferenced) are excluded. The WRAPPER set's `top.sv` and `cart2600.sv` equal `aeee6d2`'s. Because `pp_equiv` drops comments and covers neither VHDL nor memory files (`$S7/rtl-wiring/pp_equiv.py:8-9,61`; `mister/rtl/dpram.vhd`), three guards go with it: the diff since F has no added comment containing `synthesis`, `altera_attribute`, `translate_off` or `(*`; `git diff --stat` shows no `.vhd`, `.mif` or `.hex` change; the `ap_core.qsf` diff is exactly the three DARIA lines, the seed comment and `SEED` | F |
 | DARIA, constraints | `report_sdc` and `report_exceptions` of a non-DARIA fit equal F's; P9 makes this structural, and P11's rule keeps `core_constraints.sdc` fixed after F | F (Q1) |
 | DARIA, netlist | Q4 against Q1 seed 2, both with `PIN_ID=1`: identical `.rbf`, valid only if Q1r showed Quartus reproducible. Otherwise, or if Quartus embeds something else that differs, the post-fit netlists of Q4 and Q1 seed 2 are exported and compared; the per-entity resource table alone does not prove equivalence | Q1 |
 | DARIA build on non-ARM stimuli, the shipped build | `run_sim.sh` and `extra_tests.sh` stimuli and the cartram matrix, on the DARIA build and on the non-DARIA build: identical `+fp` fingerprints on every frame, the `cpu` column included (cycle identity), with P6 making the reset release identical; the `+image2` runs of 7.3 likewise. BupChip runs are compared by PCM (`pcm_check`, `run_sim.sh:273`), because `clk_arm` changes their timing. `extra_tests.sh`'s POKEY and DLI statistics equal | the non-DARIA build of the same tree |
 | ARIA unchanged | `s4/check.sh` with `DARIA=0` and `DARIA=1`. `s1/check.sh` and `thumb/aria_equiv.sh` (`sim/bupchip/daria/thumb/aria_equiv.sh:4-23`) only if `bup_cpu.sv` changes (none is planned) | |
+
+After M, no `+fp` reference from `aeee6d2` or F is used for a 7800 NTSC case without Show Overscan (the picture window moved 3 lines); a comparison across M compares every non-video column, and video only on 2600, PAL and overscan cases.
 
 All lockstep comparisons use one Verilator binary per pair (`VERILATOR` set explicitly). `run_sim.sh` otherwise picks apt's 5.020 from `PATH` (`ENVIRONMENT.md:142-147`).
 
