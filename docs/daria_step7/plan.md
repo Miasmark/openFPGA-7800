@@ -68,7 +68,7 @@ The documents settle most of what step 7 needs. Where they disagree or leave a c
 | # | Decision | Basis |
 |---|---|---|
 | P1 | **Fix B stays under `POCKET_SRAM`**, as designed, and lands as its own commit (F) before the DARIA commit (D). F is proven behaviourally against `aeee6d2`; D is proven textually against F (7.5). No new macro. | `DARIA_CORE.md:1653-1661` (vendored-file rules), decision 2 ties Fix B to the release, not to a macro |
-| P2 | **No retry for a coincident request; an assertion instead.** `t_last` loads on every `t_new`, as in the prototype. A 7800 or BIOS request and a 2600 request cannot meet: under Fix B the 7800 request exists only while `cartram_sel26` is low and the 2600 request only while it is high (`top.sv:752-759`), and `bios_sel = ~bios_en_b && AB[15]` (`top.sv:355`) never rises for a 2600 image (decision 11). A retry would start the 2600 read behind a five-cycle access and land `c_rdata` at s20 or later, past the s19 bound, with no failure anywhere (`DARIA_CORE.md:1665`). Every bench that builds `sram_ctrl` therefore stops with `$fatal` if `m_new` and `t_new` are ever high in the same `clk_sdram` cycle (a hierarchical tap; `sram_ctrl.sv` stays free of bench code), and a mutant forces the coincidence to show the assertion fires. Keep the redundant compare. | `DARIA_CORE.md:1671` (keep the compare); `sim/work/fixb/src/sram_ctrl.sv:258,272-283,410-418` |
+| P2 | **No retry for a coincident request; an assertion instead.** `t_last` loads on every `t_new`, as in the prototype. A 7800 or BIOS request and a 2600 request cannot meet: under Fix B the 7800 request exists only while `cartram_sel26` is low and the 2600 request only while it is high (`top.sv:752-759`), and `bios_sel = ~bios_en_b && AB[15]` (`top.sv:355`) never rises for a 2600 image (decision 11). A retry would start the 2600 read behind a five-cycle access and land `c_rdata` at s20 or later, past the s19 bound, with no failure anywhere (`DARIA_CORE.md:1665`). Every bench that builds `sram_ctrl` therefore stops with `$fatal` if `m_new` and `t_new` are ever high in the same `clk_sdram` cycle (a hierarchical tap; `sram_ctrl.sv` stays free of bench code), and a mutant forces the coincidence to show the assertion fires. Keep the redundant compare. **Amended in phase 1:** the two requests do meet, once: a console reset (Reset, a PLL retune, or a load with the bank-switch override) clears `tia_en` and `bios_en_b` on the clk_sys edge where `t_*_q` loads a new 2600 strobe, when the reset register rises at E1 of a cart-RAM cycle at A15 = 1 with `mclk1` high from E2. The lane's review found Fix B dropping that 2600 access, writes included. The fix (`b96fd70`) makes the 7800/BIOS request yield: `m_new = raw & ~t_new`. The 2600 access is served as in any cycle; the one BIOS read beside it, of a core in reset, is dropped. The assertion is therefore structural, and the regression is the `nohold` mutant (`m_new` without `~t_new`) caught by a K = 0 console-reset sweep with the assertion live. | `DARIA_CORE.md:1671` (keep the compare); `sim/work/fixb/src/sram_ctrl.sv:258,272-283,410-418` |
 | P3 | **Busy routing through `cart2600`:** two new `cart2600` inputs replace the stubs at `cart2600.sv:535` and `:542`, so `top.sv:306-307` keeps upstream's text. `mapper_init_busy` stays 0 (`cart2600.sv:592`). | `DARIA_CORE.md:1383` (route), `design_inputs.md:705` R2 (`mapper_init_busy` 0); `design.md:428-436` |
 | P4 | **Every `POCKET_DARIA` hook in a vendored file sits inside `ifdef NO_ARM_MAPPER`.** `run_daria.sh`'s WRAPPER build defines `POCKET_DARIA` with upstream's ARM compiled in (`sim/bupchip/daria/run_daria.sh:97-102`), so an unnested hook would change the oracle. The consequence: no `tb_daria` build ever runs the real hooks, so the first run of them on games is `tb_frames` (P24, 4.2). | Wiring finding 2 |
 | P5 | **`scheme` is gated by the `tia_mode` register:** `scheme = tia_mode ? fbs : 6'd0`, combinational from registers. `daria_profile` is the same condition registered (R16). A live `bs_override` change behaves as upstream's live mapper does: `daria_fe` resets on any scheme change (`daria_fe.sv:94-97`). | `design_inputs.md:719` R16, `:725` (live override); `daria_fe_copy.sv:151-157`; 2.4 |
@@ -341,11 +341,12 @@ Each contract gets a reviewer before it freezes (7.1).
   2. Mutants, each caught by a named check:
      - `2deep` by the bucket (19);
      - `data_stale` by wrong bytes;
-     - `nocmp` by the per-image read and write counts (the prototype's E7 run gave 1,268 reads and 2,590 writes against 1,819 and 3,995: `sim/work/fixb/logs/mut_nocmp_e7.log`, `fixb_e7_b0.log`);
+     - `nocmp` by the `+midswap` check (amended in phase 1: the per-image counts do not catch it on the in-tree harness), not by the per-image read and write counts as first planned (the prototype's E7 run gave 1,268 reads and 2,590 writes against 1,819 and 3,995: `sim/work/fixb/logs/mut_nocmp_e7.log`, `fixb_e7_b0.log`);
      - `viacp` by the bucket (16);
      - `data_comb` only by STA (5.4 (g)), whose ability to fail is shown on Q0 seed 2's database (no `data_comb` fit is needed: `aeee6d2`'s merge has the same unregistered structure);
-     - a forced coincident 7800 strobe in 2600 mode by the P2 assertion.
-  3. `run_sim.sh` on F matches `aeee6d2` frame for frame on the `+fp` fingerprints (3.6), apart from 2600 RAM-mapper `c_rdata` latency.
+     - `nohold` (`m_new` without `~t_new`) by the console-reset sweep at K = 0 with the P2 assertion live (amended in phase 1);
+     - `addr_comb` and an unregistered strobe, like `data_comb`, only by STA (5.4 (g), (h)).
+  3. `run_sim.sh` on F matches `aeee6d2` frame for frame on the `+fp` fingerprints (3.6), apart from 2600 RAM-mapper `c_rdata` latency. (Result: identical on every column, 23 of 23.)
 
 ### 3.5 I3, clocks, constraints and the snapshot
 
@@ -443,7 +444,7 @@ No commit contains game data, firmware or anything from `sim/work/`; `hygiene.sh
 
 ### 4.2 Phases
 
-Three simulation slots while no Quartus job runs, two while one does (the owner's answer to 6.2 question 1, 2026-10-09). The third slot's runs start only while Quartus is idle and are stopped (`SIGSTOP` on the run's process group) for as long as a Quartus job runs, then continued; a job counts as running while it holds `/tmp/daria_quartus.lock` or a container runs. Simulations run at `nice -n 10`; Quartus runs un-niced beside them.
+Three simulation slots while no Quartus job runs, two while one does (the owner's answer to 6.2 question 1, 2026-10-09). The third slot's runs start only while Quartus is idle and are stopped (`SIGSTOP` on the run's process group) for as long as a Quartus job runs, then continued; a job counts as running while it holds the Quartus lock file or a container runs. Simulations run at `nice -n 10`; Quartus runs un-niced beside them.
 
 | Phase | Days | Work | Machine | Reviews |
 |---|---|---|---|---|
@@ -459,7 +460,7 @@ The full frame runs (R2) wait for D, not for Q2: if Q2 forces ÷19, R2 runs agai
 
 ### 4.3 The fit schedule
 
-All fits run one at a time under `flock /tmp/daria_quartus.lock` (`ENVIRONMENT.md:237-246`) in `raetro/quartus:21.1` (`ENVIRONMENT.md:172`), started with `setsid nohup` because of the 2-hour cap on background commands (`ENVIRONMENT.md:483-491`). Each uses the step-7 driver with `WORK=sim/work/step7/fit` and `KEEP_DB` off, except where stated.
+All fits run one at a time under the machine's Quartus lock file (`ENVIRONMENT.md:237-246`) in `raetro/quartus:21.1` (`ENVIRONMENT.md:172`), started with `setsid nohup` because of the 2-hour cap on background commands (`ENVIRONMENT.md:483-491`). Each uses the step-7 driver with `WORK=sim/work/step7/fit` and `KEEP_DB` off, except where stated.
 
 | Fit | Tree | Seeds | Purpose | Time [E] |
 |---|---|---|---|---|
@@ -691,7 +692,7 @@ Each mutant is caught by the check named, or recorded as equivalent with the rea
 | | P20's gate removed | the `+retune` scenario (F6 writes while `pll_busy_s[1]` is high) |
 | | `ready_a` bypassed | 5.4 (k') in Q-mut |
 | | the five `daria_smp` mutants of 3.3 | `tb_daria_smp` |
-| I2 | `2deep`, `data_stale`, `nocmp`, `viacp`, `data_comb`, the forced coincidence | as 3.4 2 |
+| I2 | `2deep`, `data_stale`, `nocmp` (by `+midswap`), `viacp`, `nohold`; `data_comb`, `addr_comb` and an unregistered strobe by STA only | as 3.4 2 |
 | I3 | the guard pair removed | (a)/(b) find 0 paths: `quartus_sta` on Q2 seed 1's database with the altered SDC (minutes, no fit) |
 | | a clock-group cut instead of the ±20 pair | (e) shows the ±20 lines overridden everywhere: the same method |
 | | a missing synchroniser mark | (f) in Q-mut, which must flag the chain as not forced even if Quartus identifies it on its own |
@@ -758,7 +759,7 @@ All lockstep comparisons use one Verilator binary per pair (`VERILATOR` set expl
 ### 7.7 Fresh clone and hygiene
 
 - **Fresh clone.** On the final tree, the lead clones the repository into a new directory, provides the user's firmware and the game images by path (not copied into tracked paths), and runs `sim/step7_gates.sh` with a fresh `WORK`: every game-free gate (the lint sets, `pp_equiv`, the checkers' planted faults, the cartram matrix, `tb_daria_smp`, `tb_dbg_snap`, `run_sim.sh` with its DARIA section, `extra_tests.sh`, `s4/check.sh`). It must exit 0. This also shows that I2's gate no longer depends on the gitignored `sim/work/fixb/`.
-- **Hygiene** (`sim/check/hygiene.sh`, before every merge): over `git diff aeee6d2..HEAD`, no file with a cartridge-image extension (`.a26`, `.a78`, `.bin`, `.rom`) or a binary over a size limit outside a whitelist; no `bupchip.*` firmware; no absolute path into a scratch directory or `/tmp`; and none of a list of assistant and model names, which is kept outside the repository, since writing it in would break the rule it checks.
+- **Hygiene** (`sim/check/hygiene.sh`, before every merge): over `git diff aeee6d2..HEAD`, no file with a cartridge-image extension (`.a26`, `.a78`, `.bin`, `.rom`) or a binary over a size limit outside a whitelist; no `bupchip.*` firmware; no absolute path into a scratch directory or the system temporary directory; and none of a list of assistant and model names, which is kept outside the repository, since writing it in would break the rule it checks.
 
 ---
 
