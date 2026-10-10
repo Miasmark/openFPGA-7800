@@ -222,12 +222,14 @@ def common(j, s):
     j.ok(bool(s["sum"]), "no WIRE summary")
 
 
-def daria_health(j, s, guard=True, resets=0):
+def daria_health(j, s, guard=True, resets=0, selfcheck=True):
     """resets: how many cart_reset rises may abandon an open call (a console
-    reset or the end of a retune; at most one call each)"""
+    reset or the end of a retune; at most one call each). selfcheck: the last
+    image is one of fe_dir's, whose RIOT $FE counts its failed self-checks
+    (a game's or another image's RIOT RAM means nothing there)"""
     common(j, s)
-    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "halts", "psram_viol", "open_old", "errors",
-              "orphans"):
+    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "halts", "psram_viol", "open_old",
+              "orphans") + (("errors",) if selfcheck else ()):
         j.eq(s, k, 0)
     j.ok(s["sum"].get("psram_cs") == 50.0, "psram_cs=%s (want 50.0)" % s["sum"].get("psram_cs"))
     c, ca, r, rf, ab = (s["sum"].get(k, -1) for k in ("calls", "calls_arm", "rets", "rets_fe", "abandoned"))
@@ -341,7 +343,7 @@ def scenarios(img):
          "P6: a non-ARM 2600 image from power-up: released on the plain build's edge")
 
     def second(j, s):
-        daria_health(j, s)
+        daria_health(j, s, selfcheck=False)
         j.eq(s, "f6", 1); j.eq(s, "wr_after_load2", 0); j.eq(s, "hold_rise", 1); j.eq(s, "releases", 2)
     pair("dpc_then_a26", ["+image=" + I("smoke_dpc.bin"), "+wav=320", "+image2=" + I("load_test.a26"), "+image2at=150"],
          second, "P6, 7.3: an ARM image, then a non-ARM 2600 image: released on the plain build's edge, "
@@ -456,7 +458,7 @@ def scenarios(img):
     if tp and os.path.isfile(tp):
         def turbo():
             s = run("daria", "turbo", ["+image=" + tp, "+daria=1200"])
-            j = Judge("turbo"); daria_health(j, s)
+            j = Judge("turbo"); daria_health(j, s, selfcheck=False)
             j.eq(s, "f6", 1); j.eq(s, "f6_win_dt", 1); j.ge(s, "calls", 1); j.ge(s, "misses", 1)
             return j, s
         S["turbo"] = (turbo, "7.3: Turbo (CDFJ+, 128 KB) beyond the 64 KB window: calls return, cache misses, "
