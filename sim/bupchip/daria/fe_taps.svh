@@ -30,8 +30,17 @@
 // differs, both values. They read pre-edge values when called from a
 // posedge block (the state the last edge left).
 //
+// FE_PATH is daria_fe's hierarchical path from the including scope: u_fe by
+// default (tb_daria's own instance, mode A and mode B). A bench that taps the
+// instance inside the Pocket wrapper defines it first, e.g. dut.u_fe
+// (docs/daria_step7/plan.md, P14).
+//
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
+
+`ifndef FE_PATH
+`define FE_PATH u_fe
+`endif
 
 `define FT_CMP(name, fe, up) if ((fe) != (up)) return $sformatf("%s %0h, upstream %0h", name, fe, up);
 
@@ -85,31 +94,31 @@
 		wp = ft_sw(16);
 		for (int i = 0; i < 4; i++)
 			`FT_CMP($sformatf("params[%0d]", i), wp[8 * i +: 8], dut.cart2600.dpcplus.params[i])
-		`FT_CMP("parameter_pointer (pptr)", u_fe.u_core.pptr, dut.cart2600.dpcplus.parameter_pointer)
+		`FT_CMP("parameter_pointer (pptr)", `FE_PATH.u_core.pptr, dut.cart2600.dpcplus.parameter_pointer)
 		for (int i = 0; i < 3; i++)
-			`FT_CMP($sformatf("waveform[%0d]", i), u_fe.u_core.wave[i], dut.cart2600.dpcplus.waveform[i])
-		`FT_CMP("random_number (rnd)", u_fe.u_core.rnd, dut.cart2600.dpcplus.random_number)
-		`FT_CMP("bank", u_fe.u_core.bank, dut.cart2600.dpcplus.bank)
-		`FT_CMP("fast_fetch (ff_en)", u_fe.u_core.ff_en, dut.cart2600.dpcplus.fast_fetch)
-		`FT_CMP("fast_pending (fpend)", u_fe.u_core.fpend, dut.cart2600.dpcplus.fast_pending)
-		`FT_CMP("call_pending (pend_up)", u_fe.u_call.pend_up, dut.cart2600.dpcplus.call_pending)
-		`FT_CMP("service_pending (svc_pend)", u_fe.u_core.svc_pend, dut.cart2600.dpcplus.service_pending)
+			`FT_CMP($sformatf("waveform[%0d]", i), `FE_PATH.u_core.wave[i], dut.cart2600.dpcplus.waveform[i])
+		`FT_CMP("random_number (rnd)", `FE_PATH.u_core.rnd, dut.cart2600.dpcplus.random_number)
+		`FT_CMP("bank", `FE_PATH.u_core.bank, dut.cart2600.dpcplus.bank)
+		`FT_CMP("fast_fetch (ff_en)", `FE_PATH.u_core.ff_en, dut.cart2600.dpcplus.fast_fetch)
+		`FT_CMP("fast_pending (fpend)", `FE_PATH.u_core.fpend, dut.cart2600.dpcplus.fast_pending)
+		`FT_CMP("call_pending (pend_up)", `FE_PATH.u_call.pend_up, dut.cart2600.dpcplus.call_pending)
+		`FT_CMP("service_pending (svc_pend)", `FE_PATH.u_core.svc_pend, dut.cart2600.dpcplus.service_pending)
 		return "";
 	endfunction
 
 	// ---- C2: CDF; the addresses only while upstream reads them (bench.md 3.5) ---------
 	function automatic string ft_c2();
-		`FT_CMP("bank", u_fe.u_core.bank, dut.cart2600.cdf.bank)
-		`FT_CMP("mode", u_fe.u_core.mode, dut.cart2600.cdf.mode)
-		`FT_CMP("fast_pending (fpend)", u_fe.u_core.fpend, dut.cart2600.cdf.fast_pending)
+		`FT_CMP("bank", `FE_PATH.u_core.bank, dut.cart2600.cdf.bank)
+		`FT_CMP("mode", `FE_PATH.u_core.mode, dut.cart2600.cdf.mode)
+		`FT_CMP("fast_pending (fpend)", `FE_PATH.u_core.fpend, dut.cart2600.cdf.fast_pending)
 		if (dut.cart2600.cdf.fast_pending)
-			`FT_CMP("fast_expected_address (fexp)", u_fe.u_core.fexp, dut.cart2600.cdf.fast_expected_address)
-		`FT_CMP("jump_remaining (jr)", u_fe.u_core.jr, dut.cart2600.cdf.jump_remaining)
+			`FT_CMP("fast_expected_address (fexp)", `FE_PATH.u_core.fexp, dut.cart2600.cdf.fast_expected_address)
+		`FT_CMP("jump_remaining (jr)", `FE_PATH.u_core.jr, dut.cart2600.cdf.jump_remaining)
 		if (dut.cart2600.cdf.jump_remaining != 2'd0) begin
-			`FT_CMP("expected_address (jexp)", u_fe.u_core.jexp, dut.cart2600.cdf.expected_address)
-			`FT_CMP("jump_stream (jstream)", u_fe.u_core.jstream, dut.cart2600.cdf.jump_stream)
+			`FT_CMP("expected_address (jexp)", `FE_PATH.u_core.jexp, dut.cart2600.cdf.expected_address)
+			`FT_CMP("jump_stream (jstream)", `FE_PATH.u_core.jstream, dut.cart2600.cdf.jump_stream)
 		end
-		`FT_CMP("call_pending (pend_up)", u_fe.u_call.pend_up, dut.cart2600.cdf.call_pending)
+		`FT_CMP("call_pending (pend_up)", `FE_PATH.u_call.pend_up, dut.cart2600.cdf.call_pending)
 		return "";
 	endfunction
 
@@ -133,49 +142,49 @@
 	//          (the sum and AMPLITUDE), which pause_lane masks alone
 	`define FT_AUD dut.cart2600.mapper_audio
 	function automatic string ft_a1_tick();
-		`FT_CMP("accum", u_fe.u_audio.accum, `FT_AUD.tick_accum)
-		`FT_CMP("tick", u_fe.u_audio.tick, `FT_AUD.audio_tick)
-		`FT_CMP("nv (note_voice)", u_fe.u_audio.nv, `FT_AUD.note_voice)
-		`FT_CMP("nval (note_value)", u_fe.u_audio.nval, `FT_AUD.note_value)
+		`FT_CMP("accum", `FE_PATH.u_audio.accum, `FT_AUD.tick_accum)
+		`FT_CMP("tick", `FE_PATH.u_audio.tick, `FT_AUD.audio_tick)
+		`FT_CMP("nv (note_voice)", `FE_PATH.u_audio.nv, `FT_AUD.note_voice)
+		`FT_CMP("nval (note_value)", `FE_PATH.u_audio.nval, `FT_AUD.note_value)
 		return "";
 	endfunction
 	function automatic string ft_a1_cf();
-		`FT_CMP("counter[0]", u_fe.u_audio.counter[0], `FT_AUD.counter0)
-		`FT_CMP("counter[1]", u_fe.u_audio.counter[1], `FT_AUD.counter1)
-		`FT_CMP("counter[2]", u_fe.u_audio.counter[2], `FT_AUD.counter2)
-		`FT_CMP("freq[0]", u_fe.u_audio.freq[0], `FT_AUD.frequency0)
-		`FT_CMP("freq[1]", u_fe.u_audio.freq[1], `FT_AUD.frequency1)
-		`FT_CMP("freq[2]", u_fe.u_audio.freq[2], `FT_AUD.frequency2)
+		`FT_CMP("counter[0]", `FE_PATH.u_audio.counter[0], `FT_AUD.counter0)
+		`FT_CMP("counter[1]", `FE_PATH.u_audio.counter[1], `FT_AUD.counter1)
+		`FT_CMP("counter[2]", `FE_PATH.u_audio.counter[2], `FT_AUD.counter2)
+		`FT_CMP("freq[0]", `FE_PATH.u_audio.freq[0], `FT_AUD.frequency0)
+		`FT_CMP("freq[1]", `FE_PATH.u_audio.freq[1], `FT_AUD.frequency1)
+		`FT_CMP("freq[2]", `FE_PATH.u_audio.freq[2], `FT_AUD.frequency2)
 		return "";
 	endfunction
 	function automatic string ft_a1_rep(input logic no_byte);
-		`FT_CMP("st (one-hot; upstream's state as 1 << state)", u_fe.u_audio.st, 12'd1 << `FT_AUD.state)
+		`FT_CMP("st (one-hot; upstream's state as 1 << state)", `FE_PATH.u_audio.st, 12'd1 << `FT_AUD.state)
 		for (int v = 0; v < 3; v++)
-			`FT_CMP($sformatf("rc[%0d] (refresh_counter)", v), u_fe.u_audio.rc[v], `FT_AUD.refresh_counter[v])
-		`FT_CMP("rp (refresh_pending)", u_fe.u_audio.rp, `FT_AUD.refresh_pending)
-		`FT_CMP("np (note_pending)", u_fe.u_audio.np, `FT_AUD.note_pending)
-		`FT_CMP("voice", u_fe.u_audio.voice, `FT_AUD.voice)
-		if (!no_byte) `FT_CMP("ssum (sample_sum[7:0])", u_fe.u_audio.ssum, `FT_AUD.sample_sum[7:0])
-		`FT_CMP("wsh (waveform_shift)", u_fe.u_audio.wsh, `FT_AUD.waveform_shift)
-		`FT_CMP("woff (waveform_offset)", u_fe.u_audio.woff, `FT_AUD.waveform_offset)
-		`FT_CMP("dig_addr (digital_address)", u_fe.u_audio.dig_addr, `FT_AUD.digital_address)
-		`FT_CMP("dig_low (digital_low_nibble)", u_fe.u_audio.dig_low, `FT_AUD.digital_low_nibble)
-		`FT_CMP("dig_ram (digital_ram_addr)", u_fe.u_audio.dig_ram, `FT_AUD.digital_ram_addr)
-		`FT_CMP("dig_smp (digital_sample)", u_fe.u_audio.dig_smp, `FT_AUD.digital_sample)
-		if (!no_byte) `FT_CMP("amplitude", u_fe.u_audio.amplitude, `FT_AUD.amplitude)
-		`FT_CMP("aud_issue (ram_en)", u_fe.aud_issue, `FT_AUD.ram_en)
+			`FT_CMP($sformatf("rc[%0d] (refresh_counter)", v), `FE_PATH.u_audio.rc[v], `FT_AUD.refresh_counter[v])
+		`FT_CMP("rp (refresh_pending)", `FE_PATH.u_audio.rp, `FT_AUD.refresh_pending)
+		`FT_CMP("np (note_pending)", `FE_PATH.u_audio.np, `FT_AUD.note_pending)
+		`FT_CMP("voice", `FE_PATH.u_audio.voice, `FT_AUD.voice)
+		if (!no_byte) `FT_CMP("ssum (sample_sum[7:0])", `FE_PATH.u_audio.ssum, `FT_AUD.sample_sum[7:0])
+		`FT_CMP("wsh (waveform_shift)", `FE_PATH.u_audio.wsh, `FT_AUD.waveform_shift)
+		`FT_CMP("woff (waveform_offset)", `FE_PATH.u_audio.woff, `FT_AUD.waveform_offset)
+		`FT_CMP("dig_addr (digital_address)", `FE_PATH.u_audio.dig_addr, `FT_AUD.digital_address)
+		`FT_CMP("dig_low (digital_low_nibble)", `FE_PATH.u_audio.dig_low, `FT_AUD.digital_low_nibble)
+		`FT_CMP("dig_ram (digital_ram_addr)", `FE_PATH.u_audio.dig_ram, `FT_AUD.digital_ram_addr)
+		`FT_CMP("dig_smp (digital_sample)", `FE_PATH.u_audio.dig_smp, `FT_AUD.digital_sample)
+		if (!no_byte) `FT_CMP("amplitude", `FE_PATH.u_audio.amplitude, `FT_AUD.amplitude)
+		`FT_CMP("aud_issue (ram_en)", `FE_PATH.aud_issue, `FT_AUD.ram_en)
 		if (`FT_AUD.ram_en)
-			`FT_CMP("aud_addr (ram_addr)", {2'b00, u_fe.aud_addr}, `FT_AUD.ram_addr)
-		`FT_CMP("aud_take (audio_ram_grant)", u_fe.aud_take, dut.cart2600.audio_ram_grant)
+			`FT_CMP("aud_addr (ram_addr)", {2'b00, `FE_PATH.aud_addr}, `FT_AUD.ram_addr)
+		`FT_CMP("aud_take (audio_ram_grant)", `FE_PATH.aud_take, dut.cart2600.audio_ram_grant)
 		return "";
 	endfunction
 
 	// Both engines quiet: the deposit's condition (design 12.1: both IDLE with
 	// !tdef & !mwin & !rp & !np), and no sample in flight on either side.
 	function automatic logic ft_aud_quiet();
-		return `FT_AUD.state == 4'd0 && u_fe.u_audio.st == 12'd1 && !`FT_AUD.refresh_pending &&
-			!u_fe.u_audio.rp && !`FT_AUD.note_pending && !u_fe.u_audio.np && !u_fe.u_audio.tdef &&
-			!u_fe.mwin && !u_fe.u_audio.busy_l && !u_fe.u_audio.busy_r && !dut.cart2600.arm_sample_busy;
+		return `FT_AUD.state == 4'd0 && `FE_PATH.u_audio.st == 12'd1 && !`FT_AUD.refresh_pending &&
+			!`FE_PATH.u_audio.rp && !`FT_AUD.note_pending && !`FE_PATH.u_audio.np && !`FE_PATH.u_audio.tdef &&
+			!`FE_PATH.mwin && !`FE_PATH.u_audio.busy_l && !`FE_PATH.u_audio.busy_r && !dut.cart2600.arm_sample_busy;
 	endfunction
 
 	// The resync (bench.md 7.6, design 12.1): upstream's replica state into
@@ -183,29 +192,29 @@
 	// deposits the counters, the frequencies and the accumulator. These are the
 	// registers that carry public_flat_rw (1.7).
 	task automatic fe_deposit_audio(input logic cf);
-		u_fe.u_audio.st = 12'd1 << `FT_AUD.state;
-		u_fe.u_audio.rp = `FT_AUD.refresh_pending;
-		u_fe.u_audio.np = `FT_AUD.note_pending;
-		u_fe.u_audio.nv = `FT_AUD.note_voice;
-		u_fe.u_audio.nval = `FT_AUD.note_value;
-		u_fe.u_audio.voice = `FT_AUD.voice;
-		u_fe.u_audio.ssum = `FT_AUD.sample_sum[7:0];
-		u_fe.u_audio.wsh = `FT_AUD.waveform_shift;
-		u_fe.u_audio.woff = `FT_AUD.waveform_offset;
-		u_fe.u_audio.dig_addr = `FT_AUD.digital_address;
-		u_fe.u_audio.dig_low = `FT_AUD.digital_low_nibble;
-		u_fe.u_audio.dig_ram = `FT_AUD.digital_ram_addr;
-		u_fe.u_audio.dig_smp = `FT_AUD.digital_sample;
-		u_fe.u_audio.amplitude = `FT_AUD.amplitude;
-		for (int v = 0; v < 3; v++) u_fe.u_audio.rc[v] = `FT_AUD.refresh_counter[v];
+		`FE_PATH.u_audio.st = 12'd1 << `FT_AUD.state;
+		`FE_PATH.u_audio.rp = `FT_AUD.refresh_pending;
+		`FE_PATH.u_audio.np = `FT_AUD.note_pending;
+		`FE_PATH.u_audio.nv = `FT_AUD.note_voice;
+		`FE_PATH.u_audio.nval = `FT_AUD.note_value;
+		`FE_PATH.u_audio.voice = `FT_AUD.voice;
+		`FE_PATH.u_audio.ssum = `FT_AUD.sample_sum[7:0];
+		`FE_PATH.u_audio.wsh = `FT_AUD.waveform_shift;
+		`FE_PATH.u_audio.woff = `FT_AUD.waveform_offset;
+		`FE_PATH.u_audio.dig_addr = `FT_AUD.digital_address;
+		`FE_PATH.u_audio.dig_low = `FT_AUD.digital_low_nibble;
+		`FE_PATH.u_audio.dig_ram = `FT_AUD.digital_ram_addr;
+		`FE_PATH.u_audio.dig_smp = `FT_AUD.digital_sample;
+		`FE_PATH.u_audio.amplitude = `FT_AUD.amplitude;
+		for (int v = 0; v < 3; v++) `FE_PATH.u_audio.rc[v] = `FT_AUD.refresh_counter[v];
 		if (cf) begin
-			u_fe.u_audio.accum = `FT_AUD.tick_accum;
-			u_fe.u_audio.counter[0] = `FT_AUD.counter0;
-			u_fe.u_audio.counter[1] = `FT_AUD.counter1;
-			u_fe.u_audio.counter[2] = `FT_AUD.counter2;
-			u_fe.u_audio.freq[0] = `FT_AUD.frequency0;
-			u_fe.u_audio.freq[1] = `FT_AUD.frequency1;
-			u_fe.u_audio.freq[2] = `FT_AUD.frequency2;
+			`FE_PATH.u_audio.accum = `FT_AUD.tick_accum;
+			`FE_PATH.u_audio.counter[0] = `FT_AUD.counter0;
+			`FE_PATH.u_audio.counter[1] = `FT_AUD.counter1;
+			`FE_PATH.u_audio.counter[2] = `FT_AUD.counter2;
+			`FE_PATH.u_audio.freq[0] = `FT_AUD.frequency0;
+			`FE_PATH.u_audio.freq[1] = `FT_AUD.frequency1;
+			`FE_PATH.u_audio.freq[2] = `FT_AUD.frequency2;
 		end
 	endtask
 	`undef FT_AUD
@@ -239,13 +248,13 @@
 		logic [12:0] dav;
 		logic [16:0] off, sav;
 		logic  [7:0] fc, cc;
-		dav = 13'h1000 - (u_fe.u_core.svc_dst - 13'h0C00);
-		off = u_fe.u_core.svc_src - 17'h00C00;
+		dav = 13'h1000 - (`FE_PATH.u_core.svc_dst - 13'h0C00);
+		off = `FE_PATH.u_core.svc_src - 17'h00C00;
 		sav = 17'h07400 - off;
-		fc = (dav < {5'd0, u_fe.u_core.svc_rem}) ? dav[7:0] : u_fe.u_core.svc_rem;
+		fc = (dav < {5'd0, `FE_PATH.u_core.svc_rem}) ? dav[7:0] : `FE_PATH.u_core.svc_rem;
 		cc = (off >= 17'h07400) ? 8'd0 : ((sav < {9'd0, fc}) ? sav[7:0] : fc);
-		return {u_fe.u_core.svc_fill, 2'b00, u_fe.u_core.svc_src, 2'b00, u_fe.u_core.svc_dst,
-			u_fe.u_core.svc_fill ? fc : cc, u_fe.u_core.svc_val};
+		return {`FE_PATH.u_core.svc_fill, 2'b00, `FE_PATH.u_core.svc_src, 2'b00, `FE_PATH.u_core.svc_dst,
+			`FE_PATH.u_core.svc_fill ? fc : cc, `FE_PATH.u_core.svc_val};
 	endfunction
 	function automatic logic [51:0] ft_svc_up();
 		return {dut.cart2600.dpcplus.service_fill, dut.cart2600.dpcplus.service_source,
