@@ -15,8 +15,8 @@
 //                     started it: the capture's cartridge window closing (and
 //                     how many clk_sys after its fall: 1 when cart_win reaches
 //                     daria_fe unchanged), or a reset rise; at its end a hash
-//                     of the cart RAM it wrote (and of the state RAM's 32 call
-//                     words), and whether it equals the first F6's
+//                     of the cart RAM it wrote (and of state RAM words $00-$1F,
+//                     which it clears), and whether it equals the first F6's
 //   WIRE pll_busy ...      the synchronised pll_busy (pll_busy_s[1]) rising and
 //                     falling (+retune), in both builds
 //   WIRE reset_in ...      the bench's reset_in rising (+resetat)

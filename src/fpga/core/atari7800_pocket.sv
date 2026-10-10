@@ -405,8 +405,9 @@ assign      daria_hold = daria_init_busy & daria_arm;
 // rose runs on with the console in reset, a few hundred clk_sys for a
 // long copy against the about 50 between pll_busy and the PLL's stop, so
 // it would write while the clocks stop. The retune's F6 rewrites all of
-// the cart RAM and clears the state RAM's call words, as at power-up, so a
-// dropped write is never missed. F6 itself (init_busy) is not gated: a
+// the cart RAM and clears the front end's state RAM words ($00-$1F), as at
+// power-up, so a dropped write is never missed (the 6507, held in reset,
+// posts no call). F6 itself (init_busy) is not gated: a
 // retune inside a load's F6 (a menu region change, P20's residual) writes
 // as it did.
 wire        daria_we_ok = ~pll_busy_s[1] | daria_init_busy;
