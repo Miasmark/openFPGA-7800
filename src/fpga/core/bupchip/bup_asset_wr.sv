@@ -7,8 +7,9 @@
 // bup_capture (clk_sys) holds each message in a register and flips a toggle.
 // Two flops and a change detect see the toggle, and the message is copied at
 // once into a one-entry buffer: the capture may replace its register 5 clk_sys
-// clocks (10 clk_arm at 28.636 MHz) later, before a PSRAM write started from
-// it would be done. Messages are handled in order:
+// clocks (349 ns: 10 clk_arm at 28.636 MHz, 2 x clk_sys; 13 at 38.18 MHz,
+// VCO/18 with POCKET_DARIA) later, before a PSRAM write started from it would
+// be done. Messages are handled in order:
 //
 //   START     clears asset_ready and img_ready, which hold the CPU (in the
 //             BupChip's profile and in DARIA's) from the next clock
