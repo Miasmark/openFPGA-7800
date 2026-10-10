@@ -175,7 +175,8 @@ wire bupfw_dl = 1'b0;
 // pll_busy_s[1]'s fall. daria_fe's cart_reset is masked while pll_busy_s[1]
 // is high, so its one rise comes at that fall with clk_sys running, and F6
 // starts 8 clocks later; init_busy then holds the console from the next
-// clock, inside the 16. F6 never runs while the PLL is retuned.
+// clock, inside the 16. F6 never runs while the PLL is retuned, and no
+// other front-end write reaches its RAMs then (daria_we_ok, below).
 wire       daria_hold, daria_arm;
 /* verilator lint_off PROCASSINIT */
 reg        daria_rt_hold = 1'b0;
@@ -397,6 +398,18 @@ wire        daria_crb_we, daria_stb_we;
 wire  [3:0] daria_crb_be, daria_stb_be;
 wire  [7:0] daria_stb_addr;
 assign      daria_hold = daria_init_busy & daria_arm;
+
+// P20 for the front end's other writes: none reaches cart RAM or state RAM
+// (bupchip's port B write enables) while pll_busy_s[1] is high, unless F6
+// runs. A DPC+ copy or fill that the 6507 started just before pll_busy
+// rose runs on with the console in reset, a few hundred clk_sys for a
+// long copy against the about 50 between pll_busy and the PLL's stop, so
+// it would write while the clocks stop. The retune's F6 rewrites all of
+// the cart RAM and clears the state RAM's call words, as at power-up, so a
+// dropped write is never missed. F6 itself (init_busy) is not gated: a
+// retune inside a load's F6 (a menu region change, P20's residual) writes
+// as it did.
+wire        daria_we_ok = ~pll_busy_s[1] | daria_init_busy;
 `endif
 
 ////////////////////////////  MEMORY  /////////////////////////////////////
@@ -1333,12 +1346,12 @@ bupchip_pocket bupchip
 	.daria_halted   (),               // read by step 8's BUP_DEBUG overlay
 	/* verilator lint_on PINCONNECTEMPTY */
 	.daria_stb_addr (daria_stb_addr),
-	.daria_stb_we   (daria_stb_we),
+	.daria_stb_we   (daria_stb_we & daria_we_ok),
 	.daria_stb_be   (daria_stb_be),
 	.daria_stb_wd   (daria_stb_wd),
 	.daria_stb_q    (daria_stb_q),
 	.daria_crb_addr (daria_crb_addr),
-	.daria_crb_we   (daria_crb_we),
+	.daria_crb_we   (daria_crb_we & daria_we_ok),
 	.daria_crb_be   (daria_crb_be),
 	.daria_crb_wd   (daria_crb_wd),
 	.daria_crb_q    (daria_crb_q),
