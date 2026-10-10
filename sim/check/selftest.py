@@ -3,14 +3,17 @@
 (DARIA step 7, docs/daria_step7/plan.md 3.6 unit gate 1, 7.1 and 7.2 for I4).
 
   selftest.py --work DIR [--run-sim LOG] [--extra LOG --extra-ref REF
-              [--extra-dir DIR]] [--fp FILE] [--cartram LOG] [--tools]
+              [--extra-dir DIR]] [--fp FILE] [--cartram LOG]
+              [--artape LOG [--artape-ref REF]] [--tools]
 
 DIR receives the planted copies. Every case prints "ok" when the checker
 gave the expected verdict, "WRONG" otherwise; the last line is SELFTEST
 pass or FAIL, and so is the exit status (0 or 1).
   --run-sim LOG    a passing run_sim.sh log: wrong TONE ratio, BIOS_BOOT
                    FAIL, a skipped section, a missing PLL_REGION line, a
-                   truncated log, a geometry change
+                   truncated log, a geometry change, BUPCHIP_E2E FAIL, a
+                   case cut short (an earlier FRAME line with the right
+                   geometry), a SIMULATOR EXIT line
   --extra LOG      a passing extra_tests.sh log, with its reference log
                    (--extra-ref) and, for a log from before step 7, its
                    extra/ directory (--extra-dir): an ARCHECK mismatch, a
@@ -19,8 +22,12 @@ pass or FAIL, and so is the exit status (0 or 1).
                    out of order; with AR_TAPE=1 in the log, the tape
                    multiload's second load and the tape full load's ARCHECK
   --fp FILE        a tb_load/tb_system fp.csv: frame_gate --strict on a
-                   truncated copy, a one-frame shift, one RIOT hash, one
-                   pixel (video) hash and a one-clock len_sys change
+                   truncated copy (a frame, or a line, missing), a one-frame
+                   shift, one RIOT hash, one pixel (video) hash and a
+                   one-clock len_sys change; the whole run one clk_sys later
+                   (t_sys), the reset released one clk_sys later (rst_sys),
+                   one more release (rst_n), the time columns missing; two
+                   zero-byte and two header-only files
   --cartram LOG    a passing tb_cartram log (cartram2600_test.py's, E7 blend
                    off): a wrong byte, a lost write, a bucket past s19, a
                    changed read count, a fail code, a P2 $fatal; and a Fix B
@@ -33,18 +40,27 @@ pass or FAIL, and so is the exit status (0 or 1).
   --tools          the guards on scratch git repositories in DIR:
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
-                   and a missing DARIA qsf line, an SDC code change; and the
-                   changes it must let through), hygiene.sh (a cartridge
-                   image, a PNG, a firmware file, a path into the temporary
-                   directory, a listed name, no list, a list inside the
-                   repository, a binary and an oversized file) and
-                   pp_equiv.py on a small Quartus tree (a comment, a layout
-                   and a dead-ifdef edit keep the hash; a code edit, a live
-                   ifdef edit and a removed macro change it; --expect and
-                   --max-token fail); needs git and VERILATOR
+                   and a missing DARIA qsf line, an SDC code change, a
+                   removed translate_off/on pair, a new daria_ or
+                   bup_dbg_snap file with `define, `undef, `timescale or
+                   left at `default_nettype none; and the changes it must
+                   let through), hygiene.sh (a cartridge image, a PNG, a
+                   firmware file, a path into the temporary directory in
+                   each form a doc or script spells it: backticks, > and 2>,
+                   brackets, a comma and the rest, a listed name, also inside
+                   an identifier, no list, a list inside the repository, a
+                   binary and an oversized file) and pp_equiv.py on a small
+                   Quartus tree (a comment, a layout and a dead-ifdef edit
+                   keep the hash; a code edit, a live ifdef edit and a
+                   removed macro change it; --expect and --max-token fail;
+                   an excluded daria_ file holding a directive that reaches
+                   later files is refused); needs git and VERILATOR
   always           frame_gate on synthetic R1/R2 run directories: identical;
                    a release_shift that is excused; one that lasts too long;
-                   a RIOT difference with no shifted release; a video, a
+                   one that starts the frame after the shifted call's; one
+                   that reaches the last frame (never equal again); holds
+                   that cross a frame end (frames.csv); a RIOT difference
+                   with no shifted release; a video, a
                    len_sys and a cpu difference; a truncated file; a call
                    count and a late-call difference; the STATUS line's halts,
                    PSRAM violations, guard and unlocks; Spiders' excused
