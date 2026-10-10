@@ -9,8 +9,9 @@
 # calls.csv.gz, slack.csv, frames.csv, summary.txt, pcs.txt.gz, dtrace.txt.gz
 # (the ARM's ROM data reads; DTRACE=0 leaves it out), snapshots as PNG, run.log
 # and report.txt. Everything there derives from the game: it stays in sim/work
-# (gitignored). Tested with Verilator 5.040; about 1 minute of wall time per
-# emulated second, on one CPU. Set NAME= to name the run directory.
+# (gitignored). Tested with Verilator 5.040; a plain build takes 79-104 s of
+# wall time per emulated second, on one CPU, and mode B (MODE_B=1) about 286 s
+# (3.5 simulated ms per wall second). Set NAME= to name the run directory.
 # SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
 # daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
 # (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
