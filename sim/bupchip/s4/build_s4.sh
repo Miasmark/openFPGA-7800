@@ -13,8 +13,13 @@
 #   THROTTLE       BUP_THROTTLE: clocks of every 16 that may start an
 #                  instruction (16, no throttle)
 #   DARIA=1        the wrapper built with POCKET_DARIA (docs/DARIA_CORE.md):
-#                  THUMB 1, the cache's two ways, daria_mem, daria_call and
-#                  daria_mmio, in the BupChip profile
+#                  THUMB 1, the cache's two ways, daria_mem, daria_call,
+#                  daria_mmio and daria_smp, in the BupChip profile; and
+#                  bup_dbg_snap.sv when it exists (lane I3's file, which
+#                  arrives with commit D). When bupchip_pocket.sv instantiates
+#                  bup_dbg_snap, the bench is built with -DS4_SNAP and checks
+#                  the snapshot (tb_s4.sv's header; object directory _snap);
+#                  the file must then exist
 #   PSRAM_CS       psram.sv's CLOCK_SPEED (28.636364)
 #   WORK           build products (default sim/work/bupchip/s4)
 set -e
@@ -42,7 +47,15 @@ SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_periphera
 if [ "${DARIA:-0}" != 0 ]; then
 	OBJ="${OBJ}_daria"
 	DEFS+=(-DPOCKET_DARIA)
-	SRCS+=("$CORE/daria_mem.sv" "$CORE/daria_call.sv" "$CORE/daria_mmio.sv")
+	SRCS+=("$CORE/daria_mem.sv" "$CORE/daria_call.sv" "$CORE/daria_mmio.sv" "$CORE/daria_smp.sv")
+	[ -f "$CORE/bup_dbg_snap.sv" ] && SRCS+=("$CORE/bup_dbg_snap.sv")
+	# an instance "bup_dbg_snap [#(...)] NAME (", comments removed
+	if sed 's,//.*,,' "$CORE/bupchip_pocket.sv" | tr '\n' ' ' \
+			| grep -qE '(^|[^A-Za-z0-9_$.])bup_dbg_snap\s*(#\s*\([^;]*\))?\s*[A-Za-z_][A-Za-z0-9_$]*\s*\('; then
+		[ -f "$CORE/bup_dbg_snap.sv" ] || { echo "build_s4.sh: bupchip_pocket.sv instantiates bup_dbg_snap, but $CORE/bup_dbg_snap.sv does not exist" >&2; exit 2; }
+		OBJ="${OBJ}_snap"
+		DEFS+=(-DS4_SNAP)
+	fi
 fi
 if [ -n "$PSRAM_CS" ]; then
 	OBJ="${OBJ}_cs${PSRAM_CS%%.*}"

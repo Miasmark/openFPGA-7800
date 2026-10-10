@@ -8,7 +8,9 @@ error). docs/DARIA_CORE.md, "Fix B" section 4; docs/daria_step7/plan.md 1.2
 row 6 and 3.6.
 
   cartram2600_test.py MAPPER > image.bin
-      one image per RAM mapper: f8sc f4sc fa cv e7 3e wd cty. Prints its
+      one image per RAM mapper: f8sc f4sc fa cv e7 3e wd cty, and hi_MAPPER
+      for the same with the RAM areas at $Fxxx (A15 = 1, as Superchip code
+      running at $F000-$FFFF addresses them) instead of $1xxx. Prints its
       +bs= index on stderr. Each image runs, for every RAM area of its
       mapper, over and over: STA W,X (a dummy read of the write port
       first), CMP R,X; STA (pw),Y and CMP (pr),Y at a second offset; a
@@ -46,6 +48,42 @@ row 6 and 3.6.
       every clk_sdram edge of the 6507 cycle in turn. With Fix B the read
       whose cycle has it at s8 lands at s19: the run must reach s19 and go
       no further. Before Fix B it measures today's worst case (s15).
+  cartram2600_test.py reset [--work DIR] [--build] [--rtl-tree DIR]
+                            [--profile P] [--only RUN,...] [--ref-logs DIR]
+      the console-reset reproduction (Fix B's review finding; plan P2 as
+      amended): tb_cartram's +rsmode resets, each rising K clk_sys after E1
+      of a cart-RAM cycle, K swept over 0..23 (the cycle and the next), on
+      the A15 = 1 images hi_f8sc and hi_e7 (read and write cycles), the
+      Supercharger's full load (its RAM writes), with Flicker Blend, by
+      reset_in and by a reload of the image (with the bank-switch override,
+      and once with the mapper detected), the A15 = 0 control (f8sc), and
+      K = 0 eight times on three of them; the P2 assertion stays live in
+      every run (a coincidence stops it). Pass, per run: every reset done;
+      every strobe the mapper showed at E1 issued by sram_ctrl, a write with
+      its byte, a read at s13 or before (c_rdata by s19); no strobe at E1
+      only where expected (the detected-mapper reload at K = 0); no P2
+      coincidence; and the matrix's monitor checks (no wrong or stale byte,
+      writes issued = strobes, shadow = SRAM, none past s19, the build's
+      buckets with the post-reset allowance below). --ref-logs DIR: another
+      build's reset logs (aeee6d2's), whose per-reset cartridge accesses
+      this build's must equal.
+  cartram2600_test.py midswap [--work DIR] [--build] [--rtl-tree DIR]
+      Fix B's address compare (plan 3.4 item 2, the nocmp mutant): +midswap
+      changes the address inside a held, registered 2600 read strobe; the
+      new key must be served.
+  cartram2600_test.py forcecoinc [--work DIR] [--build] [--rtl-tree DIR]
+      plan P2's assertion: +forcecoinc=c_rd forces a 7800 strobe into the
+      clk_sdram cycle of a new 2600 request (200 times): the 2600 access
+      must be served and the assertion must not fire (m_new yields: the
+      nohold mutant fires it); +forcecoinc=m_new forces m_new itself there:
+      the assertion must fire (it is live).
+  Each of matrix, s19, reset, midswap and forcecoinc takes --mutant NAME
+  (nohold: m_new without ~t_new; nocmp: t_new the registered strobe's rise
+  only, no address compare): sram_ctrl.sv is mutated in a copy of the tree's
+  tracked src/fpga in WORK/mut_NAME, built and run there, and the verdict is
+  inverted: CAUGHT (exit 0) when the checks fail, NOT CAUGHT (exit 1) when
+  they pass. nohold must be caught by reset (the K = 0 runs) and by
+  forcecoinc; nocmp by midswap.
 
 Profiles (--profile, default auto: from the CARTRAM sram_ctrl line, which
 tb_cartram prints from SIM_FIXB, set by run_sim.sh when sram_ctrl.sv has
@@ -53,7 +91,11 @@ t_new): the latency buckets each build may show, Flicker Blend off / on:
   base  (aeee6d2)  off: 11 normal, 7 repeated address;  on: 11 or 14, 9
   fixb  (F, D)     off: 15 normal, 11 repeated address; on: 15, 11 or 14
 Every bucket must be one of these; no read may land past s19; on the 8
-mapper images the normal bucket holds more reads than the repeated one.
+mapper images the normal bucket holds more reads than the repeated one. The
+first CPU read of cart RAM after each release of the console reset (the
+CARTRAM post-reset line) may also land one bucket later, at s15 (base) or
+s19 (fixb): another client's access can still be in flight then (a run with
+a console reset showed it once on each build).
 With the fixb profile, chosen or detected, every run must also show the P2
 assertion armed (tb_load's "P2 armed" line, from SIM_FIXB): Fix B buckets
 on a build without the assertion fail.
@@ -106,6 +148,17 @@ BUCKETS = {   # (profile, blend): (normal, repeated address)
     ("fixb", 0): ({15}, {11}), ("fixb", 1): ({15}, {11, 14}),
 }
 LIMIT = 19     # the c_rdata multicycle: a byte for the latch at s24 must be written by s19
+POST = {"base": 15, "fixb": 19}   # the bucket the first read after a console reset may also use
+
+# sram_ctrl.sv mutants (--mutant): (the text, its replacement)
+MUTANTS = {
+    "nohold": ("wire        m_new  = ((c_rd & ~c_rd_q) | (c_wr & ~c_wr_q)) & ~t_new;\n",
+               "wire        m_new  = (c_rd & ~c_rd_q) | (c_wr & ~c_wr_q);\n"),
+    "nocmp": ("wire        t_new = (t_rd_q | t_wr_q) & (~t_last_v | (t_key != t_last));\n",
+              "reg t_rd_s = 1'b0, t_wr_s = 1'b0;\n"
+              "always @(posedge clk) begin t_rd_s <= t_rd_q; t_wr_s <= t_wr_q; end\n"
+              "wire        t_new = (t_rd_q & ~t_rd_s) | (t_wr_q & ~t_wr_s);\n"),
+}
 
 
 # ------------------------------------------------------------------ images
@@ -155,13 +208,15 @@ def areas_for(name):
     raise SystemExit("unknown mapper " + name)
 
 
-def program(areas):
+def program(areas, hi=False):
     it = [0x78, 0xD8, 0xA2, 0xFF, 0x9A,
           0xA9, 0x04, 0x85, AUDC0, 0xA9, 0x0F, 0x85, AUDV0,
           0xA9, 0x01, 0x85, AUDF0,
           0xA9, 0x00, 0x85, SEED,
           ("label", "iter")]
     for k, (setup, w, r, n, off) in enumerate(areas):
+        if hi:      # the same RAM at $Fxxx: A15 = 1 (A13-A14 are not decoded)
+            w, r = w | 0xE000, r | 0xE000
         nn = n & 0xFF
         L = lambda s: f"{s}{k}"
         fail = lambda ph: 2 + 5 * k + ph
@@ -207,7 +262,10 @@ def bank4k(prog, sc):
 
 
 def image(name):
-    prog = program(areas_for(name))
+    hi = name.startswith("hi_")
+    if hi:
+        name = name[3:]
+    prog = program(areas_for(name), hi)
     assert len(prog) < 0x3E0, len(prog)
     if name in ("f8sc", "f4sc", "fa", "cty"):
         size = {"f8sc": 0x2000, "f4sc": 0x8000, "fa": 0x3000, "cty": 0x8000}[name]
@@ -294,6 +352,30 @@ def parse(log):
             stopped = False
     r["tape_loads"] = loads
     r["md5"] = re.findall(r"^-- tb_cartram: (obj_cartram/vtb md5 \S+)", t, re.M)
+    m = re.search(r"^CARTRAM ports: .*?: reads (\d+), writes (\d+); .*?: reads (\d+), writes (\d+)", t, re.M)
+    r["ports"] = tuple(int(x) for x in m.groups()) if m else None
+    m = re.search(r"^CARTRAM post-reset reads: (\d+) .*histogram:(.*)$", t, re.M)
+    r["post"] = {int(a): int(b) for a, b in re.findall(r"(\d+):(\d+)", m.group(2))} if m else {}
+    r["rst"] = []
+    for m in re.finditer(r"^RST (\d+) K=(\d+): strobe (.*?); (.*?); cart(.*?); bios reads (\d+); bus before E6 (\w+); "
+                         r"P2 coincidences (\d+)$", t, re.M):
+        i, k, strobe, iss, cart, bios, bus, co = m.groups()
+        e = re.match(r"issued at s(-?\d+)(?: data (\w+))?", iss)
+        r["rst"].append(dict(i=int(i), k=int(k), strobe=strobe, issued=bool(e), edge=int(e.group(1)) if e else None,
+                             data=e.group(2) if e else None, nos=(iss == "-"), cart=cart.split(), bios=int(bios),
+                             bus=bus, coinc=int(co)))
+    m = re.search(r"^RST summary: (\d+) of (\d+) resets", t, re.M)
+    r["rst_done"] = (int(m.group(1)), int(m.group(2))) if m else None
+    r["rst_incomplete"] = bool(re.search(r"^RST INCOMPLETE", t, re.M))
+    m = re.search(r"^MIDSWAP verdict: (.*)$", t, re.M)
+    r["midswap"] = m.group(1).strip() if m else None
+    m = re.search(r"^MIDSWAP at .*cart accesses for the new key (\d+), for the old key (\d+)", t, re.M)
+    r["midswap_n"] = (int(m.group(1)), int(m.group(2))) if m else None
+    m = re.search(r"^FORCECOINC: (\d+) forced \((\w+)\) in 2600 mode; m_new (\d+) \(in 2600 mode (\d+)\)", t, re.M)
+    r["forcecoinc"] = (int(m.group(1)), m.group(2), int(m.group(3)), int(m.group(4))) if m else None
+    r["p2_fired"] = bool(re.search(r"P2: sram_ctrl m_new and t_new in the same clk_sdram cycle", t))
+    m = re.search(r"^exit (-?\d+)$", t, re.M)
+    r["exit"] = int(m.group(1)) if m else None
     return r
 
 
@@ -348,11 +430,19 @@ def check(log, name, blend, profile="auto", expect_counts=True, ref=None):
         er, ew, es = EXPECT[name]
         if (n, strobes, sh_n) != (er, ew, es):
             bad.append(f"counts reads/writes/shadow {n}/{strobes}/{sh_n}, expected {er}/{ew}/{es}")
+    if r["ports"] and (r["ports"][2] or r["ports"][3]) and name != "ram7800":
+        bad.append(f"the 7800/BIOS port issued {r['ports'][2]} reads and {r['ports'][3]} writes of cartridge RAM in a 2600 run")
     if prof in ("base", "fixb"):
         normal, rep = BUCKETS[(prof, blend)]
-        extra = sorted(set(r["hist"]) - normal - rep)
+        # the first read after each console reset release may also use POST[prof]
+        post = r.get("post") or {}
+        main = {k: v - post.get(k, 0) for k, v in r["hist"].items() if v - post.get(k, 0) > 0}
+        extra = sorted(set(main) - normal - rep)
         if extra:
             bad.append(f"buckets {extra} outside {sorted(normal | rep)} ({prof}, blend {blend})")
+        pextra = sorted(set(post) - normal - rep - {POST[prof]})
+        if pextra:
+            bad.append(f"post-reset reads in buckets {pextra} outside {sorted(normal | rep | {POST[prof]})} ({prof}, blend {blend})")
         if name in MAPPERS:
             nn = sum(v for k, v in r["hist"].items() if k in normal)
             nr = sum(v for k, v in r["hist"].items() if k in rep)
@@ -430,7 +520,8 @@ def run(a, name, args, log):
     if not os.path.islink(rtl):
         os.symlink(os.path.join(a.work, "rtl"), rtl)
     with open(log, "wb") as f:
-        subprocess.run([vtb] + args, cwd=run_dir, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        p = subprocess.run([vtb] + args, cwd=run_dir, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        f.write(f"exit {p.returncode}\n".encode())
 
 
 def images(a):
@@ -438,6 +529,8 @@ def images(a):
     os.makedirs(d, exist_ok=True)
     for m in MAPPERS:
         open(os.path.join(d, m + ".bin"), "wb").write(image(m))
+    for m in ("f8sc", "e7"):
+        open(os.path.join(d, "hi_" + m + ".bin"), "wb").write(image("hi_" + m))
     for mode in ("full", "multi"):
         out = subprocess.run([sys.executable, os.path.join(HERE, "ar_test.py"), mode], capture_output=True, check=True).stdout
         open(os.path.join(d, f"ar{mode}.bin"), "wb").write(out)
@@ -532,10 +625,223 @@ def cmd_s19(a):
     return 0 if ok_all else 1
 
 
+# ------------------------------------------------------- console resets
+# (name, image, extra plusargs, expectation): the reproduction of Fix B's
+# review finding (plan P2 as amended). W runs the image for 400 ms; the
+# resets start at 20 ms (30 for the Supercharger) and end the run.
+RST_W = ["+arprobe", "+wav=400"]
+RST_SW = ["+rssweep", "+rsn=24"]
+RST_RUNS = [
+    ("rst_hif8_rd_rst", "hi_f8sc", ["+rsmode=rd", "+rssrc=rst"] + RST_SW),
+    ("rst_hif8_wr_rst", "hi_f8sc", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
+    ("rst_hie7_rd_rst", "hi_e7", ["+rsmode=rd", "+rssrc=rst"] + RST_SW),
+    ("rst_hie7_wr_rst", "hi_e7", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
+    ("rst_ar_rst", "arfull", ["+rsstart=30", "+rsmode=ar", "+rssrc=rst"] + RST_SW),
+    ("rst_hif8_rd_rst_b1", "hi_f8sc", ["+blend", "+rsmode=rd", "+rssrc=rst"] + RST_SW),
+    # a reload with the bank-switch override set, so the mapper survives the
+    # load's first edge (detect2600 clears force_bs and sc there)
+    ("rst_hie7_rd_load", "hi_e7", ["+rsmode=rd", "+rssrc=load"] + RST_SW),
+    ("rst_hie7_wr_load", "hi_e7", ["+rsmode=wr", "+rssrc=load"] + RST_SW),
+    ("rst_ar_load", "arfull", ["+bs=15", "+rsstart=30", "+rsmode=ar", "+rssrc=load"] + RST_SW),
+    # a reload with the mapper detected: at K = 0 the load clears it on E1 itself
+    ("rst_hif8_rd_load_auto", "hi_f8sc", ["+rsmode=rd", "+rssrc=load"] + RST_SW),
+    # the control: RAM at $1xxx (A15 = 0), where bios_sel stays low
+    ("rst_lof8_wr_rst", "f8sc", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
+    # K = 0, eight times each
+    ("rst_hif8_rd_rst_k0", "hi_f8sc", ["+rsmode=rd", "+rssrc=rst", "+rsk0=0", "+rsn=8"]),
+    ("rst_hie7_wr_load_k0", "hi_e7", ["+rsmode=wr", "+rssrc=load", "+rsk0=0", "+rsn=8"]),
+    ("rst_ar_rst_k0", "arfull", ["+rsstart=30", "+rsmode=ar", "+rssrc=rst", "+rsk0=0", "+rsn=8"]),
+]
+
+
+def reset_args(img, image_name, extra):
+    base = image_name[3:] if image_name.startswith("hi_") else image_name
+    args = [f"+image={img}/{image_name}.bin", "+cartram"] + RST_W
+    if base in BS and BS[base] and not any(x.startswith("+bs=") for x in extra):
+        args.append(f"+bs={BS[base]}")
+    return args + list(extra)
+
+
+def check_reset(log, run_name, image_name, profile="auto", ref=None):
+    """One reset run's verdict: (ok, reasons, summary)."""
+    r = parse(log)
+    bad = []
+    if r["fatal"]:
+        bad.append("P2 assertion fired" if r["p2_fired"] else "simulator: " + r["fatal"][0][:120])
+    if r["exit"] not in (0, None):
+        bad.append(f"exit {r['exit']}")
+    if r["rst_done"] is None or r["rst_done"][0] != r["rst_done"][1] or r["rst_incomplete"]:
+        bad.append(f"resets incomplete ({r['rst_done'][0] if r['rst_done'] else len(r['rst'])} done)")
+    rs = r["rst"]
+    lost = [x for x in rs if not x["nos"] and not x["issued"]]
+    if lost:
+        bad.append("NOT issued at K=" + ",".join(str(x["k"]) for x in lost))
+    nos = [x for x in rs if x["nos"]]
+    if run_name.endswith("_auto"):
+        if sorted(x["k"] for x in nos) != sorted(x["k"] for x in rs if x["k"] == 0):
+            bad.append("no strobe at E1 at K=" + ",".join(str(x["k"]) for x in nos) + " (expected exactly at K=0)")
+    elif nos:
+        bad.append(f"{len(nos)} resets without a strobe at E1")
+    wd = [x for x in rs if x["issued"] and x["data"] is not None and not x["strobe"].endswith("data " + x["data"])]
+    if wd:
+        bad.append(f"{len(wd)} writes issued with another byte than the strobe's")
+    late = [x for x in rs if x["issued"] and x["data"] is None and x["edge"] + 6 > LIMIT]
+    if late:
+        bad.append(f"a read issued after s{LIMIT - 6} (c_rdata after s{LIMIT}) at K=" +
+                   ",".join(f"{x['k']} (s{x['edge']})" for x in late))
+    co = sum(x["coinc"] for x in rs)
+    if co:
+        bad.append(f"{co} m_new/t_new coincidences")
+    # the matrix's monitor checks (a mapper image's pass and fail codes too); the
+    # counts are the resets' own
+    base = image_name[3:] if image_name.startswith("hi_") else image_name
+    ok_m, bad_m, summ = check(log, base if base in MAPPERS else "reset", 1 if "_b1" in run_name else 0,
+                              profile, expect_counts=False)
+    bad += [b for b in bad_m if not b.startswith("simulator")]
+    if ref is not None:
+        if not os.path.exists(ref):
+            bad.append(f"no reference log {ref}")
+        else:
+            rr = {x["i"]: x for x in parse(ref)["rst"]}
+            cd = [x for x in rs if x["i"] in rr and sorted(x["cart"]) != sorted(rr[x["i"]]["cart"])]
+            sd = [x for x in rs if x["i"] in rr and x["strobe"] != rr[x["i"]]["strobe"]]
+            if sd:
+                bad.append(f"{len(sd)} resets saw another strobe than the reference build")
+            if cd:
+                bad.append("cartridge accesses differ from the reference build's at K=" + ",".join(str(x["k"]) for x in cd))
+    edges = sorted({x["edge"] for x in rs if x["issued"]})
+    summ = (f"{sum(1 for x in rs if x['issued'])}/{len(rs)} issued at " + ",".join(f"s{e}" for e in edges) +
+            f"; {summ}")
+    return not bad, bad, summ
+
+
+def mutant_tree(a, name):
+    """A copy of the tree's tracked src/fpga in WORK/mut_NAME with sram_ctrl.sv
+    mutated; returns the mutant's own work directory (also its RTL tree)."""
+    if name not in MUTANTS:
+        print(f"unknown mutant {name}: {', '.join(MUTANTS)}", file=sys.stderr)
+        sys.exit(2)
+    tree = os.path.abspath(a.rtl_tree) if a.rtl_tree else os.path.dirname(HERE)
+    d = os.path.join(a.work, "mut_" + name)
+    files = subprocess.run(["git", "-C", tree, "ls-files", "src/fpga"], capture_output=True, text=True, check=True).stdout.split()
+    for f in files:
+        dst = os.path.join(d, f)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(tree, f), dst)
+    p = os.path.join(d, "src", "fpga", "core", "sram_ctrl.sv")
+    t = open(p).read()
+    old, new = MUTANTS[name]
+    if t.count(old) != 1:
+        print(f"mutant {name}: its line is not in {p} once", file=sys.stderr)
+        sys.exit(2)
+    open(p, "w").write(t.replace(old, new))
+    print(f"-- mutant {name}: sram_ctrl.sv mutated in {d}")
+    return d
+
+
+def mutant_setup(a):
+    """--mutant: run in the mutant's own work directory, built from its tree."""
+    if not getattr(a, "mutant", None):
+        return
+    a.work = mutant_tree(a, a.mutant)
+    a.rtl_tree = a.work
+    a.build = True
+
+
+def mutant_verdict(a, rc, tag):
+    if not getattr(a, "mutant", None):
+        return rc
+    caught = rc != 0
+    print(f"MUTANT {a.mutant} {tag}: {'CAUGHT' if caught else 'NOT CAUGHT'}")
+    return 0 if caught else 1
+
+
+def cmd_reset(a):
+    if a.build:
+        build(a)
+    header(a)
+    img = images(a)
+    logs = os.path.join(a.work, "cartram", "logs")
+    os.makedirs(logs, exist_ok=True)
+    only = set(a.only.split(",")) if a.only else None
+    ok_all = True
+    for name, image_name, extra in RST_RUNS:
+        if only and name not in only:
+            continue
+        log = os.path.join(logs, name + ".log")
+        run(a, name, reset_args(img, image_name, extra), log)
+        ref = os.path.join(a.ref_logs, name + ".log") if a.ref_logs else None
+        ok, bad, summ = check_reset(log, name, image_name, a.profile, ref)
+        ok_all &= ok
+        print(f"{'PASS' if ok else 'FAIL'} {name}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
+        sys.stdout.flush()
+    print(f"CARTRAM_RESET {'pass' if ok_all else 'FAIL'}")
+    return 0 if ok_all else 1
+
+
+def cmd_midswap(a):
+    if a.build:
+        build(a)
+    header(a)
+    img = images(a)
+    logs = os.path.join(a.work, "cartram", "logs")
+    os.makedirs(logs, exist_ok=True)
+    log = os.path.join(logs, "midswap_f8sc.log")
+    run(a, "f8sc", [f"+image={img}/f8sc.bin", "+arprobe", "+cartram", "+wav=60", "+midswap=20"], log)
+    r = parse(log)
+    bad = []
+    if r["fatal"]:
+        bad.append("simulator: " + r["fatal"][0][:120])
+    if r["midswap"] is None:
+        bad.append("no MIDSWAP verdict (not a Fix B build, or no held read strobe)")
+    elif not r["midswap"].startswith("new key served"):
+        bad.append("MIDSWAP: " + r["midswap"])
+    ok = not bad
+    print(f"{'PASS' if ok else 'FAIL'} midswap f8sc: accesses for the new key / the old key "
+          f"{r['midswap_n'] if r['midswap_n'] else '-'}" + ("" if ok else "  <- " + "; ".join(bad)))
+    print(f"CARTRAM_MIDSWAP {'pass' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
+def cmd_forcecoinc(a):
+    if a.build:
+        build(a)
+    header(a)
+    img = images(a)
+    logs = os.path.join(a.work, "cartram", "logs")
+    os.makedirs(logs, exist_ok=True)
+    ok_all = True
+    modes = a.modes.split(",")
+    for mode in modes:
+        log = os.path.join(logs, f"forcecoinc_{mode}.log")
+        run(a, "e7", [f"+image={img}/e7.bin", "+arprobe", "+cartram", "+wav=60", f"+bs={BS['e7']}",
+                      f"+forcecoinc={mode}"], log)
+        r = parse(log)
+        bad = []
+        fc = r["forcecoinc"]
+        if mode == "c_rd":
+            # m_new yields: no coincidence, the 2600 accesses served as always
+            ok_m, bad_m, summ = check(log, "e7", 0, a.profile, expect_counts=True)
+            bad += bad_m
+            if fc is None or fc[0] == 0:
+                bad.append("no 7800 strobe forced (no FORCECOINC line, or none in 2600 mode)")
+        else:
+            # the assertion must fire
+            summ = "the P2 assertion " + ("fired" if r["p2_fired"] else "did not fire")
+            if not r["p2_fired"]:
+                bad.append("m_new forced beside t_new, and the P2 assertion did not fire")
+        ok = not bad
+        ok_all &= ok
+        print(f"{'PASS' if ok else 'FAIL'} forcecoinc {mode}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
+        sys.stdout.flush()
+    print(f"CARTRAM_FORCECOINC {'pass' if ok_all else 'FAIL'}")
+    return 0 if ok_all else 1
+
+
 def main():
-    if len(sys.argv) == 2 and sys.argv[1] in MAPPERS:
+    if len(sys.argv) == 2 and (sys.argv[1] in MAPPERS or (sys.argv[1].startswith("hi_") and sys.argv[1][3:] in MAPPERS)):
         sys.stdout.buffer.write(image(sys.argv[1]))
-        print(BS[sys.argv[1]], file=sys.stderr)
+        print(BS[sys.argv[1].replace("hi_", "")], file=sys.stderr)
         return 0
     if len(sys.argv) == 2 and sys.argv[1] == "ram7800":
         with tempfile.TemporaryDirectory() as d:
@@ -551,19 +857,26 @@ def main():
     c.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
     c.add_argument("--no-counts", action="store_true")
     c.add_argument("--ref", help="the reference build's log of the same case (artape's colours)")
-    for name in ("matrix", "s19"):
+    for name in ("matrix", "s19", "reset", "midswap", "forcecoinc"):
         s = sub.add_parser(name)
         s.add_argument("--work", default=os.environ.get("WORK", os.path.join(HERE, "work")))
         s.add_argument("--build", action="store_true")
         s.add_argument("--rtl-tree")
         s.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
         s.add_argument("--fp", action="store_true", help="tb_load +fp fingerprints to WORK/fp/cartram_<case>.csv")
+        s.add_argument("--mutant", choices=sorted(MUTANTS),
+                       help="build and run a mutant of sram_ctrl.sv in WORK/mut_NAME: exit 0 when CAUGHT")
         if name == "matrix":
             s.add_argument("--only")
             s.add_argument("--arfw", help="the Supercharger BIOS: adds the full load from tape (artape, 22 s)")
             s.add_argument("--ref-logs", help="the reference build's cartram/logs (artape's colours)")
-        else:
+        elif name == "s19":
             s.add_argument("--images", default="e7")
+        elif name == "reset":
+            s.add_argument("--only", help="RUN,...: " + ",".join(x[0] for x in RST_RUNS))
+            s.add_argument("--ref-logs", help="another build's cartram/logs (aeee6d2's): per-reset accesses must equal")
+        elif name == "forcecoinc":
+            s.add_argument("--modes", default="c_rd,m_new")
     a = p.parse_args()
     if a.cmd == "check":
         ok, bad, summ = check(a.log, a.image, a.blend, a.profile, not a.no_counts, ref=a.ref)
@@ -572,10 +885,13 @@ def main():
     a.work = os.path.abspath(a.work)
     if getattr(a, "ref_logs", None):
         a.ref_logs = os.path.abspath(a.ref_logs)
+    mutant_setup(a)
     if not a.build and not os.path.exists(os.path.join(a.work, "obj_cartram", "vtb")):
         print("no obj_cartram/vtb in --work: add --build", file=sys.stderr)
         return 2
-    return cmd_matrix(a) if a.cmd == "matrix" else cmd_s19(a)
+    fn = {"matrix": cmd_matrix, "s19": cmd_s19, "reset": cmd_reset, "midswap": cmd_midswap,
+          "forcecoinc": cmd_forcecoinc}[a.cmd]
+    return mutant_verdict(a, fn(a), a.cmd)
 
 
 if __name__ == "__main__":
