@@ -177,7 +177,7 @@ def run1(kind, name, args):
         log.flush()
         r = subprocess.run(["nice", "-n", "10", binary(kind)] + a, cwd=d, stdout=log, stderr=subprocess.STDOUT,
                            stdin=subprocess.DEVNULL, timeout=7200)
-    text = open(os.path.join(d, "run.log")).read()
+    text = open(os.path.join(d, "run.log"), errors="replace").read()
     return parse(text, r.returncode, d)
 
 
@@ -222,14 +222,18 @@ def common(j, s):
     j.ok(bool(s["sum"]), "no WIRE summary")
 
 
-def daria_health(j, s, guard=True):
+def daria_health(j, s, guard=True, resets=0):
+    """resets: how many cart_reset rises may abandon an open call (a console
+    reset or the end of a retune; at most one call each)"""
     common(j, s)
-    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "halts", "psram_viol", "open_old", "errors"):
+    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "halts", "psram_viol", "open_old", "errors",
+              "orphans"):
         j.eq(s, k, 0)
     j.ok(s["sum"].get("psram_cs") == 50.0, "psram_cs=%s (want 50.0)" % s["sum"].get("psram_cs"))
-    c, ca, r, rf = (s["sum"].get(k, -1) for k in ("calls", "calls_arm", "rets", "rets_fe"))
-    j.ok(abs(c - ca) <= 1 and abs(r - rf) <= 1 and 0 <= c - r <= 1,
-         "calls %s / at the BupChip %s, returns %s / at daria_fe %s" % (c, ca, r, rf))
+    c, ca, r, rf, ab = (s["sum"].get(k, -1) for k in ("calls", "calls_arm", "rets", "rets_fe", "abandoned"))
+    j.ok(abs(c - ca) <= 1 and abs(r - rf) <= 1 and 0 <= ab <= resets and 0 <= c - r - ab <= 1,
+         "calls %s / at the BupChip %s, returns %s / at daria_fe %s, abandoned %s (at most %d)" % (
+             c, ca, r, rf, ab, resets))
     if guard:
         if ARM_DIV == "18":
             j.eq(s, "locked", 1)
@@ -354,7 +358,7 @@ def scenarios(img):
     def resetat(name, t):
         def f():
             s = run("daria", name, ["+image=" + I(t + ".bin"), "+wav=300", "+resetat=120"])
-            j = Judge(name); daria_health(j, s)
+            j = Judge(name); daria_health(j, s, resets=1)
             j.eq(s, "f6", 2); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
             j.eq(s, "releases", 2)
             j.ok(len(s["rel"]) == 2 and len(s["f6end"]) == 2 and s["rel"][1] > s["f6end"][1],
@@ -371,8 +375,10 @@ def scenarios(img):
 
     def retune(name, t, at):
         def f():
-            s = run("daria", name, ["+image=" + I(t + ".bin"), "+wav=300", "+retune=%d" % at])
-            j = Judge(name); daria_health(j, s)
+            args = ["+image=" + I(t + ".bin"), "+wav=300"]
+            args += ["+retune=%d" % at] if isinstance(at, int) else ["+wire_retune=" + at]
+            s = run("daria", name, args)
+            j = Judge(name); daria_health(j, s, resets=1)
             for k, v in (("rt_f6", 1), ("rt_f6_early", 0), ("rt_rst_low", 0), ("wr_busy", 0), ("f6_busy", 0),
                          ("f6_live", 0), ("f6_ram_diff", 0), ("f6", 2), ("releases", 2)):
                 j.eq(s, k, v)
@@ -387,6 +393,9 @@ def scenarios(img):
     retune("retune_dpc", "hard_reset_call_dpc", 120)
     retune("retune_cdf", "hard_reset_call_cdf", 120)
     retune("retune_dpc2", "hard_reset_call_dpc", 131)
+    retune("retune_svc_dpc", "hard_reset_call_dpc", "svc")
+    retune("retune_call_dpc", "hard_reset_call_dpc", "call")
+    retune("retune_call_cdf", "hard_reset_call_cdf", "call")
 
     if BIOS and os.path.isfile(BIOS):
         def bios(name, t):
@@ -490,7 +499,7 @@ def main():
         if os.path.isfile(binary(k)):
             print("-- binary %s md5 %s" % (binary(k), md5(binary(k))))
         else:
-            sys.exit("no %s: run wire.py build first" % binary(k))
+            print("-- no %s (wire.py build %s): its scenarios fail" % (binary(k), k))
     names = sys.argv[2:] or list(S)
     rc = 0
     res = open(os.path.join(WORK, "results.txt"), "a")
@@ -507,7 +516,7 @@ def main():
             if j.bad:
                 rc = 1
             sm = s.get("sum", {})
-            keys = ("releases f6 f6_win_dt calls rets smp_req misses wr_crb wr_busy hold_rise rt_f6 rs_f6 "
+            keys = ("releases f6 f6_win_dt calls rets abandoned smp_req misses wr_crb wr_busy hold_rise rt_f6 rs_f6 "
                     "marker errors psram_viol locked unlocks").split()
             line += "\n        " + " ".join("%s=%s" % (k, sm.get(k)) for k in keys if k in sm)
         print(line, flush=True)
