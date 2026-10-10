@@ -248,6 +248,11 @@ module tb_system;
 	//   rst_sys  clk_sys counted from time 0 at the last of those releases:
 	//            the clock whose edge first sees reset low (plan P6: the
 	//            DARIA and the plain build release on the same edge)
+	// When the run ends, one more line: the frame still in progress, from the
+	// last VSync edge (or from time 0 when there was none: numbered 1), with
+	// its clocks so far and the same columns. A run that never raises VSync
+	// (cartram2600_test.py's images never write VSYNC) then still has one
+	// line to compare, and the clocks after the last edge are covered too.
 	localparam logic [63:0] FNV_OFFSET = 64'hcbf29ce484222325;
 	localparam logic [63:0] FNV_PRIME  = 64'h00000100000001b3;
 	function automatic logic [63:0] fnv(input logic [63:0] h, input logic [7:0] b);
@@ -297,7 +302,13 @@ module tb_system;
 			fp_cpu = fnv(fnv(fnv(fnv(fp_cpu, `FP_CPU.addr_out[7:0]), `FP_CPU.addr_out[15:8]),
 				{7'd0, `FP_CPU.rw_n}), `FP_CPU.rw_n ? `FP_CPU.data_in : `FP_CPU.data_out);
 	end
-	final if (fp_fd != 0) $fclose(fp_fd);
+	final if (fp_fd != 0) begin
+		automatic logic [63:0] h = FNV_OFFSET;
+		for (int i = 0; i < 128; i++) h = fnv(h, dut.main.riot_inst.riot_ram.mem_q[i]);
+		$fwrite(fp_fd, "%0d,%0d,%016x,%016x,%016x,%016x,%0d,%0d,%0d\n", fp_frame > 0 ? fp_frame : 1, fp_now - fp_tvs, h,
+			fp_video, fp_audio, fp_cpu, fp_now, fp_rst_n, fp_rst_t);
+		$fclose(fp_fd);
+	end
 
 `ifdef POCKET_DARIA
 	// ---------------- P18: psram.sv's CLOCK_SPEED ----------------
