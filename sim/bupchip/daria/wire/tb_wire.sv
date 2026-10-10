@@ -77,8 +77,10 @@
 module tb_wire;
 	tb_load tb ();
 
-	longint t_sys = 0;                  // clk_sys edges from time 0
-	always @(posedge tb.clk_sys) t_sys = t_sys + 1;
+	// clk_sys edges before this one, from time 0: every block reads the same
+	// value at an edge
+	longint t_sys = 0;
+	always @(posedge tb.clk_sys) t_sys <= t_sys + 1;
 	function automatic real ms();
 		real r;
 		r = $realtime;
@@ -160,6 +162,7 @@ module tb_wire;
 	int     rt_f6 = 0, rt_f6_early = 0, rt_rst_low = 0, rs_f6 = 0, rs_f6_rst_low = 0;
 	bit     rt_win = 1'b0, rs_win = 1'b0;
 	int     marker_rs = -1, calls_rs0 = -1, calls_rt0 = -1;
+	logic   rin_f6 = 1'b1;
 	always @(posedge tb.clk_sys) begin
 		automatic bit cw = `W_BC.capture.cart_win;
 		automatic bit crst = `W_FE.cart_reset;
@@ -173,7 +176,7 @@ module tb_wire;
 			t_busy_fall = t_sys;
 			calls_rt0 = calls;
 		end
-		if (t_rin >= 0 && t_sys == t_rin) begin
+		if (tb.reset_in && !rin_f6) begin
 			rs_win = 1'b1;
 			marker_rs = int'(tb.dut.main.riot_inst.riot_ram.mem_q[127]);
 			calls_rs0 = calls;
@@ -214,6 +217,7 @@ module tb_wire;
 		if (rt_win && !tb.dut.daria_arm && t_busy_fall > t_busy_rise) rt_win = 1'b0;
 		if (rs_win && t_sys > t_rin + 1 && !tb.dut.reset) rs_f6_rst_low++;
 		f6_d <= `W_CP.f6_q;
+		rin_f6 <= tb.reset_in;
 		cw_d <= cw;
 		crst_d <= crst;
 		busy_d <= busy;
