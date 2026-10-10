@@ -3,6 +3,7 @@
 
   frame_gate.py REF CAND --frames N [--name NAME] [--excuse F0-F1]
                 [--expect-guard locked|unlocked|none] [--no-status] [--scheme S]
+                [--ref-prefix]
   frame_gate.py --strict A B [--frames N]
 
 REF and CAND are run directories (or their fp.csv files) as tb_daria writes
@@ -45,6 +46,12 @@ PASS needs all of:
       STATUS calls C, late L, halts H, halt_code X, psram_viol V, guard G, unlocks U
     with halts 0, psram_viol 0, unlocks 0, guard locked (--expect-guard;
     "unlocked" at VCO/19, "none" skips it), and C and L equal to REF's.
+--ref-prefix: REF is a longer run (R1 at 1,500 frames) and CAND ran N
+frames: REF's fp.csv is cut to frames 1..N-1, and both sides' calls to those
+requested in frames 0..N-2 (a call in the last frame may still be running
+when CAND's run ends), with their slack.csv rows; CAND's STATUS calls and
+late calls are then held to CAND's own files (plan 7.3: tb_frames at 600
+frames against R1's first 600).
 --strict: the same columns in A and B, every one equal on every frame, the
 same frames, and at least one frame (for two builds of one bench, e.g.
 tb_load +fp between builds, 7.5 row 5; tb_load's and tb_system's t_sys,
@@ -129,13 +136,15 @@ def runs_of(frames):
     return [tuple(x) for x in out]
 
 
-def late_frames(d, calls):
-    """Late calls (slack.csv kind 1, slack <= 0) and their frames."""
+def late_frames(d, calls, only_these=False):
+    """Late calls (slack.csv kind 1, slack <= 0) and their frames; with
+    only_these, only the calls in `calls`."""
     rows = read_csv(path_in(d, "slack.csv")) if os.path.isdir(d) else None
     if rows is None:
         return None, None
     frame_of = {int(c["call"]): int(c["frame"]) for c in calls or []}
-    late = [int(r["call"]) for r in rows if r.get("kind") == "1" and int(r["slack_sys"]) <= 0]
+    late = [int(r["call"]) for r in rows if r.get("kind") == "1" and int(r["slack_sys"]) <= 0
+            and (not only_these or int(r["call"]) in frame_of)]
     return late, sorted({frame_of.get(c, -1) for c in late})
 
 
@@ -192,10 +201,19 @@ def strict(a, b, n):
 def gate(a):
     bad, notes = [], []
     rr, rc = load_fp(a.ref), load_fp(a.cand)
+    if a.ref_prefix:
+        rr = [r for r in rr if r.get("frame", "").isdigit() and int(r["frame"]) < a.frames]
     fr = check_frames(rr, a.frames, "REF fp.csv", bad)
     fc = check_frames(rc, a.frames, "CAND fp.csv", bad)
     calls_r = read_csv(path_in(a.ref, "calls.csv")) if os.path.isdir(a.ref) else None
     calls_c = read_csv(path_in(a.cand, "calls.csv")) if os.path.isdir(a.cand) else None
+    cand_calls_all = len(calls_c or [])
+    cand_late_all = (late_frames(a.cand, calls_c)[0] or []) if calls_c is not None else []
+    if a.ref_prefix:
+        keep = lambda rows: None if rows is None else [c for c in rows if c.get("frame", "").lstrip("-").isdigit()
+                                                       and int(c["frame"]) <= a.frames - 2]
+        calls_r, calls_c = keep(calls_r), keep(calls_c)
+        notes.append(f"--ref-prefix: REF cut to frames 1..{a.frames - 1}, calls to those requested in frames 0..{a.frames - 2}")
     # P27: the reference's load was seen
     if not calls_r:
         bad.append("REF: no calls in calls.csv (P27: the load was not seen, the run is void)")
@@ -240,8 +258,8 @@ def gate(a):
     excuse = None
     if a.excuse:
         f0, f1 = (int(x) for x in a.excuse.split("-"))
-        late_r, lf_r = late_frames(a.ref, calls_r)
-        late_c, lf_c = late_frames(a.cand, calls_c)
+        late_r, lf_r = late_frames(a.ref, calls_r, a.ref_prefix)
+        late_c, lf_c = late_frames(a.cand, calls_c, a.ref_prefix)
         want = list(range(f0, f1 + 1))
         if lf_r == want and lf_c == want:
             excuse = (f0, f1)
@@ -279,8 +297,8 @@ def gate(a):
                 bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
     # calls and late calls
     nr, nc = len(calls_r or []), len(calls_c or [])
-    late_r, _ = late_frames(a.ref, calls_r)
-    late_c, _ = late_frames(a.cand, calls_c)
+    late_r, _ = late_frames(a.ref, calls_r, a.ref_prefix)
+    late_c, _ = late_frames(a.cand, calls_c, a.ref_prefix)
     if nr != nc:
         bad.append(f"calls: REF {nr}, CAND {nc}")
     if late_r is not None and late_c is not None and len(late_r) != len(late_c):
@@ -296,8 +314,13 @@ def gate(a):
             if int(unl): bad.append(f"STATUS unlocks {unl}")
             if a.expect_guard != "none" and guard != a.expect_guard:
                 bad.append(f"STATUS guard {guard}, expected {a.expect_guard}")
-            if int(calls) != nr: bad.append(f"STATUS calls {calls}, REF has {nr}")
-            if late_r is not None and int(late) != len(late_r): bad.append(f"STATUS late {late}, REF has {len(late_r)}")
+            if a.ref_prefix:
+                # CAND's run is the whole of its own files: STATUS against them
+                if int(calls) != cand_calls_all: bad.append(f"STATUS calls {calls}, CAND's calls.csv has {cand_calls_all}")
+                if int(late) != len(cand_late_all): bad.append(f"STATUS late {late}, CAND's slack.csv has {len(cand_late_all)}")
+            else:
+                if int(calls) != nr: bad.append(f"STATUS calls {calls}, REF has {nr}")
+                if late_r is not None and int(late) != len(late_r): bad.append(f"STATUS late {late}, REF has {len(late_r)}")
     name = a.name or os.path.basename(os.path.normpath(a.cand))
     print(f"frame_gate {name}: {len(fr)} / {len(fc)} frames; calls {nr} / {nc}; late "
           f"{len(late_r) if late_r is not None else '-'} / {len(late_c) if late_c is not None else '-'}")
@@ -324,6 +347,8 @@ def main():
     p.add_argument("--expect-guard", default="locked", choices=("locked", "unlocked", "none"))
     p.add_argument("--no-status", action="store_true")
     p.add_argument("--scheme", type=int)
+    p.add_argument("--ref-prefix", action="store_true",
+                   help="REF is a longer run: compare its first N-1 frames and the calls requested before frame N-1")
     a = p.parse_args()
     if a.strict:
         sys.exit(strict(a.ref, a.cand, a.frames))

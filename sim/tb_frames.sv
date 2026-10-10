@@ -19,10 +19,14 @@
 //               header, as tb_daria's does with +frames=N.
 //   calls.csv   call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl,arm_cyc,
 //               thumb,arm: tb_daria's first ten columns, one line per call as
-//               the 6507 sees it: daria_fe's arm_call_busy (u_fe) from its
-//               rise (t_req_sys, clk_sys from time 0; frame and scanline) to
-//               its fall (busy_sys), stall_sys the clocks top.sv's
-//               arm_call_stall held the 6507 in it; arm_cyc the BupChip CPU's
+//               the 6507 sees it, counted as tb_daria counts upstream's: the
+//               request (t_req_sys, clk_sys from time 0; frame and scanline)
+//               is the clock daria_fe commits the call, the one before its
+//               registered arm_call_busy (u_fe) rises, as upstream's
+//               arm_call_request comes the clock before its busy; busy_sys
+//               runs from there to the busy's fall, stall_sys counts the
+//               clocks top.sv's arm_call_stall held the 6507 in it (one less
+//               than busy_sys, as in tb_daria); arm_cyc the BupChip CPU's
 //               clk_arm from call_go to returned, thumb and arm the
 //               instructions it retired in them (first_bl is 0: upstream's
 //               ARM only). Calls are numbered from 1 from time 0, as tb_daria's
@@ -258,14 +262,15 @@ module tb_frames;
 					pending_slack = 1;
 			end
 
-			// ---- calls as the 6507 sees them: daria_fe's arm_call_busy
+			// ---- calls as the 6507 sees them: daria_fe's arm_call_busy, from the
+			// commit clock (the one before the registered busy rises)
 			if (fe_busy && !sys_call) begin
 				sys_call = 1;
 				call_id++;
-				t_req = now;
+				t_req = now - 1;
 				stall = 0;
 				req_frame = frame;
-				req_line = int'((now - t_vs) / SYS_PER_LINE);
+				req_line = int'((t_req - t_vs) / SYS_PER_LINE);
 				if (pending_slack) begin
 					$fwrite(fd_slack, "%0d,2,%0d,0,%04x\n", poll_call, poll_done_t, poll_pc);
 					pending_slack = 0;
