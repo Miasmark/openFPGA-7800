@@ -42,7 +42,8 @@
 #                run's run_sim.sh, extra_tests.sh, cartram and artape logs
 #                and fingerprints (so it runs after them), and the guards'
 #                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees
-#   s4_check     sim/bupchip/s4/check.sh with JOBS=2, both sets of plan 1.2
+#   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
+#                that many simulations at once), both sets of plan 1.2
 #                row 5: the non-DARIA one and DARIA=1 ARM38=1
 #                PSRAM_CS=50.0. Row 5 needs the game jobs (S4_GAME=FILE and
 #                REFDIR) and the firmware jobs (check.sh reads the tree's
@@ -65,7 +66,7 @@
 # BUPFW=FILE (run_sim.sh's BIOS and BupChip sections; without them those
 # sections are skipped, which fails run_sim), GAMES=DIR (game images by path;
 # they are never copied into the tree), R1_DIR=DIR (the reference runs),
-# S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), RUN_SIM_REF=LOG,
+# S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), S4_JOBS, RUN_SIM_REF=LOG,
 # FP_REF=DIR, PP_ORACLE_BASE=REV, CARTRAM_ONLY=LIST (above).
 # Every log starts with the tree's HEAD and status and the Verilator path
 # and version (plan P23); the run scripts add the md5 of each binary they
@@ -260,9 +261,9 @@ g_s4_check() {
 	local game=() rc=0 why=""
 	[ -n "${S4_GAME:-}" ] && game=("$S4_GAME")
 	echo "== s4/check.sh, the non-DARIA set"
-	JOBS=2 WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0)"
-	DARIA=1 ARM38=1 PSRAM_CS=50.0 JOBS=2 WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	DARIA=1 ARM38=1 PSRAM_CS=50.0 JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
