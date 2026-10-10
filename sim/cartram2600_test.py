@@ -84,7 +84,8 @@ row 6 and 3.6.
   only, no address compare): sram_ctrl.sv is mutated in a copy of the tree's
   tracked src/fpga in WORK/mut_NAME, built and run there, and the verdict is
   inverted: CAUGHT (exit 0) when the checks fail, NOT CAUGHT (exit 1) when
-  they pass. nohold must be caught by reset (the K = 0 runs) and by
+  they pass. The mutant is built once in its work directory (again with
+  --build). nohold must be caught by reset (the K = 0 runs) and by
   forcecoinc; nocmp by midswap.
 
 Profiles (--profile, default auto: from the CARTRAM sram_ctrl line, which
@@ -749,7 +750,8 @@ def mutant_setup(a):
         return
     a.work = mutant_tree(a, a.mutant)
     a.rtl_tree = a.work
-    a.build = True
+    # built once per mutant work directory (again with --build)
+    a.build = a.build or not os.path.exists(os.path.join(a.work, "obj_cartram", "vtb"))
 
 
 def mutant_verdict(a, rc, tag):
