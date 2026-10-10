@@ -329,7 +329,7 @@ check("o", "INFO", f"{len(pins)} datasheet rows for cram0_a, adv_n, oe_n, dq (da
 
 # ---- verdict -----------------------------------------------------------------------------------------------------
 DARIA_CHECKS = {"a", "b", "c", "c.cells", "e", "f", "k", "k'", "j", "gate.clk_arm"}
-FIXB_CHECKS = {"g", "h", "h.retime"}
+FIXB_CHECKS = {"g", "g.legs", "h", "h.retime"}
 ALL_CHECKS = {"l", "l.clocks", "gate.hold", "n", "report", "i", "p", "kind"}
 gating = set(ALL_CHECKS)
 if kind in ("daria", "q5"):

@@ -325,13 +325,28 @@ check "f.files" INFO "metastability.rpt written (every chain); step7_checks.py c
 
 }
 # ---- (g), (h), (i): Fix B --------------------------------------------------------------------------------------
-section g {g} {
+section g {g g.legs} {
 say "\n## (g) no cart2600 path into sram_ctrl or the SRAM pads except through sram|t_*_q"
 # Nets are named by instance path alone (ic|atari|main|cart2600|...).
 set c26 [get_nets -nowarn {*|cart2600|*}]
 set n26 [csize $c26]
 say "  nets in cart2600 (*|cart2600|*): $n26"
 foreach x [names $c26 8] { say "    $x" }
+# The 2600 data leg by top.sv's own net names. Synthesis can fold cart2600's
+# output mux into LUTs named in top.sv, so a path through cart2600's logic
+# need not cross a net named *|cart2600|*: on aeee6d2 (Q0 seed 2)
+# maria_en_out -> the 7800 cart's POKEY read select -> main|read_DB~98,
+# ~135, ~136 -> main|cart_din[5]~30 -> sram|dq_out[5] had none, and on
+# Build A (Q1 seed 2) c_rdata -> main|cart|dout[0]~42 -> main|read_DB~113,
+# ~114 -> main|cart_din[0]~39 -> t_wdata_q has none either. read_DB (the
+# 6507's read bus) reaches sram_ctrl only through cart_din, the 2600 slot's
+# data input, so a path through it may end in sram_ctrl only at t_wdata_q.
+# The cart_din nets themselves are no filter: synthesis named a shared bus
+# decode LUT main|cart_din[0]~0 (Q1 seed 2), which lies on the 7800 strobe
+# path maria_en_out -> cs_ram0 -> ... -> cartram_rd -> sram_a.
+set rdb [get_nets -nowarn {*|main|read_DB*}]
+say "  nets of top.sv's read_DB (*|main|read_DB*): [csize $rdb]"
+foreach x [names $rdb 4] { say "    $x" }
 set c26r [regs "cart2600's registers" {*|cart2600:cart2600|*}]
 set sram_all [regs "sram_ctrl's registers" {*|sram_ctrl:sram|*}]
 set tq [regs "sram|t_*_q" {*|sram_ctrl:sram|t_*_q*}]
@@ -341,8 +356,8 @@ set sram_end [expr {[csize $tq] > 0 ? [remove_from_collection $sram_all $tq] : $
 set pads [get_ports -nowarn {sram_a[*] sram_dq[*] sram_oe_n sram_we_n sram_ub_n sram_lb_n}]
 say "  sram_ctrl registers: [csize $sram_all], of them t_*_q: [csize $tq]; SRAM pads: [csize $pads] (outputs with no output delay: their pad registers are sram_ctrl's)"
 foreach x [names $pads 6] { say "    $x" }
-if {$n26 == 0 || [csize $sram_all] == 0} {
-	check "g" FAIL "no such cell: cart2600's nets or sram_ctrl's registers"
+if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
+	check "g" FAIL "no such cell: cart2600's nets, top.sv's read_DB nets or sram_ctrl's registers"
 } else {
 	set ng 0
 	set gf [open fixb.rpt w]
@@ -373,20 +388,99 @@ if {$n26 == 0 || [csize $sram_all] == 0} {
 			}
 		}
 		say "  of them from cart2600's registers into $lab: $nr"
+		# the data leg by top.sv's names (above): counted as well
+		set nd 0
+		foreach_in_collection p [get_timing_paths -setup -through $rdb -to $coll -npaths 100000 -pairs_only] {
+			if {$nd < 10} {
+				say [format "    through read_DB into %s: slack %.3f %d levels %s -> %s" $lab [get_path_info $p -slack] \
+					[get_path_info $p -num_logic_levels] [get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
+			}
+			incr nd
+		}
+		say "  paths through top.sv's read_DB into $lab: $nd"
+		incr ng $nd
 		if {$n > 0} { report_timing -setup -through $c26 -to $coll -npaths 20 -detail full_path -append -file fixb.rpt }
+		if {$nd > 0} { report_timing -setup -through $rdb -to $coll -npaths 10 -detail full_path -append -file fixb.rpt }
 	}
 	set nch 0
+	set wch ""
 	set sdr [get_registers -nowarn {*|sdram:sdram|*}]
 	if {[csize $sdr] > 0} {
-		foreach_in_collection p [get_timing_paths -setup -through $c26 -to $sdr -npaths 100000 -pairs_only] { incr nch }
+		foreach_in_collection p [get_timing_paths -setup -through $c26 -to $sdr -npaths 100000 -pairs_only] {
+			incr nch
+			set v [get_path_info $p -slack]
+			if {$wch eq "" || $v < $wch} { set wch $v }
+		}
 	}
-	say "  (reported apart) paths through cart2600 into sdram's registers ([csize $sdr]), the ch0_* legs: $nch"
+	say "  (reported apart) paths through cart2600 into sdram's registers ([csize $sdr]), the ch0_* legs: $nch, worst setup $wch"
 	set nt 0
 	if {[csize $tq] > 0} {
 		foreach_in_collection p [get_timing_paths -setup -through $c26 -to $tq -npaths 100000 -pairs_only] { incr nt }
 	}
 	say "  paths through cart2600 into sram|t_*_q (allowed): $nt"
-	check "g" [expr {$ng == 0 ? "PASS" : "FAIL"}] "$ng path(s) from cart2600 into sram_ctrl or the SRAM pads other than through t_*_q (on aeee6d2, Q0, this must find the merged request's paths: the negative control)"
+	check "g" [expr {$ng == 0 ? "PASS" : "FAIL"}] "$ng path(s) from cart2600 (through its nets, from its registers, or through top.sv's read_DB) into sram_ctrl or the SRAM pads other than through t_*_q (on aeee6d2, Q0, this must find the merged request's paths: the negative control)"
+}
+# g.legs: each leg of the 2600 request (address, strobe, data) reaches its
+# t_*_q group from the 2600 side, so that (g)'s zero is not vacuous; and
+# c_rdata -> read_DB -> cart_din -> t_wdata_q is timed under the c_rdata
+# multicycle (core_constraints.sdc: -setup 2 into clk_sys).
+say "\n## (g.legs) the address, strobe and data legs into sram|t_*_q, and c_rdata -> t_wdata_q"
+if {[csize $tq] == 0} {
+	check "g.legs" FAIL "no such cell: sram|t_*_q"
+} else {
+	set legs_ok 1
+	set lsum {}
+	foreach {leg pat} {address {*|sram_ctrl:sram|t_addr_q*} strobe {*|sram_ctrl:sram|t_rd_q* *|sram_ctrl:sram|t_wr_q*} data {*|sram_ctrl:sram|t_wdata_q*}} {
+		set lc [get_registers -nowarn $pat]
+		if {[csize $lc] == 0} {
+			set legs_ok 0
+			say "  $leg: no such cell {$pat}"
+			lappend lsum "$leg: no such cell"
+			continue
+		}
+		set n 0
+		set w ""
+		array unset ends
+		foreach th [list $c26 $rdb] {
+			foreach_in_collection p [get_timing_paths -setup -through $th -to $lc -npaths 100000 -pairs_only] {
+				incr n
+				set ends([get_node_info -name [get_path_info $p -to]]) 1
+				set v [get_path_info $p -slack]
+				if {$w eq "" || $v < $w} { set w $v }
+			}
+		}
+		set nr 0
+		if {[csize $c26r] > 0} {
+			foreach_in_collection p [get_timing_paths -setup -from $c26r -to $lc -npaths 100000 -pairs_only] { incr nr }
+		}
+		say "  $leg: [csize $lc] register(s), [array size ends] reached through cart2600 or read_DB; $n path pair(s), $nr from cart2600's registers; worst setup $w"
+		lappend lsum "$leg [array size ends]/[csize $lc] reached, worst $w"
+		if {$n == 0 || [array size ends] == 0} { set legs_ok 0 }
+	}
+	set cr [get_registers -nowarn {*|sram_ctrl:sram|c_rdata[*]}]
+	set twd [get_registers -nowarn {*|sram_ctrl:sram|t_wdata_q*}]
+	set ncr 0
+	set crs ""
+	set crel ""
+	set clv ""
+	if {[csize $cr] > 0 && [csize $twd] > 0} {
+		foreach_in_collection p [get_timing_paths -setup -from $cr -to $twd -npaths 100000 -pairs_only] { incr ncr }
+		foreach_in_collection p [get_timing_paths -setup -from $cr -to $twd -npaths 1] {
+			set crs [get_path_info $p -slack]
+			set crel [get_path_info $p -clock_relationship]
+			set clv [get_path_info $p -num_logic_levels]
+		}
+		set ncd 0
+		foreach_in_collection p [get_timing_paths -setup -from $cr -through $rdb -to $twd -npaths 100000 -pairs_only] { incr ncd }
+		say "  c_rdata -> t_wdata_q: $ncr pair(s), $ncd of them through read_DB; worst setup $crs ns, relationship $crel ns, $clv levels"
+		report_timing -setup -from $cr -to $twd -npaths 2 -detail full_path -append -file fixb.rpt
+	}
+	# The multicycle moves the latch one clk_sys later: the relationship
+	# exceeds a clk_sys period (one clk_sdram plus one clk_sys).
+	set psys [get_clock_info -period $sys]
+	set mc_ok [expr {$ncr > 0 && $crel ne "" && $crel > $psys}]
+	if {!$mc_ok} { set legs_ok 0 }
+	check "g.legs" [expr {$legs_ok ? "PASS" : "FAIL"}] "[join $lsum {; }]; c_rdata -> t_wdata_q $ncr pair(s), relationship $crel ns (> one clk_sys, $psys: the multicycle), worst setup $crs ns"
 }
 
 }
@@ -424,17 +518,26 @@ section i {i} {
 say "\n## (i) open item 12"
 set cr [regs "c_rdata" {*|sram_ctrl:sram|c_rdata[*]}]
 set fb [regs "fbn_*" {*|sram_ctrl:sram|fbn_*}]
-if {[csize $cr] == 0 || [csize $fb] == 0} {
-	check "i" FAIL "no such cell: sram|c_rdata or sram|fbn_*"
+set padr [get_registers -nowarn {*|sram_ctrl:sram|sram_a* *|sram_ctrl:sram|dq_out* *|sram_ctrl:sram|sram_ub_n* *|sram_ctrl:sram|sram_lb_n* *|sram_ctrl:sram|sram_oe_n* *|sram_ctrl:sram|sram_we_n* *|sram_ctrl:sram|dq_oe*}]
+if {[csize $cr] == 0 || [csize $fb] == 0 || [csize $padr] == 0} {
+	check "i" FAIL "no such cell: sram|c_rdata, sram|fbn_* or the SRAM pad registers"
 } else {
+	# c_rdata -> clk_sys is the multicycle (its slack is open item 12's
+	# figure); c_rdata -> clk_sdram (sdram's write data, through read_DB and
+	# cart_din) is a plain one-period path and is listed apart. Flicker
+	# Blend: into fbn_* (the falling-edge capture, half a period), and
+	# fbn_* -> the pad registers.
 	foreach cond $all_corners {
 		set_operating_conditions $cond
 		update_timing_netlist
 		set l "  $cond:"
-		foreach {lab coll} [list c_rdata $cr fbn_* $fb] {
+		foreach {lab a} [list "c_rdata->clk_sys (multicycle)" [list -from $cr -to_clock $sys] "c_rdata->clk_sdram" [list -from $cr -to_clock $sdram] \
+				"into fbn_*" [list -to $fb] "fbn_*->pad registers" [list -from $fb -to $padr]] {
 			foreach w {setup hold} {
 				set v "-"
-				foreach_in_collection p [get_timing_paths -$w -from $coll -npaths 1] { set v [format "%.3f" [get_path_info $p -slack]] }
+				foreach_in_collection p [eval get_timing_paths -$w $a -npaths 1] {
+					set v [format "%.3f (rel %.3f)" [get_path_info $p -slack] [get_path_info $p -clock_relationship]]
+				}
 				append l " $lab $w $v;"
 			}
 		}
@@ -442,7 +545,7 @@ if {[csize $cr] == 0 || [csize $fb] == 0} {
 	}
 	set_operating_conditions $wcond
 	update_timing_netlist
-	check "i" INFO "c_rdata's multicycle slack and Flicker Blend's fbn_* slack per corner, above"
+	check "i" INFO "c_rdata's multicycle slack (c_rdata -> clk_sys), c_rdata -> clk_sdram apart, and Flicker Blend's fbn_* slack (into fbn_*, fbn_* -> the pad registers) per corner, above"
 }
 
 }

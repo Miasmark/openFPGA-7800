@@ -112,7 +112,7 @@ W = lambda p, s: open(p, "w").write(s)
 W(os.path.join(fpga, "step7_prep.txt"), f"kind {kind}\ndaria {int(kind in ('daria', 'q5'))}\nbup_debug {int(kind == 'q5')}\n"
   f"fixb {int(kind != 'base')}\ndiv 18\nseed 2\npin_id 0\noldpad 0\n")
 ids = ["l.clocks", "l", "gate.clk_sdram", "gate.clk_arm", "gate.hold", "a", "b", "d", "c.cells", "e.files", "f.files",
-       "g", "h", "i", "j", "k", "k'.files", "k'.fanin", "sdram.files", "p", "o.files"]
+       "g", "g.legs", "h", "i", "j", "k", "k'.files", "k'.fanin", "sdram.files", "p", "o.files"]
 info = {"d", "e.files", "f.files", "i", "k'.files", "k'.fanin", "sdram.files", "p", "o.files"}
 checks = [f"CHECK {i} {'INFO' if i in info else 'PASS'}: made up" for i in ids]
 if kind == "base":
@@ -223,9 +223,10 @@ kline() { grep "^  (k') " "$T/c/$case_n.out" | head -1 | cut -c1-400; }
 checker PASS daria "Build B, every report as it should be"
 checker PASS base "aeee6d2 (kind base), (g) the negative control failing"
 checker "FAIL: g" base "kind base whose (g) never ran" "drop=g"
-checker "FAIL: report g h h.retime i p" builda \
+checker "FAIL: report g g.legs h h.retime i p" builda \
 	"the review's case: Build A, quartus_sta stopped after (l), section ab's Tcl error, no fit report" \
-	"drop=a,b,d,c.cells,e.files,f.files,g,h,i,j,k,k'.files,k'.fanin,sdram.files,p,o.files" ab_error noend nofit
+	"drop=a,b,d,c.cells,e.files,f.files,g,g.legs,h,i,j,k,k'.files,k'.fanin,sdram.files,p,o.files" ab_error noend nofit
+checker "FAIL: g.legs" builda "Build A whose (g.legs) never ran" "drop=g.legs"
 checker "FAIL: a b" daria "Build B with a Tcl error in section ab (the old form of the id)" ab_error
 checker "FAIL: g h" daria "Build B whose (g) and (h) never ran" "drop=g,h"
 checker "FAIL: report" daria "Build B, step7_report.tcl stopped before its end" noend
