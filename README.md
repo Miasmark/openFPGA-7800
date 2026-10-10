@@ -101,7 +101,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   Mode* in the Pocket's video settings). From 2.0.14. The grayscale LCD
   look suits 2600 games played in B&W mode (L toggles it).
 - *Overscan* (in *Picture*) shows MARIA's whole NTSC picture: 242 lines instead of
-  the 224 most games stay inside. Games that draw into the overscan, like
+  the 224 most games stay inside (lines 27-250, where 7800basic's 224-line
+  screens sit). Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.
 

@@ -18,8 +18,8 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Seven upstream files are modified (`top.sv`, `Maria/DMA.sv`,
-`EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
+Eight upstream files are modified (`top.sv`, `Maria/DMA.sv`,
+`Maria/video_sync.sv`, `EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
 `banks2600.sv`), three firmware images are removed, and the POKEY is swapped
 for an older one.
 
@@ -65,6 +65,16 @@ multisprite sample). The Pocket copy restores the previous behaviour (upstream
 display list entry. `sim/extra_tests.sh` renders the multisprite sample, and
 each sprite then matches its source graphic row for row. The rest of that
 commit is kept.
+
+### `rtl/Maria/video_sync.sv`: the 224 line window moved down 3 lines
+
+Without *Show Overscan*, NTSC shows the 224 lines of `vblank_ex`. Upstream
+puts them at MARIA lines 24-247 (of 16-257). Games draw 3 lines lower:
+7800basic's 224 line screens fill lines 27-250 (its `screensafe` sample in
+`tb_load +overscan`), and Commando's score bar starts at line 27. Upstream's
+window showed 3 lines of the game's overscan at the top (Commando's
+background above the score bar) and cut 3 picture lines at the bottom.
+The Pocket copy uses lines 27-250. PAL keeps 24-297 (274 lines).
 
 ### `rtl/EEPROM_24LC256.sv`: a NACK ends a read (`EEPROM_NACK_ENDS_READ`)
 
