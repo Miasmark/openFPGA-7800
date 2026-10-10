@@ -375,10 +375,11 @@ def scenarios(img):
     resetat("resetat_dpc", "hard_reset_call_dpc")
     resetat("resetat_cdf", "hard_reset_call_cdf")
 
-    def retune(name, t, at):
+    def retune(name, t, at, extra=()):
         def f():
             args = ["+image=" + I(t + ".bin"), "+wav=300"]
             args += ["+retune=%d" % at] if isinstance(at, int) else ["+wire_retune=" + at]
+            args += list(extra)
             s = run("daria", name, args)
             j = Judge(name); daria_health(j, s, resets=1)
             for k, v in (("rt_f6", 1), ("rt_f6_early", 0), ("rt_rst_low", 0), ("wr_busy", 0), ("f6_busy", 0),
@@ -396,6 +397,7 @@ def scenarios(img):
     retune("retune_cdf", "hard_reset_call_cdf", 120)
     retune("retune_dpc2", "hard_reset_call_dpc", 131)
     retune("retune_svc_dpc", "hard_reset_call_dpc", "svc")
+    retune("retune_svc4_dpc", "hard_reset_call_dpc", "svc", ["+wire_retune_k=4"])
     retune("retune_call_dpc", "hard_reset_call_dpc", "call")
     retune("retune_call_cdf", "hard_reset_call_cdf", "call")
 

@@ -35,7 +35,7 @@
 //                           from the first F6's
 //   wr_crb, wr_stb          daria_fe's cart RAM and state RAM writes (port B)
 //   wr_busy                 of those, while pll_busy (raw or pll_busy_s[1]) is
-//                           high
+//                           high (the first 40 also as WIRE write lines)
 //   wr_after_load2          of those, after a +image2 load started
 //   hold_rise               rises of daria_hold (init_busy for an ARM scheme)
 //   calls, calls_arm        call_tog flips at daria_fe's output and at the
@@ -229,7 +229,13 @@ module tb_wire;
 	always @(posedge tb.clk_sys) begin
 		if (`W_FE.crb_we) wr_crb++;
 		if (`W_FE.stb_we) wr_stb++;
-		if ((`W_FE.crb_we || `W_FE.stb_we) && (tb.dut.pll_busy_s[1] || tb.pll_busy_tb)) wr_busy++;
+		if ((`W_FE.crb_we || `W_FE.stb_we) && (tb.dut.pll_busy_s[1] || tb.pll_busy_tb)) begin
+			wr_busy++;
+			if (wr_busy <= 40)
+				$display("WIRE write while pll_busy at clk_sys %0d (%0.6f ms): %0s word %0d, F6 %0d, copy engine %0d, pll_busy_s[1] %0d, pll_locked %0d",
+					t_sys, ms(), `W_FE.crb_we ? "cart RAM" : "state RAM", `W_FE.crb_we ? `W_FE.crb_addr : 13'(`W_FE.stb_addr),
+					`W_CP.f6_q, `W_CP.run, tb.dut.pll_busy_s[1], tb.pll_locked_tb);
+		end
 		if ((`W_FE.crb_we || `W_FE.stb_we) && t_load2 >= 0) wr_after_load2++;
 		if (tb.dut.daria_hold && !hold_d) hold_rise++;
 		hold_d <= tb.dut.daria_hold;
