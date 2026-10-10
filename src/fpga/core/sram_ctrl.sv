@@ -2,7 +2,8 @@
 // The Pocket's SRAM (AS6C2016-55: 128K x 16, 55 ns, asynchronous) as the home
 // of five memories that used to be block RAM:
 //
-//   word 0x00000-0x0FFFF  cartridge RAM        128 KiB (top.sv cartram_*)
+//   word 0x00000-0x0FFFF  cartridge RAM        128 KiB (top.sv cartram_*,
+//                                                       cartram_*26_out)
 //   word 0x10000-0x17FFF  2600 Flicker Blend    64 KiB (video_mux frame)
 //   word 0x18000-0x1BFFF  SaveKey EEPROM        32 KiB (stored inverted)
 //   word 0x1C000-0x1DFFF  7800 BIOS             16 KiB
@@ -10,8 +11,9 @@
 //
 // Byte b of a region sits in word b >> 1, low byte when b is even.
 //
-// Runs on clk_sdram (4 x clk_sys, same PLL, edges aligned). Every access is
-// five clk_sdram cycles (87 ns), comfortably over the part's 55 ns:
+// Runs on clk_sdram (4 x clk_sys, same PLL, edges aligned), apart from the
+// 2600 request register on clk_sys (below). Every access is five clk_sdram
+// cycles (87 ns), comfortably over the part's 55 ns:
 //
 //   read:  address and OE at edge 0, DQ sampled by the input register at
 //          edge 5, handed to the client at edge 6.
@@ -32,8 +34,66 @@
 //   rule lapses and everything is served in order.
 //
 //   2600 mode. The 2600 mappers hold their RAM strobe for most of the 6507
-//   cycle, so they have lots of slack. Flicker Blend prefetches the next
-//   pixel. Order: cartridge, Flicker Blend, then the rest.
+//   cycle. Their request comes on its own port (t_*) and is registered here
+//   on clk_sys (t_*_q), so the mappers' decode is timed against clk_sys and
+//   stays out of clk_sdram's cone (Fix B, docs/DARIA_CORE.md). An access
+//   starts when the registered strobe rises, and again whenever the
+//   registered address or direction changes while it is held. Flicker Blend
+//   prefetches the next pixel. Order: cartridge, Flicker Blend, then the
+//   rest.
+//
+//   The 2600 read budget, in clk_sdram edges sN counted from E0, the clk_sys
+//   edge where pclk1 loads the 6507's address (E1 = s4, E2 = s8). The
+//   mapper's strobe is valid at E1 (at E0 if the address repeats), t_*_q
+//   loads at E2 = s8, the access starts at s9 and c_rdata is written at
+//   s15 (s11 for a repeated address). At worst another client's access
+//   started at s8 and the cartridge starts when it ends, at s13: c_rdata at
+//   s19. The 6507 latches at E6 = s24, and c_rdata into clk_sys is a
+//   two-clk_sys multicycle (core_constraints.sdc), so s19 is the last edge
+//   allowed and there is no spare. A second register stage, sending every
+//   2600 request through cp before the arbiter sees it (one clk_sdram more;
+//   the s19 case above waits in cp only because the SRAM is busy), a longer
+//   access, or another client ahead of the cartridge would each break the
+//   budget without any functional failure in simulation.
+//
+//   One read is a clk_sys later: the 6507's first bus cycle after a console
+//   reset, a dummy read of its reset sequence. The cartridge's a_in[12]
+//   (AB[12] & bios_en_b, top.sv) follows the reset's release by one
+//   clk_sys, so a RAM strobe for that address is valid at E2, t_*_q loads
+//   at E3 = s12, and c_rdata lands at s19 with nothing in the way. Another
+//   client's access starting at s9 to s12 would put it at s20 to s23, past
+//   the multicycle (Flicker Blend's accesses, locked to the 6507 cycle,
+//   rarely start there; the SaveKey model's and the bridge's can start at
+//   any phase), but the 6507 discards that byte: reset forces BRK into its
+//   instruction register.
+//
+//   The two requests. top.sv drives its 7800 request (c_*) only while its 2600
+//   select (mapper_init_busy | tia_en) is low, and t_* only while it is high.
+//   The BIOS read beside the 7800 request (c_bios) needs bios_en_b low, which
+//   a 2600 image has only in reset: the bypass sets tia_en and bios_en_b on
+//   one edge and locks the control register. But t_*_q lags the select by one
+//   clk_sys. In 2600 mode the select falls only at a console reset, from any
+//   source of the wrapper's reset register (the Pocket's Reset, a PLL retune,
+//   a load): ctrl_reg clears tia_en and bios_en_b on one edge, and from it
+//   bios_sel = AB[15]. If that edge is also where t_*_q loads a new 2600
+//   strobe (the reset register rose at E1 of a cycle the mapper decodes as
+//   cart RAM, so the select falls at E2), the 6507 reads at A15 = 1 and mclk1
+//   is high from E2, the BIOS read (mclk1 & bios_sel & RW,
+//   atari7800_pocket.sv) rises there too: m_new and t_new in the same
+//   clk_sdram cycle, s9. Code at $F000-$FFFF meets this with a RAM read, a
+//   Superchip write port's dummy read or a Supercharger RAM write, all 6507
+//   reads. (A load meets it only with the bank-switch override set: otherwise
+//   detect2600 clears the mapper on the load's first edge, and there is no
+//   strobe at E1.) It is the only way the two meet, and m_new yields to t_new:
+//   the 2600 access goes ahead as in any cycle (s9, c_rdata at s15, s19 behind
+//   another client), and that BIOS read, one clk_sys wide like mclk1, is not
+//   served (a 7800 cartridge-RAM strobe would yield the same way). The core is
+//   in reset, nothing uses that byte, and the BIOS reads after it are served
+//   as before. So m_new and t_new are never high together, and the testbenches
+//   stop if they are. Rejected: a retry (t_last not loaded when m_new wins)
+//   puts the 2600 access behind the BIOS read, c_rdata at s20; gating the BIOS
+//   read with the wrapper's tia_mode misses a load, which clears tia_mode on
+//   the edge where the reset register rises.
 //
 //   The rest, in order: the APF bridge (SaveKey save and load), the SaveKey
 //   EEPROM model, the BIOS download, and the power-up clear.
@@ -50,6 +110,7 @@
 
 module sram_ctrl (
 	input  wire        clk,            // clk_sdram
+	input  wire        clk_sys,        // the 2600 request register
 
 	// From the clk_sys domain (same PLL, timed paths)
 	input  wire        sys_reset,      // core held in reset (loading)
@@ -57,14 +118,21 @@ module sram_ctrl (
 	input  wire        tia_mode,       // 2600 mode: no MARIA slots
 	input  wire        mclk1,          // MARIA master enable, the slot reference
 
-	// Cartridge RAM and BIOS (clk_sys). 7800: one strobe per mclk1.
-	// 2600: a level, re-served whenever the address changes.
+	// 7800 cartridge RAM and BIOS (clk_sys): one strobe per mclk1, served
+	// at A.
 	input  wire        c_rd,
 	input  wire        c_wr,
 	input  wire        c_bios,         // this read is the BIOS, not cartridge RAM
 	input  wire [16:0] c_addr,         // cartridge RAM byte, or BIOS byte in [13:0]
 	input  wire  [7:0] c_wdata,
-	output reg   [7:0] c_rdata,
+	// 2600 cartridge RAM (clk_sys): a level, registered here for one
+	// clk_sys, re-served whenever the registered address or direction
+	// changes.
+	input  wire        t_rd,
+	input  wire        t_wr,
+	input  wire [16:0] t_addr,
+	input  wire  [7:0] t_wdata,
+	output reg   [7:0] c_rdata,        // both ports
 
 	// Flicker Blend frame (clk_sys), the spram it replaces: q follows address
 	input  wire        fb_en,          // 2600 mode with Flicker Blend on
@@ -212,26 +280,57 @@ reg        cp_v = 1'b0, cp_we = 1'b0;     // pending cartridge access
 reg [16:0] cp_word = 17'd0;
 reg        cp_lane = 1'b0;
 reg  [7:0] cp_data = 8'd0;
-reg [18:0] c_key_last = 19'h7FFFF;        // {we, bios, addr} last requested
 
+// 2600: one clk_sys register, so the mappers' decode ends there. Address,
+// strobes and data are sampled on the same edge.
+reg        t_rd_q, t_wr_q;
+reg [16:0] t_addr_q;
+reg  [7:0] t_wdata_q;
+initial begin t_rd_q = 1'b0; t_wr_q = 1'b0; t_addr_q = 17'd0; t_wdata_q = 8'd0; end
+always @(posedge clk_sys) begin
+	t_rd_q    <= t_rd;
+	t_wr_q    <= t_wr;
+	t_addr_q  <= t_addr;
+	t_wdata_q <= t_wdata;
+end
+
+// A new 2600 request: the registered strobe with a key not yet served. The
+// compare sees registers only. The registered strobe is low for at least
+// one clk_sys between 6507 cycles, so today the compare only repeats the
+// rising edge; it is kept as a guard for a mapper that moves its address
+// inside a held strobe. t_last_v marks t_last as valid (every 18-bit key is
+// a real request).
+reg        t_last_v;
+reg [17:0] t_last;                        // {we, addr} last served
+initial begin t_last_v = 1'b0; t_last = 18'd0; end
+wire [17:0] t_key = {t_wr_q, t_addr_q};
+wire        t_new = (t_rd_q | t_wr_q) & (~t_last_v | (t_key != t_last));
+
+// 7800 and BIOS: the rising strobe only (MARIA's slot timing, served at A),
+// unless a new 2600 request arrives in the same clk_sdram cycle. That
+// happens only when a console reset clears the 2600 select on the edge
+// where t_*_q loads a new 2600 strobe (header, "The two requests"): the
+// 2600 request is served, and the BIOS read beside it, one clk_sys wide
+// like mclk1, is not. So m_new and t_new are never high together. t_new
+// comes from registers only.
 wire [16:0] c_word = c_bios ? (BIOS_BASE | {4'd0, c_addr[13:1]}) : {1'b0, c_addr[16:1]};
-wire [18:0] c_key  = {c_wr, c_bios, c_addr};
-wire        c_new  = (c_rd & ~c_rd_q) | (c_wr & ~c_wr_q) |
-                     (tia_mode & (c_rd | c_wr) & (c_key != c_key_last));
+wire        m_new  = ((c_rd & ~c_rd_q) | (c_wr & ~c_wr_q)) & ~t_new;
 
 always @(posedge clk) begin
 	c_rd_q <= c_rd;
 	c_wr_q <= c_wr;
-	if (c_new) c_key_last <= c_key;
-	if (!c_rd && !c_wr) c_key_last <= 19'h7FFFF;
+	if (t_new) begin t_last_v <= 1'b1; t_last <= t_key; end
+	if (!t_rd_q && !t_wr_q) t_last_v <= 1'b0;
 end
 
 // The request in force this edge: a new strobe beats an older pending one.
+// The 7800 strobe selects last, so its cone sees one mux here.
+wire        c_new   = m_new | t_new;
 wire        cq_v    = c_new | cp_v;
-wire        cq_we   = c_new ? c_wr : cp_we;
-wire [16:0] cq_word = c_new ? c_word : cp_word;
-wire        cq_lane = c_new ? c_addr[0] : cp_lane;
-wire  [7:0] cq_data = c_new ? c_wdata : cp_data;
+wire        cq_we   = m_new ? c_wr      : (t_new ? t_wr_q                 : cp_we);
+wire [16:0] cq_word = m_new ? c_word    : (t_new ? {1'b0, t_addr_q[16:1]} : cp_word);
+wire        cq_lane = m_new ? c_addr[0] : (t_new ? t_addr_q[0]            : cp_lane);
+wire  [7:0] cq_data = m_new ? c_wdata   : (t_new ? t_wdata_q              : cp_data);
 
 // ------------------------------------------------------- Flicker Blend ------
 // Taken on the falling edge, half a clk_sdram after the clk_sys edge that
@@ -360,7 +459,7 @@ always @(posedge clk) begin
 	// Cartridge: remember a strobe the SRAM could not take this edge.
 	if (take && go_cl == CL_CART) cp_v <= 1'b0;
 	else if (c_new) begin
-		cp_v <= 1'b1; cp_we <= c_wr; cp_word <= c_word; cp_lane <= c_addr[0]; cp_data <= c_wdata;
+		cp_v <= 1'b1; cp_we <= cq_we; cp_word <= cq_word; cp_lane <= cq_lane; cp_data <= cq_data;
 	end
 	if (done_v && done_cl == CL_CART) c_rdata <= done_byte;
 

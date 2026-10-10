@@ -32,6 +32,13 @@ module Atari7800 #(
 	output logic  [7:0] fb_wdata,
 	output logic        fb_active,
 	input  logic  [7:0] fb_q,
+	// Fix B (docs/DARIA_CORE.md, "Fix B"): the 2600 mappers' cartridge-RAM
+	// request on its own port, which sram_ctrl registers on clk_sys;
+	// cartram_* then carries the 7800 request alone.
+	output logic [17:0] cartram_addr26_out,
+	output logic        cartram_wr26_out,
+	output logic        cartram_rd26_out,
+	output logic  [7:0] cartram_wrdata26_out,
 `endif
 `ifdef POCKET_BUPCHIP
 	// Pocket: the BupChip runs outside this module (core/bupchip/, with
@@ -749,6 +756,22 @@ module Atari7800 #(
 		.tia_mode     (tia_mode)
 	);
 
+`ifdef POCKET_SRAM
+	// Pocket, Fix B: the merge below, split in two under the merge's own
+	// select. The 7800 request (MARIA's slot timing) stays on cartram_*; the
+	// 2600 request goes out on its own port, which sram_ctrl registers for
+	// one clk_sys, so the 2600 mappers' decode leaves clk_sdram's cone.
+	// Needs EXTERNAL_CARTRAM: cart_ram_tdp below sees cartram_* only.
+	wire cartram_sel26 = mapper_init_busy | tia_en;
+	assign cartram_wr = ~cartram_sel26 & cartram_wr78 & mclk1;
+	assign cartram_rd = ~cartram_sel26 & cartram_rd78 & mclk1;
+	assign cartram_addr = cartram_addr78;
+	assign cartram_wrdata = cartram_wrdata78;
+	assign cartram_wr26_out = cartram_sel26 & cartram_wr26;
+	assign cartram_rd26_out = cartram_sel26 & cartram_rd26;
+	assign cartram_addr26_out = cartram_addr26;
+	assign cartram_wrdata26_out = cartram_wrdata26;
+`else
 	assign cartram_wr = mapper_init_busy ? cartram_wr26 :
 		(tia_en ? cartram_wr26 : (cartram_wr78 & mclk1));
 	assign cartram_rd = mapper_init_busy ? cartram_rd26 :
@@ -757,6 +780,7 @@ module Atari7800 #(
 		(tia_en ? cartram_addr26 : cartram_addr78);
 	assign cartram_wrdata = mapper_init_busy ? cartram_wrdata26 :
 		(tia_en ? cartram_wrdata26 : cartram_wrdata78);
+`endif
 
 	//////////////////////
 	// ARM mapper (2600) //

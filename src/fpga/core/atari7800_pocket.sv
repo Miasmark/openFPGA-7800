@@ -889,6 +889,13 @@ wire use_bios = bios_loaded & ~skip_bios & ~tia_mode;
 wire [17:0] cartram_addr;
 wire        cartram_wr, cartram_rd;
 wire  [7:0] cartram_wrdata, sram_c_rdata;
+`ifdef POCKET_SRAM
+/* verilator lint_off UNUSEDSIGNAL */
+wire [17:0] cartram_addr26;                // the 2600 request (Fix B); [17] unused
+/* verilator lint_on UNUSEDSIGNAL */
+wire        cartram_wr26, cartram_rd26;
+wire  [7:0] cartram_wrdata26;
+`endif
 wire        mclk1, bios_sel;
 wire [15:0] fb_addr;
 wire        fb_we, fb_active;
@@ -969,12 +976,17 @@ Atari7800 main
 	.ps2_key      (11'd0),
 
 `ifdef POCKET_SRAM
-	// Cartridge RAM lives in the SRAM (EXTERNAL_CARTRAM)
+	// Cartridge RAM lives in the SRAM (EXTERNAL_CARTRAM): the 7800 request
+	// on cartram_*, the 2600 request on cartram_*26_out (Fix B)
 	.cartram_addr   (cartram_addr),
 	.cartram_wr     (cartram_wr),
 	.cartram_rd     (cartram_rd),
 	.cartram_wrdata (cartram_wrdata),
 	.cartram_data   (sram_c_rdata),
+	.cartram_addr26_out   (cartram_addr26),
+	.cartram_wr26_out     (cartram_wr26),
+	.cartram_rd26_out     (cartram_rd26),
+	.cartram_wrdata26_out (cartram_wrdata26),
 	.mclk1_out      (mclk1),
 	.bios_sel_out   (bios_sel),
 	.fb_addr        (fb_addr),
@@ -1093,6 +1105,7 @@ wire bios_rd = mclk1 & bios_sel & RW;
 sram_ctrl sram
 (
 	.clk          (clk_sdram),
+	.clk_sys      (clk_sys),
 	.sys_reset    (reset),
 	.game_running (~reset & cart_loaded),
 	.tia_mode     (tia_en),
@@ -1103,6 +1116,10 @@ sram_ctrl sram
 	.c_bios       (bios_rd),
 	.c_addr       (bios_rd ? {3'd0, bios_addr[13:0] & bios_mask[13:0]} : cartram_addr[16:0]),
 	.c_wdata      (cartram_wrdata),
+	.t_rd         (cartram_rd26),
+	.t_wr         (cartram_wr26),
+	.t_addr       (cartram_addr26[16:0]),
+	.t_wdata      (cartram_wrdata26),
 	.c_rdata      (sram_c_rdata),
 
 	.fb_en        (fb_active),

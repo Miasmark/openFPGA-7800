@@ -167,6 +167,16 @@ is required. That frees 256 M10K blocks.
 - `rtl/top.sv` (`POCKET_SRAM`): new outputs `mclk1_out` (MARIA's 7.16 MHz
   strobe, the SRAM's slot reference), `bios_sel_out` (a cartridge-space read
   is the BIOS), and the Flicker Blend port, passed through from `video_mux`.
+  Fix B (`../../../docs/DARIA_CORE.md`, "Fix B") adds the outputs
+  `cartram_addr26_out`, `cartram_wr26_out`, `cartram_rd26_out` and
+  `cartram_wrdata26_out`, and splits upstream's merge of the 2600 and 7800
+  cartridge-RAM requests (an `ifdef POCKET_SRAM` / `else` upstream merge /
+  `endif` block) under the merge's own select: `cartram_*` carries the 7800
+  request alone, and the new ports carry the 2600 request, which `sram_ctrl`
+  registers on `clk_sys`. That keeps the 2600 mappers' decode off the SRAM's
+  `clk_sdram` request path. `POCKET_SRAM` therefore needs `EXTERNAL_CARTRAM`
+  (`../ap_core.qsf` and `sim/run_sim.sh` set both): without it,
+  `cart_ram_tdp` would see no 2600 request.
 - `rtl/video_mux.sv` (`POCKET_SRAM`): the frame's `spram` becomes the port
   `fb_addr` / `fb_we` / `fb_wdata` / `fb_q`, plus `fb_active`. `sram_ctrl`
   answers like the `spram` did, prefetching the next pixel.
