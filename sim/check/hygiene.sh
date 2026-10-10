@@ -10,11 +10,12 @@
 #     /private/tmp) or a scratch directory in an added line, whatever text
 #     surrounds it: a quote, a backtick, a redirection (> or 2> glued to it),
 #     brackets, a comma, a ${X:-...} default, a table cell, an option letter
-#     glued to it (-I, -o), a URL (file:///tmp/...), a doubled leading slash
-#     (//tmp/...). Only a path whose "tmp" continues a relative one (work, ./,
-#     ~, $WORK, ${WORK} before it, also with a doubled slash: work//tmp) is
-#     let through, and so is the directory itself without a path into it (cd
-#     /tmp inside a container);
+#     glued to it (-I, -o), a file URL (file: and three slashes before the
+#     directory's name), a doubled leading slash (two slashes before it).
+#     Only a path whose "tmp" continues a relative one (work, ./, ~, $WORK,
+#     ${WORK} before it, also with a doubled slash between) is let through,
+#     and so is the directory itself without a path into it (cd /tmp inside
+#     a container);
 #   - none of the assistant and model names in a list kept OUTSIDE the
 #     repository (writing them in would break the rule this checks): give it
 #     as --names FILE or HYGIENE_NAMES=FILE, one name per line, matched
