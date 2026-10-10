@@ -33,10 +33,18 @@
 //                           rst_quiet; must be 0)
 //   f6_ram_diff             F6 ends whose cart RAM or state RAM hash differs
 //                           from the first F6's
-//   wr_crb, wr_stb          daria_fe's cart RAM and state RAM writes (port B)
-//   wr_busy                 of those, while pll_busy (raw or pll_busy_s[1]) is
-//                           high (the first 40 also as WIRE write lines)
-//   wr_after_load2          of those, after a +image2 load started
+//   wr_crb, wr_stb          daria_fe's cart RAM and state RAM writes that
+//                           reach the RAMs (bupchip's port B write enables,
+//                           after atari7800_pocket.sv's daria_we_ok)
+//   wr_busy                 of those, while pll_busy_s[1] is high (P20; the
+//                           first 40 also as WIRE write lines)
+//   wr_stop                 clk_run edges (+retune, +wire_retune: the PLL's
+//                           outputs stopping or restarting) with either RAM's
+//                           port B write enable high
+//   wr_drop                 daria_fe's write enables that did not reach the
+//                           RAMs (daria_we_ok low: a service running on into
+//                           a retune); the first 40 as WIRE drop lines
+//   wr_after_load2          RAM writes after a +image2 load started
 //   hold_rise               rises of daria_hold (init_busy for an ARM scheme)
 //   calls, calls_arm        call_tog flips at daria_fe's output and at the
 //                           BupChip's input
@@ -224,21 +232,37 @@ module tb_wire;
 	end
 
 	// ---- daria_fe's RAM writes, daria_hold ------------------------------------------------
-	int  wr_crb = 0, wr_stb = 0, wr_busy = 0, wr_after_load2 = 0, hold_rise = 0;
+	int  wr_crb = 0, wr_stb = 0, wr_busy = 0, wr_stop = 0, wr_drop = 0, wr_after_load2 = 0, hold_rise = 0;
 	logic hold_d = 1'b0;
 	always @(posedge tb.clk_sys) begin
-		if (`W_FE.crb_we) wr_crb++;
-		if (`W_FE.stb_we) wr_stb++;
-		if ((`W_FE.crb_we || `W_FE.stb_we) && (tb.dut.pll_busy_s[1] || tb.pll_busy_tb)) begin
+		automatic bit cwe = `W_BC.daria_crb_we, swe = `W_BC.daria_stb_we;
+		if (cwe) wr_crb++;
+		if (swe) wr_stb++;
+		if ((cwe || swe) && tb.dut.pll_busy_s[1]) begin
 			wr_busy++;
 			if (wr_busy <= 40)
-				$display("WIRE write while pll_busy at clk_sys %0d (%0.6f ms): %0s word %0d, F6 %0d, copy engine %0d, pll_busy_s[1] %0d, pll_locked %0d",
-					t_sys, ms(), `W_FE.crb_we ? "cart RAM" : "state RAM", `W_FE.crb_we ? `W_FE.crb_addr : 13'(`W_FE.stb_addr),
-					`W_CP.f6_q, `W_CP.run, tb.dut.pll_busy_s[1], tb.pll_locked_tb);
+				$display("WIRE write while pll_busy at clk_sys %0d (%0.6f ms): %0s word %0d, F6 %0d, copy engine %0d, pll_locked %0d",
+					t_sys, ms(), cwe ? "cart RAM" : "state RAM", cwe ? `W_FE.crb_addr : 13'(`W_FE.stb_addr),
+					`W_CP.f6_q, `W_CP.run, tb.pll_locked_tb);
 		end
-		if ((`W_FE.crb_we || `W_FE.stb_we) && t_load2 >= 0) wr_after_load2++;
+		if ((`W_FE.crb_we && !cwe) || (`W_FE.stb_we && !swe)) begin
+			wr_drop++;
+			if (wr_drop <= 40)
+				$display("WIRE drop at clk_sys %0d (%0.6f ms): %0s word %0d, F6 %0d, copy engine %0d, pll_busy_s[1] %0d",
+					t_sys, ms(), `W_FE.crb_we ? "cart RAM" : "state RAM", `W_FE.crb_we ? `W_FE.crb_addr : 13'(`W_FE.stb_addr),
+					`W_CP.f6_q, `W_CP.run, tb.dut.pll_busy_s[1]);
+		end
+		if ((cwe || swe) && t_load2 >= 0) wr_after_load2++;
 		if (tb.dut.daria_hold && !hold_d) hold_rise++;
 		hold_d <= tb.dut.daria_hold;
+	end
+	// the write enables as the PLL's outputs stop and restart
+	always @(tb.clk_run) begin
+		#0.001;
+		if (`W_BC.daria_crb_we || `W_BC.daria_stb_we) begin
+			wr_stop++;
+			$display("WIRE write enable high as the clocks %0s (%0.6f ms)", tb.clk_run ? "restart" : "stop", ms());
+		end
 	end
 
 	// ---- calls, returns, samples --------------------------------------------------------
@@ -367,8 +391,8 @@ module tb_wire;
 			rel_n, f6_n, f6_win, f6_rst, f6_win_dt);
 		w = {w, $sformatf(" f6_rst_low=%0d f6_busy=%0d f6_noib=%0d f6_live=%0d f6_ram_diff=%0d",
 			f6_rst_low, f6_busy, f6_noib, f6_live, f6_ram_diff)};
-		w = {w, $sformatf(" wr_crb=%0d wr_stb=%0d wr_busy=%0d wr_after_load2=%0d hold_rise=%0d",
-			wr_crb, wr_stb, wr_busy, wr_after_load2, hold_rise)};
+		w = {w, $sformatf(" wr_crb=%0d wr_stb=%0d wr_busy=%0d wr_stop=%0d wr_drop=%0d wr_after_load2=%0d hold_rise=%0d",
+			wr_crb, wr_stb, wr_busy, wr_stop, wr_drop, wr_after_load2, hold_rise)};
 		w = {w, $sformatf(" calls=%0d calls_arm=%0d rets=%0d rets_fe=%0d ret_max_us=%0d open_old=%0d abandoned=%0d orphans=%0d",
 			calls, calls_arm, rets, rets_fe, int'(ret_max / 1000.0), open_old, abandoned, orphans)};
 		w = {w, $sformatf(" smp_req=%0d smp_ack=%0d", smp_req, smp_ack)};

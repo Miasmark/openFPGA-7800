@@ -228,7 +228,7 @@ def daria_health(j, s, guard=True, resets=0, selfcheck=True):
     image is one of fe_dir's, whose RIOT $FE counts its failed self-checks
     (a game's or another image's RIOT RAM means nothing there)"""
     common(j, s)
-    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "halts", "psram_viol", "open_old",
+    for k in ("f6_rst_low", "f6_noib", "f6_live", "f6_busy", "wr_busy", "wr_stop", "halts", "psram_viol", "open_old",
               "orphans") + (("errors",) if selfcheck else ()):
         j.eq(s, k, 0)
     j.ok(s["sum"].get("psram_cs") == 50.0, "psram_cs=%s (want 50.0)" % s["sum"].get("psram_cs"))
@@ -390,9 +390,14 @@ def scenarios(img):
             j.ok(len(s["busyfall"]) == 1 and len(s["f6end"]) == 2 and s["f6end"][1] > s["busyfall"][0],
                  "F6 not after pll_busy's fall")
             j.ge(s, "calls_rt", 1)
+            if at == "svc":
+                # not vacuous: the service ran on into pll_busy_s[1], and
+                # atari7800_pocket.sv's daria_we_ok dropped its writes
+                j.ge(s, "wr_drop", 1)
             return j, s
         S[name] = (f, "7.3, P20: a PAL/NTSC retune (+retune) mid-game in a busy ARM image: no daria_fe RAM write "
-                      "while pll_busy, one F6 after it, the reset never dips, the RAM as at power-up", True)
+                      "while pll_busy_s[1] or as the clocks stop, one F6 after it, the reset never dips, the RAM as "
+                      "at power-up" + ("; it lands in a DPC+ copy-engine service" if at == "svc" else ""), True)
     retune("retune_dpc", "hard_reset_call_dpc", 120)
     retune("retune_cdf", "hard_reset_call_cdf", 120)
     retune("retune_dpc2", "hard_reset_call_dpc", 131)
@@ -520,7 +525,8 @@ def main():
             if j.bad:
                 rc = 1
             sm = s.get("sum", {})
-            keys = ("releases f6 f6_win_dt calls rets abandoned smp_req misses wr_crb wr_busy hold_rise rt_f6 rs_f6 "
+            keys = ("releases f6 f6_win_dt calls rets abandoned smp_req misses wr_crb wr_busy wr_stop wr_drop hold_rise "
+                    "rt_f6 rs_f6 "
                     "marker errors psram_viol locked unlocks").split()
             line += "\n        " + " ".join("%s=%s" % (k, sm.get(k)) for k in keys if k in sm)
         print(line, flush=True)
