@@ -6,12 +6,14 @@
   frame_gate.py --strict A B [--frames N]
 
 REF and CAND are run directories (or their fp.csv files) as tb_daria writes
-them (+fp=1): fp.csv (frame,len_sys,riot,video,audio[,cpu]), calls.csv or
-calls.csv.gz (call,frame,line,t_req_sys,busy_sys,...), slack.csv
-(call,kind,sys_end_to_poll,slack_sys,poll_pc) and run.log. REF is upstream
-(R1, tb_daria plain), CAND the integrated core (R2, tb_frames). N is the
-run's +frames: frames are counted from the reset release, and a run of N
-frames records frames 1..N-1 ("ran N frames").
+them (+fp=1): fp.csv (frame,len_sys,riot,video,audio[,cpu,...]), calls.csv
+or calls.csv.gz (call,frame,line,t_req_sys,busy_sys,...), slack.csv
+(call,kind,sys_end_to_poll,slack_sys,poll_pc), frames.csv
+(frame,t_sys,len_sys,...: when each frame starts, on the clock calls.csv's
+t_req_sys counts) and run.log. REF is upstream (R1, tb_daria plain), CAND
+the integrated core (R2, tb_frames). N is the run's +frames: frames are
+counted from the reset release, and a run of N frames records frames 1..N-1
+("ran N frames").
 
 PASS needs all of:
   - both fp.csv hold exactly frames 1..N-1, in order (a truncated, padded
@@ -20,11 +22,17 @@ PASS needs all of:
   - riot and audio equal on every frame, or the difference classed
     release_shift: calls are matched by number and each call's release (the
     6507's hold, busy_sys) compared; a run of differing frames in one column
-    is release_shift when it starts in the frame of a call whose release
-    differs (its frame or the next), lasts at most 8 frames, and len_sys and
-    video are equal there (they are everywhere, by the rule above). Every
-    other difference fails. A cpu column, when both files have it, must be
-    equal on every frame;
+    is release_shift when it starts in a frame where a call whose release
+    differs is held (the frame of its request and, when REF's frames.csv
+    shows the hold, on either side's busy_sys, reaching past that frame's
+    end, the frames up to the one its release falls in; without frames.csv,
+    the request's frame only), lasts at most 8 frames, ends before the last
+    frame of the file (the column is equal again), and len_sys and video are
+    equal there (they are everywhere, by the rule above). Every other
+    difference fails. A cpu column, when both files have it, must be equal
+    on every frame; the absolute-time columns of tb_load's and tb_system's
+    +fp (t_sys, rst_n, rst_sys) are not compared here: tb_frames counts from
+    its own reset release and tb_daria from its own;
   - Spiders (--excuse 557-572, set by default when NAME contains "Spiders"):
     frames F0..F1 are excused when they are the overrun frames on both sides
     (the frames of the late calls) and every column matches from F1+1;
@@ -37,13 +45,17 @@ PASS needs all of:
       STATUS calls C, late L, halts H, halt_code X, psram_viol V, guard G, unlocks U
     with halts 0, psram_viol 0, unlocks 0, guard locked (--expect-guard;
     "unlocked" at VCO/19, "none" skips it), and C and L equal to REF's.
---strict: every column of A and B equal on every frame, the same frames
-(for two builds of one bench, e.g. tb_load +fp between builds, 7.5 row 5).
+--strict: the same columns in A and B, every one equal on every frame, the
+same frames, and at least one frame (for two builds of one bench, e.g.
+tb_load +fp between builds, 7.5 row 5; tb_load's and tb_system's t_sys,
+rst_n and rst_sys columns then also hold the run to the same clocks and the
+console's reset to the same release edges).
 Prints a report and one verdict line; exit status 0 pass, 1 fail, 2 usage.
 The files derive from game images: keep them and this output in sim/work.
 SPDX-License-Identifier: MIT
 """
 import argparse
+import bisect
 import csv
 import gzip
 import io
@@ -138,13 +150,30 @@ def status_of(d):
     return m.groups() if m else None
 
 
+def header_of(p):
+    raw = gzip.open(p, "rb").read() if p.endswith(".gz") else open(p, "rb").read()
+    first = raw.decode("utf-8", "replace").split("\n", 1)[0].strip()
+    return first.split(",") if first else []
+
+
 def strict(a, b, n):
     bad = []
     ra, rb = load_fp(a), load_fp(b)
+    ha, hb = header_of(path_in(a, "fp.csv")), header_of(path_in(b, "fp.csv"))
+    if ha != hb:
+        bad.append(f"the columns differ: A {','.join(ha) or '(none)'}, B {','.join(hb) or '(none)'}")
+    for who, rows in (("A", ra), ("B", rb)):
+        if not rows:
+            bad.append(f"{who}: no frame at all (an empty or header-only file)")
     fa, fb = check_frames(ra, n, "A", bad), check_frames(rb, n, "B", bad)
     if not n and len(fa) != len(fb):
         bad.append(f"frame counts differ: A {len(fa)}, B {len(fb)}")
-    cols = COLS + (["cpu"] if ra and rb and "cpu" in ra[0] and "cpu" in rb[0] else [])
+    cols = [c for c in ha if c != "frame" and c in hb] or COLS
+    for who, rows in (("A", ra), ("B", rb)):
+        for r in rows:
+            if any(r.get(c) in (None, "") for c in cols):
+                bad.append(f"{who}: frame {r.get('frame')} has an empty column (truncated line)")
+                break
     first = {}
     for f in sorted(set(fa) & set(fb)):
         for c in cols:
@@ -180,12 +209,33 @@ def gate(a):
     hold_c = {int(c["call"]): (int(c["frame"]), int(c["busy_sys"])) for c in calls_c or []}
     if calls_c is None:
         bad.append("CAND: no calls.csv")
+    # The frames in which a call whose release differs is held: its request's
+    # frame and, when REF's frames.csv gives the frames' start times (on
+    # calls.csv's t_req_sys clock), every later frame up to the one in which
+    # it is released, on either side's hold. Without frames.csv, the
+    # request's frame only.
+    t_req = {int(c["call"]): int(c["t_req_sys"]) for c in calls_r or [] if c.get("t_req_sys", "").lstrip("-").isdigit()}
+    fstart = sorted((int(r["t_sys"]), int(r["frame"])) for r in
+                    (read_csv(path_in(a.ref, "frames.csv")) if os.path.isdir(a.ref) else None) or []
+                    if r.get("t_sys", "").isdigit() and r.get("frame", "").isdigit())
+    starts = [s for s, _ in fstart]
+
+    def frame_at(t):
+        i = bisect.bisect_right(starts, t) - 1
+        return fstart[i][1] if i >= 0 else None
     shifted_frames, rel_diff = set(), {}
     for k in sorted(set(hold_r) & set(hold_c)):
         d = hold_c[k][1] - hold_r[k][1]
         rel_diff[d] = rel_diff.get(d, 0) + 1
         if d:
-            shifted_frames |= {hold_r[k][0], hold_r[k][0] + 1}
+            f0 = hold_r[k][0]
+            last = f0
+            if fstart and k in t_req:
+                for busy in (hold_r[k][1], hold_c[k][1]):
+                    rel_f = frame_at(t_req[k] + busy)
+                    if rel_f is not None and rel_f > last:
+                        last = rel_f
+            shifted_frames |= set(range(f0, last + 1))
     # Spiders' overrun frames
     excuse = None
     if a.excuse:
@@ -218,11 +268,14 @@ def gate(a):
         if c in ("len_sys", "video", "cpu"):
             bad.append(f"{c}: {len(diff)} frames differ, the first is {diff[0]}")
             continue
+        end = common[-1] if common else None
         for f0, f1 in runs_of(diff):
-            if f0 in shifted_frames and f1 - f0 + 1 <= SHIFT_MAX:
+            if f0 in shifted_frames and f1 - f0 + 1 <= SHIFT_MAX and f1 != end:
                 shift_count[c] += 1
             else:
-                why = "no call's release differs there" if f0 not in shifted_frames else f"lasts {f1 - f0 + 1} frames (> {SHIFT_MAX})"
+                why = ("no call whose release differs is held there" if f0 not in shifted_frames else
+                       f"lasts {f1 - f0 + 1} frames (> {SHIFT_MAX})" if f1 - f0 + 1 > SHIFT_MAX else
+                       "it reaches the last frame of the file: the column is never equal again")
                 bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
     # calls and late calls
     nr, nc = len(calls_r or []), len(calls_c or [])

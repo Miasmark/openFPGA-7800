@@ -293,6 +293,16 @@ module tb_load;
 	//   cpu      FNV-1a 64 of the 6502's address (low byte first), R/W and
 	//            data at every phase-2 enable (core_phi2_en): data_in on a
 	//            read, data_out on a write
+	// and three columns that place the frame in absolute time, so that a
+	// whole run shifted by some clocks (every column above restarts with the
+	// console's reset) does not compare equal:
+	//   t_sys    clk_sys counted from time 0 at the edge that ends the frame
+	//   rst_n    how many times the wrapper's console reset (the register
+	//            reset in atari7800_pocket.sv, which P6's daria_hold joins)
+	//            has been released so far, counted from time 0
+	//   rst_sys  clk_sys counted from time 0 at the last of those releases:
+	//            the clock whose edge first sees reset low (plan P6: the
+	//            DARIA and the plain build release on the same edge)
 	localparam logic [63:0] FNV_OFFSET = 64'hcbf29ce484222325;
 	localparam logic [63:0] FNV_PRIME  = 64'h00000100000001b3;
 	function automatic logic [63:0] fnv(input logic [63:0] h, input logic [7:0] b);
@@ -301,24 +311,30 @@ module tb_load;
 	`define FP_CPU dut.main.cpu_inst.cpu
 	int          fp_fd = 0, fp_frame = 0;
 	longint      fp_now = 0, fp_tvs = 0;
-	logic        fp_vs = 1'b0;
+	logic        fp_vs = 1'b0, fp_rs = 1'b1;
+	longint      fp_rst_n = 0, fp_rst_t = 0;
 	logic [63:0] fp_video = FNV_OFFSET, fp_audio = FNV_OFFSET, fp_cpu = FNV_OFFSET;
 	logic [31:0] fp_last = 32'd0;
 	string       fp_path;
 	initial if ($value$plusargs("fp=%s", fp_path)) begin
 		fp_fd = $fopen(fp_path, "w");
 		if (fp_fd == 0) $fatal(1, "cannot open %s", fp_path);
-		$fwrite(fp_fd, "frame,len_sys,riot,video,audio,cpu\n");
+		$fwrite(fp_fd, "frame,len_sys,riot,video,audio,cpu,t_sys,rst_n,rst_sys\n");
 	end
 	always @(posedge clk_sys) if (fp_fd != 0) begin
 		fp_now++;
 		fp_vs <= VSync;
+		if (fp_rs && !dut.reset) begin
+			fp_rst_n++;
+			fp_rst_t = fp_now;
+		end
+		fp_rs = dut.reset;
 		if (VSync && !fp_vs) begin
 			automatic logic [63:0] h = FNV_OFFSET;
 			for (int i = 0; i < 128; i++) h = fnv(h, dut.main.riot_inst.riot_ram.mem_q[i]);
 			if (fp_frame > 0) begin
-				$fwrite(fp_fd, "%0d,%0d,%016x,%016x,%016x,%016x\n", fp_frame, fp_now - fp_tvs, h,
-					fp_video, fp_audio, fp_cpu);
+				$fwrite(fp_fd, "%0d,%0d,%016x,%016x,%016x,%016x,%0d,%0d,%0d\n", fp_frame, fp_now - fp_tvs, h,
+					fp_video, fp_audio, fp_cpu, fp_now, fp_rst_n, fp_rst_t);
 				$fflush(fp_fd);
 			end
 			fp_video = FNV_OFFSET;

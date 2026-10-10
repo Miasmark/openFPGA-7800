@@ -33,9 +33,14 @@ turns every section into rules:
                 green: reported as a note)
   cartridge RAM the CARTRAM_MATRIX and CARTRAM_S19 verdicts
                 (cartram2600_test.py), in logs of the step-7 script, which
-                runs them before the network clones
-and fails on any "FAIL", "skipped" or simulator error, and on "exit N" with
-N != 0 when the log records the exit status.
+                runs them before the network clones; with the tape path
+                (AR_TAPE=1) also the matrix's tape load with +cartram
+                ("PASS artape"), whose colours must equal this log's own
+                tape full load's (the same image, BIOS and run, without the
+                monitor)
+and fails on any "FAIL", "skipped" or simulator error, on a "SIMULATOR EXIT
+N" line (a bench that exited non-zero in a piped case), and on "exit N"
+with N != 0 when the log records the exit status.
 Exit status: 0 pass, 1 fail, 2 usage.
 SPDX-License-Identifier: MIT
 """
@@ -113,6 +118,7 @@ def check(a):
         if re.search(r"^(\[\d+\] )?%(Error|Fatal)|Assertion failed", x.strip()): bad.append("simulator: " + x.strip()[:160])
         m = re.match(r"^exit (\d+)$", x.strip())
         if m and m.group(1) != "0": bad.append("extra_tests.sh exit status " + m.group(1))
+        if x.startswith("SIMULATOR EXIT"): bad.append("a bench exited non-zero: " + x.strip()[:160])
 
     def need(body, pat, what):
         if body is None or not any(re.fullmatch(pat, x.strip()) for x in body):
@@ -260,6 +266,7 @@ def check(a):
            [e[2] for e in ev if e[1] == "colubk" and e[2] != "00"][:2] != ["84", "1e"]:
             bad.append(f"Supercharger two loads: {ev}, resets {rs}; expect blue $84 / AUDF0 3, the reset, yellow $1e / AUDF0 20")
     tape = hit["With the BIOS, from tape"]
+    tape_full_colours = None
     if tape:
         # With the BIOS the tape loads take seconds, and the BIOS plays its
         # own tones (AUDF0 counting down) while it loads. A load has run when
@@ -286,6 +293,7 @@ def check(a):
             return out
         if loads(full)[:1] != [5]:
             bad.append(f"Supercharger tape full load: tones after the tape {loads(full)}, expect 5")
+        tape_full_colours = [e[2] for e in ar_events(full) if e[1] == "colubk" and e[2] != "00"]
         if loads(multi)[:2] != [7, 14]:
             bad.append(f"Supercharger tape multiload: tones after the tape {loads(multi)}, expect 7, then 14")
         colours = [e[2] for e in ar_events(multi) if e[1] == "colubk" and e[2] != "00"]
@@ -315,8 +323,19 @@ def check(a):
         for v in ("CARTRAM_MATRIX pass", "CARTRAM_S19 pass"):
             if not any(x.strip() == v for x in b):
                 bad.append(f"cartridge RAM: no '{v}'")
+        if tape or a.ar_tape:
+            # the tape load with +cartram (artape) runs with AR_TAPE=1
+            at = [x.strip() for x in b if x.strip().startswith(("PASS artape", "FAIL artape"))]
+            if not any(x.startswith("PASS artape blend 0:") for x in at):
+                bad.append("cartridge RAM: no 'PASS artape' (AR_TAPE=1 runs the tape load with +cartram)")
+            else:
+                m = re.search(r"; colours ((?:\$[0-9a-f]{2} ?)+|-)", at[0])
+                cols = m.group(1).replace("$", "").split() if m and m.group(1) != "-" else []
+                if tape_full_colours is not None and cols != tape_full_colours:
+                    bad.append(f"cartridge RAM: artape's colours {cols} differ from the tape full load's "
+                               f"{tape_full_colours} (the same run without the monitor)")
         if not [x for x in bad if x.startswith("cartridge RAM")]:
-            notes.append("cartridge RAM: CARTRAM_MATRIX pass, CARTRAM_S19 pass")
+            notes.append("cartridge RAM: CARTRAM_MATRIX pass, CARTRAM_S19 pass" + (", artape pass" if tape or a.ar_tape else ""))
     return bad, notes
 
 

@@ -139,15 +139,27 @@ if [ "${BUPCHIP:-1}" = 1 ] && [ "${DARIA:-$QSF_DARIA}" = 1 ]; then
 		| grep -qE '(^|[^A-Za-z0-9_$.])daria_fe\s*(#[^;]*)?[^A-Za-z0-9_$]u_fe\s*\(' && BUP_DEFS="$BUP_DEFS -DSIM_DARIA_FE"
 fi
 # Fix B's P2 assertion in the benches (docs/daria_step7/plan.md P2): on when
-# sram_ctrl.sv has Fix B's two requests, m_new and t_new.
+# sram_ctrl.sv has Fix B's two requests, m_new and t_new, and the build has
+# the SRAM controller at all (the wrapper instantiates sram_ctrl as sram only
+# under POCKET_SRAM: SRAM=0 has no dut.sram to tap).
 SIM_DEFS=""
-grep -qE '\bt_new\b' "$FPGA/core/sram_ctrl.sv" && grep -qE '\bm_new\b' "$FPGA/core/sram_ctrl.sv" && SIM_DEFS="-DSIM_FIXB"
+[ "${SRAM:-1}" = 1 ] && grep -qE '\bt_new\b' "$FPGA/core/sram_ctrl.sv" && grep -qE '\bm_new\b' "$FPGA/core/sram_ctrl.sv" \
+	&& SIM_DEFS="-DSIM_FIXB"
 ARMDIV_ARG=""
 [ "$DARIA_ON" = 1 ] && [ -n "${ARM_DIV:-}" ] && ARMDIV_ARG="+arm_div=$ARM_DIV"
 # fp CASE: the plusargs every run gets: its fingerprint file with FP=1, and
 # the DARIA build's clk_arm divider with ARM_DIV.
 fp() { [ "${FP:-0}" = 1 ] && printf '%s ' "+fp=$WORK/fp/$1.csv"; printf '%s' "$ARMDIV_ARG"; }
 [ "${FP:-0}" = 1 ] && mkdir -p "$WORK/fp"
+
+# Every bench run goes through sim. Most cases pipe the bench into grep,
+# which drops its exit status and its "%Fatal" line (Verilator prints it on
+# stdout); sim prints "SIMULATOR EXIT N: <command>" past the pipe, on the
+# script's own stdout (descriptor 3), when the bench exits non-zero, and
+# sim/check/run_sim_check.py fails on that line. A passing run prints
+# nothing more than before.
+exec 3>&1
+sim() { local rc=0; "$@" || rc=$?; [ "$rc" = 0 ] || echo "SIMULATOR EXIT $rc: $*" >&3; return 0; }
 
 build() {   # build <top> <objdir> [more bench sources]
 	local top="$1" obj="$2"; shift 2
@@ -177,37 +189,37 @@ cd "$WORK"
 for audf in ${@:-0 7 14 31}; do
 	rm -f rtl/mem0.hex   # may be a link to the upstream file: never write through it
 	python3 "$HERE/tone_test.py" "$audf" > rtl/mem0.hex
-	out=$(./obj/vtb +audf="$audf" $(fp tone_$audf))
+	out=$(sim ./obj/vtb +audf="$audf" $(fp tone_$audf))
 	echo "$out" | grep TONE; echo "$out" | grep FRAME | tail -1
 done
 echo "-- border hidden:"
-./obj/vtb +audf=0 +hide_border $(fp border) | grep FRAME | tail -1
+sim ./obj/vtb +audf=0 +hide_border $(fp border) | grep FRAME | tail -1
 echo "-- 2600 mode (TIA video, stabilised):"
 for audf in 0 14; do
 	rm -f rtl/mem0.hex
 	python3 "$HERE/tone_test.py" "$audf" 2600 > rtl/mem0.hex
-	out=$(./obj/vtb +audf="$audf" +mode2600 $(fp mode2600_$audf))
+	out=$(sim ./obj/vtb +audf="$audf" +mode2600 $(fp mode2600_$audf))
 	echo "$out" | grep TONE; echo "$out" | grep FRAME | tail -1
 done
 
 echo "-- PAL and overscan geometry (expect 274 / 242 / 274 lines: PAL ignores overscan; video PAL flag set for PAL):"
 rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 7 > rtl/mem0.hex
 for opt in "+pal" "+overscan" "+overscan +pal"; do
-	echo "  $opt: $(./obj/vtb +audf=7 $opt $(fp geom_$(echo $opt | tr -d '+ ')) | grep FRAME | tail -1 | sed 's/^FRAME [0-9]*: //')"
+	echo "  $opt: $(sim ./obj/vtb +audf=7 $opt $(fp geom_$(echo $opt | tr -d '+ ')) | grep FRAME | tail -1 | sed 's/^FRAME [0-9]*: //')"
 done
 echo "-- PAL 2600 frame, after region detection (expect 288 lines, video PAL 1):"
 rm -f rtl/mem0.hex; python3 "$HERE/tone_test.py" 14 2600 pal > rtl/mem0.hex
-./obj/vtb +audf=14 +mode2600 +long $(fp pal2600) | grep FRAME | tail -1
+sim ./obj/vtb +audf=14 +mode2600 +long $(fp pal2600) | grep FRAME | tail -1
 rm -f rtl/mem0.hex
 
 echo "-- load an A78 through the APF data loader:"
 ln -sfn "$RTL/mem0.hex" rtl/mem0.hex     # upstream's built-in image: no tone
 python3 "$HERE/make_a78.py" 7 > load_test.a78
-./obj_load/vtb +image=load_test.a78 +audf=7 $(fp load_a78) | grep -E "LOAD|TONE|HSC"
+sim ./obj_load/vtb +image=load_test.a78 +audf=7 $(fp load_a78) | grep -E "LOAD|TONE|HSC"
 
 echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
-./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -E "LOAD|TONE"
+sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -E "LOAD|TONE"
 
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
@@ -237,7 +249,7 @@ if [ -f "$BIOS" ]; then
 	bios_case() {
 		local log="$1" title="$2" pat; shift 2
 		echo "  $title:"
-		(cd "$BD" && ./../obj_load/vtb "$@" $(fp bios_$log) < /dev/null > "$log.log")
+		(cd "$BD" && sim ./../obj_load/vtb "$@" $(fp bios_$log) < /dev/null > "$log.log")
 		grep -E "^(BOOT|TONE|IMAGE2)" "$BD/$log.log" | sed 's/^/    /'
 		while read -r pat; do
 			grep -Eq "$pat" "$BD/$log.log" || { echo "    MISSING: $pat"; bios_ok=0; }
@@ -331,7 +343,7 @@ if [ "${BUPCHIP:-1}" = 1 ]; then
 armdec.HEX = os.environ["BUPFW"]
 sys.argv = ["armemu.py"] + sys.argv[1:]
 runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --secs 1 --pcm "$B/song0_model.pcm" > "$B/armemu.log")
-		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupfwlast +bupms="${BUPMS:-250}" +bupout=e2e $(fp bupchip_e2e) > e2e.log)
+		(cd "$B" && sim ./../obj_load/vtb +image=souper.a78 +bupfw=bupchip.bin +bupfwlast +bupms="${BUPMS:-250}" +bupout=e2e $(fp bupchip_e2e) > e2e.log)
 		grep -E "^(LOAD|BUPCHIP)" "$B/e2e.log"
 		PS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\1/p' "$B/e2e.log")"
 		OS="$(sed -n 's/^BUPCHIP song start: pushed \([0-9-]*\), output \([0-9-]*\)$/\2/p' "$B/e2e.log")"
@@ -348,7 +360,7 @@ runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --sec
 			grep -q "^PCM IDENTICAL" "$B/check_$k.log" || e2e_ok=0
 		done
 		echo "  the same cartridge without the firmware (expect fw_loaded=0 cpu_run=0 pushed=0 out_nz=0 mix_nz=0):"
-		(cd "$B" && ./../obj_load/vtb +image=souper.a78 +bupms=40 $(fp bupchip_nofw) > nofw.log)
+		(cd "$B" && sim ./../obj_load/vtb +image=souper.a78 +bupms=40 $(fp bupchip_nofw) > nofw.log)
 		grep "^BUPCHIP result" "$B/nofw.log" | sed 's/^/    /'
 		grep -Eq "^BUPCHIP result: fw_loaded=0 asset_ready=1 cpu_run=0 halted=0 .* pushed=0 pops=0 under=0 over=0 .* out_nz=0 mix_nz=0 arsc_bad=0 psram_viol=0$" "$B/nofw.log" || e2e_ok=0
 		[ "$e2e_ok" = 1 ] && echo "BUPCHIP_E2E pass" || echo "BUPCHIP_E2E FAIL"
@@ -375,7 +387,7 @@ if [ "$DARIA_ON" = 1 ]; then
 	daria_ok=1
 	guard=locked; [ "${ARM_DIV:-18}" = 19 ] && guard=unlocked
 	for t in smoke_dpc smoke_cdf digital_cdfj; do
-		(cd "$DR" && ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $(fp daria_$t) < /dev/null > "$t.log" 2>&1) || true
+		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $(fp daria_$t) < /dev/null > "$t.log" 2>&1) || true
 		line="$(grep -m1 "^DARIA result:" "$DR/$t.log" || echo "DARIA result: none (the run did not finish; see $DR/$t.log)")"
 		echo "  $t: ${line#DARIA result: }"
 		python3 - "$DR/img/$t.meta" "$line" "$guard" <<-'PY' || daria_ok=0
@@ -415,16 +427,16 @@ echo "-- PAL/NTSC PLL retune sequence:"
 "${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_pll_region \
 	-Mdir "$WORK/obj_pllr" -o vtb "$FPGA/core/pll_region.v" "$HERE/tb_pll_region.sv" > "$WORK/obj_pllr.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_pllr.log"; exit 1; }
-./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
+sim ./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
 
 echo "-- audio filter:"
 "${VERILATOR:-verilator}" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_audio_filter \
 	-Mdir "$WORK/obj_af" -o vtb "$FPGA/core/audio_filter.sv" "$HERE/tb_audio_filter.sv" > "$WORK/obj_af.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_af.log"; exit 1; }
-./obj_af/vtb | grep AUDIO
+sim ./obj_af/vtb | grep AUDIO
 
 echo "-- virtual paddle / driving / light-gun axis:"
 "${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_virtual_axis \
 	-Mdir "$WORK/obj_va" -o vtb "$FPGA/core/virtual_axis.sv" "$HERE/tb_virtual_axis.sv" > "$WORK/obj_va.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_va.log"; exit 1; }
-./obj_va/vtb | grep AXIS
+sim ./obj_va/vtb | grep AXIS

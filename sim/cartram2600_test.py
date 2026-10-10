@@ -22,17 +22,26 @@ row 6 and 3.6.
       back 256 bytes, runs a routine from $4100, then AUDF0 = 7 (pass) or 31
       (fail); tb_load's TONE line tells them apart.
   cartram2600_test.py check LOG --image NAME [--blend 0|1] [--profile P]
-      one run's verdict (NAME: a mapper, arfull, armulti or ram7800).
+                             [--ref REF_LOG]
+      one run's verdict (NAME: a mapper, arfull, artape, armulti, armimg or
+      ram7800; --ref: the reference build's log of the same case, for
+      artape's colours).
   cartram2600_test.py matrix [--work DIR] [--build] [--rtl-tree DIR]
-                             [--profile P] [--only NAME,...]
+                             [--profile P] [--only NAME,...] [--arfw FILE]
+                             [--ref-logs DIR] [--fp]
       every mapper image with Flicker Blend off and on (60 ms each), the
       Supercharger's full load (blend off and on, with the RAM dump check)
       and multiload, the 7800 RAM cartridge, and a synthetic DPC+ image
       (fe_dir/mkimg.py) that must make no cart-RAM access at all; with
       --arfw FILE (the Supercharger BIOS) also the full load from tape
-      (artape, 22 simulated seconds); then the verdicts.
+      (artape, 22 simulated seconds, about an hour); then the verdicts.
+      --ref-logs DIR: the reference build's matrix logs (its WORK's
+      cartram/logs), whose artape colours this run's must equal. --fp: every
+      run also writes its tb_load +fp fingerprint to WORK/fp/cartram_<case>.csv,
+      for comparing two builds frame by frame (sim/check/frame_gate.py
+      --strict; plan 7.5 row 5).
   cartram2600_test.py s19 [--work DIR] [--build] [--rtl-tree DIR]
-                          [--profile P] [--images e7,...]
+                          [--profile P] [--images e7,...] [--fp]
       the directed s19 run: +inject=sweep places a BIOS download write at
       every clk_sdram edge of the 6507 cycle in turn. With Fix B the read
       whose cycle has it at s8 lands at s19: the run must reach s19 and go
@@ -45,6 +54,18 @@ t_new): the latency buckets each build may show, Flicker Blend off / on:
   fixb  (F, D)     off: 15 normal, 11 repeated address; on: 15, 11 or 14
 Every bucket must be one of these; no read may land past s19; on the 8
 mapper images the normal bucket holds more reads than the repeated one.
+With the fixb profile, chosen or detected, every run must also show the P2
+assertion armed (tb_load's "P2 armed" line, from SIM_FIXB): Fix B buckets
+on a build without the assertion fail.
+
+The Supercharger loads: arfull (the core's loader stub) must show magenta
+$54 / AUDF0 5 and the RAM dump equal to the image (ARCHECK 0). artape (the
+BIOS, from tape) takes seconds, and the BIOS plays its own tones (AUDF0
+counting down) while it loads: the load has run when AUDF0 5 follows the
+tape stopping (extra_tests_check.py's rule), with ARCHECK 0. The colour the
+program then sets depends on what the BIOS leaves in $80 (ar_test.py; on
+aeee6d2, white $0e, not magenta): with --ref (--ref-logs) it must equal the
+reference build's, and without one it is reported, not judged.
 
 The runs: --work DIR is a run_sim.sh work directory (default $WORK, else
 sim/work): obj_cartram/ there (built by run_sim.sh with BUILD_TOP=tb_cartram
@@ -260,6 +281,19 @@ def parse(log):
     r["inject"] = [(int(d), int(n), int(a), int(b)) for d, n, a, b in
                    re.findall(r"^CARTRAM inject phase s(\d+): (\d+) reads, c_rdata at E0\+(-?\d+)\.\.(-?\d+)$", t, re.M)]
     r["fatal"] = re.findall(r"^(?:\[\d+\] )?%(?:Error|Fatal).*$", t, re.M)
+    r["p2"] = bool(re.search(r"^P2 armed:", t, re.M))
+    # the tones that follow the tape stopping (the BIOS's own count down
+    # comes before): one per load
+    loads, stopped = [], False
+    for l in t.splitlines():
+        if re.match(r"^AR \d+ ms: tape stops", l):
+            stopped = True
+        m = re.match(r"^AR \d+ ms: AUDF0 = (\d+)$", l)
+        if m and stopped and m.group(1) != "0":
+            loads.append(int(m.group(1)))
+            stopped = False
+    r["tape_loads"] = loads
+    r["md5"] = re.findall(r"^-- tb_cartram: (obj_cartram/vtb md5 \S+)", t, re.M)
     return r
 
 
@@ -271,12 +305,15 @@ def profile_of(r, want):
     return "fixb" if r["sram"].startswith("Fix B") else "base"
 
 
-def check(log, name, blend, profile="auto", expect_counts=True):
-    """Returns (ok, reasons, summary)."""
+def check(log, name, blend, profile="auto", expect_counts=True, ref=None):
+    """Returns (ok, reasons, summary). ref: the reference build's log of the
+    same case (artape's colours)."""
     r = parse(log)
     bad = []
     if r["fatal"]:
         bad.append("simulator: " + r["fatal"][0][:120])
+    if profile_of(r, profile) == "fixb" and not r["p2"]:
+        bad.append("fixb profile, but the P2 assertion is not armed (no 'P2 armed' line: SIM_FIXB not defined)")
     if name == "ram7800":
         if not r["tone"]:
             bad.append("no TONE line")
@@ -326,15 +363,32 @@ def check(log, name, blend, profile="auto", expect_counts=True):
         fails = [v for v in r["audf"] if 2 <= v < 16]
         if fails: bad.append(f"fail code AUDF0 {fails[0]}")
         if not [v for v in r["audf"] if 16 <= v <= 23]: bad.append("no pass code (AUDF0 16-23)")
-    elif name in ("arfull", "artape"):
+    elif name == "arfull":
         if 5 not in r["audf"] or "54" not in r["colubk"]: bad.append("no magenta $54 / AUDF0 5")
         if r["archeck"] is None: bad.append("no ARCHECK line")
         elif r["archeck"][1]: bad.append(f"ARCHECK {r['archeck'][1]} RAM bytes differ")
+    elif name == "artape":
+        if r["tape_loads"][:1] != [5]:
+            bad.append(f"tones after the tape stopped {r['tape_loads']}, expected 5 (the full load)")
+        if r["archeck"] is None: bad.append("no ARCHECK line")
+        elif r["archeck"][1]: bad.append(f"ARCHECK {r['archeck'][1]} RAM bytes differ")
+        if ref is not None:
+            if not os.path.exists(ref):
+                bad.append(f"no reference log {ref}")
+            else:
+                rc_ = parse(ref)["colubk"]
+                if rc_ != r["colubk"]:
+                    bad.append(f"colours {r['colubk']} differ from the reference build's {rc_}")
     elif name == "armulti":
         if r["audf"][:1] != [7] or 14 not in r["audf"] or "c4" not in r["colubk"]:
             bad.append(f"multiload codes {r['audf']} (expect 7, then 14)")
     hist = " ".join(f"{k}:{v}" for k, v in sorted(r["hist"].items()))
     summ = f"{prof} reads {n} writes {strobes} shadow {sh_n} hist {hist}"
+    if name == "artape":
+        cols = [c for c in r["colubk"] if c != "00"]
+        summ += (f"; colours {' '.join('$' + c for c in cols) or '-'}"
+                 + (" (equal to the reference's)" if ref is not None and not bad else
+                    "" if ref is not None else " (no reference given: not judged)"))
     return not bad, bad, summ
 
 
@@ -348,6 +402,24 @@ def build(a):
     if r.returncode != 0:
         sys.stdout.write(r.stderr)
         sys.exit(2)
+
+
+def vtb_md5(a):
+    import hashlib
+    return hashlib.md5(open(os.path.join(a.work, "obj_cartram", "vtb"), "rb").read()).hexdigest()
+
+
+def header(a):
+    # plan P23: which binary these verdicts belong to
+    print(f"-- tb_cartram: obj_cartram/vtb md5 {vtb_md5(a)} ({os.path.join(a.work, 'obj_cartram', 'vtb')})")
+    sys.stdout.flush()
+
+
+def fp_arg(a, case):
+    if not getattr(a, "fp", False):
+        return []
+    os.makedirs(os.path.join(a.work, "fp"), exist_ok=True)
+    return [f"+fp={os.path.join(a.work, 'fp', 'cartram_' + case + '.csv')}"]
 
 
 def run(a, name, args, log):
@@ -398,6 +470,7 @@ def case_args(img, name, blend, extra=()):
 def cmd_matrix(a):
     if a.build:
         build(a)
+    header(a)
     img = images(a)
     logs = os.path.join(a.work, "cartram", "logs")
     os.makedirs(logs, exist_ok=True)
@@ -410,12 +483,14 @@ def cmd_matrix(a):
             extra = [f"+ardump={logs}/ram_{name}_b{blend}.bin"]
         if name == "artape":
             extra.append(f"+arfw={os.path.abspath(a.arfw)}")
+        extra += fp_arg(a, f"{name}_b{blend}")
         run(a, name, case_args(img, name, blend, extra), log)
         if name in ("arfull", "artape"):
             ck = subprocess.run([sys.executable, os.path.join(HERE, "ar_test.py"), "check",
                                  f"{logs}/ram_{name}_b{blend}.bin", f"{img}/arfull.bin"], capture_output=True, text=True)
             open(log, "a").write(ck.stdout)
-        ok, bad, summ = check(log, name, blend, a.profile)
+        ref = os.path.join(a.ref_logs, f"{name}_b{blend}.log") if a.ref_logs and name == "artape" else None
+        ok, bad, summ = check(log, name, blend, a.profile, ref=ref)
         ok_all &= ok
         print(f"{'PASS' if ok else 'FAIL'} {name} blend {blend}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
         sys.stdout.flush()
@@ -426,13 +501,14 @@ def cmd_matrix(a):
 def cmd_s19(a):
     if a.build:
         build(a)
+    header(a)
     img = images(a)
     logs = os.path.join(a.work, "cartram", "logs")
     os.makedirs(logs, exist_ok=True)
     ok_all = True
     for name in a.images.split(","):
         log = os.path.join(logs, f"s19_{name}.log")
-        run(a, name, case_args(img, name, 0, ["+inject=sweep"]), log)
+        run(a, name, case_args(img, name, 0, ["+inject=sweep"] + fp_arg(a, f"s19_{name}")), log)
         ok, bad, summ = check(log, name, 0, a.profile, expect_counts=True)
         r = parse(log)
         prof = profile_of(r, a.profile)
@@ -474,23 +550,28 @@ def main():
     c.add_argument("--blend", type=int, default=0)
     c.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
     c.add_argument("--no-counts", action="store_true")
+    c.add_argument("--ref", help="the reference build's log of the same case (artape's colours)")
     for name in ("matrix", "s19"):
         s = sub.add_parser(name)
         s.add_argument("--work", default=os.environ.get("WORK", os.path.join(HERE, "work")))
         s.add_argument("--build", action="store_true")
         s.add_argument("--rtl-tree")
         s.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
+        s.add_argument("--fp", action="store_true", help="tb_load +fp fingerprints to WORK/fp/cartram_<case>.csv")
         if name == "matrix":
             s.add_argument("--only")
             s.add_argument("--arfw", help="the Supercharger BIOS: adds the full load from tape (artape, 22 s)")
+            s.add_argument("--ref-logs", help="the reference build's cartram/logs (artape's colours)")
         else:
             s.add_argument("--images", default="e7")
     a = p.parse_args()
     if a.cmd == "check":
-        ok, bad, summ = check(a.log, a.image, a.blend, a.profile, not a.no_counts)
+        ok, bad, summ = check(a.log, a.image, a.blend, a.profile, not a.no_counts, ref=a.ref)
         print(f"{'PASS' if ok else 'FAIL'} {a.image} blend {a.blend}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
         return 0 if ok else 1
     a.work = os.path.abspath(a.work)
+    if getattr(a, "ref_logs", None):
+        a.ref_logs = os.path.abspath(a.ref_logs)
     if not a.build and not os.path.exists(os.path.join(a.work, "obj_cartram", "vtb")):
         print("no obj_cartram/vtb in --work: add --build", file=sys.stderr)
         return 2

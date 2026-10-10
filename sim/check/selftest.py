@@ -23,7 +23,13 @@ pass or FAIL, and so is the exit status (0 or 1).
                    pixel (video) hash and a one-clock len_sys change
   --cartram LOG    a passing tb_cartram log (cartram2600_test.py's, E7 blend
                    off): a wrong byte, a lost write, a bucket past s19, a
-                   changed read count
+                   changed read count, a fail code, a P2 $fatal; and a Fix B
+                   log made from it, which passes with the P2 assertion armed
+                   and fails without it (also with --profile fixb)
+  --artape LOG     a passing artape log (the tape load with +cartram), with
+                   --artape-ref the reference build's: an ARCHECK mismatch,
+                   no tone 5 after the tape, another colour than the
+                   reference's
   --tools          the guards on scratch git repositories in DIR:
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
@@ -60,10 +66,13 @@ results = []
 
 def run(cmd, py=True, env=None):
     r = subprocess.run(([sys.executable] if py else []) + cmd, capture_output=True, text=True, env=env)
-    return r.returncode, r.stdout + (r.stderr if r.returncode not in (0, 1) else "")
+    crashed = "Traceback (most recent call last)" in r.stderr
+    return (2 if crashed else r.returncode), r.stdout + (r.stderr if r.returncode not in (0, 1) or crashed else "")
 
 
 def expect(name, cmd, want_pass, py=True, env=None):
+    # a checker that crashes (a Python traceback) gives no verdict: WRONG,
+    # whatever its exit status
     rc, out = run(cmd, py, env)
     ok = (rc == 0) == want_pass and rc in (0, 1)
     results.append(ok)
@@ -99,6 +108,13 @@ def run_sim_cases(log, w):
         "truncated": lambda t: t[:len(t) // 2],
         "geometry": sub1(r"^(  \+overscan: 238804 clk_sys \(59\.958 Hz\), active lines )242", r"\g<1>241"),
         "bupchip_fail": sub1(r"^BUPCHIP_E2E pass$", "BUPCHIP_E2E FAIL"),
+        # a case cut short: an earlier FRAME line with the right geometry
+        "frame_number_border": sub1(r"^FRAME 17(: 238804 clk_sys \(59\.958 Hz\), active lines 224, active pixels/line 320)",
+                                    r"FRAME 9\g<1>"),
+        "frame_number_pal2600": sub1(r"^FRAME 75(: 284544)", r"FRAME 74\g<1>"),
+        # a bench that exited non-zero in a piped case (its %Fatal line went
+        # to grep): run_sim.sh's sim prints this line past the pipe
+        "simulator_exit": sub1(r"^(-- border hidden:\n)", r"\g<1>SIMULATOR EXIT 1: ./obj/vtb +audf=0 +hide_border\n"),
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)
@@ -176,6 +192,14 @@ def fp_cases(fp, w):
         i = cols.index(col)
         r[f][i] = str(int(r[f][i]) + 1) if col == "len_sys" else format(int(r[f][i], 16) ^ 1, "016x")
         return r
+
+    def later(col):
+        # the whole run one clk_sys later in an absolute-time column
+        r = [list(x) for x in rows]
+        i = cols.index(col)
+        for x in r:
+            x[i] = str(int(x[i]) + 1)
+        return r
     cases = {
         "truncated": rows[:-1],
         "truncated_line": [list(x) for x in rows[:-1]] + [rows[-1][:3]],
@@ -184,10 +208,34 @@ def fp_cases(fp, w):
         "pixel_hash": changed("video", k),
         "len_sys_one_clock": changed("len_sys", k),
     }
+    if "rst_sys" in cols:
+        # a run shifted as a whole (every hash restarts with the reset), and
+        # the console's reset released one clock later (plan P6)
+        cases["t_sys_whole_run_one_clock_later"] = later("t_sys")
+        cases["rst_sys_release_one_clock_later"] = later("rst_sys")
+        rn = [list(x) for x in rows]
+        rn[-1][cols.index("rst_n")] = str(int(rn[-1][cols.index("rst_n")]) + 1)
+        cases["rst_n_one_more_release"] = rn
     for c, r in cases.items():
         p = os.path.join(w, f"fp_{c}.csv")
         write_fp(p, head, r)
         expect(c, [fg, "--strict", fp, p], False)
+    if "rst_sys" in cols:
+        # the same frames without the absolute-time columns (a fingerprint of
+        # the bench before they existed): the columns differ
+        p = os.path.join(w, "fp_without_time_columns.csv")
+        keep = [i for i, c in enumerate(cols) if c not in ("t_sys", "rst_n", "rst_sys")]
+        write_fp(p, ",".join(cols[i] for i in keep), [[x[i] for i in keep] for x in rows])
+        expect("without_time_columns", [fg, "--strict", fp, p], False)
+    # two empty files, and two with only the header: no frame is no pass
+    e1, e2 = os.path.join(w, "fp_empty_a.csv"), os.path.join(w, "fp_empty_b.csv")
+    open(e1, "w").close()
+    open(e2, "w").close()
+    expect("two zero-byte files", [fg, "--strict", e1, e2], False)
+    h1, h2 = os.path.join(w, "fp_header_a.csv"), os.path.join(w, "fp_header_b.csv")
+    write_fp(h1, head, [])
+    write_fp(h2, head, [])
+    expect("two header-only files", [fg, "--strict", h1, h2], False)
 
 
 def cartram_cases(log, w):
@@ -205,6 +253,49 @@ def cartram_cases(log, w):
     }
     for c, fn in cases.items():
         expect(c, [ct, "check", plant(log, os.path.join(w, f"cartram_{c}.log"), fn), "--image", "e7", "--blend", "0"], False)
+    # The fixb profile needs the P2 assertion armed. From this log, a Fix B
+    # one: the sram_ctrl line, Fix B's buckets (15 normal, 11 repeated) and
+    # the "P2 armed" line; it must pass, and fail without the P2 line, also
+    # with --profile fixb given explicitly.
+    def as_fixb(t):
+        t = re.sub(r"^CARTRAM sram_ctrl: .*$", "CARTRAM sram_ctrl: Fix B (the 2600 request registered on clk_sys, t_new)", t,
+                   count=1, flags=re.M)
+        t = re.sub(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):).*$",
+                   lambda m: m.group(1) + " 11:" + str(sum(v for k, v in parse_hist(log).items() if k in (7, 9))) +
+                   " 15:" + str(sum(v for k, v in parse_hist(log).items() if k not in (7, 9))), t, count=1, flags=re.M)
+        t = re.sub(r"c_rdata at E0\+(-?\d+)\.\.(-?\d+) clk_sdram", "c_rdata at E0+11..15 clk_sdram", t, count=1)
+        return ("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram\n" +
+                t.replace("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram\n", ""))
+    fx = plant(log, os.path.join(w, "cartram_fixb.log"), as_fixb)
+    expect("a Fix B log (synthetic, from this one)", [ct, "check", fx, "--image", "e7", "--blend", "0"], True)
+    nop2 = plant(fx, os.path.join(w, "cartram_fixb_no_p2.log"), lambda t: t.replace("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram\n", ""))
+    expect("Fix B buckets with the P2 assertion not armed", [ct, "check", nop2, "--image", "e7", "--blend", "0"], False)
+    expect("the same with --profile fixb", [ct, "check", nop2, "--image", "e7", "--blend", "0", "--profile", "fixb"], False)
+
+
+def parse_hist(log):
+    m = re.search(r"^CARTRAM latency histogram \(clk_sdram from E0: count\):(.*)$", open(log, errors="replace").read(), re.M)
+    return {int(a): int(b) for a, b in re.findall(r"(\d+):(\d+)", m.group(1))} if m else {}
+
+
+def artape_cases(log, ref, w):
+    """The Supercharger tape load with +cartram (cartram2600_test.py's artape)."""
+    ct = os.path.join(SIM, "cartram2600_test.py")
+    print("cartram2600_test.py check, artape:")
+    base = [ct, "check", log, "--image", "artape"] + (["--ref", ref] if ref else [])
+    expect("artape as it is", base, True)
+    last = lambda a, b: (lambda t: t[::-1].replace(a[::-1], b[::-1], 1)[::-1])
+    cases = {
+        "artape_archeck": sub1(r"^(ARCHECK 24 pages, )0( of 6144)", r"\g<1>5\g<2>"),
+        "artape_no_tone_5_after_the_tape": last("AUDF0 = 5\n", "AUDF0 = 6\n"),
+    }
+    for c, fn in cases.items():
+        expect(c, [ct, "check", plant(log, os.path.join(w, f"{c}.log"), fn), "--image", "artape"]
+               + (["--ref", ref] if ref else []), False)
+    # another colour than the reference build's
+    col = plant(log, os.path.join(w, "artape_colour.log"), sub1(r"^(AR \d+ ms: COLUBK = \$)([0-9a-f]{2})$",
+                                                               lambda m: m.group(1) + ("54" if m.group(2) != "54" else "0e")))
+    expect("artape_colour_differs_from_the_reference", [ct, "check", col, "--image", "artape", "--ref", ref or log], False)
 
 
 # ---------------------------------------------------------------- the guards (--tools)
@@ -390,18 +481,28 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked"):
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=()):
+    """A tb_daria-style run directory. frames=True also writes frames.csv
+    (each frame's start on the t_req_sys clock); the first call of each frame
+    in cross is requested 1,000 clk_sys before its frame ends, so that its
+    hold reaches into the next frame."""
     rnd = random.Random(1)
     d = os.path.join(w, name)
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
-    fp = [[str(f), "238944"] + [format(rnd.getrandbits(64), "016x") for _ in range(3)] for f in range(1, n)]
+    L = 238944
+    fp = [[str(f), str(L)] + [format(rnd.getrandbits(64), "016x") for _ in range(3)] for f in range(1, n)]
     calls, slack, k = [], [], 0
     for f in range(0, n):
         for j in range(calls_per):
             k += 1
-            calls.append([k, f, 10 + 100 * j, 1000 * k, 3000 + 7 * (k % 5), 2999, "00000000"])
+            t_req = f * L + L - 1000 if (f in cross and j == 0) else f * L + 10000 + 100000 * j
+            calls.append([k, f, 10 + 100 * j, t_req, 3000 + 7 * (k % 5), 2999, "00000000"])
             slack.append([k, 1, 500, -100 if f in late else 4000, "f000"])
+    if frames:
+        open(os.path.join(d, "frames.csv"), "w").write(
+            "frame,t_sys,len_sys,lines,calls,instr,arm_cyc,stall_sys,dma_sys,max_call_instr\n" +
+            "".join(f"{f},{f * L},{L},262.00,{calls_per},0,0,0,0,0\n" for f in range(1, n)))
     st = {"calls": len(calls), "late": sum(1 for s in slack if s[3] <= 0), "halts": 0, "halt_code": 0,
           "psram_viol": 0, "guard": status, "unlocks": 0}
     if mutate:
@@ -449,6 +550,25 @@ def gate_cases(w):
     G("release_shift_riot_3_frames", m_shift(50, 52), want=True)
     G("release_shift_audio_8_frames", m_shift(60, 67, "audio"), want=True)
     G("release_shift_too_long_9_frames", m_shift(70, 78), want=False)
+    # the difference must start where a call whose release differs is held:
+    # the frame after it does not count, unless the hold reaches into it
+    G("riot_starts_one_frame_after_the_shifted_call", lambda fp, c, s, st: (shift_call(c, 80), setcol(fp, 81, "riot")),
+      want=False)
+    # the column must be equal again within the file
+    G("riot_from_a_shifted_frame_to_the_end_of_the_file", m_shift(195, 199), want=False)
+    xref = synth(w, "ref_cross", frames=True, cross=(60, 70))
+    expect("riot_in_the_frame_a_crossing_hold_is_released_in",
+           [fg, xref, synth(w, "cross_ok", frames=True, cross=(60, 70),
+                            mutate=lambda fp, c, s, st: (shift_call(c, 60), setcol(fp, 61, "riot"), setcol(fp, 62, "riot"))),
+            "--frames", "200"], True)
+    expect("riot_two_frames_after_a_crossing_hold",
+           [fg, xref, synth(w, "cross_late", frames=True, cross=(60, 70),
+                            mutate=lambda fp, c, s, st: (shift_call(c, 70), setcol(fp, 72, "riot"))),
+            "--frames", "200"], False)
+    expect("riot_one_frame_after_a_hold_inside_its_frame (frames.csv)",
+           [fg, xref, synth(w, "cross_inside", frames=True, cross=(60, 70),
+                            mutate=lambda fp, c, s, st: (shift_call(c, 90), setcol(fp, 91, "riot"))),
+            "--frames", "200"], False)
     G("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
     G("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
     G("len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
@@ -493,6 +613,8 @@ def main():
     p.add_argument("--extra-dir")
     p.add_argument("--fp")
     p.add_argument("--cartram")
+    p.add_argument("--artape", help="a passing artape log (cartram2600_test.py matrix --arfw)")
+    p.add_argument("--artape-ref", help="the reference build's artape log")
     p.add_argument("--tools", action="store_true", help="the guards: pp_guards.py, hygiene.sh, pp_equiv.py")
     a = p.parse_args()
     w = os.path.abspath(a.work)
@@ -505,6 +627,8 @@ def main():
         fp_cases(a.fp, w)
     if a.cartram:
         cartram_cases(a.cartram, w)
+    if a.artape:
+        artape_cases(a.artape, a.artape_ref, w)
     if a.tools:
         guard_cases(w)
         hygiene_cases(w)

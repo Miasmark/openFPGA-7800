@@ -15,7 +15,13 @@ against its expected lines and fails on:
     legitimately print ratio 0.000 (the BIOS is still running when the tone
     window closes); there only the BOOT lines count;
   - video geometry other than the documented frame (lines, pixels, PAL flag,
-    frame length in clk_sys) for each case;
+    frame length in clk_sys) for each case, and a last FRAME line other than
+    the run's own (FRAME 17 at 300 ms; FRAME 75 for the PAL 2600 case's
+    +long run): tb_system prints its FRAME lines only when the run ends, so
+    an earlier number means a run that stopped or changed length;
+  - a "SIMULATOR EXIT N" line: a bench that exited non-zero, e.g. on a
+    $fatal, in a case whose output run_sim.sh pipes through grep (which
+    drops the "%Fatal" line);
   - the load, PLL retune, audio filter and virtual axis lines other than
     expected;
   - "exit N" with N != 0 when the log records the script's exit status.
@@ -147,6 +153,8 @@ def check(log, build, audfs):
         m = re.match(r"^exit (\d+)$", x.strip())
         if m and m.group(1) != "0":
             bad.append("run_sim.sh exit status " + m.group(1))
+        if x.startswith("SIMULATOR EXIT"):
+            bad.append("a bench exited non-zero: " + x.strip()[:160])
     new_format = any(x.startswith("-- run_sim.sh:") for x in L.lines)
     if build == "auto":
         build = "daria" if any(re.match(r"^-- run_sim\.sh: .*POCKET_DARIA 1,", x) for x in L.lines) else "plain"
@@ -160,24 +168,24 @@ def check(log, build, audfs):
     for a in audfs:
         if not any(tone_ok(x, a) for x in body):
             bad.append(f"7800 tone AUDF0={a}: no TONE line with ratio 0.990-1.010")
-    n78 = sum(1 for x in body if re.fullmatch(r"FRAME \d+: " + NTSC78, x.strip()))
+    n78 = sum(1 for x in body if re.fullmatch(r"FRAME 17: " + NTSC78, x.strip()))
     if n78 != len(audfs):
-        bad.append(f"7800 tone frames: {n78} of {len(audfs)} FRAME lines are the NTSC 7800 frame")
+        bad.append(f"7800 tone frames: {n78} of {len(audfs)} FRAME lines are FRAME 17, the NTSC 7800 frame")
     h, b = L.section("-- border hidden")
-    need(b, r"FRAME \d+: 238804 clk_sys \(59\.958 Hz\), active lines 224, active pixels/line 320, video PAL 0", "border hidden")
+    need(b, r"FRAME 17: 238804 clk_sys \(59\.958 Hz\), active lines 224, active pixels/line 320, video PAL 0", "border hidden")
     h, b = L.section("-- 2600 mode")
     for a in (0, 14):
         if not b or not any(tone_ok(x, a) for x in b):
             bad.append(f"2600 tone AUDF0={a}: no TONE line with ratio 0.990-1.010")
     if not b or sum(1 for x in b if re.fullmatch(
-            r"FRAME \d+: 238944 clk_sys \(59\.923 Hz\), active lines 240, active pixels/line 160, video PAL 0", x.strip())) != 2:
-        bad.append("2600 frames: expected two 240-line 160-pixel NTSC frames")
+            r"FRAME 17: 238944 clk_sys \(59\.923 Hz\), active lines 240, active pixels/line 160, video PAL 0", x.strip())) != 2:
+        bad.append("2600 frames: expected two FRAME 17 lines, 240-line 160-pixel NTSC frames")
     h, b = L.section("-- PAL and overscan geometry")
     need(b, r"\+pal: 284204 clk_sys \(50\.380 Hz\), active lines 274, active pixels/line 372, video PAL 1", "+pal")
     need(b, r"\+overscan: 238804 clk_sys \(59\.958 Hz\), active lines 242, active pixels/line 372, video PAL 0", "+overscan")
     need(b, r"\+overscan \+pal: 284204 clk_sys \(50\.380 Hz\), active lines 274, active pixels/line 372, video PAL 1", "+overscan +pal")
     h, b = L.section("-- PAL 2600 frame")
-    need(b, r"FRAME \d+: 284544 clk_sys \(50\.320 Hz\), active lines 288, active pixels/line 160, video PAL 1", "PAL 2600 frame")
+    need(b, r"FRAME 75: 284544 clk_sys \(50\.320 Hz\), active lines 288, active pixels/line 160, video PAL 1", "PAL 2600 frame")
     h, b = L.section("-- load an A78")
     need(b, r"HSC_EN 0 \(setting 0, firmware loaded 0\)", "A78 load")
     need(b, r"LOAD 16512 bytes, header ATARI, cart_is_7800=1, cart_size=16384, tia_mode=0, payload mismatches=0", "A78 load")
