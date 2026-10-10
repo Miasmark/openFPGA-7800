@@ -175,7 +175,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
-| Display geometry | Active lines per frame match the display mode: NTSC 224, overscan 242, PAL 274 (overscan setting ignored), 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
+| Display geometry | Active lines per frame match the display mode: NTSC 224 (MARIA lines 27-250: 7800basic's `screensafe` sample in 224-line mode fills them exactly, from 2.1.3), overscan 242, PAL 274 (overscan setting ignored), 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
 | Paddles (virtual) | A 2600 test program timing INPT0-3 after the pot dump: all four paddles respond, the D-pad reaches both ends (lines 1 and 191 of 192), X and Y change the speed, A/B press the buttons, and a stick moved on controller 1 takes over (Paddles on both ports) |
 | Driving controller (virtual) | SWCHA bits 5:4 step 3, 1, 0, 2 turning right and the reverse turning left; A reads on INPT4 |
 | Light gun, both ports (Sentinel) | Sentinel's header asks for a gun on both ports; the gun goes on port 1 (from 2.0.18; before, port 2, aimed from controller 2) |
@@ -188,14 +188,15 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.1.2) meets timing on all four corners: worst setup
-slack +1.92 ns (on clk_sdram, the SRAM request path), worst hold slack
-+0.04 ns. It uses 12,899 of 18,480 ALMs (70%), 78 of 308 M10K blocks and 12
-DSP blocks. 2.1.2 leaves out the 6507-side logic of the ARM cartridge
-schemes, which can't run without the ARM: about 1,750 ALMs, and the slowest
-leg of that path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md), Fix A). 2.1.1
-had +0.44 ns and 79%; a structural fix in the SRAM controller (Fix B) is
-still planned before 2600 ARM cartridges come back.
+The Quartus build (2.1.3) meets timing on all four corners: worst setup
+slack +1.60 ns (on clk_sdram, the SRAM request path), worst hold slack
++0.11 ns. It uses 12,909 of 18,480 ALMs (70%), 78 of 308 M10K blocks and 12
+DSP blocks. Since 2.1.2 the core leaves out the 6507-side logic of the ARM
+cartridge schemes, which can't run without the ARM: about 1,750 ALMs, and
+the slowest leg of that path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md),
+Fix A). 2.1.2 had +1.92 ns, 2.1.1 +0.44 ns and 79%; a structural fix in
+the SRAM controller (Fix B) is still planned before 2600 ARM cartridges
+come back.
 The 2.0.21 build: worst setup
 slack +1.32 ns, worst hold +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
@@ -215,6 +216,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Midnight Mutants, Commando, Dig Dug sprites | No corruption (holey DMA fix) |
 | Ballblazer | A full match played to a win, plus several attract-mode loops: procedural music and goal siren correct. Also a full match with upstream's POKEY and the adapter fix (2.0.21-test); before the fix the music fell to near silence |
 | 2600: Solaris, Adventure | Nothing significantly wrong seen |
+| Picture position (2.1.3 test build) | Commando without Overscan: the score bar at the very top, with no brown rows of overscan above it (2.1.2 showed 3); with Overscan, unchanged |
 | 2600 after Fix A (2.1.2 test build) | Pitfall II (DPC), Crystal Castles, Omega Race and other 2600 games work |
 | Commando POKEY music | Works: typing intro, title theme and attract music. Needs a dump whose header flags the POKEY (see below) |
 | SaveKey (Triple Punch) | Works from 2.0.8: shows "Save SK", saves, and the high score is back after reloading. 2.0.7 showed "Save ER" (EEPROM model bug on reads, and a zero-filled file); delete an all-zero `savekey.sav` left by older versions |
