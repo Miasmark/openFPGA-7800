@@ -185,7 +185,15 @@ module bupchip_pocket #(
 	input  wire [12:0] daria_fea_addr,  // front-end ROM port A (not while the cartridge loads)
 	output wire [31:0] daria_fea_q,
 	input  wire [12:0] daria_feb_addr,  // front-end ROM port B
-	output wire [31:0] daria_feb_q
+	output wire [31:0] daria_feb_q,
+	output wire        daria_cart_win,  // the capture's cartridge window (bup_capture.cart_win)
+	// The front end's sample port (daria_fe smp_*): a request toggle and the
+	// image byte offset, held while the request is open (clk_sys); the answer
+	// byte, held from before the answer toggle flips (clk_arm).
+	input  wire        daria_smp_req,
+	input  wire [18:0] daria_smp_addr,
+	output wire        daria_smp_ack,
+	output wire  [7:0] daria_smp_data
 `endif
 `ifdef BUP_DEBUG
 	,
@@ -376,6 +384,15 @@ module bupchip_pocket #(
 	end
 	assign daria_ready = ready_s[1];
 	assign daria_halted = halted_s[1];
+
+	// The front end's cartridge window and sample port: tied off in this port
+	// shell (docs/daria_step7/plan.md 4.1, commit S).
+	assign daria_cart_win = 1'b0;
+	assign daria_smp_ack = 1'b0;
+	assign daria_smp_data = 8'd0;
+	/* verilator lint_off UNUSEDSIGNAL */
+	wire smp_shell_unused = daria_smp_req | (|daria_smp_addr);
+	/* verilator lint_on UNUSEDSIGNAL */
 `else
 	// Port B belongs to the receiver while fw_loaded is low: the CPU is held
 	// then, so it makes no data reads.
