@@ -386,8 +386,8 @@ Other constraints already in the file:
 
 The tightest path is on `clk_sdram`: the cartridge-RAM request from MARIA
 or the 6502, through the mappers and `sram_ctrl`'s arbiter, into the SRAM's
-pad registers. Its margin moves with placement (+0.44 ns in 2.1.1, +1.32 in
-2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes.
+pad registers. Its margin moves with placement (+1.60 ns in 2.1.3, +1.92 in 2.1.2,
++0.44 in 2.1.1, +1.32 in 2.0.21). [SRAM_TIMING.md](SRAM_TIMING.md) has the path and two fixes.
 
 ## Resource budget
 
