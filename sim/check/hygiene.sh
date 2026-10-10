@@ -6,12 +6,19 @@
 #     sim/work, and no binary file or file over LIMIT bytes (default 262144)
 #     unless --allow names it;
 #   - no user firmware (a file named bupchip.<anything>);
-#   - no absolute path into /tmp or a scratch directory in an added line;
+#   - no absolute path into the temporary directory (/tmp, /var/tmp,
+#     /private/tmp) or a scratch directory in an added line, whatever text
+#     surrounds it: a quote, a backtick, a redirection (> or 2> glued to it),
+#     brackets, a comma, a ${X:-...} default, a table cell, an option letter
+#     glued to it (-I, -o). Only a path whose "tmp" continues a relative one
+#     (work, ./, ~, $WORK, ${WORK} before it) is let through, and so is the
+#     directory itself without a path into it (cd /tmp inside a container);
 #   - none of the assistant and model names in a list kept OUTSIDE the
 #     repository (writing them in would break the rule this checks): give it
-#     as --names FILE or HYGIENE_NAMES=FILE, one name per line, matched as
-#     words, case-insensitively. Without the list the run fails: the check
-#     did not happen.
+#     as --names FILE or HYGIENE_NAMES=FILE, one name per line, matched
+#     case-insensitively, a name of 5 or more characters anywhere (inside an
+#     identifier too: camelCase, snake_case), a shorter one as a word.
+#     Without the list the run fails: the check did not happen.
 # Commit messages are not files and are not checked here.
 #   sim/check/hygiene.sh [--base REV] [--names FILE] [--allow PATH]... [--limit BYTES]
 #                        [--repo DIR]
@@ -44,10 +51,27 @@ allow = set(sys.argv[5:])
 def git(*a):
     return subprocess.run(["git", "-C", repo] + list(a), capture_output=True, text=True, errors="replace", check=True).stdout
 
-# absolute paths into /tmp or a scratch directory (spelled in pieces, so that
-# this file does not match itself)
+# absolute paths into the temporary directory or a scratch directory (spelled
+# in pieces, so that this file does not match itself). A path into it is
+# absolute unless the character before it continues a relative path (a name,
+# ".", "~", "/", "$", "}", ")", "*" or "%"), or an option letter is glued to
+# it ("-I" or "-o" before it), which makes it absolute again.
 T = "tmp/"
-TMP_RE = re.compile(r"(^|[\s\"'=(:])/" + T + "|/var/" + T + "|/private/" + T + "|scratch" + "pad")
+TMP_AT = re.compile(r"/(?:var/|private/)?" + T)
+SCRATCH = "scratch" + "pad"
+
+
+def abs_tmp(text):
+    for m in TMP_AT.finditer(text):
+        i = m.start()
+        if m.group(0) != "/" + T:
+            return True                      # the var and private ones
+        c = text[i - 1] if i else ""
+        if c == "" or not re.match(r"[\w.~/$})*%]", c):
+            return True
+        if re.search(r"(?:^|[\s\"'`=(:,\[{|>])-[A-Za-z]$", text[:i]):
+            return True                      # an option glued to the path
+    return SCRATCH in text.lower()
 bad = []
 head = git("rev-parse", "--short", "HEAD").strip()
 changed = [l.split("\t") for l in git("diff", "--name-status", "--no-renames", base, "HEAD").splitlines() if l]
@@ -84,7 +108,7 @@ for l in diff.splitlines():
     elif l.startswith("+") and cur and cur not in allow:
         added.append((cur, l[1:]))
 for f, t in added:
-    if re.search(TMP_RE, t):
+    if abs_tmp(t):
         bad.append(f"absolute path into /tmp or a scratch directory: {f}: {t.strip()[:120]}")
 
 if not names:
@@ -97,7 +121,8 @@ else:
         bad.append(f"the name list {names} does not exist")
     else:
         words = [w.strip() for w in open(rp, errors="replace") if w.strip() and not w.startswith("#")]
-        pats = [re.compile(r"(?<![A-Za-z0-9])" + re.escape(w) + r"(?![A-Za-z0-9])", re.I) for w in words]
+        pats = [re.compile(re.escape(w), re.I) if len(w) >= 5 else
+                re.compile(r"(?<![A-Za-z0-9])" + re.escape(w) + r"(?![A-Za-z0-9])", re.I) for w in words]
         hits = 0
         for f, t in added:
             for w, p in zip(words, pats):

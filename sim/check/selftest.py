@@ -77,7 +77,10 @@ def expect(name, cmd, want_pass, py=True, env=None):
     ok = (rc == 0) == want_pass and rc in (0, 1)
     results.append(ok)
     last = out.strip().splitlines()[-1] if out.strip() else "(no output)"
-    print(f"  {'ok   ' if ok else 'WRONG'} {name}: expected {'pass' if want_pass else 'fail'}, got rc {rc} ({last})")
+    # the first finding, when the last line does not name it
+    why = next((l.strip() for l in out.splitlines() if re.search(r"FAIL|REFUSED|MISMATCH", l) and l.strip() != last.strip()), "")
+    print(f"  {'ok   ' if ok else 'WRONG'} {name}: expected {'pass' if want_pass else 'fail'}, got rc {rc} ({last})"
+          + (f" [{why[:150]}]" if rc == 1 and why else ""))
     if not ok:
         print("\n".join("        " + l for l in out.splitlines()[-12:]))
 
@@ -339,7 +342,18 @@ endmodule
 """
 SV_B = """module b(input logic d, output logic e);
 	assign e = d;
+	// synthesis translate_off
+	initial $display("b: simulation only");
+	// synthesis translate_on
 endmodule
+"""
+# a new DARIA file (excluded from pp_equiv's stream) listed before a.sv
+SV_DARIA = """`default_nettype none
+module daria_x(input wire clk, output logic q);
+	// `define IN_A_COMMENT is no directive
+	always_ff @(posedge clk) q <= ~q;
+endmodule
+`default_nettype wire
 """
 QIP = """set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) a.sv ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) b.sv ]
@@ -386,6 +400,22 @@ def guard_cases(w):
         ("a DARIA qsf line missing", "daria", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3.split("\n", 1)[1]), False),
         ("an SDC code change", "comments", lambda: edit("src/fpga/core/core_constraints.sdc", "69.841", "69.000"), False),
         ("a qsf code change", "comments", lambda: edit("src/fpga/ap_core.qsf", "SEED 1", "SEED 3"), False),
+        # removing a directive comment changes what Quartus builds as much as adding one
+        ("a translate_off/on pair removed", "comments",
+         lambda: edit("src/fpga/core/b.sv", "\t// synthesis translate_off\n", "") or
+         edit("src/fpga/core/b.sv", "\t// synthesis translate_on\n", ""), False),
+        # plan 2.8: a new daria_* file holds no directive that reaches later files
+        ("a new daria_ file with default_nettype none, then wire, and a define in a comment", "comments",
+         lambda: write(d, "src/fpga/core/daria_x.sv", SV_DARIA), True),
+        ("a new daria_ file with `undef", "comments",
+         lambda: write(d, "src/fpga/core/daria_x.sv", SV_DARIA.replace("module daria_x", "`undef POCKET_SRAM\nmodule daria_x")), False),
+        ("a new daria_ file with `define", "comments",
+         lambda: write(d, "src/fpga/core/daria_x.sv", SV_DARIA.replace("module daria_x", "`define X 1\nmodule daria_x")), False),
+        ("a new bup_dbg_snap file with `timescale", "comments",
+         lambda: write(d, "src/fpga/core/bupchip/bup_dbg_snap.sv", SV_DARIA.replace("daria_x", "bup_dbg_snap")
+                       .replace("module bup", "`timescale 1ns/1ps\nmodule bup")), False),
+        ("a new daria_ file left at default_nettype none", "comments",
+         lambda: write(d, "src/fpga/core/daria_x.sv", SV_DARIA.replace("`default_nettype wire\n", "")), False),
     ]
     for name, q, fn, want in cases:
         g("checkout", "-q", "-f", "base")
@@ -424,6 +454,24 @@ def hygiene_cases(w):
          ["--names", os.path.join(d, "names.txt")]),
         ("binary file", lambda: write(d, "sim/blob.dat", bytes(range(256)) * 4, "wb"), False, ["--names", names]),
         ("file over the size limit", lambda: write(d, "sim/big.txt", big), False, ["--names", names]),
+        # the forms in which a scratch path reaches a doc or a script
+        ("path in markdown backticks", lambda: write(d, "docs/x.md", "see `" + tmp + "`\n"), False, ["--names", names]),
+        ("path after a redirection >", lambda: write(d, "sim/x.sh", "cmd >" + tmp + "\n"), False, ["--names", names]),
+        ("path after a redirection 2>", lambda: write(d, "sim/x.sh", "cmd 2>" + tmp + "\n"), False, ["--names", names]),
+        ("path in brackets", lambda: write(d, "docs/x.md", "a link [" + tmp + "](x)\n"), False, ["--names", names]),
+        ("path after a comma", lambda: write(d, "sim/x.py", "p = ['a'," + tmp + "]\n"), False, ["--names", names]),
+        ("path as a default ${X:-...}", lambda: write(d, "sim/x.sh", "x=${Y:-" + tmp + "}\n"), False, ["--names", names]),
+        ("path in a table cell", lambda: write(d, "docs/x.md", "| a |" + tmp + " |\n"), False, ["--names", names]),
+        ("path glued to an option", lambda: write(d, "sim/x.sh", "gcc -I" + tmp + " x.c\n"), False, ["--names", names]),
+        # the directory itself, no path into it (I3's container command)
+        ("the directory itself, no path into it", lambda: write(d, "sim/x.sh", "bash -c 'cd " + tmp.rsplit("/", 1)[0] + " && ls'\n"),
+         True, ["--names", names]),
+        ("relative paths ending in tmp", lambda: write(d, "sim/x.sh", "ls work" + tmp + " $WORK" + tmp + " ${WORK}" + tmp +
+                                                       " ./" + tmp.lstrip("/") + " ~" + tmp + " " + tmp.replace("tmp", "tmpfoo") + "\n"),
+         True, ["--names", names]),
+        ("listed name inside a camelCase identifier", lambda: write(d, "docs/x.md", "QuuxbotHelper wrote it\n"), False, ["--names", names]),
+        ("listed name inside a snake_case identifier", lambda: write(d, "sim/x.py", "quuxbot_x = 1\n"), False, ["--names", names]),
+        ("listed name in a file name", lambda: write(d, "docs/Quuxbot-notes.md", "x\n"), False, ["--names", names]),
     ]
     for name, fn, want, extra in cases:
         g("checkout", "-q", "-f", "base")
@@ -477,6 +525,23 @@ def pp_equiv_cases(w):
     expect("--max-token 0 with that file excluded", [pe, fpga, os.path.join(w, "pp_out"), "--max-token", "0",
                                                       "--exclude", "core/b\\.sv"], True)
     write(fpga, "core/b.sv", SV_B)
+    # A new DARIA file, listed before a.sv and excluded from the stream: the
+    # hash must not hide what it does to the files after it (plan 2.8).
+    qip = open(os.path.join(fpga, "core/core.qip")).read()
+    write(fpga, "core/core.qip", "set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) daria_x.sv ]\n" + qip)
+    write(fpga, "core/daria_x.sv", SV_DARIA)
+    ex = [pe, fpga, os.path.join(w, "pp_out"), "--exclude", "daria_", "--expect", h0]
+    expect("a daria_ file excluded (default_nettype none, then wire): the hash of the rest", ex, True)
+    for what, src in (("`undef POCKET_SRAM", SV_DARIA.replace("module daria_x", "`undef POCKET_SRAM\nmodule daria_x")),
+                      ("`define", SV_DARIA.replace("module daria_x", "`define POCKET_X 1\nmodule daria_x")),
+                      ("`timescale", SV_DARIA.replace("module daria_x", "`timescale 1ns/1ps\nmodule daria_x")),
+                      ("`include", SV_DARIA.replace("module daria_x", "`include \"b.sv\"\nmodule daria_x")),
+                      ("`default_nettype tri", SV_DARIA.replace("`default_nettype wire", "`default_nettype tri")),
+                      ("an `ifdef without `endif", SV_DARIA.replace("module daria_x", "`ifdef POCKET_SRAM\nmodule daria_x"))):
+        write(fpga, "core/daria_x.sv", src)
+        expect(f"an excluded daria_ file with {what}: refused", ex, False)
+    write(fpga, "core/core.qip", qip)
+    os.remove(os.path.join(fpga, "core/daria_x.sv"))
     shutil.rmtree(d, ignore_errors=True)
 
 

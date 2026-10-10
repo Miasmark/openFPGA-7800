@@ -21,9 +21,18 @@ Usage:
       the Quartus file list. -D adds a macro (e.g. POCKET_DARIA), -U removes
       one the qsf sets. --exclude drops files whose path (relative to
       FPGA_DIR) matches REGEX from the stream (the new DARIA files, once they
-      are shown to be unreferenced). --token counts the identifiers in the
-      stream that contain WORD (default daria) and prints the count; with
-      --max-token N the run fails when the count is above N.
+      are shown to be unreferenced). An excluded file is not in the stream,
+      so a directive in it that reaches the files after it in Quartus's
+      order would go unseen: an excluded file is refused (exit 1) when it
+      holds, outside comments, any of `define, `undef, `undefineall,
+      `timescale, `resetall, `include, `celldefine, `unconnected_drive,
+      `pragma, `begin_keywords, `line, `default_decay_time,
+      `default_trireg_strength, `delay_mode_*, a `default_nettype other than
+      none or wire or not ending at wire, or unbalanced `ifdef/`endif
+      (plan 2.8; leak_directives below, which pp_guards.py also applies).
+      --token counts the identifiers in the stream that contain WORD
+      (default daria) and prints the count; with --max-token N the run fails
+      when the count is above N.
   pp_equiv.py --files OUTDIR FILE... [-D NAME[=V] ...] [-I DIR ...]
               [--expect SHA256]
       the given files in the given order, with only the macros given (no qsf,
@@ -62,6 +71,68 @@ def qip_files(path, out, vhdl):
             out.append(f)
         elif kind == "VHDL_FILE":
             vhdl.append(f)
+
+
+# Compiler directives whose effect reaches the files compiled after the one
+# that holds them (IEEE 1800 22.x); `ifdef and friends only within the file,
+# when balanced. `default_nettype is allowed as the daria files use it: none,
+# back to wire at the end (a file that compiles under none compiles to the
+# same netlist under wire, and the reverse is a compile error).
+LEAK = re.compile(r"`\s*(define|undef|undefineall|timescale|resetall|include|celldefine|endcelldefine|"
+                  r"unconnected_drive|nounconnected_drive|pragma|begin_keywords|end_keywords|line|"
+                  r"default_decay_time|default_trireg_strength|delay_mode_\w+)\b")
+
+
+def strip_comments(text):
+    """The text without // and /* */ comments and string literals, line breaks kept."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            seg = text[i:n if j < 0 else j + 2]
+            out.append("\n" * seg.count("\n"))
+            i = n if j < 0 else j + 2
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"' and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append('""')
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def leak_directives(text):
+    """[(line, what)] for each directive in text (one file) that could reach
+    the files compiled after it."""
+    code = strip_comments(text)
+    bad = []
+    for ln, l in enumerate(code.splitlines(), 1):
+        for m in LEAK.finditer(l):
+            bad.append((ln, "`" + m.group(1)))
+    nettypes = [(ln, m.group(1)) for ln, l in enumerate(code.splitlines(), 1)
+                for m in re.finditer(r"`\s*default_nettype\s+(\w+)", l)]
+    for ln, v in nettypes:
+        if v not in ("none", "wire"):
+            bad.append((ln, f"`default_nettype {v}"))
+    if nettypes and nettypes[-1][1] != "wire":
+        bad.append((nettypes[-1][0], "`default_nettype not set back to wire at the end"))
+    depth = 0
+    for ln, l in enumerate(code.splitlines(), 1):
+        for m in re.finditer(r"`\s*(ifdef|ifndef|endif)\b", l):
+            depth += 1 if m.group(1) != "endif" else -1
+            if depth < 0:
+                bad.append((ln, "`endif without `ifdef"))
+                depth = 0
+    if depth:
+        bad.append((0, f"{depth} `ifdef/`ifndef without `endif"))
+    return bad
 
 
 def normalise(text):
@@ -118,6 +189,12 @@ def main():
         macros = [x for x in macros if x.split("=")[0] not in o["rems"]] + o["adds"] + ["ALTERA_RESERVED_QIS=1"]
         excluded = [f for f in files if any(re.search(r, os.path.relpath(f, fpga)) for r in o["excl"])]
         files = [f for f in files if f not in excluded]
+        refused = [(os.path.relpath(f, fpga), ln, what) for f in excluded
+                   for ln, what in leak_directives(open(f, errors="replace").read())]
+        if refused:
+            for rel, ln, what in refused:
+                print(f"EXCLUDE REFUSED {rel}:{ln}: {what} would reach the files after it, which the stream would not show")
+            sys.exit(1)
         incs = sorted({os.path.dirname(f) for f in files} | {os.path.join(fpga, "mister"), os.path.join(fpga, "mister/rtl")})
     os.makedirs(outdir, exist_ok=True)
     rel = [os.path.relpath(f, root) for f in files]

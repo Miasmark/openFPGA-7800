@@ -4,11 +4,18 @@
 pp_equiv.py hashes the preprocessed Verilog stream, which drops comments and
 covers neither VHDL nor memory files nor the qsf. Over `git diff FROM TO`:
 
-  directive  no added line in a Verilog/SystemVerilog file carries a Quartus
-             directive in a comment or an attribute: synthesis,
-             altera_attribute, translate_off/translate_on, or "(*" inside a
-             comment. Attributes in code reach pp_equiv's stream and are
-             hashed; a directive in a comment does not, so it is listed here.
+  directive  no added or removed line in a Verilog/SystemVerilog file
+             carries a Quartus directive in a comment or an attribute:
+             synthesis, altera_attribute, translate_off/translate_on, or
+             "(*" inside a comment. Attributes in code reach pp_equiv's
+             stream and are hashed; a directive in a comment does not, so it
+             is listed here, and removing one (a translate_off/on pair, a
+             keep) changes what Quartus builds as much as adding one.
+  daria      every daria_* and bup_dbg_snap source in TO (src/fpga) is free
+             of directives that reach the files compiled after it: `define,
+             `undef, `timescale and the rest of pp_equiv.py's
+             leak_directives (plan 2.8), so that excluding these files from
+             pp_equiv's stream cannot hide a change to the others.
   files      no .vhd/.vhdl, .mif or .hex file changed (git diff --name-only).
   qsf        --qsf daria: the ap_core.qsf diff is exactly the three DARIA
              lines (VERILOG_MACRO "POCKET_DARIA=1", QIP_FILE core/daria.qip,
@@ -25,6 +32,9 @@ Usage: pp_guards.py --from REV [--to REV] [--repo DIR] [--qsf daria|comments|non
 SPDX-License-Identifier: MIT
 """
 import argparse, os, re, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pp_equiv import leak_directives  # noqa: E402
 
 HDL = ("*.v", "*.sv", "*.svh", "*.vh")
 DIRECTIVE = re.compile(r"synthesis|altera_attribute|translate_(off|on)", re.I)
@@ -48,16 +58,20 @@ def diff_args(a):
     return [a.frm] if a.to == "WORKTREE" else [a.frm, a.to]
 
 
-def added_lines(repo, a, paths):
-    """(file, line number in TO, text) for every added line."""
-    out, f, ln = [], None, 0
+def added_lines(repo, a, paths, sign="+"):
+    """(file, line number, text) for every added line (sign "+", numbered in
+    TO) or removed line (sign "-", numbered in FROM)."""
+    out, f, ln, fold, fnew = [], None, 0, None, None
     for l in git(repo, "diff", "-U0", "--no-color", *diff_args(a), "--", *paths).splitlines():
-        if l.startswith("+++ "):
-            f = l[6:] if l.startswith("+++ b/") else None
+        if l.startswith("--- "):
+            fold = l[6:] if l.startswith("--- a/") else None
+        elif l.startswith("+++ "):
+            fnew = l[6:] if l.startswith("+++ b/") else None
+            f = fnew if sign == "+" else fold
         elif l.startswith("@@"):
-            m = re.search(r"\+(\d+)", l)
+            m = re.search(r"\+(\d+)" if sign == "+" else r"-(\d+)", l)
             ln = int(m.group(1)) if m else 0
-        elif l.startswith("+") and f:
+        elif l.startswith(sign) and f:
             out.append((f, ln, l[1:]))
             ln += 1
     return out
@@ -92,11 +106,26 @@ def comment_part(text, in_block):
 
 
 def guard_directive(repo, a):
-    bad, blk = [], {}
-    for f, ln, text in added_lines(repo, a, HDL):
-        com, blk[f] = comment_part(text, blk.get(f, False))
-        if DIRECTIVE.search(com) or "(*" in com:
-            bad.append(f"{f}:{ln}: {text.strip()}")
+    bad = []
+    for sign, what in (("+", "added"), ("-", "removed")):
+        blk = {}
+        for f, ln, text in added_lines(repo, a, HDL, sign):
+            com, blk[f] = comment_part(text, blk.get(f, False))
+            if DIRECTIVE.search(com) or "(*" in com:
+                bad.append(f"{what} {f}:{ln}: {text.strip()}")
+    return bad
+
+
+def guard_daria(repo, a):
+    bad = []
+    if a.to == "WORKTREE":
+        names = git(repo, "ls-files", "src/fpga").split()
+    else:
+        names = git(repo, "ls-tree", "-r", "--name-only", a.to, "src/fpga").split()
+    for n in sorted(names):
+        if re.search(r"(^|/)(daria_[^/]*|bup_dbg_snap)\.(sv|v|svh|vh)$", n):
+            for ln, what in leak_directives(blob(repo, a.to, n)):
+                bad.append(f"{n}:{ln}: {what}")
     return bad
 
 
@@ -166,7 +195,7 @@ def main():
     a = p.parse_args()
     repo = os.path.abspath(a.repo)
     rc = 0
-    checks = [("directive", guard_directive), ("files", guard_files)]
+    checks = [("directive", guard_directive), ("daria", guard_daria), ("files", guard_files)]
     if a.qsf == "daria":
         checks.append(("qsf daria", guard_qsf_daria))
     elif a.qsf == "comments":
