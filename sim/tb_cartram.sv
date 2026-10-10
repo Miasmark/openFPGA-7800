@@ -123,7 +123,8 @@ module tb_cartram;
 	// 2600 port, else the pending cp, whose port is followed as sram_ctrl loads
 	// it), and before Fix B by the image type: every cartridge access of a
 	// 2600 image is the 2600 port's.
-	int  rd_m = 0, wr_m = 0;         // the 7800/BIOS port's, issued in a 2600 image
+	int  rd_m = 0, wr_m = 0;         // the 7800/BIOS port's cart RAM accesses (word below $10000)
+	int  bios_m = 0;                 // accesses in the BIOS region (word $10000 and up), either port
 	bit  cp_t = 1'b0;                // the pending access cp came from the 2600 port
 	always @(posedge tb.clk_sdram) if (on) begin
 		automatic bit from_t;
@@ -136,7 +137,8 @@ module tb_cartram;
 `endif
 		if (`CR_S.take) begin
 			if (`CR_S.go_cl == 3'd0) begin
-				if (from_t) begin if (`CR_S.go_we) wr_issued++; else rd_issued++; end
+				if (`CR_S.go_word >= 17'h10000) bios_m++;	// the BIOS region (no 2600 access is there)
+				else if (from_t) begin if (`CR_S.go_we) wr_issued++; else rd_issued++; end
 				else begin if (`CR_S.go_we) wr_m++; else rd_m++; end
 			end else if (`CR_S.go_cl == 3'd1) fb_issued++;
 			else other_issued++;
@@ -459,11 +461,11 @@ module tb_cartram;
 		$display("CARTRAM traffic: cart reads issued %0d, Flicker Blend %0d, other %0d; address or direction changes inside a held strobe %0d",
 			rd_issued, fb_issued, other_issued, mid_changes);
 `ifdef SIM_FIXB
-		$display("CARTRAM ports: the 2600 port's accesses issued: reads %0d, writes %0d; the 7800/BIOS port's: reads %0d, writes %0d (by request port)",
-			rd_issued, wr_issued, rd_m, wr_m);
+		$display("CARTRAM ports: the 2600 port's accesses issued: reads %0d, writes %0d; the 7800/BIOS port's: reads %0d, writes %0d of cart RAM; %0d in the BIOS region (by request port)",
+			rd_issued, wr_issued, rd_m, wr_m, bios_m);
 `else
-		$display("CARTRAM ports: the 2600 image's accesses issued: reads %0d, writes %0d; others: reads %0d, writes %0d (by image type: no request ports before Fix B)",
-			rd_issued, wr_issued, rd_m, wr_m);
+		$display("CARTRAM ports: the 2600 image's accesses issued: reads %0d, writes %0d; others: reads %0d, writes %0d of cart RAM; %0d in the BIOS region (by image type: no request ports before Fix B)",
+			rd_issued, wr_issued, rd_m, wr_m, bios_m);
 `endif
 		$write("CARTRAM post-reset reads: %0d (the first CPU read of cart RAM after each console reset release), histogram:", pr_n);
 		for (int i = 0; i <= 40; i++) if (pr_hist[i]) $write(" %0d:%0d", i, pr_hist[i]);

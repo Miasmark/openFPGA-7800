@@ -220,9 +220,11 @@
 		.daria_stb_addr(d_stb_addr), .daria_stb_we(d_stb_we), .daria_stb_be(4'hF), .daria_stb_wd(d_stb_wd), .daria_stb_q(d_stb_q),
 		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
 		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q(),
+		/* verilator lint_off PINCONNECTEMPTY */
 		.daria_cart_win(),
 		// the samples are upstream's: the sample port makes no requests
 		.daria_smp_req(1'b0), .daria_smp_addr(19'd0), .daria_smp_ack(), .daria_smp_data());
+		/* verilator lint_on PINCONNECTEMPTY */
 `endif
 
 	wire [21:16] cram_a;

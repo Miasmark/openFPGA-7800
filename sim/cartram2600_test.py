@@ -25,6 +25,8 @@ row 6 and 3.6.
       (fail); tb_load's TONE line tells them apart.
   cartram2600_test.py check LOG --image NAME [--blend 0|1] [--profile P]
                              [--ref REF_LOG]
+  cartram2600_test.py check-reset LOG --run RUN [--profile P] [--ref REF_LOG]
+      one reset run's verdict (RUN: a name from the reset list below)
       one run's verdict (NAME: a mapper, arfull, artape, armulti, armimg or
       ram7800; --ref: the reference build's log of the same case, for
       artape's colours).
@@ -140,6 +142,8 @@ EXPECT = {
     "cv": (1819, 3993, 512), "e7": (1819, 3995, 768), "3e": (1819, 3995, 1024),
     "wd": (1918, 3898, 64), "cty": (1935, 3871, 60),
     "arfull": (232458, 6144, 6144), "armulti": (1516502, 512, 256),
+    # the tape load (--arfw, 22 s): aeee6d2 and F alike (lane I2's comparison)
+    "artape": (6228868, 25262, 6144),
 }
 RUN_MS = {m: 60 for m in MAPPERS}
 RUN_MS.update(arfull=300, armulti=1300, artape=22000, armimg=60)
@@ -352,7 +356,7 @@ def parse(log):
             stopped = False
     r["tape_loads"] = loads
     r["md5"] = re.findall(r"^-- tb_cartram: (obj_cartram/vtb md5 \S+)", t, re.M)
-    m = re.search(r"^CARTRAM ports: .*?: reads (\d+), writes (\d+); .*?: reads (\d+), writes (\d+)", t, re.M)
+    m = re.search(r"^CARTRAM ports: .*?: reads (\d+), writes (\d+); .*?: reads (\d+), writes (\d+) of cart RAM; (\d+) in the BIOS", t, re.M)
     r["ports"] = tuple(int(x) for x in m.groups()) if m else None
     m = re.search(r"^CARTRAM post-reset reads: (\d+) .*histogram:(.*)$", t, re.M)
     r["post"] = {int(a): int(b) for a, b in re.findall(r"(\d+):(\d+)", m.group(2))} if m else {}
@@ -430,8 +434,8 @@ def check(log, name, blend, profile="auto", expect_counts=True, ref=None):
         er, ew, es = EXPECT[name]
         if (n, strobes, sh_n) != (er, ew, es):
             bad.append(f"counts reads/writes/shadow {n}/{strobes}/{sh_n}, expected {er}/{ew}/{es}")
-    if r["ports"] and (r["ports"][2] or r["ports"][3]) and name != "ram7800":
-        bad.append(f"the 7800/BIOS port issued {r['ports'][2]} reads and {r['ports'][3]} writes of cartridge RAM in a 2600 run")
+    if r["ports"] and r["ports"][3] and name != "ram7800":
+        bad.append(f"the 7800/BIOS port issued {r['ports'][3]} writes of cartridge RAM in a 2600 run")
     if prof in ("base", "fixb"):
         normal, rep = BUCKETS[(prof, blend)]
         # the first read after each console reset release may also use POST[prof]
@@ -857,6 +861,11 @@ def main():
     c.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
     c.add_argument("--no-counts", action="store_true")
     c.add_argument("--ref", help="the reference build's log of the same case (artape's colours)")
+    c = sub.add_parser("check-reset")
+    c.add_argument("log")
+    c.add_argument("--run", required=True, choices=[x[0] for x in RST_RUNS])
+    c.add_argument("--profile", default="auto", choices=("auto", "base", "fixb"))
+    c.add_argument("--ref", help="the reference build's log of the same run (per-reset accesses)")
     for name in ("matrix", "s19", "reset", "midswap", "forcecoinc"):
         s = sub.add_parser(name)
         s.add_argument("--work", default=os.environ.get("WORK", os.path.join(HERE, "work")))
@@ -881,6 +890,11 @@ def main():
     if a.cmd == "check":
         ok, bad, summ = check(a.log, a.image, a.blend, a.profile, not a.no_counts, ref=a.ref)
         print(f"{'PASS' if ok else 'FAIL'} {a.image} blend {a.blend}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
+        return 0 if ok else 1
+    if a.cmd == "check-reset":
+        image_name = {x[0]: x[1] for x in RST_RUNS}[a.run]
+        ok, bad, summ = check_reset(a.log, a.run, image_name, a.profile, a.ref)
+        print(f"{'PASS' if ok else 'FAIL'} {a.run}: {summ}" + ("" if ok else "  <- " + "; ".join(bad)))
         return 0 if ok else 1
     a.work = os.path.abspath(a.work)
     if getattr(a, "ref_logs", None):

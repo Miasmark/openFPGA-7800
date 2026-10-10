@@ -3,7 +3,7 @@
 (DARIA step 7, docs/daria_step7/plan.md 3.6 unit gate 1, 7.1 and 7.2 for I4).
 
   selftest.py --work DIR [--run-sim LOG] [--extra LOG --extra-ref REF
-              [--extra-dir DIR]] [--fp FILE] [--cartram LOG]
+              [--extra-dir DIR]] [--fp FILE] [--cartram LOG] [--reset LOG]
               [--artape LOG [--artape-ref REF]] [--tools]
 
 DIR receives the planted copies. Every case prints "ok" when the checker
@@ -30,13 +30,20 @@ pass or FAIL, and so is the exit status (0 or 1).
                    zero-byte and two header-only files
   --cartram LOG    a passing tb_cartram log (cartram2600_test.py's, E7 blend
                    off): a wrong byte, a lost write, a bucket past s19, a
-                   changed read count, a fail code, a P2 $fatal; and a Fix B
-                   log made from it, which passes with the P2 assertion armed
-                   and fails without it (also with --profile fixb)
+                   changed read count, a fail code, a P2 $fatal, a write of
+                   cart RAM by the 7800/BIOS port; and a Fix B log made from
+                   it, which passes with the P2 assertion armed and fails
+                   without it (also with --profile fixb), passes with a read
+                   at s19 that is the first after a console reset and fails
+                   with one that is not, or with the first at s18
+  --reset LOG      a passing reset run's log (cartram2600_test.py reset,
+                   rst_hif8_rd_rst_k0): a strobe not issued, a read issued
+                   at s14, a P2 coincidence, a reset not done, a reset with
+                   no strobe at E1
   --artape LOG     a passing artape log (the tape load with +cartram), with
                    --artape-ref the reference build's: an ARCHECK mismatch,
                    no tone 5 after the tape, another colour than the
-                   reference's
+                   reference's, a read count and a write count changed
   --tools          the guards on scratch git repositories in DIR:
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
@@ -47,7 +54,8 @@ pass or FAIL, and so is the exit status (0 or 1).
                    let through), hygiene.sh (a cartridge image, a PNG, a
                    firmware file, a path into the temporary directory in
                    each form a doc or script spells it: backticks, > and 2>,
-                   brackets, a comma and the rest, a listed name, also inside
+                   brackets, a comma, a file:/// URL, a doubled leading
+                   slash and the rest, a listed name, also inside
                    an identifier, no list, a list inside the repository, a
                    binary and an oversized file) and pp_equiv.py on a small
                    Quartus tree (a comment, a layout and a dead-ifdef edit
@@ -299,6 +307,48 @@ def cartram_cases(log, w):
     nop2 = plant(fx, os.path.join(w, "cartram_fixb_no_p2.log"), lambda t: t.replace("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram\n", ""))
     expect("Fix B buckets with the P2 assertion not armed", [ct, "check", nop2, "--image", "e7", "--blend", "0"], False)
     expect("the same with --profile fixb", [ct, "check", nop2, "--image", "e7", "--blend", "0", "--profile", "fixb"], False)
+    # the first read after a console reset may land at s19 with Fix B (and only it)
+    def post_line(t, hist):
+        line = f"CARTRAM post-reset reads: {sum(hist.values())} (the first CPU read of cart RAM after each console reset release), histogram:" + \
+            "".join(f" {k}:{v}" for k, v in sorted(hist.items())) + "\n"
+        t2 = re.sub(r"^CARTRAM post-reset reads: .*\n", line, t, count=1, flags=re.M)
+        return t2 if t2 != t else t + line
+    def add19(t):
+        t = re.sub(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):.*)$", r"\g<1> 19:1", t, count=1, flags=re.M)
+        return re.sub(r"c_rdata at E0\+(-?\d+)\.\.(-?\d+) clk_sdram", r"c_rdata at E0+\g<1>..19 clk_sdram", t, count=1)
+    pr = plant(fx, os.path.join(w, "cartram_fixb_post19.log"), lambda t: post_line(add19(t), {19: 1}))
+    expect("a Fix B read at s19, the first after a console reset", [ct, "check", pr, "--image", "e7", "--blend", "0"], True)
+    npr = plant(fx, os.path.join(w, "cartram_fixb_s19_not_post.log"), lambda t: post_line(add19(t), {}))
+    expect("a Fix B read at s19 that is not the first after a reset", [ct, "check", npr, "--image", "e7", "--blend", "0"], False)
+    pr2 = plant(fx, os.path.join(w, "cartram_fixb_post18.log"),
+                lambda t: post_line(re.sub(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):.*)$", r"\g<1> 18:1", t,
+                                           count=1, flags=re.M), {18: 1}))
+    expect("a first read after a reset at s18 (only s19 is allowed)", [ct, "check", pr2, "--image", "e7", "--blend", "0"], False)
+    def port_write(t):
+        line = ("CARTRAM ports: the 2600 port's accesses issued: reads 0, writes 0; the 7800/BIOS port's: reads 0, writes 1 of "
+                "cart RAM; 0 in the BIOS region (by request port)\n")
+        t2 = re.sub(r"^CARTRAM ports: .*\n", line, t, count=1, flags=re.M)
+        return t2 if t2 != t else t + line
+    expect("a 7800/BIOS-port write of cart RAM in a 2600 run",
+           [ct, "check", plant(log, os.path.join(w, "cartram_port_write.log"), port_write), "--image", "e7", "--blend", "0"], False)
+
+
+def reset_cases(log, w):
+    """A passing reset run's log (cartram2600_test.py reset, rst_hif8_rd_rst_k0)."""
+    ct = os.path.join(SIM, "cartram2600_test.py")
+    print("cartram2600_test.py check-reset:")
+    run = ["--run", "rst_hif8_rd_rst_k0"]
+    expect("the reset run as it is", [ct, "check-reset", log] + run, True)
+    first = lambda pat, rpl: (lambda t: re.sub(pat, rpl, t, count=1, flags=re.M))
+    cases = {
+        "reset_not_issued": first(r"^(RST 0 K=\d+: strobe [^;]*; )issued at s\d+( data \w+)?;", r"\g<1>NOT issued;"),
+        "reset_read_late": first(r"^(RST 0 K=\d+: strobe read [^;]*; issued at s)\d+;", r"\g<1>14;"),
+        "reset_coincidence": first(r"^(RST 0 K=.*P2 coincidences )0$", r"\g<1>1"),
+        "reset_incomplete": first(r"^RST summary: (\d+) of", lambda m: f"RST summary: {int(m.group(1)) - 1} of"),
+        "reset_no_strobe": first(r"^(RST 0 K=\d+: strobe )[^;]*; [^;]*;", r"\g<1>none; -;"),
+    }
+    for c, fn in cases.items():
+        expect(c, [ct, "check-reset", plant(log, os.path.join(w, f"{c}.log"), fn)] + run, False)
 
 
 def parse_hist(log):
@@ -315,6 +365,9 @@ def artape_cases(log, ref, w):
     last = lambda a, b: (lambda t: t[::-1].replace(a[::-1], b[::-1], 1)[::-1])
     cases = {
         "artape_archeck": sub1(r"^(ARCHECK 24 pages, )0( of 6144)", r"\g<1>5\g<2>"),
+        "artape_read_count": sub1(r"^CARTRAM reads: (\d+)", lambda m: "CARTRAM reads: " + str(int(m.group(1)) + 1)),
+        "artape_write_count": sub1(r"^CARTRAM writes: (\d+) strobes at the mappers, (\d+) cart writes issued",
+                                   lambda m: f"CARTRAM writes: {int(m.group(1)) + 1} strobes at the mappers, {int(m.group(2)) + 1} cart writes issued"),
         "artape_no_tone_5_after_the_tape": last("AUDF0 = 5\n", "AUDF0 = 6\n"),
     }
     for c, fn in cases.items():
@@ -488,6 +541,9 @@ def hygiene_cases(w):
         ("path as a default ${X:-...}", lambda: write(d, "sim/x.sh", "x=${Y:-" + tmp + "}\n"), False, ["--names", names]),
         ("path in a table cell", lambda: write(d, "docs/x.md", "| a |" + tmp + " |\n"), False, ["--names", names]),
         ("path glued to an option", lambda: write(d, "sim/x.sh", "gcc -I" + tmp + " x.c\n"), False, ["--names", names]),
+        ("path as a file URL (file:///)", lambda: write(d, "docs/x.md", "open file://" + tmp + "\n"), False, ["--names", names]),
+        ("path with a doubled leading slash", lambda: write(d, "sim/x.sh", "cat /" + tmp + "\n"), False, ["--names", names]),
+        ("a doubled slash inside a relative path", lambda: write(d, "sim/x.sh", "ls work/" + tmp + "\n"), True, ["--names", names]),
         # the directory itself, no path into it (I3's container command)
         ("the directory itself, no path into it", lambda: write(d, "sim/x.sh", "bash -c 'cd " + tmp.rsplit("/", 1)[0] + " && ls'\n"),
          True, ["--names", names]),
@@ -703,6 +759,7 @@ def main():
     p.add_argument("--extra-dir")
     p.add_argument("--fp")
     p.add_argument("--cartram")
+    p.add_argument("--reset", help="a passing reset run's log (cartram2600_test.py reset: rst_hif8_rd_rst_k0)")
     p.add_argument("--artape", help="a passing artape log (cartram2600_test.py matrix --arfw)")
     p.add_argument("--artape-ref", help="the reference build's artape log")
     p.add_argument("--tools", action="store_true", help="the guards: pp_guards.py, hygiene.sh, pp_equiv.py")
@@ -717,6 +774,8 @@ def main():
         fp_cases(a.fp, w)
     if a.cartram:
         cartram_cases(a.cartram, w)
+    if a.reset:
+        reset_cases(a.reset, w)
     if a.artape:
         artape_cases(a.artape, a.artape_ref, w)
     if a.tools:

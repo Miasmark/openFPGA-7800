@@ -18,7 +18,12 @@
 #                the qsf has POCKET_DARIA, else --qsf comments)
 #   cartram      cartram2600_test.py matrix and the directed s19 run
 #                (CARTRAM_ONLY=e7,... runs a subset of the matrix: a quick
-#                look, never the gate); with POCKET_DARIA in the qsf also
+#                look, never the gate); with Fix B in the tree (sram_ctrl.sv's
+#                t_new) also the console-reset sweep (reset), the address
+#                compare (midswap) and the P2 assertion's forced coincidence
+#                (forcecoinc), and the mutants each must catch: nohold by the
+#                reset sweep's K = 0 runs and by forcecoinc c_rd, nocmp by
+#                midswap (CAUGHT); with POCKET_DARIA in the qsf also
 #                on the plain build (DARIA=0), every run with its +fp
 #                fingerprint, all equal between the builds but the ARM
 #                image's (plan 7.5 row 5)
@@ -39,7 +44,7 @@
 #                and every extra_ and cartram_ fingerprint equal between the
 #                builds but the ARM image's (plan 7.5 row 5, 1.2 row 4)
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
-#                run's run_sim.sh, extra_tests.sh, cartram and artape logs
+#                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
 #                and fingerprints (so it runs after them), and the guards'
 #                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
@@ -50,13 +55,22 @@
 #                src/fpga/mister/rtl/bupchip.hex): without them the jobs
 #                that can run must pass and the gate reports PARTIAL, which
 #                is not a pass
-#   lint         sim/lint_step7.sh (lane I1's three macro sets)
+#   lint         sim/lint_step7.sh: Verilator -Wall over the three macro
+#                sets of plan 3.3 item 1 (the shipped set, the shipped set
+#                without POCKET_DARIA, run_daria.sh's WRAPPER set), no
+#                warning added against aeee6d2
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
-#                (lane I4c, not yet in the tree) against R1's tb_daria runs,
-#                GAMES=DIR and R1_DIR=DIR; until tb_frames exists it is NOT
-#                AVAILABLE
+#                (sim/run_frames.sh) against R1's tb_daria runs: for each name
+#                in FRAMES_LIST (default Juno-First_demo_final_CGP_NTSC, the
+#                calibration image), GAMES/**/NAME.bin run for as many frames
+#                as R1_DIR/NAME/fp.csv holds plus one, and compared with
+#                frame_gate.py: --strict when R1's run made no call (a
+#                non-ARM image: every column equal), else the gate's rules
+#                (FRAMES_GUARD: locked, unlocked or none; default locked).
+#                The images are read by path, never copied; the runs go to
+#                OUT/frames/runs. Needs GAMES and R1_DIR
 # A gate whose script or input does not exist yet is NOT AVAILABLE, and one
 # that ran only part of what its plan row needs is PARTIAL: neither is a
 # pass. --list prints the gates and whether each is available.
@@ -67,7 +81,8 @@
 # sections are skipped, which fails run_sim), GAMES=DIR (game images by path;
 # they are never copied into the tree), R1_DIR=DIR (the reference runs),
 # S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), S4_JOBS, RUN_SIM_REF=LOG,
-# FP_REF=DIR, PP_ORACLE_BASE=REV, CARTRAM_ONLY=LIST (above).
+# FP_REF=DIR, PP_ORACLE_BASE=REV, CARTRAM_ONLY=LIST, FRAMES_LIST,
+# FRAMES_GUARD (above).
 # Every log starts with the tree's HEAD and status and the Verilator path
 # and version (plan P23); the run scripts add the md5 of each binary they
 # build. Output in --out DIR (default sim/work/step7/gates): <gate>.log and
@@ -114,10 +129,10 @@ avail() {
 		pp_equiv) [ -n "${PP_EXPECT:-}" ] || echo "PP_EXPECT (the expected non-DARIA stream hash) not given" ;;
 		pp_guards) [ -n "${PP_GUARD_FROM:-}" ] || echo "PP_GUARD_FROM (commit F) not given" ;;
 		extra_tests) [ -n "${EXTRA_REF:-}" ] && [ -f "${EXTRA_REF:-}" ] || echo "EXTRA_REF (the reference build's extra_tests.sh log) not given" ;;
-		lint) [ -f "$HERE/lint_step7.sh" ] || echo "sim/lint_step7.sh does not exist yet (lane I1)" ;;
+		lint) [ -f "$HERE/lint_step7.sh" ] || echo "sim/lint_step7.sh does not exist" ;;
 		daria_smp) [ -f "$HERE/bupchip/daria/smp/run_smp.sh" ] || echo "sim/bupchip/daria/smp/run_smp.sh does not exist yet (lane I1)" ;;
 		dbg_snap) [ -f "$HERE/bupchip/dbgsnap/run_dbgsnap.sh" ] || echo "sim/bupchip/dbgsnap/run_dbgsnap.sh does not exist yet (lane I3)" ;;
-		frames) if [ ! -f "$HERE/tb_frames.sv" ]; then echo "sim/tb_frames.sv does not exist yet (lane I4c)"
+		frames) if [ ! -f "$HERE/tb_frames.sv" ]; then echo "sim/tb_frames.sv does not exist"
 			elif [ -z "${GAMES:-}" ] || [ ! -d "${GAMES:-}" ]; then echo "GAMES (the directory of game images) not given"
 			elif [ -z "${R1_DIR:-}" ] || [ ! -d "${R1_DIR:-}" ]; then echo "R1_DIR (the reference runs) not given"; fi ;;
 	esac
@@ -199,6 +214,16 @@ g_cartram() {
 	WORK="$w" BUILD_TOP=tb_cartram bash "$HERE/run_sim.sh" || return 1
 	slot python3 "$HERE/cartram2600_test.py" matrix --work "$w" "${fp[@]}" "${only[@]}" || rc=1
 	slot python3 "$HERE/cartram2600_test.py" s19 --work "$w" "${fp[@]}" || rc=1
+	if grep -qE '\bt_new\b' "$REPO/src/fpga/core/sram_ctrl.sv"; then
+		echo "== Fix B: the console-reset sweep, the address compare and the P2 assertion, and the mutants they catch"
+		slot python3 "$HERE/cartram2600_test.py" reset --work "$w" || rc=1
+		slot python3 "$HERE/cartram2600_test.py" midswap --work "$w" || rc=1
+		slot python3 "$HERE/cartram2600_test.py" forcecoinc --work "$w" || rc=1
+		slot python3 "$HERE/cartram2600_test.py" reset --work "$w" --mutant nohold \
+			--only rst_hif8_rd_rst_k0,rst_hie7_wr_load_k0,rst_ar_rst_k0 || rc=1
+		slot python3 "$HERE/cartram2600_test.py" forcecoinc --work "$w" --mutant nohold --modes c_rd || rc=1
+		slot python3 "$HERE/cartram2600_test.py" midswap --work "$w" --mutant nocmp || rc=1
+	fi
 	if [ "$QSF_DARIA" = 1 ]; then
 		echo "== the plain build (DARIA=0): the same runs, and their fingerprints equal (plan 7.5 row 5)"
 		mkdir -p "$p"
@@ -234,6 +259,7 @@ g_selftest() {
 	[ -f "$OUT/run_sim.out" ] && args+=(--run-sim "$OUT/run_sim.out")
 	[ -f "$OUT/rs/fp/load_a26.csv" ] && args+=(--fp "$OUT/rs/fp/load_a26.csv")
 	[ -f "$OUT/cartram_work/cartram/logs/e7_b0.log" ] && args+=(--cartram "$OUT/cartram_work/cartram/logs/e7_b0.log")
+	[ -f "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log" ] && args+=(--reset "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log")
 	[ -f "$OUT/rs/cartram/logs/artape_b0.log" ] && args+=(--artape "$OUT/rs/cartram/logs/artape_b0.log")
 	[ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ] && args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
 	python3 "$HERE/check/selftest.py" "${args[@]}"
@@ -276,7 +302,34 @@ g_s4_check() {
 g_lint() { bash "$HERE/lint_step7.sh"; }
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
-g_frames() { echo "the frame gate's runs arrive with tb_frames (lane I4c); this runner has none yet"; return 1; }
+g_frames() {
+	local rc=0 name img ref n calls d="$OUT/frames"
+	mkdir -p "$d"
+	for name in ${FRAMES_LIST:-Juno-First_demo_final_CGP_NTSC}; do
+		img="$(find "$GAMES" -name "$name.bin" -print -quit)"
+		ref="$R1_DIR/$name"
+		echo "== $name"
+		[ -n "$img" ] || { echo "  FAIL: no $name.bin under GAMES"; rc=1; continue; }
+		[ -f "$ref/fp.csv" ] || { echo "  FAIL: no $ref/fp.csv"; rc=1; continue; }
+		n=$(( $(wc -l < "$ref/fp.csv") ))      # the header and frames 1..N-1: N lines
+		WORK="$d" NAME="$name" FRAMES="$n" slot bash "$HERE/run_frames.sh" "$img" || rc=1
+		calls="$(python3 - "$ref" <<-'PY'
+			import csv, gzip, io, os, sys
+			d = sys.argv[1]
+			p = os.path.join(d, "calls.csv")
+			t = open(p).read() if os.path.exists(p) else gzip.open(p + ".gz", "rt").read() if os.path.exists(p + ".gz") else ""
+			print(sum(1 for _ in csv.DictReader(io.StringIO(t))))
+			PY
+		)"
+		if [ "${calls:-0}" = 0 ]; then
+			python3 "$HERE/check/frame_gate.py" --strict "$ref/fp.csv" "$d/runs/$name/fp.csv" --frames "$n" || rc=1
+		else
+			python3 "$HERE/check/frame_gate.py" "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
+				--expect-guard "${FRAMES_GUARD:-locked}" || rc=1
+		fi
+	done
+	return $rc
+}
 
 declare -A RES
 for g in "${GATES[@]}"; do
