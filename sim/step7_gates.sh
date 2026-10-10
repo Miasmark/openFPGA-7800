@@ -34,7 +34,13 @@
 #                and every non-BupChip case's fingerprints equal between the
 #                two (plan 7.5 row 5); with FP_REF=DIR every run_sim.sh
 #                fingerprint there (DIR/<case>.csv, e.g. another tree's
-#                WORK/fp) equal to this run's (frame_gate.py --strict)
+#                WORK/fp) equal to this run's (frame_gate.py --strict).
+#                FP_REF must hold fingerprints in tb_load's current format
+#                (frame,len_sys,riot,video,audio,cpu,t_sys,rst_n,rst_sys:
+#                made by these benches since 56ff012, e.g. run_sim.sh
+#                with FP=1 and RTL_TREE set to an aeee6d2 checkout, then
+#                extra_tests.sh with FP=1 on its WORK); an older set has
+#                fewer columns, and --strict fails it ("the columns differ")
 #   extra_tests  extra_tests.sh with FP=1 on run_sim's WORK, checked against
 #                EXTRA_REF (the reference build's extra_tests.sh log); AR_TAPE=1
 #                passes through (the tape path, and the tape load with
