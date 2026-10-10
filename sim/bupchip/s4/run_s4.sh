@@ -86,7 +86,7 @@ RES="$(grep "^result: " "$OUT.log" || true)"
 [ -n "$RES" ] || { echo "run_s4.sh: no result line" >&2; exit 1; }
 ok=1
 # The snapshot check (tb_s4.sv's header): ok, or na in a build without it.
-SNAP="$(grep -m1 "^snap: " "$OUT.log" || true)"
+SNAP="$(grep -m1 -E "^snap: (ok|FAIL|na) " "$OUT.log" || true)"
 if [ "${SNAP_REQUIRED:-0}" != 0 ]; then
 	grep -q "^snap: ok " <<< "$SNAP" || { echo "the snapshot check did not pass: ${SNAP:-no snap line}"; ok=0; }
 else

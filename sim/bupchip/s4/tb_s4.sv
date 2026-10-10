@@ -1012,18 +1012,18 @@ module tb_s4;
 		bit found;
 		snap_chg++;
 		if ($realtime != snap_t_sys) begin
-			if (snap_off_edge < 5) $display("snap: dbg_status/dbg_halt_pc changed at %.3f us, not on a clk_sys rising edge", $realtime / 1.0e6);
+			if (snap_off_edge < 5) $display("snap check: dbg_status/dbg_halt_pc changed at %.3f us, not on a clk_sys rising edge", $realtime / 1.0e6);
 			snap_off_edge++;
 		end
 		if (snap_last >= 0 && snap_ns - snap_last < SNAP_PER / 2) begin
-			if (snap_fast < 5) $display("snap: the copies changed %0d clk_sys after the last change (period %0d)", snap_ns - snap_last, SNAP_PER);
+			if (snap_fast < 5) $display("snap check: the copies changed %0d clk_sys after the last change (period %0d)", snap_ns - snap_last, SNAP_PER);
 			snap_fast++;
 		end
 		snap_last = snap_ns;
 		found = 0;
 		foreach (snap_hw[i]) if (snap_hw[i] === snap_sys) found = 1;
 		if (!found && snap_sys !== 64'd0) begin	// 0: the power-up word of the copy register
-			if (snap_torn < 5) $display("snap: the copies took %016x, a word the clk_arm side did not hold in the last periods", snap_sys);
+			if (snap_torn < 5) $display("snap check: the copies took %016x, a word the clk_arm side did not hold in the last periods", snap_sys);
 			snap_torn++;
 		end
 	end

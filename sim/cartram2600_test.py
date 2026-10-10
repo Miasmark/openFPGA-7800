@@ -66,7 +66,8 @@ row 6 and 3.6.
       only where expected (the detected-mapper reload at K = 0); no P2
       coincidence; and the matrix's monitor checks (no wrong or stale byte,
       writes issued = strobes, shadow = SRAM, none past s19, the build's
-      buckets with the post-reset allowance below). --ref-logs DIR: another
+      buckets with the post-reset allowance below; a mapper image's pass
+      code, which it shows before the first reset, and no fail code). --ref-logs DIR: another
       build's reset logs (aeee6d2's), whose per-reset cartridge accesses
       this build's must equal.
   cartram2600_test.py midswap [--work DIR] [--build] [--rtl-tree DIR]
@@ -633,20 +634,23 @@ def cmd_s19(a):
 # ------------------------------------------------------- console resets
 # (name, image, extra plusargs, expectation): the reproduction of Fix B's
 # review finding (plan P2 as amended). W runs the image for 400 ms; the
-# resets start at 20 ms (30 for the Supercharger) and end the run.
+# resets start at 20 ms (30 for the Supercharger, 45 for hi_e7, whose first
+# iteration over its two RAM areas, and so its first pass code, ends at about
+# 37 ms: a reset every 3 ms restarts the program before it ends another one)
+# and end the run.
 RST_W = ["+arprobe", "+wav=400"]
 RST_SW = ["+rssweep", "+rsn=24"]
 RST_RUNS = [
     ("rst_hif8_rd_rst", "hi_f8sc", ["+rsmode=rd", "+rssrc=rst"] + RST_SW),
     ("rst_hif8_wr_rst", "hi_f8sc", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
-    ("rst_hie7_rd_rst", "hi_e7", ["+rsmode=rd", "+rssrc=rst"] + RST_SW),
-    ("rst_hie7_wr_rst", "hi_e7", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
+    ("rst_hie7_rd_rst", "hi_e7", ["+rsstart=45", "+rsmode=rd", "+rssrc=rst"] + RST_SW),
+    ("rst_hie7_wr_rst", "hi_e7", ["+rsstart=45", "+rsmode=wr", "+rssrc=rst"] + RST_SW),
     ("rst_ar_rst", "arfull", ["+rsstart=30", "+rsmode=ar", "+rssrc=rst"] + RST_SW),
     ("rst_hif8_rd_rst_b1", "hi_f8sc", ["+blend", "+rsmode=rd", "+rssrc=rst"] + RST_SW),
     # a reload with the bank-switch override set, so the mapper survives the
     # load's first edge (detect2600 clears force_bs and sc there)
-    ("rst_hie7_rd_load", "hi_e7", ["+rsmode=rd", "+rssrc=load"] + RST_SW),
-    ("rst_hie7_wr_load", "hi_e7", ["+rsmode=wr", "+rssrc=load"] + RST_SW),
+    ("rst_hie7_rd_load", "hi_e7", ["+rsstart=45", "+rsmode=rd", "+rssrc=load"] + RST_SW),
+    ("rst_hie7_wr_load", "hi_e7", ["+rsstart=45", "+rsmode=wr", "+rssrc=load"] + RST_SW),
     ("rst_ar_load", "arfull", ["+bs=15", "+rsstart=30", "+rsmode=ar", "+rssrc=load"] + RST_SW),
     # a reload with the mapper detected: at K = 0 the load clears it on E1 itself
     ("rst_hif8_rd_load_auto", "hi_f8sc", ["+rsmode=rd", "+rssrc=load"] + RST_SW),
@@ -654,7 +658,7 @@ RST_RUNS = [
     ("rst_lof8_wr_rst", "f8sc", ["+rsmode=wr", "+rssrc=rst"] + RST_SW),
     # K = 0, eight times each
     ("rst_hif8_rd_rst_k0", "hi_f8sc", ["+rsmode=rd", "+rssrc=rst", "+rsk0=0", "+rsn=8"]),
-    ("rst_hie7_wr_load_k0", "hi_e7", ["+rsmode=wr", "+rssrc=load", "+rsk0=0", "+rsn=8"]),
+    ("rst_hie7_wr_load_k0", "hi_e7", ["+rsstart=45", "+rsmode=wr", "+rssrc=load", "+rsk0=0", "+rsn=8"]),
     ("rst_ar_rst_k0", "arfull", ["+rsstart=30", "+rsmode=ar", "+rssrc=rst", "+rsk0=0", "+rsn=8"]),
 ]
 
