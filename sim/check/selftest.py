@@ -155,6 +155,15 @@ def extra_cases(log, ref, xdir, w):
         last = lambda a, b: (lambda t: t[::-1].replace(a[::-1], b[::-1], 1)[::-1])
         cases["tape_multiload_tone"] = last("AUDF0 = 14\n", "AUDF0 = 13\n")
         cases["tape_archeck"] = last("ARCHECK 24 pages, 0 of", "ARCHECK 24 pages, 9 of")
+    if "-- 2600 cartridge RAM" in open(log, errors="replace").read():
+        # the cartridge-RAM section (its verdicts follow cartram2600_test.py's
+        # "-- tb_cartram: ... md5" lines, which must not end the section)
+        cases["cartram_matrix_verdict_missing"] = sub1(r"^CARTRAM_MATRIX pass\n", "")
+        cases["cartram_s19_verdict_missing"] = sub1(r"^CARTRAM_S19 pass\n", "")
+        if re.search(r"^PASS artape blend 0:", open(log, errors="replace").read(), re.M):
+            cases["artape_missing"] = sub1(r"^PASS artape blend 0:.*\n", "")
+            cases["artape_colours_differ_from_the_tape_full_load"] = sub1(r"^(PASS artape blend 0:.*; colours )\$[0-9a-f]{2}",
+                                                                          r"\g<1>$54")
     for k, fn in cases.items():
         if fn is None:
             expect(k, [chk, log] + (["--extra-dir", xdir] if xdir else []), False)

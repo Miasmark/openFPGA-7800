@@ -54,9 +54,12 @@ TONE = re.compile(r"^TONE from loaded cart AUDF0=(\d+): measured ([0-9.]+) Hz, T
 
 
 def sections(lines):
+    # A line starting "-- " opens a section, except cartram2600_test.py's
+    # binary line ("-- tb_cartram: obj_cartram/vtb md5 ...", plan P23), which
+    # it prints inside the cartridge-RAM section before the verdicts
     out, cur = [], ("(start)", [])
     for l in lines:
-        if l.startswith("-- "):
+        if l.startswith("-- ") and not l.startswith("-- tb_cartram: "):
             out.append(cur)
             cur = (l, [])
         else:
