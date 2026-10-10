@@ -50,6 +50,22 @@ module Atari7800 #(
 	input  logic [15:0] bup_audio_l_i,
 	input  logic [15:0] bup_audio_r_i,
 `endif
+`ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+	// Pocket: the DARIA front end (core/bupchip/daria_fe.sv) runs the DPC+
+	// and CDF cartridges outside this module, in place of the left-out ARM
+	// mapper. This exports what it watches on the cartridge bus and takes its
+	// data byte and its busys back into cart2600. See POCKET_CHANGES.md.
+	output logic [12:0] daria_a_in_o,      // {AB[12] & bios_en_b, AB[11:0]}, as cart2600's a_in
+	output logic        daria_pclk0_o,     // pclk0
+	output logic        daria_access_o,    // mapper_phi2 && lock_ctrl && tia_en, as cart2600's arm_access
+	output logic        daria_reset_o,     // effective_reset
+	input  logic  [7:0] daria_fe_do_i,
+	input  logic        daria_fe_oe_i,
+	input  logic        daria_call_busy_i,
+	input  logic        daria_dma_busy_i,
+`endif
+`endif
 `ifdef EXTERNAL_FIRMWARE
 	// Pocket: the HSC and Supercharger firmware are loaded at run time from
 	// user-supplied files instead of being built in (see POCKET_CHANGES.md).
@@ -1135,6 +1151,19 @@ module Atari7800 #(
 	// reads as a read here too.
 	assign cart_din = RW ? read_DB : write_DB;
 
+`ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+	// Pocket: what the DARIA front end sees of the 2600 cartridge bus, the
+	// same as cart2600 sees below: its address, phase 2, its access strobe
+	// (arm_access in cart2600: the stalled cycle is seen once, and only while
+	// the 2600 owns the bus) and the cartridge's reset.
+	assign daria_a_in_o   = {AB[12] & bios_en_b, AB[11:0]};
+	assign daria_pclk0_o  = pclk0;
+	assign daria_access_o = mapper_phi2 && lock_ctrl && tia_en;
+	assign daria_reset_o  = effective_reset;
+`endif
+`endif
+
 	cart2600 cart2600
 	(
 `ifdef EXTERNAL_FIRMWARE
@@ -1244,6 +1273,17 @@ module Atari7800 #(
 		.tape_rewind    (loading),
 `endif
 		.fix_sc_cs      (fix_sc_cs)
+`ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+		,
+		// Pocket: the DARIA front end's byte, its output enable and the busys
+		// that stall the 6507 through arm_call_stall, as the ARM mapper's do
+		.fe_do          (daria_fe_do_i),
+		.fe_oe          (daria_fe_oe_i),
+		.fe_call_busy   (daria_call_busy_i),
+		.fe_dma_busy    (daria_dma_busy_i)
+`endif
+`endif
 	);
 
 endmodule

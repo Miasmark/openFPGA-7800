@@ -87,6 +87,7 @@ Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
 | `NO_BUPCHIP` | Leaves out the BupChip player (`bupchip_subsystem`): an ARM program with DDR-resident assets. Souper carts still run; their music channel is silent unless `POCKET_BUPCHIP` brings in the Pocket's own player. |
 | `POCKET_BUPCHIP` | With `NO_BUPCHIP`: `top.sv` hands the BupChip's inputs out and takes its audio back, so that the Pocket's own BupChip (`../core/bupchip/`, ARIA; `../../../docs/BUPCHIP_CORE.md`) can play the music outside it. New ports `bup_cmd_valid_o` / `bup_cmd_data_o` (the `$8007` command, `bup_cmd_*_eff`), `souper_profile_o` (`souper_profile`), and `bup_audio_l_i` / `bup_audio_r_i`, which drive `bupchip_audio_l/r` in place of the zeros, so the audio goes through upstream's gain, saturation and mix unchanged. Both blocks are `ifdef`s: a port group next to `POCKET_SRAM`'s, and the assignments inside the `NO_BUPCHIP` branch. |
 | `EXTERNAL_FIRMWARE` | Builds the HSC and Supercharger firmware ROMs empty, with a load port (see below). |
+| `POCKET_DARIA` | Only together with `NO_ARM_MAPPER`: hooks for the Pocket's DARIA front end, which runs the 2600 ARM cartridges outside this module. See "DARIA front end hooks" below. |
 
 The Pocket build defines all five (`NO_ARM_MAPPER`, `NO_DDRAM`,
 `NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`.
@@ -200,6 +201,40 @@ and stay.
 It saves about 1,750 ALMs and takes the DPC+ decode off the SRAM's
 `clk_sdram` request path: Fix A in `../../../docs/SRAM_TIMING.md`. Without
 the macro the file is unchanged from upstream.
+
+### DARIA front end hooks (`POCKET_DARIA`, inside `NO_ARM_MAPPER`)
+
+With `POCKET_DARIA` the Pocket runs DPC+ and the CDF family (CDF0, CDF1,
+CDFJ, CDFJ+) again, on its own front end (`../core/bupchip/daria_fe.sv`,
+instance `u_fe` in `../core/atari7800_pocket.sv`) and the BupChip's CPU
+(`../../../docs/DARIA_CORE.md`, `../../../docs/daria_fe/design.md`). Every
+hook below sits inside `ifdef NO_ARM_MAPPER` and `ifdef POCKET_DARIA`, so
+upstream's own build with the ARM (`NO_ARM_MAPPER` undefined, as the
+simulation oracle `sim/bupchip/daria/tb_daria.sv` builds it, `POCKET_DARIA`
+or not) sees none of it.
+
+- `rtl/cart2600.sv`: four inputs, `fe_do[7:0]` (the front end's data byte,
+  a register), `fe_oe` (its output enable, A12), `fe_call_busy` and
+  `fe_dma_busy`. `BANKDPCP` and `BANKCDF` drive `fe_do` as their direct
+  byte with `out_en` from `fe_oe`; the cartridge RAM is never selected for
+  them and their ROM address stays 0, as without DARIA. `arm_call_busy`
+  and `arm_dma_busy` take the front end's busys in place of the stubs, so
+  `top.sv`'s `arm_call_stall` (and with it `RDY` and `mapper_phi2`) keeps
+  upstream's text; `mapper_init_busy` stays 0. `is_bad_game` keeps the bad
+  game screen for ELF and BUS only.
+- `rtl/top.sv`: a port group after `POCKET_BUPCHIP`'s, with outputs
+  `daria_a_in_o` (`{AB[12] & bios_en_b, AB[11:0]}`, cart2600's `a_in`),
+  `daria_pclk0_o` (`pclk0`), `daria_access_o` (`mapper_phi2 && lock_ctrl
+  && tia_en`, cart2600's `arm_access`) and `daria_reset_o`
+  (`effective_reset`), and inputs `daria_fe_do_i`, `daria_fe_oe_i`,
+  `daria_call_busy_i` and `daria_dma_busy_i`, which go to the four
+  `cart2600` inputs above. The front end also takes the CPU's clock enable
+  from the existing `cpu_ce` output (`pclk1`), and `write_DB` and `RW` from
+  `dout` and `RW`.
+
+The wrapper holds the console in reset through the front end's RAM image at
+load and after a reset (`init_busy`, for an ARM image only) and across a PLL
+retune; see the DARIA section of `../core/atari7800_pocket.sv`.
 
 ### Supercharger: tape position and loading without the BIOS (`POCKET_SUPERCHARGER`)
 

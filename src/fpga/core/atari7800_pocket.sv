@@ -10,7 +10,10 @@
 // Everything here runs on clk_sys (14.318181 MHz) except the SDRAM
 // controller, which runs on clk_sdram (exactly 4 x clk_sys, phase aligned),
 // and with POCKET_BUPCHIP the BupChip and its PSRAM controller, on clk_arm
-// (exactly 2 x clk_sys, phase aligned).
+// (exactly 2 x clk_sys, phase aligned; with POCKET_DARIA VCO/18, 38.18 MHz,
+// from the same VCO, so 8 clk_arm to 3 clk_sys: pll/pll_core.v). The DARIA
+// front end (POCKET_DARIA, daria_fe below) runs on clk_sys, but for one
+// clk_arm flop of its guard.
 //
 // SPDX-License-Identifier: MIT
 // Portions derived from the MiSTer Atari7800 core,
@@ -24,7 +27,7 @@ module atari7800_pocket
 	input  wire        clk_sys,
 	input  wire        clk_sdram,
 `ifdef POCKET_BUPCHIP
-	input  wire        clk_arm,         // 2 x clk_sys, edge aligned: the BupChip (ARIA)
+	input  wire        clk_arm,         // the BupChip: 2 x clk_sys, edge aligned; VCO/18 with POCKET_DARIA
 `endif
 	input  wire        pll_locked,
 	input  wire        pll_busy,        // clk_74a: PLL retune (PAL/NTSC) in progress
@@ -163,12 +166,42 @@ wire bupfw_dl = bupfw_download;
 wire bupfw_dl = 1'b0;
 `endif
 
+`ifdef POCKET_DARIA
+// DARIA (docs/daria_step7/plan.md P6, P20; the wires are under DARIA below).
+// daria_hold: the front end's init_busy, which covers its RAM image (F6),
+// holds the console only for an ARM image, so every other load releases on
+// the same edge as in a build without DARIA. daria_rt_hold: a PLL retune
+// (pll_busy) keeps an ARM image's console in reset for 16 clk_sys past
+// pll_busy_s[1]'s fall. daria_fe's cart_reset is masked while pll_busy_s[1]
+// is high, so its one rise comes at that fall with clk_sys running, and F6
+// starts 8 clocks later; init_busy then holds the console from the next
+// clock, inside the 16. F6 never runs while the PLL is retuned.
+wire       daria_hold, daria_arm;
+/* verilator lint_off PROCASSINIT */
+reg        daria_rt_hold = 1'b0;
+reg  [3:0] daria_rt_cnt = 4'd0;
+/* verilator lint_on PROCASSINIT */
+always @(posedge clk_sys) begin
+	daria_rt_hold <= pll_busy_s[1] | (daria_rt_cnt != 4'd0);
+	if (pll_busy_s[1])
+		daria_rt_cnt <= 4'd15;
+	else if (daria_rt_cnt != 4'd0)
+		daria_rt_cnt <= daria_rt_cnt - 4'd1;
+end
+`endif
+
 always @(posedge clk_sys) begin
 	old_cart_download <= cart_download;
 	pll_busy_s <= {pll_busy_s[0], pll_busy};
+`ifdef POCKET_DARIA
+	reset <= reset_in | cart_download | bios_download | hscfw_download |
+		arfw_download | bupfw_dl | old_cart_download | mapper_init_busy | ~pll_locked |
+		pll_busy_s[1] | daria_hold | (daria_rt_hold & daria_arm);
+`else
 	reset <= reset_in | cart_download | bios_download | hscfw_download |
 		arfw_download | bupfw_dl | old_cart_download | mapper_init_busy | ~pll_locked |
 		pll_busy_s[1];
+`endif
 end
 
 ////////////////////////////  CART HEADER  ////////////////////////////////
@@ -317,6 +350,54 @@ detect2600 detect2600
 	.cdfj_stack,
 	.arm_audio_size_addr
 );
+
+`ifdef POCKET_DARIA
+////////////////////////////  DARIA  //////////////////////////////////////
+// The 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+) on the DARIA front end
+// (core/bupchip/daria_fe.sv, u_fe below) and the BupChip's CPU in its 2600
+// profile (bupchip, below). docs/DARIA_CORE.md; docs/daria_step7/plan.md 2.
+//
+// daria_fbs is the bankswitching the core runs (main's force_bs, below:
+// the menu's override, else detect2600's). The front end's scheme is it
+// only while tia_mode, a register, says a 2600 image is loaded, so an A78
+// with the override set never starts it (P5). The profile is the same
+// condition registered; daria_ram32 is top.sv's mapper_ram_size == 32768.
+// bupchip's level inputs come from clk_sys registers, so that its first
+// clk_arm flops sample one register each (P21): daria_ram32_r, and
+// daria_mres_r for the mapper reset (top.sv's effective_reset, an OR of
+// two registers).
+wire  [5:0] daria_fbs    = |bs_override ? {1'b0, bs_override} : force_bs;
+wire  [5:0] daria_scheme = tia_mode ? daria_fbs : 6'd0;
+wire        daria_ram32  = daria_fbs == 6'd23 && mapper_revision == 3'd3;
+assign      daria_arm    = daria_scheme == 6'd21 || daria_scheme == 6'd23;
+wire        daria_reset;                     // main's effective_reset
+/* verilator lint_off PROCASSINIT */
+reg         daria_profile = 1'b0;
+reg         daria_ram32_r = 1'b0;
+reg         daria_mres_r  = 1'b1;
+/* verilator lint_on PROCASSINIT */
+always @(posedge clk_sys) begin
+	daria_profile <= tia_mode && (daria_fbs == 6'd21 || daria_fbs == 6'd23);
+	daria_ram32_r <= daria_ram32;
+	daria_mres_r  <= daria_reset;
+end
+
+// The front end's side of the system module and of the BupChip
+wire [12:0] daria_a_in;
+wire        daria_pclk0, daria_pclk1, daria_access;
+wire  [7:0] daria_fe_do;
+wire        daria_fe_oe, daria_call_busy, daria_dma_busy, daria_init_busy;
+wire        daria_call_tog, daria_ret_tog, daria_ready, daria_cart_win;
+wire        daria_smp_req, daria_smp_ack;
+wire [18:0] daria_smp_addr;
+wire  [7:0] daria_smp_data;
+wire [12:0] daria_fea_addr, daria_feb_addr, daria_crb_addr;
+wire [31:0] daria_fea_q, daria_feb_q, daria_crb_q, daria_crb_wd, daria_stb_q, daria_stb_wd;
+wire        daria_crb_we, daria_stb_we;
+wire  [3:0] daria_crb_be, daria_stb_be;
+wire  [7:0] daria_stb_addr;
+assign      daria_hold = daria_init_busy & daria_arm;
+`endif
 
 ////////////////////////////  MEMORY  /////////////////////////////////////
 
@@ -920,7 +1001,11 @@ Atari7800 main
 	.fw_data      (ioctl_dout),
 	.clk_sys      (clk_sys),
 	.reset        (reset),
+`ifdef POCKET_DARIA
+	.loading      (cart_download || bios_download || mapper_init_busy || daria_hold),
+`else
 	.loading      (cart_download || bios_download || mapper_init_busy),
+`endif
 	.pause        (pause_core),
 
 	// Video
@@ -957,7 +1042,11 @@ Atari7800 main
 	.hsc_en       (hsc_en),
 	.hsc_ram_dout (hsc_ram_dout),
 	.hsc_ram_cs   (hsc_ram_cs),
+`ifdef POCKET_DARIA
+	.cpu_ce       (daria_pclk1),
+`else
 	.cpu_ce       (),
+`endif
 
 	// Audio
 	.AUDIO_R      (AUDIO_R),
@@ -1010,6 +1099,19 @@ Atari7800 main
 	.souper_profile_o (souper_profile),
 	.bup_audio_l_i    (bup_audio_l),
 	.bup_audio_r_i    (bup_audio_r),
+`endif
+`ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+	// The DARIA front end (u_fe, below) in place of the ARM mapper
+	.daria_a_in_o      (daria_a_in),
+	.daria_pclk0_o     (daria_pclk0),
+	.daria_access_o    (daria_access),
+	.daria_reset_o     (daria_reset),
+	.daria_fe_do_i     (daria_fe_do),
+	.daria_fe_oe_i     (daria_fe_oe),
+	.daria_call_busy_i (daria_call_busy),
+	.daria_dma_busy_i  (daria_dma_busy),
+`endif
 `endif
 
 	// ARM mapper / BupChip / DDR3 - compiled out for the Pocket
@@ -1171,6 +1273,12 @@ assign SRAM_LB_N = 1'b1;
 // come from clk_sys registers, except pll_locked and pll_busy, which the
 // wrapper synchronises. The console reset is not one of them, as on MiSTer:
 // the music survives a 7800 reset.
+//
+// With POCKET_DARIA the same CPU also runs the 2600 ARM cartridges' code,
+// in its 2600 profile (daria_profile), as the DARIA front end's call side
+// (u_fe, below): the call and return toggles, the cart RAM, front-end ROM
+// and state RAM ports, the capture's cartridge window and the sample port.
+// There the mapper reset (daria_mres_r) does reach it.
 wire        psr_bank, psr_we, psr_hi, psr_lo, psr_re, psr_avail, psr_busy;
 wire [21:0] psr_addr;
 wire [15:0] psr_din, psr_dout;
@@ -1212,6 +1320,38 @@ bupchip_pocket bupchip
 	.psram_read_avail      (psr_avail),
 	.psram_data_out        (psr_dout),
 	.psram_busy            (psr_busy)
+`ifdef POCKET_DARIA
+	,
+	.daria_profile  (daria_profile),
+	.daria_ram32    (daria_ram32_r),
+	.daria_pal      (region_select),
+	.daria_mreset   (daria_mres_r),
+	.daria_call_tog (daria_call_tog),
+	.daria_ret_tog  (daria_ret_tog),
+	.daria_ready    (daria_ready),
+	/* verilator lint_off PINCONNECTEMPTY */
+	.daria_halted   (),               // read by step 8's BUP_DEBUG overlay
+	/* verilator lint_on PINCONNECTEMPTY */
+	.daria_stb_addr (daria_stb_addr),
+	.daria_stb_we   (daria_stb_we),
+	.daria_stb_be   (daria_stb_be),
+	.daria_stb_wd   (daria_stb_wd),
+	.daria_stb_q    (daria_stb_q),
+	.daria_crb_addr (daria_crb_addr),
+	.daria_crb_we   (daria_crb_we),
+	.daria_crb_be   (daria_crb_be),
+	.daria_crb_wd   (daria_crb_wd),
+	.daria_crb_q    (daria_crb_q),
+	.daria_fea_addr (daria_fea_addr),
+	.daria_fea_q    (daria_fea_q),
+	.daria_feb_addr (daria_feb_addr),
+	.daria_feb_q    (daria_feb_q),
+	.daria_cart_win (daria_cart_win),
+	.daria_smp_req  (daria_smp_req),
+	.daria_smp_addr (daria_smp_addr),
+	.daria_smp_ack  (daria_smp_ack),
+	.daria_smp_data (daria_smp_data)
+`endif
 `ifdef BUP_DEBUG
 	,
 	.dbg_status    (bup_dbg_status),
@@ -1220,11 +1360,94 @@ bupchip_pocket bupchip
 `endif
 );
 
-// agg23's controller (pocket_utils/psram.sv, unmodified). CLOCK_SPEED stays
-// 28.636364 whatever clk_arm is: every count in it is a minimum time, and
-// slower settings break its state machine (docs/BUPCHIP_CORE.md,
-// "Controller"). 5 clk_arm per halfword.
+`ifdef POCKET_DARIA
+// The DARIA front end (docs/daria_fe/design.md): the 6507 side of DPC+ and
+// the CDF family, in place of upstream's ARM mapper, beside cart2600 in
+// top.sv (its byte, output enable and busys go back there), with its
+// memories in the BupChip (daria_mem) and its calls run by the BupChip's
+// CPU. clk_sys, but for its guard's one clk_arm flop.
+//
+// cart_reset is top.sv's effective_reset, masked while pll_busy_s[1] is
+// high (P20, above): a retune never starts F6; F6 runs once, when the
+// retune ends. init_busy reaches the console reset and .loading through
+// daria_hold (P6). The bench hooks are tied off; dbg_locked and dbg_unlock
+// are for step 8's BUP_DEBUG overlay and the benches (P22).
+daria_fe u_fe
+(
+	.clk_sys         (clk_sys),
+	.clk_arm         (clk_arm),
+	.cart_reset      (daria_reset & ~pll_busy_s[1]),
+	.pause           (pause_core),
+	.a_in            (daria_a_in),
+	.d_in            (din),
+	.rw              (RW),
+	.pclk1           (daria_pclk1),
+	.pclk0           (daria_pclk0),
+	.access          (daria_access),
+	.scheme          (daria_scheme),
+	.revision        (mapper_revision),
+	.cdf_ldx         (cdf_ldx),
+	.cdf_ldy         (cdf_ldy),
+	.fetch_off_en    (cdf_fetch_offset_enable),
+	.fetch_off       (cdf_fetch_offset),
+	.cdfj_entry      (cdfj_entry),
+	.cdfj_stack      (cdfj_stack),
+	.audio_size_addr (arm_audio_size_addr),
+	.rom_size        (cart_size),
+	.ram32           (daria_ram32),
+	.load_start      (~old_cart_download && cart_download),
+	.load_end        (old_cart_download && ~cart_download),
+	.cart_win        (daria_cart_win),
+	.cpu_ready       (daria_ready),
+	.ret_tog         (daria_ret_tog),
+	.call_tog        (daria_call_tog),
+	.smp_req         (daria_smp_req),
+	.smp_addr        (daria_smp_addr),
+	.smp_ack         (daria_smp_ack),
+	.smp_data        (daria_smp_data),
+	.fe_do           (daria_fe_do),
+	.fe_oe           (daria_fe_oe),
+	.arm_call_busy   (daria_call_busy),
+	.arm_dma_busy    (daria_dma_busy),
+	.init_busy       (daria_init_busy),
+	.fea_addr        (daria_fea_addr),
+	.fea_q           (daria_fea_q),
+	.feb_addr        (daria_feb_addr),
+	.feb_q           (daria_feb_q),
+	.crb_addr        (daria_crb_addr),
+	.crb_we          (daria_crb_we),
+	.crb_be          (daria_crb_be),
+	.crb_wd          (daria_crb_wd),
+	.crb_q           (daria_crb_q),
+	.stb_addr        (daria_stb_addr),
+	.stb_we          (daria_stb_we),
+	.stb_be          (daria_stb_be),
+	.stb_wd          (daria_stb_wd),
+	.stb_q           (daria_stb_q),
+	.hk_en           (1'b0),
+	.hk_stb          (1'b0),
+	.hk_ret          (192'd0),
+	/* verilator lint_off PINCONNECTEMPTY */
+	.dbg_locked      (),
+	.dbg_unlock      ()
+	/* verilator lint_on PINCONNECTEMPTY */
+);
+`endif
+
+// agg23's controller (pocket_utils/psram.sv, unmodified). Every count in it
+// is a minimum time, and slower settings break its state machine
+// (docs/BUPCHIP_CORE.md, "Controller"). CLOCK_SPEED is 28.636364 with
+// clk_arm at 2 x clk_sys, 5 clk_arm per halfword. With POCKET_DARIA clk_arm
+// is VCO/18, 38.18 MHz, where one clock from oe_n to the sample (26.2 ns) is
+// short of the part's output-enable access with the pad delays (about 27 ns,
+// an estimate), so CLOCK_SPEED is 50.0: two clocks there, 6 clk_arm per
+// halfword (docs/DARIA_CORE.md 7.4;
+// docs/daria_step7/plan.md P18, which tb_load checks by the parameter).
+`ifdef POCKET_DARIA
+psram #(.CLOCK_SPEED(50.0)) bup_psram
+`else
 psram #(.CLOCK_SPEED(28.636364)) bup_psram
+`endif
 (
 	.clk             (clk_arm),
 	.bank_sel        (psr_bank),
