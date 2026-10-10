@@ -889,11 +889,13 @@ wire use_bios = bios_loaded & ~skip_bios & ~tia_mode;
 wire [17:0] cartram_addr;
 wire        cartram_wr, cartram_rd;
 wire  [7:0] cartram_wrdata, sram_c_rdata;
+`ifdef POCKET_SRAM
 /* verilator lint_off UNUSEDSIGNAL */
 wire [17:0] cartram_addr26;                // the 2600 request (Fix B); [17] unused
 /* verilator lint_on UNUSEDSIGNAL */
 wire        cartram_wr26, cartram_rd26;
 wire  [7:0] cartram_wrdata26;
+`endif
 wire        mclk1, bios_sel;
 wire [15:0] fb_addr;
 wire        fb_we, fb_active;
