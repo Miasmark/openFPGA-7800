@@ -80,7 +80,9 @@ module daria_fe (
 	input  wire   [31:0] stb_q,
 	input  wire          hk_en,           // bench merge hook; tied 0 in synthesis
 	input  wire          hk_stb,          // bench: upstream's call_done
-	input  wire  [191:0] hk_ret           // bench: {f2, f1, f0, c2, c1, c0}
+	input  wire  [191:0] hk_ret,          // bench: {f2, f1, f0, c2, c1, c0}
+	output logic         dbg_locked,      // observation only (step 7 P22): u_guard's lock
+	output logic         dbg_unlock       // observation only (step 7 P22): one clock per unlock
 );
 	// ---- scheme decode, rst_fe (F2), fe_oe --------------------------------------------
 	wire       is_dpc = scheme == daria_fe_pkg::SCHEME_DPCP;
@@ -171,7 +173,7 @@ module daria_fe (
 
 	// ---- u_guard outputs --------------------------------------------------------------
 	/* verilator lint_off UNUSEDSIGNAL */
-	logic locked;                     // tap only
+	logic locked;                     // the bench's tap, and dbg_locked (step 7 P22)
 	/* verilator lint_on UNUSEDSIGNAL */
 	logic phb_next, guard_on;
 
@@ -459,8 +461,10 @@ module daria_fe (
 		.cpu_ready (cpu_ready),
 		.locked    (locked),
 		.phb_next  (phb_next),
-		.guard_on  (guard_on)
+		.guard_on  (guard_on),
+		.unlock    (dbg_unlock)
 	);
+	assign dbg_locked = locked;
 endmodule
 
 `default_nettype wire

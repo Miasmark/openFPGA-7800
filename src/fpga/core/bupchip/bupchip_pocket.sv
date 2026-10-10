@@ -5,8 +5,10 @@
 // between clk_sys, clk_arm and clk_74a.
 //
 // Clocks. clk_sys (console, loader, audio out); clk_arm (the CPU and
-// everything around it; 2 x clk_sys for S1, from the same VCO and edge
-// aligned); clk_74a (the 48 kHz tick only). Crossings (design, "Crossings"):
+// everything around it), from the same VCO as clk_sys (VCO/48): VCO/24, 2 x
+// clk_sys, for the BupChip alone; VCO/18, 38.18 MHz, with POCKET_DARIA, so 8
+// clk_arm to 3 clk_sys with one clk_sys edge in three shared; clk_74a (the
+// 48 kHz tick only). Crossings (design, "Crossings"):
 //
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect
 //   hold, pause      clk_sys -> clk_arm   two flops
@@ -15,6 +17,8 @@
 //   audio frame      clk_arm -> clk_sys   frame held, toggle, captured on the
 //                                         change between the second and third
 //                                         flops
+//
+// and with POCKET_DARIA the ones listed under DARIA below.
 //
 // Nothing else crosses, so the wrapper stays correct if clk_arm ever gets a
 // PLL of its own: the peripheral's mute (clk_arm) is applied to the frame as
@@ -103,9 +107,26 @@
 // daria_call and daria_mmio (both clocks) are held, so a new cartridge, a
 // mapper reset or a PAL retune clears MAMCR, TCR and TC (P4) and abandons a
 // call. The front ends' side (clk_sys): call_tog in, ret_tog out (the call
-// block in state RAM port B), daria_ready (parked & img_ready) and
-// daria_halted through two clk_sys flops, cart RAM port B, front-end ROM
-// ports A and B.
+// block in state RAM port B), daria_ready (parked & img_ready, registered on
+// clk_arm first, so the first clk_sys flop samples one register: ready_a)
+// and daria_halted through two clk_sys flops, cart RAM port B, front-end ROM
+// ports A and B, the capture's cartridge window (daria_cart_win, clk_sys),
+// and the sample port: daria_smp.sv answers the front end's sample
+// requests (a toggle and a held address in, a held byte and a toggle out)
+// with one PSRAM halfword read each, ahead of the cache at the writer's read
+// port, and $FF at once while the image is not readable (the 2600 profile,
+// img_ready and no hold). It is never reset.
+//
+// DARIA's crossings, besides the ones above (the profile, daria_ram32 and
+// the mapper reset are levels through two clk_arm flops):
+//
+//   call_tog         clk_sys -> clk_arm   daria_call.sv
+//   ret_tog          clk_arm -> clk_sys   daria_fe (two clk_sys flops)
+//   ready, halted    clk_arm -> clk_sys   two flops (ready from ready_a)
+//   cpu_run          clk_arm -> clk_sys   two flops (daria_mmio's reset)
+//   MMIO             both ways            daria_mmio.sv
+//   sample request   clk_sys -> clk_arm   toggle, two flops; address held
+//   sample answer    clk_arm -> clk_sys   byte held, toggle (daria_fe)
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -262,6 +283,9 @@ module bupchip_pocket #(
 		.fw_download, .fw_valid,
 		.msg_type, .msg_pl, .msg_tog,
 		.seq_err(cap_seq_err), .lost(cap_lost), .cart_win(cap_cart_win), .fw_win(cap_fw_win));
+`ifdef POCKET_DARIA
+	assign daria_cart_win = cap_cart_win;	// daria_fe's c_close is its fall
+`endif
 
 	wire        rom_we;
 	wire [11:0] rom_wa;
@@ -376,23 +400,20 @@ module bupchip_pocket #(
 		.ro_valid, .ro_idx, .ro_data, .returned,
 		.sta_addr, .sta_we, .sta_wd, .sta_q);
 
-	// Ready and halted, to the front ends.
+	// Ready and halted, to the front ends. parked decodes the CPU's state, so
+	// ready is registered on clk_arm first: the first clk_sys flop samples
+	// one register, never a decode that may be settling (plan P21).
+	/* verilator lint_off PROCASSINIT */
+	logic       ready_a = 1'b0;
+	/* verilator lint_on PROCASSINIT */
+	always_ff @(posedge clk_arm) ready_a <= parked & img_ready;
 	logic [1:0] ready_s = 2'b00, halted_s = 2'b00;
 	always_ff @(posedge clk_sys) begin
-		ready_s <= {ready_s[0], parked & img_ready};
+		ready_s <= {ready_s[0], ready_a};
 		halted_s <= {halted_s[0], halted};
 	end
 	assign daria_ready = ready_s[1];
 	assign daria_halted = halted_s[1];
-
-	// The front end's cartridge window and sample port: tied off in this port
-	// shell (docs/daria_step7/plan.md 4.1, commit S).
-	assign daria_cart_win = 1'b0;
-	assign daria_smp_ack = 1'b0;
-	assign daria_smp_data = 8'd0;
-	/* verilator lint_off UNUSEDSIGNAL */
-	wire smp_shell_unused = daria_smp_req | (|daria_smp_addr);
-	/* verilator lint_on UNUSEDSIGNAL */
 `else
 	// Port B belongs to the receiver while fw_loaded is low: the CPU is held
 	// then, so it makes no data reads.
@@ -410,10 +431,26 @@ module bupchip_pocket #(
 `endif
 
 	wire st_miss, st_pf, st_preempt, st_late, st_stall;
+`ifdef POCKET_DARIA
+	// The cache's reads reach the writer through the sample requester, which
+	// takes the read port for the front end's samples (daria_smp.sv).
+	wire        c_rd_req, c_rd_ack;
+	wire [21:0] c_rd_addr;
+	daria_smp smp (
+		.clk(clk_arm),
+		.smp_req(daria_smp_req), .smp_addr(daria_smp_addr), .smp_ack(daria_smp_ack), .smp_data(daria_smp_data),
+		.readable(prof26 & img_ready & ~hold_a[1]),
+		.c_rd_req, .c_rd_addr, .c_rd_ack,
+		.rd_req, .rd_addr, .rd_ack, .rd_avail(psram_read_avail), .rd_data(psram_data_out));
+`endif
 	bup_asset_cache #(.PREEMPT(PREEMPT), .PREFETCH(PREFETCH), .WAYS(CACHE_WAYS)) cache (
 		.clk(clk_arm), .pre_run, .run(cpu_run), .sweep_done,
 		.d_addr, .w_asset, .w_addr, .w_size, .asset_q, .w_wait,
+`ifdef POCKET_DARIA
+		.rd_req(c_rd_req), .rd_addr(c_rd_addr), .rd_ack(c_rd_ack), .rd_avail(psram_read_avail), .rd_data(psram_data_out),
+`else
 		.rd_req, .rd_addr, .rd_ack, .rd_avail(psram_read_avail), .rd_data(psram_data_out),
+`endif
 		.st_miss, .st_pf, .st_preempt, .st_late, .st_stall);
 
 `ifdef BUP_DEBUG
