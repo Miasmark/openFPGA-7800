@@ -13,10 +13,10 @@ same Verilator command (read back from obj_load's verFiles), so tb_wire is
 tb_load as run_sim.sh builds it, plus the checks. No game data: the images
 are fe_dir/mkimg.py's synthetic ARM images, tone_test.py's and make_a78.py's
 tone programs and souper_test.py's Souper cartridge with a synthetic ARSC
-block; GAMES=DIR (game images by path, never copied) adds the Turbo run,
-PALGAME=FILE (a PAL 2600 ARM image by path, Stay Frosty 2's PAL build) the
-PAL run on Auto region, BIOS=FILE the decision-11 runs, BUPFW=FILE (default
-the tree's src/fpga/mister/rtl/bupchip.hex) the Souper second loads.
+block, and pal_dpc, smoke_dpc with PAL frames; GAMES=DIR (game images by
+path, never copied) adds the Turbo run, BIOS=FILE the decision-11 runs,
+BUPFW=FILE (default the tree's src/fpga/mister/rtl/bupchip.hex) the Souper
+second loads.
 
 Environment: WORK (default sim/work/step7/wire), VERILATOR (default
 /opt/verilator-5.040/bin/verilator), VL_JOBS (default 2), RTL_TREE (build
@@ -40,7 +40,6 @@ GAMES = os.environ.get("GAMES", "")
 BIOS = os.environ.get("BIOS", "")
 BUPFW = os.environ.get("BUPFW", os.path.join(REPO, "src/fpga/mister/rtl/bupchip.hex"))
 ARM_DIV = os.environ.get("ARM_DIV", "18")
-PALGAME = os.environ.get("PALGAME", "")
 TURBO = "Turbo-Arcade_demo_final_CG_NTSC.bin"
 
 
@@ -147,6 +146,7 @@ def images():
         b = bytearray(open(os.path.join(d, t + ".bin"), "rb").read())
         b[57] |= 1
         open(os.path.join(d, t + ".b57.bin"), "wb").write(bytes(b))
+    pal_dpc(os.path.join(d, "pal_dpc.bin"))
     # the Souper cartridge and the firmware (run_sim.sh's BupChip section)
     if os.path.isfile(BUPFW):
         r = subprocess.run([sys.executable, os.path.join(REPO, "tools/hex2bin.py"), BUPFW], capture_output=True)
@@ -157,6 +157,42 @@ def images():
             sh([sys.executable, os.path.join(SIM, "souper_test.py"), os.path.join(d, "souper.a78"),
                 "--arsc", os.path.join(d, "synth.arsc")])
     return d
+
+
+def pal_dpc(path):
+    """fe_dir's smoke_dpc (tests.py) with PAL frames: its body, then 60 lines
+    and 255 more, about 320 lines a frame, which the TIA scores as PAL after
+    48 frames (about 1 s). No .meta: not in the directed set."""
+    fd = os.path.join(SIM, "bupchip/daria/fe_dir")
+    if fd not in sys.path:
+        sys.path.insert(0, fd)
+    from mkimg import Img, classify
+    from armenc import OP_W8
+    img = Img('dpc', scripts=[[], [(OP_W8, 0x40000C10, 0x5A)]])
+    img.program(5, init="""
+        LDA #$10
+        STA DF0LOW
+        LDA #0
+        STA DF0HI
+""", body="""
+        LDA DF0DATA
+        STA $80
+        LDA #$FF
+        STA CALLFUNCTION
+        LDA #$10
+        STA DF0LOW
+        LDA DF0DATA
+        STA $81
+        INC M_DONE
+        LDX #256-60
+paldly: STA WSYNC
+        INX
+        BNE paldly
+""", lines=255)
+    rom = img.build()
+    if classify(rom) != (21, 0):
+        sys.exit("pal_dpc: classified as %s" % (classify(rom),))
+    open(path, "wb").write(rom)
 
 
 def meta(img):
@@ -519,18 +555,16 @@ def scenarios(img):
                     "has scored 48 frames (about 1 s), and the game restarts in PAL (the plain build's count is "
                     "reported)", True)
 
-    if PALGAME and os.path.isfile(PALGAME):
-        def palgame():
-            s = run("daria", "palgame", ["+image=" + PALGAME, "+daria=1500", "+wire_pll"])
-            j = Judge("palgame"); daria_health(j, s, resets=1, selfcheck=False)
-            after_retunes(j, s, 2)
-            j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
-            j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
-            return j, s
-        S["palgame"] = (palgame, "P20: a PAL 2600 ARM game on Auto (PALGAME), pll_region in the loop: one retune "
-                        "to PAL once the TIA sees PAL frames, one F6 after it, the game restarts in PAL", True)
-    else:
-        S["palgame"] = (None, "a PAL ARM game on Auto (needs PALGAME=FILE)", False)
+    def pal_arm():
+        s = run("daria", "pal_dpc", ["+image=" + I("pal_dpc.bin"), "+daria=1300", "+wire_pll"])
+        j = Judge("pal_dpc"); daria_health(j, s, resets=1)
+        after_retunes(j, s, 2)
+        j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
+        j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+        j.ge(s, "marker", 3)
+        return j, s
+    S["pal_dpc"] = (pal_arm, "P20: a PAL DPC+ image on Auto (smoke_dpc in PAL frames), pll_region in the loop: one "
+                    "retune, to PAL, once the TIA has scored 48 frames, one F6 after it, the game restarts in PAL", True)
 
     if BIOS and os.path.isfile(BIOS):
         def bios(name, t):
