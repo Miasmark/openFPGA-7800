@@ -113,6 +113,14 @@ module tb_load;
 		void'($value$plusargs("port2=%d", port2_in));
 	end
 	logic [1:0] hsc_setting = 2'd0;
+	// +region=N: region_setting (0 auto, 1 NTSC, 2 PAL; default 0). A wrapper
+	// bench (tb_frames) may also set region_tb before the load ends.
+	logic [1:0] region_tb = 2'd0;
+	initial void'($value$plusargs("region=%d", region_tb));
+	// ext_end: a wrapper bench (tb_frames) that ends the run itself sets this
+	// before the load ends; the flow below then stops at the reset release,
+	// running none of its own cases.
+	bit ext_end = 1'b0;
 
 	// ---------------- APF bridge + loader ----------------
 	logic        bridge_wr = 1'b0;
@@ -174,7 +182,7 @@ module tb_load;
 		.cart_download(cart_download), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
 		.ioctl_wr(ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
-		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
+		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
@@ -267,11 +275,24 @@ module tb_load;
 	// (m_new) and its 2600 request (t_new) are mode-exclusive and never
 	// meet in one clk_sdram cycle. run_sim.sh defines SIM_FIXB when
 	// sram_ctrl.sv has t_new; the RTL itself carries no bench code.
+// +p2count counts the coincidences instead of stopping, for a diagnosis on
+// a tree that has the fault (tb_cartram's +rsmode reproduction); a run with
+// it is no gate run (no "P2 armed" line).
 `ifdef SIM_FIXB
-	initial $display("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram");
+	bit p2_count = 1'b0;
+	int p2_n = 0;
+	initial begin
+		p2_count = $test$plusargs("p2count");
+		if (p2_count) $display("P2 counting (+p2count): sram_ctrl m_new and t_new counted on every clk_sdram, not stopped");
+		else $display("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram");
+	end
 	always @(posedge clk_sdram)
-		if (dut.sram.m_new && dut.sram.t_new)
-			$fatal(1, "P2: sram_ctrl m_new and t_new in the same clk_sdram cycle at %0.3f us", $realtime / 1000.0);
+		if (dut.sram.m_new && dut.sram.t_new) begin
+			if (!p2_count) $fatal(1, "P2: sram_ctrl m_new and t_new in the same clk_sdram cycle at %0.3f us", $realtime / 1000.0);
+			p2_n++;
+			if (p2_n <= 10) $display("P2 COINCIDENCE (+p2count) at %0.3f us: m_new and t_new in one clk_sdram cycle", $realtime / 1000.0);
+		end
+	final if (p2_count) $display("P2 counted: %0d clk_sdram cycles with m_new and t_new together", p2_n);
 `endif
 
 	// ---------------- frame fingerprint (+fp=FILE) ----------------
@@ -1126,6 +1147,7 @@ module tb_load;
 			end
 		end
 		reset_in = 1'b0;
+		if (ext_end) wait (1'b0);
 `ifdef POCKET_DARIA
 		if ($value$plusargs("daria=%d", daria_ms)) begin
 			for (int ms_i = 0; ms_i < daria_ms; ms_i++) repeat (14318) @(posedge clk_sys);

@@ -36,7 +36,8 @@ module daria_fe_guard (
 	input  wire  cpu_ready,
 	output logic locked,           // reg-derived
 	output logic phb_next,         // reg-derived: lk & (ph == 0)
-	output logic guard_on          // comb: locked & (call_win | !cpu_ready)
+	output logic guard_on,         // comb: locked & (call_win | !cpu_ready)
+	output logic unlock            // pulse: ev_unlock, observation only (step 7 P22)
 );
 	// ---- bench taps (design 1.4, 1.7, 8.1; frozen names) ---------------------------
 	// Power-up values are the repository's idiom (docs/DEVELOPING.md,
@@ -53,7 +54,7 @@ module daria_fe_guard (
 	/* verilator lint_on PROCASSINIT */
 	logic       pd_same;           // in (E, E+1): pd_rx did not change at E, so E was shared
 	/* verilator lint_off UNUSEDSIGNAL */
-	logic       ev_unlock;         // pulse: the clock whose edge drops locked (read only by the bench)
+	logic       ev_unlock;         // pulse: the clock whose edge drops locked (the bench's tap; unlock since P22)
 	/* verilator lint_on UNUSEDSIGNAL */
 
 	// ---- the detector ------------------------------------------------------------------
@@ -77,6 +78,7 @@ module daria_fe_guard (
 	assign locked   = lk;
 	assign phb_next = lk & (ph == 2'd0);          // from the flywheel register, not the receiver
 	assign guard_on = lk & (call_win | !cpu_ready);
+	assign unlock   = ev_unlock;
 endmodule
 
 `default_nettype wire

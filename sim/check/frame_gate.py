@@ -3,7 +3,9 @@
 
   frame_gate.py REF CAND --frames N [--name NAME] [--excuse F0-F1]
                 [--expect-guard locked|unlocked|none] [--no-status] [--scheme S]
+                [--ref-prefix] [--shift-cap K]
   frame_gate.py --strict A B [--frames N]
+  frame_gate.py --auto REF CAND --frames N [the gate's options]
 
 REF and CAND are run directories (or their fp.csv files) as tb_daria writes
 them (+fp=1): fp.csv (frame,len_sys,riot,video,audio[,cpu,...]), calls.csv
@@ -26,10 +28,18 @@ PASS needs all of:
     differs is held (the frame of its request and, when REF's frames.csv
     shows the hold, on either side's busy_sys, reaching past that frame's
     end, the frames up to the one its release falls in; without frames.csv,
-    the request's frame only), lasts at most 8 frames, ends before the last
-    frame of the file (the column is equal again), and len_sys and video are
-    equal there (they are everywhere, by the rule above). Every other
-    difference fails. A cpu column, when both files have it, must be equal
+    the request's frame only), lasts at most 8 frames (SHIFT_MAX), is
+    followed by at least 8 equal frames in that column inside the file (the
+    column settles: no other difference starts within 8 frames of its end,
+    and it does not end within 8 frames of the file's end), and len_sys and
+    video are equal there (they are everywhere, by the rule above); and the
+    release_shift frames of one column, all runs together, number at most
+    the cap (--shift-cap K; default the larger of 8 and 1% of the run's
+    frames: 8 at 600 frames, 15 at 1,500). Every other difference fails.
+    The settle and cap rules close what plan 7.4's "stays equal until the
+    next shifted release" leaves open in R2, where nearly every frame holds
+    a call whose release differs: without them any sparse RIOT or audio
+    difference (most frames, or one frame in ten) would pass. A cpu column, when both files have it, must be equal
     on every frame; the absolute-time columns of tb_load's and tb_system's
     +fp (t_sys, rst_n, rst_sys) are not compared here: tb_frames counts from
     its own reset release and tb_daria from its own;
@@ -45,6 +55,18 @@ PASS needs all of:
       STATUS calls C, late L, halts H, halt_code X, psram_viol V, guard G, unlocks U
     with halts 0, psram_viol 0, unlocks 0, guard locked (--expect-guard;
     "unlocked" at VCO/19, "none" skips it), and C and L equal to REF's.
+--ref-prefix: REF is a longer run (R1 at 1,500 frames) and CAND ran N
+frames: REF's fp.csv is cut to frames 1..N-1, and both sides' calls to those
+requested in frames 0..N-2 (a call in the last frame may still be running
+when CAND's run ends), with their slack.csv rows; CAND's STATUS calls and
+late calls are then held to CAND's own files (plan 7.3: tb_frames at 600
+frames against R1's first 600).
+--auto (the step-7 frame gate's choice, sim/step7_gates.sh g_frames): the
+mode follows the scheme the real loader found, CAND's run.log line "2600
+mapper S" (tb_load's), which REF's run.log ("detect2600: force_bs S", P27)
+must equal; an ARM scheme (21 DPC+, 23 CDF) takes the gate's rules with
+--scheme S, any other --strict (a non-ARM image: every column equal on every
+frame, and no call on either side).
 --strict: the same columns in A and B, every one equal on every frame, the
 same frames, and at least one frame (for two builds of one bench, e.g.
 tb_load +fp between builds, 7.5 row 5; tb_load's and tb_system's t_sys,
@@ -64,7 +86,13 @@ import re
 import sys
 
 COLS = ["len_sys", "riot", "video", "audio"]
-SHIFT_MAX = 8
+SHIFT_MAX = 8                       # the longest release_shift run, and the equal frames that must follow it
+ARM_SCHEMES = {21: "DPC+", 23: "CDF"}   # detect2600's BANKDPCP and BANKCDF
+
+
+def shift_cap(frames):
+    """The default cap on release_shift frames per column: 1% of the run's frames, at least SHIFT_MAX."""
+    return max(SHIFT_MAX, frames // 100)
 
 
 def path_in(d, name):
@@ -129,13 +157,15 @@ def runs_of(frames):
     return [tuple(x) for x in out]
 
 
-def late_frames(d, calls):
-    """Late calls (slack.csv kind 1, slack <= 0) and their frames."""
+def late_frames(d, calls, only_these=False):
+    """Late calls (slack.csv kind 1, slack <= 0) and their frames; with
+    only_these, only the calls in `calls`."""
     rows = read_csv(path_in(d, "slack.csv")) if os.path.isdir(d) else None
     if rows is None:
         return None, None
     frame_of = {int(c["call"]): int(c["frame"]) for c in calls or []}
-    late = [int(r["call"]) for r in rows if r.get("kind") == "1" and int(r["slack_sys"]) <= 0]
+    late = [int(r["call"]) for r in rows if r.get("kind") == "1" and int(r["slack_sys"]) <= 0
+            and (not only_these or int(r["call"]) in frame_of)]
     return late, sorted({frame_of.get(c, -1) for c in late})
 
 
@@ -192,10 +222,19 @@ def strict(a, b, n):
 def gate(a):
     bad, notes = [], []
     rr, rc = load_fp(a.ref), load_fp(a.cand)
+    if a.ref_prefix:
+        rr = [r for r in rr if r.get("frame", "").isdigit() and int(r["frame"]) < a.frames]
     fr = check_frames(rr, a.frames, "REF fp.csv", bad)
     fc = check_frames(rc, a.frames, "CAND fp.csv", bad)
     calls_r = read_csv(path_in(a.ref, "calls.csv")) if os.path.isdir(a.ref) else None
     calls_c = read_csv(path_in(a.cand, "calls.csv")) if os.path.isdir(a.cand) else None
+    cand_calls_all = len(calls_c or [])
+    cand_late_all = (late_frames(a.cand, calls_c)[0] or []) if calls_c is not None else []
+    if a.ref_prefix:
+        keep = lambda rows: None if rows is None else [c for c in rows if c.get("frame", "").lstrip("-").isdigit()
+                                                       and int(c["frame"]) <= a.frames - 2]
+        calls_r, calls_c = keep(calls_r), keep(calls_c)
+        notes.append(f"--ref-prefix: REF cut to frames 1..{a.frames - 1}, calls to those requested in frames 0..{a.frames - 2}")
     # P27: the reference's load was seen
     if not calls_r:
         bad.append("REF: no calls in calls.csv (P27: the load was not seen, the run is void)")
@@ -240,8 +279,8 @@ def gate(a):
     excuse = None
     if a.excuse:
         f0, f1 = (int(x) for x in a.excuse.split("-"))
-        late_r, lf_r = late_frames(a.ref, calls_r)
-        late_c, lf_c = late_frames(a.cand, calls_c)
+        late_r, lf_r = late_frames(a.ref, calls_r, a.ref_prefix)
+        late_c, lf_c = late_frames(a.cand, calls_c, a.ref_prefix)
         want = list(range(f0, f1 + 1))
         if lf_r == want and lf_c == want:
             excuse = (f0, f1)
@@ -251,8 +290,11 @@ def gate(a):
     common = sorted(set(fr) & set(fc))
     counts = {}
     shift_count = {"riot": 0, "audio": 0}
+    shift_frames = {"riot": 0, "audio": 0}
+    cap = a.shift_cap if a.shift_cap is not None else shift_cap(a.frames)
     for c in COLS + (["cpu"] if rr and rc and "cpu" in rr[0] and "cpu" in rc[0] else []):
         diff = [f for f in common if fr[f][c] != fc[f][c]]
+        diff_all = diff[:]                  # the settle rule counts truly equal frames only
         if excuse:
             inside = [f for f in diff if excuse[0] <= f <= excuse[1]]
             after = [f for f in diff if f > excuse[1]]
@@ -269,18 +311,36 @@ def gate(a):
             bad.append(f"{c}: {len(diff)} frames differ, the first is {diff[0]}")
             continue
         end = common[-1] if common else None
-        for f0, f1 in runs_of(diff):
-            if f0 in shifted_frames and f1 - f0 + 1 <= SHIFT_MAX and f1 != end:
+        runs = runs_of(diff)
+        col_bad = []
+        for i, (f0, f1) in enumerate(runs):
+            # the equal frames after the run: up to the next differing frame (an
+            # excused one too), or the file's end
+            nxt = next((f for f in diff_all if f > f1), end + 1)
+            settle = nxt - f1 - 1
+            if f0 in shifted_frames and f1 - f0 + 1 <= SHIFT_MAX and settle >= SHIFT_MAX:
                 shift_count[c] += 1
+                shift_frames[c] += f1 - f0 + 1
             else:
                 why = ("no call whose release differs is held there" if f0 not in shifted_frames else
                        f"lasts {f1 - f0 + 1} frames (> {SHIFT_MAX})" if f1 - f0 + 1 > SHIFT_MAX else
-                       "it reaches the last frame of the file: the column is never equal again")
-                bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
+                       "it reaches the last frame of the file: the column is never equal again" if f1 == end else
+                       f"the column is equal for only {settle} frames after it before the file ends (< {SHIFT_MAX})"
+                       if nxt == end + 1 else
+                       f"the column is equal for only {settle} frames after it (< {SHIFT_MAX}): the next difference "
+                       f"starts at frame {nxt}")
+                col_bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
+        bad += col_bad[:8]
+        if len(col_bad) > 8:
+            bad.append(f"{c}: {len(col_bad) - 8} more runs of differing frames not release_shift "
+                       f"({len(col_bad)} in all, {len(diff)} frames)")
+        if shift_frames[c] > cap:
+            bad.append(f"{c}: {shift_frames[c]} release_shift frames in {shift_count[c]} runs, over the cap of {cap} "
+                       f"(--shift-cap)")
     # calls and late calls
     nr, nc = len(calls_r or []), len(calls_c or [])
-    late_r, _ = late_frames(a.ref, calls_r)
-    late_c, _ = late_frames(a.cand, calls_c)
+    late_r, _ = late_frames(a.ref, calls_r, a.ref_prefix)
+    late_c, _ = late_frames(a.cand, calls_c, a.ref_prefix)
     if nr != nc:
         bad.append(f"calls: REF {nr}, CAND {nc}")
     if late_r is not None and late_c is not None and len(late_r) != len(late_c):
@@ -296,13 +356,19 @@ def gate(a):
             if int(unl): bad.append(f"STATUS unlocks {unl}")
             if a.expect_guard != "none" and guard != a.expect_guard:
                 bad.append(f"STATUS guard {guard}, expected {a.expect_guard}")
-            if int(calls) != nr: bad.append(f"STATUS calls {calls}, REF has {nr}")
-            if late_r is not None and int(late) != len(late_r): bad.append(f"STATUS late {late}, REF has {len(late_r)}")
+            if a.ref_prefix:
+                # CAND's run is the whole of its own files: STATUS against them
+                if int(calls) != cand_calls_all: bad.append(f"STATUS calls {calls}, CAND's calls.csv has {cand_calls_all}")
+                if int(late) != len(cand_late_all): bad.append(f"STATUS late {late}, CAND's slack.csv has {len(cand_late_all)}")
+            else:
+                if int(calls) != nr: bad.append(f"STATUS calls {calls}, REF has {nr}")
+                if late_r is not None and int(late) != len(late_r): bad.append(f"STATUS late {late}, REF has {len(late_r)}")
     name = a.name or os.path.basename(os.path.normpath(a.cand))
     print(f"frame_gate {name}: {len(fr)} / {len(fc)} frames; calls {nr} / {nc}; late "
           f"{len(late_r) if late_r is not None else '-'} / {len(late_c) if late_c is not None else '-'}")
     print("  differing frames: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
-    print(f"  release_shift runs: riot {shift_count['riot']}, audio {shift_count['audio']}")
+    print(f"  release_shift runs (frames): riot {shift_count['riot']} ({shift_frames['riot']}), "
+          f"audio {shift_count['audio']} ({shift_frames['audio']}); cap {cap} frames per column")
     print("  release differences (CAND - REF busy_sys: calls): " +
           (", ".join(f"{d:+d}: {n}" for d, n in sorted(rel_diff.items())) or "-"))
     for x in notes:
@@ -313,18 +379,71 @@ def gate(a):
     return 0 if not bad else 1
 
 
+def log_scheme(d, pat):
+    p = os.path.join(d, "run.log") if os.path.isdir(d) else None
+    if not p or not os.path.exists(p):
+        return None
+    m = re.search(pat, open(p, errors="replace").read(), re.M)
+    return int(m.group(1)) if m else None
+
+
+def auto(a):
+    """--auto: the mode from the scheme the real loader found (CAND's), which REF's must equal (P27)."""
+    sc = log_scheme(a.cand, r"^OPTIONS .*?\b2600 mapper (\d+)")
+    sr = log_scheme(a.ref, r"detect2600: force_bs (\d+)")
+    print(f"frame_gate --auto: CAND's loader found scheme {sc if sc is not None else 'none'}, "
+          f"REF's detect2600 {sr if sr is not None else 'none'}")
+    bad = []
+    if sc is None:
+        bad.append("CAND: no '2600 mapper' line in run.log (tb_load's OPTIONS line)")
+    if sr is None:
+        bad.append("REF: no 'detect2600: force_bs' line in run.log")
+    if sc is not None and sr is not None and sc != sr:
+        bad.append(f"REF's detect2600 chose scheme {sr}, the real loader {sc} (P27: REF's load was not seen)")
+    if bad:
+        for x in bad:
+            print("  FAIL: " + x)
+        print(f"FRAME_GATE FAIL {a.name or os.path.basename(os.path.normpath(a.cand))}")
+        return 1
+    if sc in ARM_SCHEMES:
+        print(f"  an ARM scheme ({ARM_SCHEMES[sc]}): the gate's rules, --scheme {sc}")
+        a.scheme = sc
+        return gate(a)
+    print("  not an ARM scheme: --strict, and no call on either side")
+    calls_bad = []
+    for who, d in (("REF", a.ref), ("CAND", a.cand)):
+        n = len(read_csv(path_in(d, "calls.csv")) or []) if os.path.isdir(d) else 0
+        if n:
+            calls_bad.append(f"{who}: {n} calls in calls.csv, from an image whose scheme makes none")
+    rc = strict(a.ref, a.cand, a.frames)
+    for x in calls_bad:
+        print("  FAIL: " + x)
+    if calls_bad:
+        print("FRAME_GATE FAIL (calls in a run of a non-ARM image)")
+        return 1
+    return rc
+
+
 def main():
     p = argparse.ArgumentParser(description="the frame gate (plan P13, 7.4)")
     p.add_argument("ref")
     p.add_argument("cand")
     p.add_argument("--frames", type=int, help="the run's +frames (fp.csv then holds frames 1..N-1)")
     p.add_argument("--strict", action="store_true")
+    p.add_argument("--auto", action="store_true",
+                   help="--strict or the gate's rules by the scheme CAND's loader found (REF's must equal it)")
+    p.add_argument("--shift-cap", type=int,
+                   help="release_shift frames allowed per column (default the larger of 8 and 1%% of the run's frames)")
     p.add_argument("--name")
     p.add_argument("--excuse", help="F0-F1: frames excused as overrun frames (default 557-572 for Spiders)")
     p.add_argument("--expect-guard", default="locked", choices=("locked", "unlocked", "none"))
     p.add_argument("--no-status", action="store_true")
     p.add_argument("--scheme", type=int)
+    p.add_argument("--ref-prefix", action="store_true",
+                   help="REF is a longer run: compare its first N-1 frames and the calls requested before frame N-1")
     a = p.parse_args()
+    if a.strict and a.auto:
+        p.error("--strict and --auto exclude each other")
     if a.strict:
         sys.exit(strict(a.ref, a.cand, a.frames))
     if not a.frames:
@@ -332,7 +451,7 @@ def main():
     name = a.name or os.path.basename(os.path.normpath(a.cand))
     if a.excuse is None and "spiders" in name.lower():
         a.excuse = "557-572"
-    sys.exit(gate(a))
+    sys.exit(auto(a) if a.auto else gate(a))
 
 
 if __name__ == "__main__":

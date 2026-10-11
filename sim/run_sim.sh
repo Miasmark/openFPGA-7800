@@ -16,8 +16,11 @@
 #   ARM_DIV=19     the DARIA build's clk_arm at VCO/19 instead of VCO/18
 #   RTL_TREE=DIR   build the RTL of another checkout (DIR/src/fpga) with this
 #                  checkout's benches, e.g. a lane's worktree
-#   BUILD_TOP=TOP  only build the bench TOP (tb_system, tb_load or
-#                  tb_cartram) into $WORK/obj_TOP and stop
+#   BUILD_TOP=TOP  only build the bench TOP (tb_system, tb_load,
+#                  tb_cartram or tb_frames) into $WORK/obj_TOP and stop;
+#                  tb_frames is built without BUP_DEBUG and with -O3
+#                  --x-assign fast --x-initial fast, as run_daria.sh builds
+#                  tb_daria (docs/daria_step7/plan.md 3.6 I4c)
 # The checker sim/check/run_sim_check.py turns this script's output into one
 # exit code.
 set -e
@@ -161,9 +164,10 @@ fp() { [ "${FP:-0}" = 1 ] && printf '%s ' "+fp=$WORK/fp/$1.csv"; printf '%s' "$A
 exec 3>&1
 sim() { local rc=0; "$@" || rc=$?; [ "$rc" = 0 ] || echo "SIMULATOR EXIT $rc: $*" >&3; return 0; }
 
+VL_OPT=(-O2)
 build() {   # build <top> <objdir> [more bench sources]
 	local top="$1" obj="$2"; shift 2
-	"${VERILATOR:-verilator}" --binary --timing -j "${VL_JOBS:-4}" -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
+	"${VERILATOR:-verilator}" --binary --timing -j "${VL_JOBS:-4}" "${VL_OPT[@]}" -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
 		-Wno-TIMESCALEMOD \
 		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ -DPOCKET_SUPERCHARGER \
 		$SRAM_DEFS $BUP_DEFS $SIM_DEFS \
@@ -176,7 +180,13 @@ if [ -n "${BUILD_TOP:-}" ]; then
 		tb_cartram) o=obj_cartram; build tb_cartram $o "$HERE/tb_load.sv" ;;
 		tb_system) o=obj; build tb_system $o ;;
 		tb_load) o=obj_load; build tb_load $o ;;
-		*) echo "run_sim.sh: BUILD_TOP=$BUILD_TOP: tb_system, tb_load or tb_cartram" >&2; exit 1 ;;
+		tb_frames)
+			o=obj_frames
+			VL_OPT=(-O3 --x-assign fast --x-initial fast)
+			BUP_DEFS="${BUP_DEFS/ -DBUP_DEBUG/}"
+			echo "-- tb_frames: BUP_DEBUG off, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
+			build tb_frames $o "$HERE/tb_load.sv" ;;
+		*) echo "run_sim.sh: BUILD_TOP=$BUILD_TOP: tb_system, tb_load, tb_cartram or tb_frames" >&2; exit 1 ;;
 	esac
 	echo "-- built $BUILD_TOP: $o/vtb md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)"
 	exit 0

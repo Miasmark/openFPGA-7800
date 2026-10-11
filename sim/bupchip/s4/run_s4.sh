@@ -28,6 +28,12 @@
 #   PSRAM, PREEMPT, PREFETCH, PCM_DEPTH, DARIA, PSRAM_CS: see build_s4.sh
 #   ARM38=1  clk_arm at 38.18 MHz (+arm38; DARIA's clock), except in runs
 #            that ask for +arm15
+#   ARM19=1  clk_arm at 36.17 MHz (+arm19; DARIA's fallback divider, VCO/19),
+#            except in runs that ask for +arm15; not with ARM38=1
+#   SNAP_REQUIRED=1  the snapshot check must have run ("snap: ok"); 0 also
+#            lets "snap: na" pass. Default 1 when DARIA=1 and
+#            src/fpga/core/bupchip/bup_dbg_snap.sv exists (build_s4.sh then
+#            builds the check), else 0
 #   WORK     default sim/work/bupchip/s4
 # Exits 0 when the CPU did not halt, nothing underflowed or overflowed, the
 # FIFO stayed at or above MINLEV, every testbench check passed (ROM and PSRAM
@@ -40,13 +46,20 @@
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 HEX="$(cd "$HERE/../../../src/fpga/mister/rtl" && pwd)/bupchip.hex"
+if [ -z "${SNAP_REQUIRED:-}" ]; then
+	SNAP_REQUIRED=0
+	[ "${DARIA:-0}" != 0 ] && [ -f "$HERE/../../../src/fpga/core/bupchip/bup_dbg_snap.sv" ] && SNAP_REQUIRED=1
+fi
 TOOLS="$(cd "$HERE/../../../tools" && pwd)"
 WORK="${WORK:-$HERE/../../work/bupchip/s4}"
 GAME="$(realpath "${1:?usage: run_s4.sh GAME.a78 [SONG] [SECONDS] [+plusargs...]}")"
 SONG="${2:-13}"
 SECS="${3:-4}"
 shift $(( $# < 3 ? $# : 3 ))
-[ "${ARM38:-0}" = 0 ] || set -- "$@" +arm38
+[ "${ARM38:-0}" = 0 ] || [ "${ARM19:-0}" = 0 ] || { echo "run_s4.sh: ARM38=1 and ARM19=1 exclude each other" >&2; exit 2; }
+if [ "${ARM38:-0}" != 0 ] || [ "${ARM19:-0}" != 0 ]; then
+	case " $* " in *" +arm15 "*) ;; *) [ "${ARM38:-0}" = 0 ] && set -- "$@" +arm19 || set -- "$@" +arm38 ;; esac
+fi
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 export WORK
@@ -78,6 +91,13 @@ nice -n "${NICE:-5}" "$BIN" "${FWARG[@]}" +rom="$GAME" +song="$SONG" +secs="$SEC
 RES="$(grep "^result: " "$OUT.log" || true)"
 [ -n "$RES" ] || { echo "run_s4.sh: no result line" >&2; exit 1; }
 ok=1
+# The snapshot check (tb_s4.sv's header): ok, or na in a build without it.
+SNAP="$(grep -m1 -E "^snap: (ok|FAIL|na) " "$OUT.log" || true)"
+if [ "$SNAP_REQUIRED" != 0 ]; then
+	grep -q "^snap: ok " <<< "$SNAP" || { echo "the snapshot check did not pass: ${SNAP:-no snap line}"; ok=0; }
+else
+	grep -Eq "^snap: (ok |na )" <<< "$SNAP" || { echo "the snapshot check failed: ${SNAP:-no snap line}"; ok=0; }
+fi
 if grep -q "^result: silent=" <<< "$RES"; then
 	grep -q "^result: silent=1 .* lost=0 cross=0$" <<< "$RES" || ok=0
 	[ "$ok" = 1 ] && echo "PASS $NAME: held and silent" || echo "FAIL $NAME"

@@ -3,7 +3,7 @@
 (DARIA step 7, docs/daria_step7/plan.md 3.6 unit gate 1, 7.1 and 7.2 for I4).
 
   selftest.py --work DIR [--run-sim LOG] [--extra LOG --extra-ref REF
-              [--extra-dir DIR]] [--fp FILE] [--cartram LOG]
+              [--extra-dir DIR]] [--fp FILE] [--cartram LOG] [--reset LOG]
               [--artape LOG [--artape-ref REF]] [--tools]
 
 DIR receives the planted copies. Every case prints "ok" when the checker
@@ -30,13 +30,20 @@ pass or FAIL, and so is the exit status (0 or 1).
                    zero-byte and two header-only files
   --cartram LOG    a passing tb_cartram log (cartram2600_test.py's, E7 blend
                    off): a wrong byte, a lost write, a bucket past s19, a
-                   changed read count, a fail code, a P2 $fatal; and a Fix B
-                   log made from it, which passes with the P2 assertion armed
-                   and fails without it (also with --profile fixb)
+                   changed read count, a fail code, a P2 $fatal, a write of
+                   cart RAM by the 7800/BIOS port; and a Fix B log made from
+                   it, which passes with the P2 assertion armed and fails
+                   without it (also with --profile fixb), passes with a read
+                   at s19 that is the first after a console reset and fails
+                   with one that is not, or with the first at s18
+  --reset LOG      a passing reset run's log (cartram2600_test.py reset,
+                   rst_hif8_rd_rst_k0): a strobe not issued, a read issued
+                   at s14, a P2 coincidence, a reset not done, a reset with
+                   no strobe at E1
   --artape LOG     a passing artape log (the tape load with +cartram), with
                    --artape-ref the reference build's: an ARCHECK mismatch,
                    no tone 5 after the tape, another colour than the
-                   reference's
+                   reference's, a read count and a write count changed
   --tools          the guards on scratch git repositories in DIR:
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
@@ -47,7 +54,8 @@ pass or FAIL, and so is the exit status (0 or 1).
                    let through), hygiene.sh (a cartridge image, a PNG, a
                    firmware file, a path into the temporary directory in
                    each form a doc or script spells it: backticks, > and 2>,
-                   brackets, a comma and the rest, a listed name, also inside
+                   brackets, a comma, a file:/// URL, a doubled leading
+                   slash and the rest, a listed name, also inside
                    an identifier, no list, a list inside the repository, a
                    binary and an oversized file) and pp_equiv.py on a small
                    Quartus tree (a comment, a layout and a dead-ifdef edit
@@ -299,6 +307,53 @@ def cartram_cases(log, w):
     nop2 = plant(fx, os.path.join(w, "cartram_fixb_no_p2.log"), lambda t: t.replace("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram\n", ""))
     expect("Fix B buckets with the P2 assertion not armed", [ct, "check", nop2, "--image", "e7", "--blend", "0"], False)
     expect("the same with --profile fixb", [ct, "check", nop2, "--image", "e7", "--blend", "0", "--profile", "fixb"], False)
+    # the first read after a console reset may land at s19 with Fix B (and only it)
+    def post_line(t, hist):
+        line = f"CARTRAM post-reset reads: {sum(hist.values())} (the first CPU read of cart RAM after each console reset release), histogram:" + \
+            "".join(f" {k}:{v}" for k, v in sorted(hist.items())) + "\n"
+        t2 = re.sub(r"^CARTRAM post-reset reads: .*\n", line, t, count=1, flags=re.M)
+        return t2 if t2 != t else t + line
+    def add19(t):
+        t = re.sub(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):.*)$", r"\g<1> 19:1", t, count=1, flags=re.M)
+        return re.sub(r"c_rdata at E0\+(-?\d+)\.\.(-?\d+) clk_sdram", r"c_rdata at E0+\g<1>..19 clk_sdram", t, count=1)
+    pr = plant(fx, os.path.join(w, "cartram_fixb_post19.log"), lambda t: post_line(add19(t), {19: 1}))
+    expect("a Fix B read at s19, the first after a console reset", [ct, "check", pr, "--image", "e7", "--blend", "0"], True)
+    npr = plant(fx, os.path.join(w, "cartram_fixb_s19_not_post.log"), lambda t: post_line(add19(t), {}))
+    expect("a Fix B read at s19 that is not the first after a reset", [ct, "check", npr, "--image", "e7", "--blend", "0"], False)
+    pr2 = plant(fx, os.path.join(w, "cartram_fixb_post18.log"),
+                lambda t: post_line(re.sub(r"^(CARTRAM latency histogram \(clk_sdram from E0: count\):.*)$", r"\g<1> 18:1", t,
+                                           count=1, flags=re.M), {18: 1}))
+    expect("a first read after a reset at s18 (only s19 is allowed)", [ct, "check", pr2, "--image", "e7", "--blend", "0"], False)
+    def port_write(t):
+        line = ("CARTRAM ports: the 2600 port's accesses issued: reads 0, writes 0; the 7800/BIOS port's: reads 0, writes 1 of "
+                "cart RAM; 0 in the BIOS region (by request port)\n")
+        t2 = re.sub(r"^CARTRAM ports: .*\n", line, t, count=1, flags=re.M)
+        return t2 if t2 != t else t + line
+    expect("a 7800/BIOS-port write of cart RAM in a 2600 run",
+           [ct, "check", plant(log, os.path.join(w, "cartram_port_write.log"), port_write), "--image", "e7", "--blend", "0"], False)
+
+
+def reset_cases(log, w):
+    """A passing reset run's log (cartram2600_test.py reset, rst_hif8_rd_rst_k0)."""
+    ct = os.path.join(SIM, "cartram2600_test.py")
+    print("cartram2600_test.py check-reset:")
+    run = ["--run", "rst_hif8_rd_rst_k0"]
+    expect("the reset run as it is", [ct, "check-reset", log] + run, True)
+    first = lambda pat, rpl: (lambda t: re.sub(pat, rpl, t, count=1, flags=re.M))
+    cases = {
+        "reset_not_issued": first(r"^(RST 0 K=\d+: strobe [^;]*; )issued at s\d+( data \w+)?;", r"\g<1>NOT issued;"),
+        "reset_read_late": first(r"^(RST 0 K=\d+: strobe read [^;]*; issued at s)\d+;", r"\g<1>14;"),
+        "reset_coincidence": first(r"^(RST 0 K=.*P2 coincidences )0$", r"\g<1>1"),
+        "reset_incomplete": first(r"^RST summary: (\d+) of", lambda m: f"RST summary: {int(m.group(1)) - 1} of"),
+        "reset_no_strobe": first(r"^(RST 0 K=\d+: strobe )[^;]*; [^;]*;", r"\g<1>none; -;"),
+        # the strobe's kind must be the run mode's: a write in this read run
+        "reset_strobe_kind_write_in_a_read_run": first(r"^(RST 0 K=\d+: strobe )read (\$\w+); issued at s(\d+);",
+                                                         r"\g<1>write \g<2> data 00; issued at s\g<3> data 00;"),
+        "reset_run_mode_wr_with_read_strobes": first(r"^(RST armed: .*?, mode )rd,", r"\g<1>wr,"),
+        "reset_run_without_a_mode": first(r"^(RST armed: .*?, )mode rd,", r"\g<1>"),
+    }
+    for c, fn in cases.items():
+        expect(c, [ct, "check-reset", plant(log, os.path.join(w, f"{c}.log"), fn)] + run, False)
 
 
 def parse_hist(log):
@@ -315,6 +370,9 @@ def artape_cases(log, ref, w):
     last = lambda a, b: (lambda t: t[::-1].replace(a[::-1], b[::-1], 1)[::-1])
     cases = {
         "artape_archeck": sub1(r"^(ARCHECK 24 pages, )0( of 6144)", r"\g<1>5\g<2>"),
+        "artape_read_count": sub1(r"^CARTRAM reads: (\d+)", lambda m: "CARTRAM reads: " + str(int(m.group(1)) + 1)),
+        "artape_write_count": sub1(r"^CARTRAM writes: (\d+) strobes at the mappers, (\d+) cart writes issued",
+                                   lambda m: f"CARTRAM writes: {int(m.group(1)) + 1} strobes at the mappers, {int(m.group(2)) + 1} cart writes issued"),
         "artape_no_tone_5_after_the_tape": last("AUDF0 = 5\n", "AUDF0 = 6\n"),
     }
     for c, fn in cases.items():
@@ -488,6 +546,15 @@ def hygiene_cases(w):
         ("path as a default ${X:-...}", lambda: write(d, "sim/x.sh", "x=${Y:-" + tmp + "}\n"), False, ["--names", names]),
         ("path in a table cell", lambda: write(d, "docs/x.md", "| a |" + tmp + " |\n"), False, ["--names", names]),
         ("path glued to an option", lambda: write(d, "sim/x.sh", "gcc -I" + tmp + " x.c\n"), False, ["--names", names]),
+        ("path as a file URL (file:///)", lambda: write(d, "docs/x.md", "open file://" + tmp + "\n"), False, ["--names", names]),
+        ("path with a doubled leading slash", lambda: write(d, "sim/x.sh", "cat /" + tmp + "\n"), False, ["--names", names]),
+        ("path as a file URL with a host", lambda: write(d, "docs/x.md", "open file://localhost" + tmp + "\n"), False,
+         ["--names", names]),
+        ("JSON-escaped path", lambda: write(d, "sim/x.json", '{"log": "' + tmp.replace("/", "\\/") + '"}\n'), False,
+         ["--names", names]),
+        ("JSON-escaped relative path", lambda: write(d, "sim/x.json", '{"log": "work' + tmp.replace("/", "\\/") + '"}\n'), True,
+         ["--names", names]),
+        ("a doubled slash inside a relative path", lambda: write(d, "sim/x.sh", "ls work/" + tmp + "\n"), True, ["--names", names]),
         # the directory itself, no path into it (I3's container command)
         ("the directory itself, no path into it", lambda: write(d, "sim/x.sh", "bash -c 'cd " + tmp.rsplit("/", 1)[0] + " && ls'\n"),
          True, ["--names", names]),
@@ -571,7 +638,7 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=()):
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
@@ -603,7 +670,8 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
     open(os.path.join(d, "slack.csv"), "w").write("call,kind,sys_end_to_poll,slack_sys,poll_pc\n" +
                                                   "".join(",".join(map(str, s)) + "\n" for s in slack))
     open(os.path.join(d, "run.log"), "w").write(
-        "detect2600: force_bs 23 revision 2\n"
+        f"detect2600: force_bs {scheme} revision 2\n"
+        f"OPTIONS RAM0 bytes non-zero after load: 0 of 2048; 2600 mapper {scheme} (override 0)\n"
         f"STATUS calls {st['calls']}, late {st['late']}, halts {st['halts']}, halt_code {st['halt_code']}, "
         f"psram_viol {st['psram_viol']}, guard {st['guard']}, unlocks {st['unlocks']}\n"
         f"ran {n} frames, {len(calls)} calls\n")
@@ -659,6 +727,37 @@ def gate_cases(w):
            [fg, xref, synth(w, "cross_inside", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 90), setcol(fp, 91, "riot"))),
             "--frames", "200"], False)
+    # R2's regime: every call's release differs (each frame holds a shifted
+    # release), so only the settle rule and the cap bound what passes
+    def every_call(by):
+        def m(calls):
+            for c in calls:
+                c[4] += by
+        return m
+
+    def sparse(c, every, by, keep):
+        def m(fp, calls, slack, st):
+            every_call(by)(calls)
+            for f in range(1, len(fp) + 1):
+                if (f % every == 0) != keep:
+                    setcol(fp, f, c)
+        return m
+    G("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
+    G("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
+    G("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+
+    def runs_at(spans, c="riot"):
+        def m(fp, calls, slack, st):
+            for lo, hi in spans:
+                shift_call(calls, lo)
+                for f in range(lo, hi + 1):
+                    setcol(fp, f, c)
+        return m
+    G("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
+    G("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
+    G("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
+    G("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
+    G("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
     G("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
     G("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
     G("len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
@@ -674,17 +773,39 @@ def gate_cases(w):
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
+    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found
+    A = lambda name, r, cand, want: expect(name, [fg, "--auto", r, cand, "--frames", "200"], want)
+    A("auto_arm_identical", ref, synth(w, "auto_same"), True)
+    A("auto_arm_one_riot_byte", ref, synth(w, "auto_riot", mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_arm_reference_without_calls", synth(w, "auto_ref_void", calls_per=0),
+      synth(w, "auto_cand_void", calls_per=0), False)
+    A("auto_scheme_differs_from_the_loader's", ref, synth(w, "auto_dpcp", scheme=21), False)
+    A("auto_with_the_mapper_line (control)", ref, synth(w, "auto_nomap"), True)
+    nomap = os.path.join(w, "auto_nomap", "run.log")
+    open(nomap, "w").write("".join(l for l in open(nomap) if not l.startswith("OPTIONS")))
+    A("auto_no_mapper_line", ref, os.path.dirname(nomap), False)
+    nref = synth(w, "auto_f4_ref", calls_per=0, scheme=6)
+    A("auto_non_arm_identical (strict)", nref, synth(w, "auto_f4_same", calls_per=0, scheme=6), True)
+    A("auto_non_arm_one_riot_byte (strict)", nref,
+      synth(w, "auto_f4_riot", calls_per=0, scheme=6, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_non_arm_with_calls", nref, synth(w, "auto_f4_calls", calls_per=1, scheme=6), False)
     # Spiders: overrun frames 150-165 excused when they are the late frames on both sides
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
-    def sp(extra_after=False):
+    def sp(extra_after=False, riot_run=None):
         def m(fp, c, s, st):
             for f in range(150, 166):
                 setcol(fp, f, "video")
                 setcol(fp, f, "len_sys")
+                if riot_run:
+                    setcol(fp, f, "riot")
             if extra_after:
                 setcol(fp, 170, "riot")
+            if riot_run:
+                shift_call(c, riot_run[0])
+                for f in range(riot_run[0], riot_run[1] + 1):
+                    setcol(fp, f, "riot")
         return m
     expect("spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
                                "--excuse", "150-165"], True)
@@ -692,6 +813,14 @@ def gate_cases(w):
                                      "--excuse", "150-165"], False)
     expect("spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
                                            "--excuse", "150-165"], False)
+    # a release_shift run must settle on truly equal frames: the excused
+    # overrun frames (riot differing there too) do not count
+    expect("spiders_release_shift_3_frames_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
+            "--excuse", "150-165"], False)
+    expect("spiders_release_shift_well_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
+            "--excuse", "150-165"], True)
 
 
 def main():
@@ -703,6 +832,7 @@ def main():
     p.add_argument("--extra-dir")
     p.add_argument("--fp")
     p.add_argument("--cartram")
+    p.add_argument("--reset", help="a passing reset run's log (cartram2600_test.py reset: rst_hif8_rd_rst_k0)")
     p.add_argument("--artape", help="a passing artape log (cartram2600_test.py matrix --arfw)")
     p.add_argument("--artape-ref", help="the reference build's artape log")
     p.add_argument("--tools", action="store_true", help="the guards: pp_guards.py, hygiene.sh, pp_equiv.py")
@@ -717,6 +847,8 @@ def main():
         fp_cases(a.fp, w)
     if a.cartram:
         cartram_cases(a.cartram, w)
+    if a.reset:
+        reset_cases(a.reset, w)
     if a.artape:
         artape_cases(a.artape, a.artape_ref, w)
     if a.tools:

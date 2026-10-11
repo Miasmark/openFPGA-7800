@@ -17,8 +17,10 @@
 # (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
 # runs/shadow<WIN_KB>/<rom name>/. With WRAPPER=1 as well, DARIA is the
 # whole wrapper (bupchip_pocket.sv with POCKET_DARIA: capture, window, the
-# two-way cache over psram.sv and psram_model.sv, MMIO, the call port):
-# obj_wrap<WIN_KB>, runs/wrap<WIN_KB>/. NOBUILD=1 runs the binary that is there
+# two-way cache over psram.sv and psram_model.sv, MMIO, the call port, the
+# sample requester daria_smp.sv; bup_dbg_snap.sv too once it exists, which
+# BUP_DEBUG builds need): obj_wrap<WIN_KB>, runs/wrap<WIN_KB>/. NOBUILD=1 runs
+# the binary that is there
 # without checking its sources (run_all.sh builds once, then sets it).
 # FE=1 adds the front-end shadow (fe_shadow.svh, -DFE_SHADOW): fe.csv,
 # fe_err.txt and the "FE ..." lines of run.log. It combines with the others:
@@ -32,15 +34,20 @@
 # MODE_B=1 builds mode B of the front-end shadow (docs/daria_fe/spec/bench.md
 # 7.1; design.md 12.2 step 8; -DFE_MODE_B): daria_fe posts the calls to DARIA's
 # own CPU (dcall) and shares DARIA's cart RAM (dmem), clk_d is on the PLL's
-# lattice (+d_ofs=PS), the 6507 is held for daria_fe's calls too. It sets
-# SHADOW=1 and FE=1 itself, and refuses WRAPPER=1 and FE_STAGE0=1:
+# lattice (+d_ofs=PS; +d_div=19 puts it on the VCO/19 fallback's lattice, where
+# the guard must never lock and port B's coincidences with DARIA are counted,
+# docs/daria_step7/plan.md 5.2), the 6507 is held for daria_fe's calls too. It
+# sets SHADOW=1 and FE=1 itself, and refuses FE_STAGE0=1:
 # obj_shadow<WIN_KB>_fe_modeB, runs/shadow<WIN_KB>_fe_modeB/ (with FE_POISON=1
-# _fe_modeB_poison). Every other build is as before.
+# _fe_modeB_poison). MODE_B=1 WRAPPER=1 runs daria_fe on the whole wrapper's
+# ports (bupchip_pocket.sv), wired as atari7800_pocket.sv wires them (plan
+# 3.6 I4b; daria_shadow.svh): obj_wrap<WIN_KB>_fe_modeB,
+# runs/wrap<WIN_KB>_fe_modeB/; pass WIN_KB=64, the shipped window (the default
+# is 128). Every other build is as before.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ "${MODE_B:-0}" != 0 ]; then
-	[ "${WRAPPER:-0}" = 0 ] || { echo "run_daria.sh: MODE_B=1 does not combine with WRAPPER=1" >&2; exit 1; }
 	[ "${FE_STAGE0:-0}" = 0 ] || { echo "run_daria.sh: MODE_B=1 does not combine with FE_STAGE0=1" >&2; exit 1; }
 	SHADOW=1
 	FE=1
@@ -98,7 +105,11 @@ if [ "${SHADOW:-0}" != 0 ]; then
 	if [ "${WRAPPER:-0}" != 0 ]; then
 		S4="$HERE/../s4"
 		SRCS+=("$RTL/bupchip_peripheral.sv" "$BUP/bup_tick48k.sv" "$BUP/bup_capture.sv" "$BUP/bup_asset_wr.sv"
-			"$BUP/bup_asset_cache.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv")
+			"$BUP/bup_asset_cache.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv"
+			"$BUP/daria_smp.sv")
+		# lane I3's snapshot (plan P15), instantiated only under BUP_DEBUG; it
+		# arrives with commit D, so it is compiled once it exists
+		[ -f "$BUP/bup_dbg_snap.sv" ] && SRCS+=("$BUP/bup_dbg_snap.sv")
 		OBJ="$WORK/obj_wrap${WIN_KB:-128}"
 		DEFS+=(-DDARIA_WRAPPER -DPOCKET_DARIA)
 	fi

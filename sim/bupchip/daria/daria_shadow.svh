@@ -84,21 +84,28 @@
 `endif
 
 	// ---- DARIA's clock ---------------------------------------------------------
+	real D_HZ = 687272727.0 / 18.0;		// clk_d (+d_div=19 in mode B: / 19)
 `ifdef FE_MODE_B
-`ifdef DARIA_WRAPPER
-	initial begin
-		$display("mode B (FE_MODE_B) runs on dcall and dmem, not the wrapper");
-		$finish;
-	end
-`endif
 	// On the PLL's lattice (bench.md 6.3): high from time 0, toggling from +d_ofs
 	// on, so the rising edges fall at d_ofs + 26,190 n (n >= 1), 8 per 3 clk_sys.
-	logic clk_d = 1'b1;
-	int   d_ofs = 0;
+	// +d_div=19 (docs/daria_step7/plan.md 5.2, the fallback divider): VCO/19,
+	// 13,823 ps high and 13,822 low (9.5 VCO periods each, the counter's odd
+	// duty correction), rising at d_ofs + 27,645 n, together with a clk_sys
+	// edge once every 19 clk_sys; the guard is then expected never to lock, and
+	// port B's coincidences with DARIA are counted instead of checked
+	// (fe_shadow.svh).
+	logic   clk_d = 1'b1;
+	int     d_ofs = 0, d_div = 18;
+	longint d_per = 26190;			// clk_d's period in ps
 	initial begin
 		void'($value$plusargs("d_ofs=%d", d_ofs));
+		void'($value$plusargs("d_div=%d", d_div));
+		if (d_div != 18 && d_div != 19) $fatal(1, "+d_div=%0d: 18 or 19", d_div);
+		d_per = d_div == 19 ? 27645 : 26190;
+		D_HZ = 687272727.0 / real'(d_div);
 		#(d_ofs);
-		forever #13095 clk_d = ~clk_d;
+		if (d_div == 19) forever begin #13823 clk_d = ~clk_d; #13822 clk_d = ~clk_d; end
+		else forever #13095 clk_d = ~clk_d;
 	end
 	// The self-tests (+mb_inj=K, fe_shadow.svh). K = 2: u_fe's clk_arm is a copy
 	// of clk_d +mb_det_ofs ps later, so the phase detector locks on another
@@ -106,14 +113,17 @@
 	int   mb_inj = 0, mb_det_ofs = 8730;
 	logic clk_d_inj = 1'b1;
 	initial begin
-		int o;
+		int o, dv;
 		o = 0;
+		dv = 18;
 		void'($value$plusargs("d_ofs=%d", o));		// (this block may run before clk_d's)
+		void'($value$plusargs("d_div=%d", dv));
 		void'($value$plusargs("mb_inj=%d", mb_inj));
 		void'($value$plusargs("mb_det_ofs=%d", mb_det_ofs));
 		if (mb_inj == 2) begin
 			#(o + mb_det_ofs);
-			forever #13095 clk_d_inj = ~clk_d_inj;
+			if (dv == 19) forever begin #13823 clk_d_inj = ~clk_d_inj; #13822 clk_d_inj = ~clk_d_inj; end
+			else forever #13095 clk_d_inj = ~clk_d_inj;
 		end
 	end
 	wire  fb_clk_arm = mb_inj == 2 ? clk_d_inj : clk_d;
@@ -121,7 +131,6 @@
 	logic clk_d = 0;
 	always #13095 clk_d = ~clk_d;		// 26.19 ns, 8 per 3 clk_sys
 `endif
-	localparam real D_HZ = 687272727.0 / 18.0;
 
 `ifdef DARIA_WRAPPER
 	// ---- the wrapper as DARIA builds it, in the 2600 profile ----------------------------
@@ -133,18 +142,73 @@
 	// ends' ports: state RAM port B, call_tog, ret_tog, ready.
 	logic clk_74a = 0;
 	always #6734 clk_74a = ~clk_74a;
+	// top.sv's mapper_ram_size == 32768 is force_bs == BANKCDF && mapper_revision
+	// == 3 (top.sv), the expression atari7800_pocket.sv's daria_ram32 uses on the
+	// same force_bs (its daria_fbs, which it gives main): the same signal
 	wire         d_ram32 = dut.mapper_ram_size == 16'd32768;
 	int          d_await = 0;		// +d_await has no effect here: the cache makes the waits
 	logic  [7:0] d_stb_addr = 0;
 	logic        d_stb_we = 0;
 	logic [31:0] d_stb_wd = 0;
 	wire  [31:0] d_stb_q;
-	logic        d_call_tog = 0;
 	wire         d_ret_tog, d_ready;
 	wire         p_bank, p_we, p_hi, p_lo, p_re, p_avail, p_busy;
 	wire  [21:0] p_addr;
 	wire  [15:0] p_din, p_dout;
 
+`ifdef FE_MODE_B
+	// Mode B on the wrapper (docs/daria_step7/plan.md 3.6 I4b): daria_fe (u_fe,
+	// fe_shadow.svh) on bupchip_pocket's DARIA ports, wired as
+	// atari7800_pocket.sv wires them (plan 2.1, 2.5): call_tog and ret_tog,
+	// ready, state RAM and cart RAM port B, the front-end ROM's two ports (the
+	// ROM filled by the wrapper's own capture), the capture's cartridge window
+	// and the sample port (daria_smp, on the PSRAM); the profile, daria_ram32
+	// and the mapper reset (the console's effective_reset) each through one
+	// clk_sys register (P21), so a console reset abandons a call on both sides.
+	// Step 5's poster is not built; clk_arm is clk_d on the PLL's lattice.
+	wire  [12:0] fu_fea_addr, fu_feb_addr, fu_crb_addr;
+	wire  [31:0] fu_fea_q, fu_feb_q, fu_crb_q, fu_stb_q, fu_crb_wd, fu_stb_wd;
+	wire         fu_crb_we, fu_stb_we;
+	wire   [3:0] fu_crb_be, fu_stb_be;
+	wire   [7:0] fu_stb_addr;
+	wire         d_call_tog;			// u_fe's call_tog (fe_shadow.svh)
+	wire         d_cart_win, d_smp_req, d_smp_ack;
+	wire  [18:0] d_smp_addr;
+	wire   [7:0] d_smp_data;
+	logic        d_profile = 1'b0, d_ram32_r = 1'b0, d_mres_r = 1'b1;
+	always @(posedge clk_sys) begin
+		d_profile <= tia_mode && (force_bs == 6'd21 || force_bs == 6'd23);
+		d_ram32_r <= d_ram32;
+		d_mres_r <= dut.effective_reset;
+	end
+	assign d_stb_q = fu_stb_q;
+	wire         d_ready_b = d_ready;		// u_fe's cpu_ready: daria_ready
+	// DARIA's call readout, for the mode-B record of each call (below)
+	wire         d_ro_valid = dw.ro_valid;
+	wire   [2:0] d_ro_idx = dw.ro_idx;
+	wire  [31:0] d_ro_data = dw.ro_data;
+	`define D_CPU dw.cpu
+
+	bupchip_pocket #(.WIN_KB(`DARIA_WIN_KB)) dw (
+		.clk_sys, .clk_arm(clk_d), .clk_74a,
+		.pll_locked(1'b1), .pll_busy(1'b0), .souper_profile(1'b0), .pause(1'b0),
+		.byte_valid(ioctl_wr && cart_download), .byte_hi(3'd0), .load_addr(ioctl_addr), .load_data(ioctl_dout),
+		.load_start(cart_download && !old_cart_download), .load_end(!cart_download && old_cart_download),
+		.fw_download(1'b0), .cmd_valid(1'b0), .cmd_data(8'd0), .audio_l(), .audio_r(),
+		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
+		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
+		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
+		.daria_profile(d_profile), .daria_ram32(d_ram32_r), .daria_pal(1'b0), .daria_mreset(d_mres_r),
+		.daria_call_tog(d_call_tog), .daria_ret_tog(d_ret_tog), .daria_ready(d_ready), .daria_halted(),
+		.daria_stb_addr(fu_stb_addr), .daria_stb_we(fu_stb_we), .daria_stb_be(fu_stb_be), .daria_stb_wd(fu_stb_wd),
+		.daria_stb_q(fu_stb_q),
+		.daria_crb_addr(fu_crb_addr), .daria_crb_we(fu_crb_we), .daria_crb_be(fu_crb_be), .daria_crb_wd(fu_crb_wd),
+		.daria_crb_q(fu_crb_q),
+		.daria_fea_addr(fu_fea_addr), .daria_fea_q(fu_fea_q), .daria_feb_addr(fu_feb_addr), .daria_feb_q(fu_feb_q),
+		.daria_cart_win(d_cart_win),
+		.daria_smp_req(d_smp_req), .daria_smp_addr(d_smp_addr), .daria_smp_ack(d_smp_ack), .daria_smp_data(d_smp_data));
+`else
+	logic        d_call_tog = 0;
 	bupchip_pocket #(.WIN_KB(`DARIA_WIN_KB)) dw (
 		.clk_sys, .clk_arm(clk_d), .clk_74a,
 		.pll_locked(1'b1), .pll_busy(1'b0), .souper_profile(1'b0), .pause(1'b0),
@@ -158,7 +222,13 @@
 		.daria_call_tog(d_call_tog), .daria_ret_tog(d_ret_tog), .daria_ready(d_ready), .daria_halted(),
 		.daria_stb_addr(d_stb_addr), .daria_stb_we(d_stb_we), .daria_stb_be(4'hF), .daria_stb_wd(d_stb_wd), .daria_stb_q(d_stb_q),
 		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
-		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q());
+		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q(),
+		/* verilator lint_off PINCONNECTEMPTY */
+		.daria_cart_win(),
+		// the samples are upstream's: the sample port makes no requests
+		.daria_smp_req(1'b0), .daria_smp_addr(19'd0), .daria_smp_ack(), .daria_smp_data());
+		/* verilator lint_on PINCONNECTEMPTY */
+`endif
 
 	wire [21:16] cram_a;
 	wire  [15:0] cram_dq;
@@ -305,6 +375,7 @@
 
 	wire        d_not_ready = d_rst_sys;
 	`define D_CART_RAM dmem.cart_ram
+	`define D_CPU dcpu
 
 	// ---- the image, when the run starts ---------------------------------------------------
 `ifdef FE_MODE_B
@@ -583,7 +654,7 @@
 		// edge) where DARIA's port A is in cart RAM: the access is counted here exactly as a
 		// real one, and the clk_d block below pairs it with DARIA's store or (one clk_d later)
 		// load of the same edge.
-		if ((mb_inj == 4 || mb_inj == 5) && $time >= longint'(d_ofs) + 26190 && ($time - longint'(d_ofs)) % 26190 == 0 &&
+		if ((mb_inj == 4 || mb_inj == 5) && $time >= longint'(d_ofs) + d_per && ($time - longint'(d_ofs)) % d_per == 0 &&
 				d_d_addr[31:15] == 17'h08000) begin
 			int w;
 			w = int'(d_d_addr[14:2]);
@@ -619,9 +690,9 @@
 		// takes the word in W now (bup_cpu: chk_v, acc_load, acc_addr in the 2600 map's
 		// cart RAM, 0x4000_0000-0x4000_7FFF). Seen one clk_d late, so only this block counts
 		// it; a daria_fe write is at a clk_sys edge, never in between.
-		if (dcpu.chk_v && dcpu.acc_load && dcpu.acc_addr[31:15] == 17'h08000 && mb_d_prev_t >= 0) begin
+		if (`D_CPU.chk_v && `D_CPU.acc_load && `D_CPU.acc_addr[31:15] == 17'h08000 && mb_d_prev_t >= 0) begin
 			int w;
-			w = int'(dcpu.acc_addr[14:2]);
+			w = int'(`D_CPU.acc_addr[14:2]);
 			d_loads++;
 			if (mb_shared_d(mb_d_prev_t)) d_shared_loads++;
 			if (fe_wt[w] == mb_d_prev_t) coll_d_ld_same++;

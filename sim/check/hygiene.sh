@@ -10,9 +10,14 @@
 #     /private/tmp) or a scratch directory in an added line, whatever text
 #     surrounds it: a quote, a backtick, a redirection (> or 2> glued to it),
 #     brackets, a comma, a ${X:-...} default, a table cell, an option letter
-#     glued to it (-I, -o). Only a path whose "tmp" continues a relative one
-#     (work, ./, ~, $WORK, ${WORK} before it) is let through, and so is the
-#     directory itself without a path into it (cd /tmp inside a container);
+#     glued to it (-I, -o), a file URL with or without a host (file:, two
+#     slashes, a host name or none, then the directory), a doubled leading
+#     slash (two slashes before it), and a JSON-escaped path (a backslash
+#     before each slash: the escapes are removed before the match).
+#     Only a path whose "tmp" continues a relative one (work, ./, ~, $WORK,
+#     ${WORK} before it, also with a doubled slash between) is let through,
+#     and so is the directory itself without a path into it (cd /tmp inside
+#     a container);
 #   - none of the assistant and model names in a list kept OUTSIDE the
 #     repository (writing them in would break the rule this checks): give it
 #     as --names FILE or HYGIENE_NAMES=FILE, one name per line, matched
@@ -55,19 +60,30 @@ def git(*a):
 # in pieces, so that this file does not match itself). A path into it is
 # absolute unless the character before it continues a relative path (a name,
 # ".", "~", "/", "$", "}", ")", "*" or "%"), or an option letter is glued to
-# it ("-I" or "-o" before it), which makes it absolute again.
+# it ("-I" or "-o" before it), which makes it absolute again. Slashes before
+# it count only when a name continues before them: "work//" is relative,
+# "//" at the start, " //" and "file:///" are absolute, and so is a file URL
+# with a host ("file:" and two slashes, a host name, then the path). JSON's
+# escaped slash (a backslash before it) is a slash.
 T = "tmp/"
 TMP_AT = re.compile(r"/(?:var/|private/)?" + T)
+FILE_URL = re.compile(r"file:/{2}[^/\s\"'`]*$", re.I)
 SCRATCH = "scratch" + "pad"
 
 
 def abs_tmp(text):
+    text = text.replace("\\/", "/")
     for m in TMP_AT.finditer(text):
         i = m.start()
         if m.group(0) != "/" + T:
             return True                      # the var and private ones
-        c = text[i - 1] if i else ""
-        if c == "" or not re.match(r"[\w.~/$})*%]", c):
+        if FILE_URL.search(text[:i]):
+            return True                      # a file URL, with a host or none
+        j = i - 1
+        while j >= 0 and text[j] == "/":
+            j -= 1                           # a run of slashes: what is before it decides
+        c = text[j] if j >= 0 else ""
+        if c == "" or not re.match(r"[\w.~$})*%]", c):
             return True
         if re.search(r"(?:^|[\s\"'`=(:,\[{|>])-[A-Za-z]$", text[:i]):
             return True                      # an option glued to the path

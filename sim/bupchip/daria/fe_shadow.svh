@@ -1028,7 +1028,11 @@
 	// forced arm_call_stall of the hold (7.4.2).
 	// =================================================================================
 `ifdef FE_MODE_B
+`ifdef DARIA_WRAPPER
+	`define FE_MEM dw.mem		// mode B on the wrapper: bupchip_pocket's daria_mem (daria_shadow.svh)
+`else
 	`define FE_MEM dmem		// mode B: DARIA's daria_mem (daria_shadow.svh)
+`endif
 `else
 	`define FE_MEM fe_mem
 `endif
@@ -1165,9 +1169,16 @@
 		.scheme(force_bs), .revision(mapper_revision), .cdf_ldx, .cdf_ldy,
 		.fetch_off_en(cdf_fetch_offset_enable), .fetch_off(cdf_fetch_offset), .cdfj_entry, .cdfj_stack,
 		.audio_size_addr(arm_audio_size_addr), .rom_size(cart_size), .ram32(dut.mapper_ram_size == 16'd32768),
+`ifdef DARIA_WRAPPER
+		// on the wrapper (daria_shadow.svh): its capture's window and its sample port
+		.load_start(f1_load_start), .load_end(f1_load_end), .cart_win(d_cart_win),
+		.cpu_ready(f1_cpu_ready), .ret_tog(d_ret_tog), .call_tog(d_call_tog),
+		.smp_req(d_smp_req), .smp_addr(d_smp_addr), .smp_ack(d_smp_ack), .smp_data(d_smp_data),
+`else
 		.load_start(f1_load_start), .load_end(f1_load_end), .cart_win(f1_cart_win),
 		.cpu_ready(f1_cpu_ready), .ret_tog(d_ret_tog), .call_tog(d_call_tog),
 		.smp_req(), .smp_addr(), .smp_ack(f1_smp_ack), .smp_data(f1_smp_data),
+`endif
 		.fe_do(), .fe_oe(), .arm_call_busy(), .arm_dma_busy(), .init_busy(),
 		.fea_addr(fu_fea_addr), .fea_q(fu_fea_q), .feb_addr(fu_feb_addr), .feb_q(fu_feb_q),
 		.crb_addr(fu_crb_addr), .crb_we(fu_crb_we), .crb_be(fu_crb_be), .crb_wd(fu_crb_wd), .crb_q(fu_crb_q),
@@ -1392,8 +1403,12 @@
 	longint      mb_bf_up = -1, mb_bf_fe = -1, mb_bf_n = 0, mb_bf_lo = 0, mb_bf_hi = 0, mb_bf_fel = 0;
 	logic        mb_ucb_q = 0, mb_fcb_q = 0;
 	function automatic logic mb_shared_sys(input longint t);	// a clk_sys edge that is a clk_d edge
-		return t >= longint'(d_ofs) + 26190 && (t - longint'(d_ofs)) % 26190 == 0;
+		return t >= longint'(d_ofs) + d_per && (t - longint'(d_ofs)) % d_per == 0;
 	endfunction
+	// +d_div=19 (daria_shadow.svh): the guard is expected never to lock, so port B on a
+	// shared edge while DARIA runs a call, and the coincidences, are the counted race of
+	// design.md 8.4 (plan 5.2) and are counted here, not checked.
+	longint      mb19_wr_sh = 0, mb19_rd_sh = 0, mb19_cds = 0, mb19_cld = 0, mb19_cww = 0;
 	// The merge_race rule (above): the frequencies equal, k > 0, and every voice's counter
 	// difference explained by the k ticks
 	function automatic logic mb_race_ok(output string why);
@@ -1899,7 +1914,9 @@
 					$sformatf("phb_bad: phb_next %0d, the last clk_sys edge %s shared", u_fe.u_guard.phb_next,
 						mb_sh_prev ? "was" : "was not"))
 			end
-			`F1_CHK(mb_clk == 25 && mb_lock_edge < 0, G_MB_LOCK_LATE, "lock_late: the guard is not locked 24 clk_sys after the start")
+			`F1_CHK(d_div == 18 && mb_clk == 25 && mb_lock_edge < 0, G_MB_LOCK_LATE, "lock_late: the guard is not locked 24 clk_sys after the start")
+			`F1_CHK(d_div == 19 && u_fe.u_guard.lk && mb_lock_edge == mb_clk - 1, G_MB_LOCK_LATE,
+				"lock_late: at VCO/19 (+d_div=19) the guard locked, which it is expected never to do")
 			`F1_CHK(u_fe.u_guard.ev_unlock, G_MB_UNLOCK, "det_unlock: the guard lost its lock")
 			// the guard's window as the bench forms it (design 3.5): locked & (call_win | !cpu_ready)
 			gwin = u_fe.u_guard.lk && (u_fe.call_win || !f1_cpu_ready);
@@ -1914,20 +1931,22 @@
 				f1_inc(G_MB_WR_SH);
 				`F1_CHK(gwin && !u_fe.f6_act, G_MB_WR_SH_G,
 					$sformatf("wr_shared_guard: a port-B write of word $%04x on a shared edge in the guard's window", mb_fe_a))
-				`F1_CHK(d_in_call && !u_fe.f6_act, G_MB_WR_SH_D,
+				if (d_div == 19) begin if (d_in_call && !u_fe.f6_act) mb19_wr_sh++; end
+				else `F1_CHK(d_in_call && !u_fe.f6_act, G_MB_WR_SH_D,
 					$sformatf("wr_shared_daria: a port-B write of word $%04x on a shared edge while DARIA runs a call", mb_fe_a))
 			end
 			if (sh && mb_fe_rd) begin
 				f1_inc(G_MB_RD_SH);
 				`F1_CHK(gwin, G_MB_RD_SH_G,
 					$sformatf("rd_shared_guard: a consumed port-B read of word $%04x on a shared edge in the guard's window", mb_fe_a))
-				`F1_CHK(d_in_call, G_MB_RD_SH_D,
+				if (d_div == 19) begin if (d_in_call) mb19_rd_sh++; end
+				else `F1_CHK(d_in_call, G_MB_RD_SH_D,
 					$sformatf("rd_shared_daria: a consumed port-B read of word $%04x on a shared edge while DARIA runs a call", mb_fe_a))
 			end
 			// daria_shadow.svh's coincidences, K1d and call compare, as they come
-			while (mb_cds < coll_d_same) begin mb_cds++; `F1_CHK(1, G_MB_COLL_SAME, "coll_d_same: a DARIA store and a consumed daria_fe read of one word on one edge") end
-			while (mb_cld < coll_d_ld_same) begin mb_cld++; `F1_CHK(1, G_MB_COLL_LD, "coll_d_ld_same: a daria_fe write and a DARIA load of one word on one edge") end
-			while (mb_cww < coll_ww_same) begin mb_cww++; `F1_CHK(1, G_MB_COLL_WW, "coll_ww_same: a daria_fe write and a DARIA store of one word on one edge") end
+			while (mb_cds < coll_d_same) begin mb_cds++; if (d_div == 19) mb19_cds++; else `F1_CHK(1, G_MB_COLL_SAME, "coll_d_same: a DARIA store and a consumed daria_fe read of one word on one edge") end
+			while (mb_cld < coll_d_ld_same) begin mb_cld++; if (d_div == 19) mb19_cld++; else `F1_CHK(1, G_MB_COLL_LD, "coll_d_ld_same: a daria_fe write and a DARIA load of one word on one edge") end
+			while (mb_cww < coll_ww_same) begin mb_cww++; if (d_div == 19) mb19_cww++; else `F1_CHK(1, G_MB_COLL_WW, "coll_ww_same: a daria_fe write and a DARIA store of one word on one edge") end
 			while (mb_k1db < mb_k1d_bad) begin mb_k1db++; `F1_CHK(1, G_MB_K1D_BAD, "ram_dcall_bad: DARIA's cart RAM at call_go differs from upstream's at its call start") end
 			while (mb_shb < shadow_bad) begin mb_shb++; `F1_CHK(1, G_MB_CALL_BAD, "daria_call_bad: a DARIA call differs from upstream's (DARIA call line in run.log)") end
 			// guard_shift (design 3.5, 9.5; mode B and hardware only): the audio would be granted
@@ -2999,9 +3018,18 @@
 		if (mb_inj >= 4)
 			$display("FE mode B self-test %0d: %0d injected", mb_inj, mb_inj >= 7 ? longint'(mb_i7_n) :
 				(mb_inj == 6 ? longint'(mb_i6_n) : mb_pc_n));
-		$display("MODE B result: %s (FE %0d bad; DARIA %0d calls differ or halted, %0d skipped; lock %0s)",
-			nbad == 0 && shadow_bad == 0 && shadow_skip == 0 && mb_lock_edge >= 0 && mb_lock_edge <= 24 ? "PASS" : "FAIL",
-			nbad, shadow_bad, shadow_skip, mb_lock_edge >= 0 && mb_lock_edge <= 24 ? "in time" : "late or never");
+		if (d_div == 19)
+			$display("FE mode B at VCO/19: counted, not checked: port-B writes on a shared edge while DARIA runs a call %0d, consumed reads %0d; coll_d_same %0d, coll_d_ld_same %0d, coll_ww_same %0d",
+				mb19_wr_sh, mb19_rd_sh, mb19_cds, mb19_cld, mb19_cww);
+		begin
+			bit lock_ok;
+			// VCO/18: locked within 24 clk_sys; VCO/19: never locked (plan 5.2)
+			lock_ok = d_div == 19 ? mb_lock_edge < 0 : mb_lock_edge >= 0 && mb_lock_edge <= 24;
+			$display("MODE B result: %s (FE %0d bad; DARIA %0d calls differ or halted, %0d skipped; lock %0s)",
+				nbad == 0 && shadow_bad == 0 && shadow_skip == 0 && lock_ok ? "PASS" : "FAIL",
+				nbad, shadow_bad, shadow_skip, d_div == 19 ? (lock_ok ? "never, as expected at VCO/19" : "locked at VCO/19") :
+				(lock_ok ? "in time" : "late or never"));
+		end
 `endif
 		if (fd_f1 != 0) $fclose(fd_f1);
 		if (fd_f1_ticks != 0) $fclose(fd_f1_ticks);
