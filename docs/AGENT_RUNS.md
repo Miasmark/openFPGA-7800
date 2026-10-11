@@ -68,12 +68,23 @@ Instead, write a short continuation script:
 
 **The owner's rule (2026-10-09):** at most three simulations while no Quartus job runs, and two while one does (`docs/daria_step7/plan.md` 4.2). Quartus runs one job at a time, under the lock of ENVIRONMENT.md 3.5.
 
-**The slot helper.** The step-7 runs used a small helper outside the repository that gives lanes two slots:
-- Slot A is always available. Slot B is used only while Quartus is idle.
-- A job in slot B is stopped with `SIGSTOP` on its process group while a Quartus job runs, and continued afterwards.
+**The slot helper.** The step-7 runs used a small helper outside the repository that gives each call one slot:
+- Slot A is always available. Slot C, the orchestrating session's own simulation, is lent to lanes while that session runs none, so it is also always available.
+- Slot B is used only while Quartus is idle. A job in slot B is stopped with `SIGSTOP` on its process group while a Quartus job runs, and continued afterwards.
+- So three simulations run while no Quartus job runs (A, B, C), and two while one does (A, C).
 - A job counts as Quartus while it holds the lock or a container runs.
 
 The helper must wait on slot A with a blocking `flock` (in short timeouts), not poll it with `flock -n`. Otherwise callers that use a plain blocking `flock` on the same file starve it: one caller waited over three hours.
+
+**Replacing the helper.** Replace it atomically (write a new file, then `mv`). Callers already waiting keep running the old file, so a new slot only serves calls made after the change.
+
+**Jobs that need two simulations.** A gate that runs two simulations at once (`check.sh` with `JOBS=2`) was wrapped by its agent in scripts that took two slots:
+- One version needed both slots free within seconds of each other and starved for hours.
+- Another held slot A idle while it waited for B.
+
+Run such a job one simulation at a time inside a single slot.
+
+**Expect queues.** On 2026-10-11 slot A had about eight waiters and one job waited 7.5 hours. The nine-fit ladder stopped slot B for about 3.5 hours. When the queue is that long, start fewer simulation batches, or let a lane finish before starting the next.
 
 ## 4. Disk
 
@@ -90,6 +101,7 @@ The helper must wait on slot A with a blocking `flock` (in short timeouts), not 
 | Seen | Prevented by |
 |---|---|
 | A benchmark agent cloned an external repository into the main checkout's root. | "Never create files or clones inside the main checkout"; check `git status` before stopping. |
+| Agents wrapped a two-simulation gate in their own scripts that held two slots; it starved for hours or held a slot idle. | "Run one simulation per slot; a job that runs two at once runs them one at a time." |
 | A cleanup deleted a still-running agent's scratch worktree. | Before deleting a directory, check that no process uses it (`lsof +D`) and no workflow is active. |
 | A first explanation of a timing change blamed the wrong path. | An independent skeptic agent re-checks every conclusion against the data; here it found the error. |
 | A cost attribution double-counted 72 calls at a snapshot boundary. | An independent recount with its own parser. |
