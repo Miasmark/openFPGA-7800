@@ -45,7 +45,9 @@
 #                EXTRA_REF (the reference build's extra_tests.sh log); AR_TAPE=1
 #                passes through (the tape path, and the tape load with
 #                +cartram, which the checker then requires); with FP_REF=DIR
-#                its extra_<case>.csv there too; with POCKET_DARIA in the
+#                its extra_<case>.csv there too (the two tape loads'
+#                extra_ar_tape_full and _multi only with AR_TAPE=1, the run
+#                that writes them); with POCKET_DARIA in the
 #                qsf also on run_sim's plain build, checked the same way,
 #                and every extra_ and cartram_ fingerprint equal between the
 #                builds but the ARM image's (plan 7.5 row 5, 1.2 row 4)
@@ -174,6 +176,10 @@ fp_cross() {
 		d="$(basename "$f")"
 		case "$3:$d" in "*.csv:extra_"*|"*.csv:cartram_"*) continue ;; esac
 		case "$d" in cartram_armimg_*) continue ;; esac
+		# the tape loads' fingerprints exist only in an AR_TAPE=1 run
+		case "$d" in extra_ar_tape_full.csv|extra_ar_tape_multi.csv)
+			[ "${AR_TAPE:-0}" = 1 ] || { echo "-- fingerprints $d: not compared (AR_TAPE=1 runs the tape load that writes it)"; continue; } ;;
+		esac
 		n=$((n + 1))
 		echo "-- fingerprints $d: $4 against this run"
 		if [ -f "$2/$d" ]; then python3 "$HERE/check/frame_gate.py" --strict "$f" "$2/$d" || rc=1
