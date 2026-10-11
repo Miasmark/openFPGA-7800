@@ -37,15 +37,17 @@ module tb_load;
 `ifdef POCKET_DARIA
 	// clk_arm on the PLL's lattice (docs/daria_step7/plan.md, F5). The VCO
 	// is 48 x clk_sys (687.27 MHz, 1.455 ns): clk_sdram is VCO/12 and
-	// clk_arm VCO/18 (38.18 MHz), half period 13.095 ns = 1.5 x
-	// T_HALF_SDRAM, PLL phase 0 (pll_core.v): a clk_arm rising edge meets a
-	// clk_sys rising edge every 3 clk_sys (8 clk_arm). +arm_div=19 selects
-	// the fallback, VCO/19 (36.17 MHz): rising edges every 19 VCO periods
-	// (27.645 ns), the falling edge 9.5 VCO periods after (the counter's odd
-	// duty correction), which the bench's 1 ps step gives as 13.823 ns high,
-	// 13.822 ns low. +arm_ofs=PS starts the lattice PS ps late (the phase
-	// runs). The check below stops the run if an edge leaves its lattice.
-	int arm_div = 18, arm_ofs = 0;
+	// clk_arm, by default, VCO/19 (36.17 MHz; pll_core.v's divider, plan
+	// 5.2): rising edges every 19 VCO periods (27.645 ns), PLL phase 0, so
+	// one meets a clk_sys rising edge every 19 clk_sys (48 clk_arm), the
+	// falling edge 9.5 VCO periods after (the counter's odd duty
+	// correction), which the bench's 1 ps step gives as 13.823 ns high,
+	// 13.822 ns low. +arm_div=18 selects VCO/18 (38.18 MHz), half period
+	// 13.095 ns = 1.5 x T_HALF_SDRAM, a rising edge on a clk_sys rising edge
+	// every 3 clk_sys (8 clk_arm). +arm_ofs=PS starts the lattice PS ps late
+	// (the phase runs). The check below stops the run if an edge leaves its
+	// lattice.
+	int arm_div = 19, arm_ofs = 0;
 	bit arm_init = 1'b0, arm_ph = 1'b0;
 	always begin
 		if (!arm_init) begin

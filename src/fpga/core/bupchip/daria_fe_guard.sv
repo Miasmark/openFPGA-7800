@@ -6,9 +6,10 @@
 // = locked & (call_win | !cpu_ready). No reset: power-up initialised. The
 // SDC lines of 8.2 name daria_fe_guard:u_guard|pd_tog and |pd_rx.
 //
-// How it works (8.1). On the Pocket clk_sys = VCO/48 and clk_arm = VCO/18,
-// so a 144-VCO frame holds clk_sys edges at 0 (shared with a clk_arm edge),
-// 48 and 96, and clk_arm edges every 18. With the pd_tog -> pd_rx path held
+// How it works (8.1). At the design's divider clk_sys = VCO/48 and
+// clk_arm = VCO/18, so a 144-VCO frame holds clk_sys edges at 0 (shared
+// with a clk_arm edge), 48 and 96, and clk_arm edges every 18 (the build's
+// divider is pll_core.v's). With the pd_tog -> pd_rx path held
 // in [1, 6] ns by the SDC pair, the shared edge catches two toggles (those
 // launched at -36 and -18; the one launched on it arrives after it) and the
 // other two edges three each. So pd_rx keeps its value exactly at the shared

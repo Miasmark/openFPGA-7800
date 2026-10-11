@@ -21,7 +21,8 @@ second loads.
 Environment: WORK (default sim/work/step7/wire), VERILATOR (default
 /opt/verilator-5.040/bin/verilator), VL_JOBS (default 2), RTL_TREE (build
 another checkout's RTL with these benches: a mutant's scratch worktree),
-ARM_DIV (19: clk_arm at VCO/19; the guard is then expected unlocked), DIRECTED=1
+ARM_DIV (19, the default and pll_core.v's divider: clk_arm at VCO/19, where
+the guard never locks; 18: VCO/18, the guard expected locked), DIRECTED=1
 (also every fe_dir directed image, the whole-core directed set), PAL2600_PLAIN=0
 (pal2600 without its plain-build run, which is only reported).
 The log starts with the tree's HEAD and status, the tool and the binaries'
@@ -39,7 +40,7 @@ RTL_TREE = os.path.abspath(os.environ["RTL_TREE"]) if os.environ.get("RTL_TREE")
 GAMES = os.environ.get("GAMES", "")
 BIOS = os.environ.get("BIOS", "")
 BUPFW = os.environ.get("BUPFW", os.path.join(REPO, "src/fpga/mister/rtl/bupchip.hex"))
-ARM_DIV = os.environ.get("ARM_DIV", "18")
+ARM_DIV = os.environ.get("ARM_DIV", "19")
 TURBO = "Turbo-Arcade_demo_final_CG_NTSC.bin"
 
 
@@ -234,7 +235,7 @@ def run1(kind, name, args):
     rtl = os.path.join(d, "rtl")
     if not os.path.islink(rtl):
         os.symlink(os.path.join(WORK, kind, "rtl"), rtl)
-    a = list(args) + (["+arm_div=%s" % ARM_DIV] if kind == "daria" and ARM_DIV != "18" else [])
+    a = list(args) + (["+arm_div=%s" % ARM_DIV] if kind == "daria" else [])
     with open(os.path.join(d, "run.log"), "w") as log:
         log.write("-- %s %s\n" % (binary(kind), " ".join(a)))
         log.flush()

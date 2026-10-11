@@ -12,7 +12,8 @@
 #   NAME=NAME    the run directory, WORK/runs/NAME (default the image's name)
 #   FRAMES=N     +frames (default 1500)
 #   DARIA, ARM_DIV, VERILATOR, VL_JOBS, RTL_TREE: passed to run_sim.sh's build
-#                (ARM_DIV=19 also adds +arm_div=19 to the run)
+#                (ARM_DIV=18 or 19 also adds +arm_div to the run; tb_load's
+#                default is 19, pll_core.v's divider)
 # Writes WORK/runs/NAME/{fp,calls,slack,zero,frames}.csv and run.log; run.log
 # starts with the tree's HEAD and status, the Verilator and the binary's md5
 # (plan P23), then the bench's output, its exit status and the wall time per

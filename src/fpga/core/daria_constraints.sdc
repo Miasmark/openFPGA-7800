@@ -9,8 +9,8 @@
 # its constraint set changes. Padding for the DARIA build alone goes here,
 # never in core_constraints.sdc.
 #
-# Under POCKET_DARIA clk_arm (counter[3]) is VCO/18 (pll_core.v): its rising
-# edges meet clk_sys's only every 3 clk_sys (8 clk_arm), so the requirement
+# Under POCKET_DARIA clk_arm (counter[3]) is VCO/19 (pll_core.v): its rising
+# edges meet clk_sys's only every 19 clk_sys (48 clk_arm), so the requirement
 # derived from the edges can be as little as one VCO period. Every crossing
 # between the two goes through a synchroniser (two or three flops on a level
 # or a toggle), and the buses that go with a toggle are held until the far
@@ -38,7 +38,9 @@ set_min_delay -from [get_clocks $daria_arm] -to [get_clocks $daria_sys] -20.000
 # 8.1-8.2): one clk_arm toggle (pd_tog) into one clk_sys flop (pd_rx), which
 # is not a synchroniser (SYNCHRONIZER_IDENTIFICATION OFF in the RTL). 6 ns:
 # a toggle launched 8.73 ns before a clk_sys edge is always caught there.
-# 1 ns: the toggle launched on the shared edge is never caught on it.
+# 1 ns: the toggle launched on the shared edge is never caught on it. (That
+# is VCO/18's lattice, design.md 8.2; at VCO/19, the build's divider, the
+# guard never locks, 8.3, and the pair only bounds this one path.)
 # Register to register, so these two lines take precedence over the
 # clock-to-clock pair above on this one path.
 set_max_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
