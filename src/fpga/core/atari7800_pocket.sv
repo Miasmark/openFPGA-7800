@@ -852,7 +852,10 @@ assign PBin[0] = ~joya[8] & ~joyb[8];     // Reset
 // A 2600 image's region is measured from its video (the TIA's auto_pal). That
 // measurement restarts with the core's reset, and switching the master clock
 // to PAL resets the core, so the result is latched here until the next cart
-// load; otherwise a PAL 2600 game would flip back to NTSC and retune forever.
+// load. The latch alone does not keep a PAL 2600 game in PAL: while the
+// console is in reset (tia_en low, as through every retune) Auto reads
+// cart_region[0] instead. The PLL is therefore asked for region_pll (below),
+// which holds a 2600 image's region through its console resets.
 reg tia_pal_seen = 1'b0;
 always @(posedge clk_sys)
 	if (cart_download)
@@ -862,6 +865,28 @@ always @(posedge clk_sys)
 
 wire region_select = (region_setting == 2'd0) ?
 	(tia_en ? (tia_pal | tia_pal_seen) : cart_region[0]) : (region_setting == 2'd2);
+
+// The region asked of the PLL (is_pal_o, core_top.v's pll_region, whose
+// retune holds the console in reset through pll_busy). It follows
+// region_select a clock later, but is held while a 2600 image's region is not
+// known: during its download (once the header shows no A78) and the clock
+// after it, and while its console is in reset (tia_mode, tia_en low).
+// Unheld, region_select falls to cart_region[0] whenever a 2600 image's
+// console is in reset: 0 (cleared at the image's end), or the image's byte
+// 57 during its download. A PAL game's own retune, whose reset outlasts it,
+// would then ask for NTSC, that retune's reset for PAL again, and so on
+// without end; and a load's end could start a retune to a stale byte 57's
+// region. An A78 is not held: its region follows its header. A Region
+// setting changed while a 2600 image's console is in reset reaches the PLL
+// when it is released. A register, so that is_pal_o leaves clk_sys without
+// glitches (pll_region samples it on clk_74a).
+/* verilator lint_off PROCASSINIT */
+reg region_pll = 1'b0;
+/* verilator lint_on PROCASSINIT */
+wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (tia_mode & ~tia_en);
+always @(posedge clk_sys)
+	if (!region_pll_hold)
+		region_pll <= region_select;
 
 reg [15:0] rnd = 16'h5A5A;
 always @(posedge clk_sys) rnd <= {rnd[14:0], rnd[15] ^ rnd[13] ^ rnd[12] ^ rnd[10]};
@@ -1283,7 +1308,7 @@ assign B = pic_b;
 `endif
 
 assign tia_mode_o = tia_en;
-assign is_pal_o = region_select;
+assign is_pal_o = region_pll;
 // MARIA's frame follows region_select (274 visible lines for PAL, 224 NTSC).
 // A 2600 image's window follows the TIA's own region measurement (288 / 240),
 // which is what the stabiliser uses, whatever the Region setting says.
