@@ -461,7 +461,7 @@ module tb_frames;
 		begin
 			int tg, go, rt;
 			bit flight;
-			string since;
+			string since, verdict;
 			tg = n_tog - base_tog; go = n_go - base_go; rt = n_ret - base_ret;
 			// One call at most in flight at the end: posted (call_tog flipped,
 			// the busy up or about to rise) and not yet ended. Every ended call
@@ -471,9 +471,10 @@ module tb_frames;
 			calls_ok = cross_off || (tg == sys_calls + (flight ? 1 : 0) && go >= sys_calls && go <= tg && rt >= sys_calls && rt <= go);
 			since = "";
 			if (restarts != 0) since = " (since the last restart)";
+			verdict = calls_ok ? "consistent" : "MISMATCH";
+			if (cross_off) verdict = "not checked (a call in flight at a restart)";
 			$display("FRAMES calls: %0d busy periods (the 6507's), %0d call_tog flips, %0d call_go, %0d returned%s, %0d in flight at the end: %s",
-				sys_calls, tg, go, rt, since, flight, cross_off ? "not checked (a call in flight at a restart)" :
-				calls_ok ? "consistent" : "MISMATCH");
+				sys_calls, tg, go, rt, since, flight, verdict);
 		end
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
 			sys_calls, overruns, halts, halts != 0 ? int'(d_hcode) : 0, psram_viol, guard, unlocks);
