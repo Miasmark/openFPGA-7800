@@ -7,6 +7,8 @@
 # in daria_sync.tcl beside this file, which this file sources: Quartus
 # refuses SYNCHRONIZER_IDENTIFICATION in a qip (it tags each assignment of a
 # qip with -qip, an option that assignment does not take), and takes it from
-# a sourced Tcl file. See daria_sync.tcl.
+# a sourced Tcl file. See daria_sync.tcl. So does the DARIA build's one
+# fitter setting, ROUTER_REGISTER_DUPLICATION OFF (the guard's pd_tog and
+# pd_rx kept single registers), at the end of daria_sync.tcl.
 
 set_global_assignment -name SOURCE_TCL_SCRIPT_FILE [file join $::quartus(qip_path) daria_sync.tcl]
