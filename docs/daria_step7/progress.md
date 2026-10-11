@@ -108,15 +108,15 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
   - A 7800 image that the BIOS drops into 2600 mode is not covered by the hold. It could loop if its 2600-mode video measured PAL against an NTSC header. This is not simulated; M has the same exposure.
 - **For step 8, already in M:** `pll_region.v` checks `loading` only before a retune starts. A load that starts inside a retune's clock stop holds PSRAM CE# low for about 20 µs, where the part's maximum is 4 µs. P reduces the exposure to one retune per PAL game.
 
-### Phase 2: the D candidate at ÷18, and plan 5.2's ladder (2026-10-11)
+### Phase 2: the D candidate at ÷18, and the `clk_arm` ladder (2026-10-11)
 
 - **Q2** [sta] (D at `70a63ca`, ÷18, seeds 1 / 2 / 3):
   - `clk_sdram` +2.456 / +2.662 / +2.880 ns, which meets 5.3. The worst path is Flicker Blend.
   - Worst hold +0.123 / +0.053 / +0.115 ns.
   - ALMs 15,502 / 15,508 / 15,505 (83.9%), under the 15,523 guide.
   - `clk_arm` +0.548 / +0.115 / −1.736 ns. Seed 3 misses 5.2: 13 failing endpoints, TNS −8.837 ns.
-  - The failing `clk_arm` class is the same on every seed: a `daria_mem` window M10K → `bup_cpu` execute → register-file write data, 17-18 levels, 58-65% of it interconnect.
-- **Plan 5.2's ladder** (Q3) [sta], worse slow corner, seeds 1 / 2 / 3:
+  - The worst `clk_arm` path class is the same on every seed: a window or ROM RAM → `bup_cpu` execute → register-file write data, 17-18 levels, about 64% of it interconnect.
+- **The ladder** (Q3) [sta]. Plan 5.2's 0.3 ns rung, an extra 0.8 ns rung, and ÷19, each on seeds 1 / 2 / 3, at the worse slow corner:
 
   | Fit | `clk_arm` setup | `clk_sdram` setup | Worst hold | ALMs needed |
   |---|---|---|---|---|
@@ -125,27 +125,27 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
   | Q3b: ÷18, 0.8 ns padding | −0.662 / +0.395 / +0.509 | +2.322 / +3.047 / +3.010 | +0.110 / +0.084 / +0.120 | 15,504-15,519 |
   | Q3c: ÷19, no padding | **+1.477 / +1.638 / +1.614** | +2.724 / +2.686 / +2.874 | +0.097 / +0.107 / +0.100 | 15,472-15,505 |
 
+  - **The 0.3 ns rung still misses seed 3, so plan 5.2 now prescribes ÷19**, which meets 5.2 on every seed. Its cost: the guard never locks, so cart RAM collisions go back to the counted race, and Qyx's heaviest call rises to 97% of its budget.
   - **Padding does not fix ÷18.** Over the nine ÷18 fits, `clk_arm` averages +0.04 ns over a range of 2.7 ns, and 3 of 9 miss. 0.8 ns of padding made seed 1 worse, and the fitter never reached its own target (−1.462 / −0.405 / −0.291 ns in its view).
-  - **÷19 meets 5.2 on every seed**, so plan 5.2 now prescribes it. Its cost: the guard never locks, and cart RAM collisions go back to the counted race; Qyx's heaviest call rises to 97% of its budget.
-- **The guard's registers:**
+  - Q3a seed 3 is 2 ALMs over the guide; area alone triggers nothing (5.1).
+- **The guard's registers** (plan 5.4's checks (a)-(c) and (k)):
   - In 8 of the 12 fits the router duplicated `u_guard|pd_tog`, `pd_rx` or both, for routability. `ap_core.qsf` sets `ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION` on, and `PRESERVE_REGISTER` does not stop it.
-  - Every copy is timed at 6 / 1 ns. Still, (c) and (k) fail, and (a) and (b) fail when `pd_rx` is copied, because they find two paths. Only Q2 seed 2 and Q3c seed 3 pass every check.
-  - The guard's 6 ns window ran from +0.025 to +0.418 ns, and −0.031 ns once (Q3a seed 2).
+  - Every copy is timed at 6 / 1 ns. Still, (c) and (k) fail. Where `pd_rx` was copied, (a) and (b), which expect exactly one guard path, fail as well.
+  - Only Q2 seed 2 and Q3c seed 3 pass every check.
+  - The setup slack of `pd_tog` → `pd_rx` against 6 ns, at slow 85 °C, ran from +0.025 to +0.418 ns, and −0.031 ns once (Q3a seed 2).
 - **Mode B through the wrapper at ÷18** (D, `MODE_B=1 WRAPPER=1 WIN_KB=64`) passes 9 of 9 runs:
-  - Galagon, SF2fix, draconian RC8 and Turbo at phase 0 for 300 frames; Spiders at phase 0 for 600 frames; Galagon and Spiders at 8,730 ps and at 17,460 ps for 600 frames.
-  - Calls: 8,318 compared with upstream, 0 differ.
-  - Every front-end bad counter is 0.
-  - The guard locks at the model's edge (16 / 18 / 14), with 0 unlocks.
-  - `coll_d_same`, `coll_d_ld_same` and `coll_ww_same` are 0.
-  - 0 halts, 0 PSRAM violations.
-  - Late calls as R1: Spiders 16, at frames 557-572.
-  - The 300-frame runs repeat step 6's mode-B counts exactly. The five 600-frame runs match R1's `fp.csv` in every column over frames 1-599.
-  - Mode B does not check the Pocket's 6507 release and stall timeline, the region hold or a PAL image. `tb_wire` and the frame runs cover those.
-- **For the owner's "same frames" question:** in mode B the console resumes when upstream's call ends. DARIA's front end ends almost every call earlier: by 0.1-3.2 thousand `clk_sys`, and later only in 1 of Galagon's 599 calls and 137 of draconian's 600.
-  - In the DARIA build DARIA's own end applies, so the 6507 resumes earlier. That fits lane I4's Galagon RIOT RAM differing in every frame.
-  - The likely cause is that shift, not a call's result: every call's registers, RAM writes and MMIO matched upstream.
+  - **The runs:** Galagon, SF2fix, draconian RC8 and Turbo at phase 0 for 300 frames; Spiders at phase 0 for 600 frames; Galagon and Spiders at 8,730 ps and 17,460 ps for 600 frames.
+  - **Calls:** 8,318 compared with upstream, 0 differ. Late calls are as R1: Spiders 16 at frames 557-572 at each phase, 0 on the other images.
+  - **Guard and collisions:** the guard locks at the model's edge (16 / 18 / 14 at phases 0 / 8,730 / 17,460 ps) with 0 unlocks. `coll_d_same`, `coll_d_ld_same` and `coll_ww_same` are 0, and so is every front-end bad counter.
+  - **Faults:** 0 halts, 0 PSRAM violations.
+  - **Against earlier runs:** the 300-frame Galagon, SF2fix and draconian runs repeat step 6's mode-B counts exactly, except the run length and the `guard_on` share, because the wrapper releases the console later; Turbo has no step-6 counterpart. The five 600-frame runs match R1's `fp.csv` in every column over frames 1-599.
+  - **Not covered:** the frame runs cover the Pocket's 6507 release and stall timeline, and `tb_load +retune` and `tb_wire` the region logic. No PAL image runs in mode B.
+- **For the owner's "same frames" question:**
+  - In mode B the console resumes when the later of the two calls ends, which is upstream's on almost every call.
+  - DARIA's front end ends calls up to about 3.2 thousand `clk_sys` earlier. It ends later in only 1 of Galagon's 599 calls, 1 of SF2fix's 525, 59 of Turbo's 599 and 137 of draconian's 600 (phase-0 runs), and in none of Spiders' 1,199.
+  - In the DARIA build DARIA's own end applies, so the 6507 resumes earlier. That earlier release (plan 7.4's release-shift rule), not a call's result, is the likely cause of lane I4's Galagon RIOT RAM differing in every frame: every call's registers, RAM writes and MMIO matched upstream.
 - **Still running at the end of 2026-10-11:**
-  - On D: the frame runs against R1, the regression gates and a whole-commit review.
-  - Plan 5.2's checks at ÷19: mode B at ÷19 with each collision's edge distance recorded (Galagon and Mappy first, then phase 2's set) and `tb_s4` at ÷19.
+  - On D: the frame-run report (the runs are done), the regression gates, and a whole-commit review.
+  - Plan 5.2's checks at ÷19: mode B at ÷19 with each collision's edge distance recorded (Galagon and Mappy first, then phase 2's set), and `tb_s4` at ÷19.
   - The guard's registers: a fix that keeps each a single register, and ÷19 fits of it on seeds 1-3.
-- **Owner (2026-10-11):** nothing major starts before Tuesday 13 October, 7 PM Eastern. The owner decides between ÷18 and ÷19 after the ÷19 collision results. D's fixes, P's adoption into D, and R2 wait for that decision.
+- **Owner (2026-10-11):** nothing major starts before Tuesday 13 October, 7 PM Eastern (23:00 UTC). The owner decides between ÷18 and ÷19 after the ÷19 collision results. D's fixes, P's adoption into D, and R2 wait for that decision.

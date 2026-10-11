@@ -69,7 +69,7 @@ Instead, write a short continuation script:
 **The owner's rule (2026-10-09):** at most three simulations while no Quartus job runs, and two while one does (`docs/daria_step7/plan.md` 4.2). Quartus runs one job at a time, under the lock of ENVIRONMENT.md 3.5.
 
 **The slot helper.** The step-7 runs used a small helper outside the repository that gives each call one slot:
-- Slot A is always available. Slot C, the orchestrating session's own simulation, is lent to lanes while that session runs none, so it is also always available.
+- Slot A is always available. Slot C, the orchestrating session's own simulation slot, is lent to lanes while that session runs none; like A, it does not depend on Quartus.
 - Slot B is used only while Quartus is idle. A job in slot B is stopped with `SIGSTOP` on its process group while a Quartus job runs, and continued afterwards.
 - So three simulations run while no Quartus job runs (A, B, C), and two while one does (A, C).
 - A job counts as Quartus while it holds the lock or a container runs.
@@ -78,13 +78,13 @@ The helper must wait on slot A with a blocking `flock` (in short timeouts), not 
 
 **Replacing the helper.** Replace it atomically (write a new file, then `mv`). Callers already waiting keep running the old file, so a new slot only serves calls made after the change.
 
-**Jobs that need two simulations.** A gate that runs two simulations at once (`check.sh` with `JOBS=2`) was wrapped by its agent in scripts that took two slots:
-- One version needed both slots free within seconds of each other and starved for hours.
-- Another held slot A idle while it waited for B.
+**Jobs that need two simulations.** A gate that runs two simulations at once (`sim/bupchip/s4/check.sh` with `JOBS=2`; its default is 3) was wrapped by its agent in scripts that took two slots:
+- One version needed both slots free within seconds of each other. It was still waiting after more than 13 hours.
+- The other two held slot A idle while they waited for B, including the version written to fix that.
 
-Run such a job one simulation at a time inside a single slot.
+Run such a job one simulation at a time inside a single slot call (for this gate, `S4_JOBS=1`).
 
-**Expect queues.** On 2026-10-11 slot A had about eight waiters and one job waited 7.5 hours. The nine-fit ladder stopped slot B for about 3.5 hours. When the queue is that long, start fewer simulation batches, or let a lane finish before starting the next.
+**Expect queues.** On 2026-10-11 slot A had about eight waiters and one job waited 7.5 hours; it was queued before slot C existed, so it could never use C. The nine-fit ladder stopped slot B for about 3.5 hours. When the queue is that long, start fewer simulation batches, or let a lane finish before starting the next.
 
 ## 4. Disk
 
