@@ -454,11 +454,15 @@ module tb_frames;
 			g_dbg_lk, g_lk, g_lk_bad, g_ul_bad, d_hcode);
 		begin
 			int tg, go, rt;
+			string since;
 			tg = n_tog - base_tog; go = n_go - base_go; rt = n_ret - base_ret;
-			calls_ok = tg - sys_calls inside {[-1:1]} && go - sys_calls inside {[-1:1]} && rt - sys_calls inside {[-1:1]};
+			// each within one of the busy periods (the call in flight at the end)
+			calls_ok = tg >= sys_calls - 1 && tg <= sys_calls + 1 && go >= sys_calls - 1 && go <= sys_calls + 1 &&
+				rt >= sys_calls - 1 && rt <= sys_calls + 1;
+			since = "";
+			if (restarts != 0) since = " (since the last restart)";
 			$display("FRAMES calls: %0d busy periods (the 6507's), %0d call_tog flips, %0d call_go, %0d returned%s: %s",
-				sys_calls, tg, go, rt, restarts ? " (since the last restart)" : "",
-				calls_ok ? "equal (within the call in flight at the end)" : "MISMATCH");
+				sys_calls, tg, go, rt, since, calls_ok ? "equal within one" : "MISMATCH");
 		end
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
 			sys_calls, overruns, halts, halts != 0 ? int'(d_hcode) : 0, psram_viol, guard, unlocks);
