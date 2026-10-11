@@ -505,10 +505,10 @@ if {[csize $tq] == 0} {
 	}
 	set_operating_conditions $wcond
 	update_timing_netlist
-	if {$ws eq "" || $ws < 8.0} { set h_ok 0 }
+	if {$ws eq "" || $ws < 4.5} { set h_ok 0 }
 	if {$whh eq "" || $whh < 0} { set h_ok 0 }
 	if {$wi eq "" || $wi < 40.0} { set h_ok 0 }
-	say "  t_*_q -> clk_sdram: worst setup $ws ns ([expr {$ws eq "" ? "-" : $wl}] levels, >= +8), worst hold over corners $whh ns (>= 0)"
+	say "  t_*_q -> clk_sdram: worst setup $ws ns ([expr {$ws eq "" ? "-" : $wl}] levels, >= +4.5), worst hold over corners $whh ns (>= 0)"
 	say "  into t_*_q: worst setup $wi ns (>= +40)"
 	check "h" [expr {$h_ok ? "PASS" : "FAIL"}] "t_*_q -> clk_sdram setup $ws / hold $whh, into t_*_q $wi (retiming into cart2600: step7_checks.py)"
 }

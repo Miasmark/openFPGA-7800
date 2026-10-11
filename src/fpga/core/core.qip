@@ -81,6 +81,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) b
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_mem.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_call.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_mmio.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_smp.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_dbg_snap.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_pkg.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_seq.sv]

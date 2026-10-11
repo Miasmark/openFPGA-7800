@@ -19,8 +19,8 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 ## Changes from upstream
 
 Eight upstream files are modified (`top.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
-`banks2600.sv`), three firmware images are removed, and the POKEY is swapped
+`Maria/video_sync.sv`, `video_mux.sv`, `EEPROM_24LC256.sv`, and for the firmware switch
+`cart.sv`, `cart2600.sv`, `banks2600.sv`), three firmware images are removed, and the POKEY is swapped
 for an older one.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
