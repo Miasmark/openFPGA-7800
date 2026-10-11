@@ -987,7 +987,16 @@ module tb_s4;
 	// ---- the BUP_DEBUG snapshot (see the header) ---------------------------------------------
 	int snap_chg = 0, snap_off_edge = 0, snap_fast = 0, snap_torn = 0;
 `ifdef S4_SNAP
-	localparam int SNAP_PER = dut.dbg_snap.PERIOD;   // the instance's own period (1,024 clk_sys in D)
+	// The instance's own period (1,024 clk_sys in D), read at run time: in
+	// a constant expression, version 5.040 of the simulator gives a
+	// hierarchical parameter its default, not the instance's override (a
+	// PERIOD(256) instance read as 1,024); the run-time read gives the override.
+	int          SNAP_PER = 0;
+	initial begin
+		SNAP_PER = dut.dbg_snap.PERIOD;
+		if (SNAP_PER < 2) $fatal(1, "tb_s4: dut.dbg_snap.PERIOD %0d", SNAP_PER);
+		$display("snapshot   bup_dbg_snap's period %0d clk_sys (dut.dbg_snap.PERIOD)", SNAP_PER);
+	end
 	wire  [63:0] snap_arm = {dut.dbg_status_arm, dut.halt_pc};   // clk_arm
 	wire  [63:0] snap_sys = {dbg_status, dbg_halt_pc};           // clk_sys copies
 	longint      snap_ns = 0;                // clk_sys rising edges since time 0
