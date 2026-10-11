@@ -11,16 +11,29 @@
 //                         so the SDRAM <-> core crossing is synchronous.
 //   outclk_2  clk_sys_90  clk_sys shifted 90 degrees, for the APF video
 //                         interface's sample clock.
-//   outclk_3  clk_arm     28.636363 MHz  - exactly 2 x clk_sys, edge aligned:
-//                         the BupChip's CPU, ARIA (core/bupchip/,
-//                         docs/BUPCHIP_CORE.md, "Clocking"). Nothing uses
-//                         it without POCKET_BUPCHIP.
+//   outclk_3  clk_arm     the BupChip's CPU (core/bupchip/;
+//                         docs/BUPCHIP_CORE.md, "Clocking"; docs/DARIA_CORE.md).
+//                         Counter 3 is selected by macro; both settings are
+//                         the tool's output (C3 = 18 and C3 = 24), only the
+//                         `ifdef is by hand:
+//                         - POCKET_DARIA: VCO/18 = 38.181818 MHz, DARIA's ARM
+//                           (decision 7). Rising edges meet clk_sys's every
+//                           3 clk_sys = 8 clk_arm (a 48:18 lattice); half
+//                           period 13.095 ns = 1.5 x clk_sdram's.
+//                         - otherwise: VCO/24 = 28.636363 MHz, exactly
+//                           2 x clk_sys, edge aligned (ARIA).
+//                         Phase 0 and counter preset 1, like C0, so STA puts
+//                         its rising edges on clk_sys's. Nothing uses it
+//                         without POCKET_BUPCHIP.
 //
-// VCO = 74.25 * (9 + K/2^32); C0 = C2 = 48, C1 = 12, C3 = 24. PAL retunes K
-// alone (core_top.v, pll_cfg), so every output and the 90 degree shift scale
-// together: NTSC K = 1100363522 (14.3181818 MHz), PAL K = 737741760
-// (14.1875800 MHz), both exact to the 32 bit fraction; clk_arm is then
-// 28.375160 MHz.
+// VCO = 74.25 * (9 + K/2^32); C0 = C2 = 48, C1 = 12, C3 = 18 (POCKET_DARIA)
+// or 24. PAL retunes K alone (core_top.v, pll_cfg; pll_region.v writes only
+// the fraction and the start register, so C3 is kept), and every output and
+// the 90 degree shift scale together: NTSC K = 1100363522 (14.3181818 MHz),
+// PAL K = 737741760 (14.1875800 MHz), both exact to the 32 bit fraction;
+// clk_arm is then 37.833547 MHz (C3 = 18) or 28.375160 MHz (C3 = 24).
+// The fallback C3 = 19 (36.172 MHz) is regenerated the same way
+// (docs/DEVELOPING.md, "Regenerate the PLL").
 module  pll_core(
 
 	// interface 'refclk'
@@ -67,7 +80,11 @@ module  pll_core(
 		.output_clock_frequency2("14.318181 MHz"),
 		.phase_shift2("17460 ps"),
 		.duty_cycle2(50),
+`ifdef POCKET_DARIA
+		.output_clock_frequency3("38.181816 MHz"),
+`else
 		.output_clock_frequency3("28.636362 MHz"),
+`endif
 		.phase_shift3("0 ps"),
 		.duty_cycle3(50),
 		.output_clock_frequency4("0 MHz"),
@@ -143,6 +160,15 @@ module  pll_core(
 		.c_cnt_in_src2("ph_mux_clk"),
 		.c_cnt_bypass_en2("false"),
 		.c_cnt_odd_div_duty_en2("false"),
+`ifdef POCKET_DARIA
+		.c_cnt_hi_div3(9),
+		.c_cnt_lo_div3(9),
+		.c_cnt_prst3(1),
+		.c_cnt_ph_mux_prst3(0),
+		.c_cnt_in_src3("ph_mux_clk"),
+		.c_cnt_bypass_en3("false"),
+		.c_cnt_odd_div_duty_en3("false"),
+`else
 		.c_cnt_hi_div3(12),
 		.c_cnt_lo_div3(12),
 		.c_cnt_prst3(1),
@@ -150,6 +176,7 @@ module  pll_core(
 		.c_cnt_in_src3("ph_mux_clk"),
 		.c_cnt_bypass_en3("false"),
 		.c_cnt_odd_div_duty_en3("false"),
+`endif
 		.c_cnt_hi_div4(1),
 		.c_cnt_lo_div4(1),
 		.c_cnt_prst4(1),
