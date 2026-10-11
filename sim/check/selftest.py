@@ -793,13 +793,19 @@ def gate_cases(w):
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
-    def sp(extra_after=False):
+    def sp(extra_after=False, riot_run=None):
         def m(fp, c, s, st):
             for f in range(150, 166):
                 setcol(fp, f, "video")
                 setcol(fp, f, "len_sys")
+                if riot_run:
+                    setcol(fp, f, "riot")
             if extra_after:
                 setcol(fp, 170, "riot")
+            if riot_run:
+                shift_call(c, riot_run[0])
+                for f in range(riot_run[0], riot_run[1] + 1):
+                    setcol(fp, f, "riot")
         return m
     expect("spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
                                "--excuse", "150-165"], True)
@@ -807,6 +813,14 @@ def gate_cases(w):
                                      "--excuse", "150-165"], False)
     expect("spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
                                            "--excuse", "150-165"], False)
+    # a release_shift run must settle on truly equal frames: the excused
+    # overrun frames (riot differing there too) do not count
+    expect("spiders_release_shift_3_frames_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
+            "--excuse", "150-165"], False)
+    expect("spiders_release_shift_well_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
+            "--excuse", "150-165"], True)
 
 
 def main():

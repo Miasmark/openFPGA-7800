@@ -294,6 +294,7 @@ def gate(a):
     cap = a.shift_cap if a.shift_cap is not None else shift_cap(a.frames)
     for c in COLS + (["cpu"] if rr and rc and "cpu" in rr[0] and "cpu" in rc[0] else []):
         diff = [f for f in common if fr[f][c] != fc[f][c]]
+        diff_all = diff[:]                  # the settle rule counts truly equal frames only
         if excuse:
             inside = [f for f in diff if excuse[0] <= f <= excuse[1]]
             after = [f for f in diff if f > excuse[1]]
@@ -313,8 +314,9 @@ def gate(a):
         runs = runs_of(diff)
         col_bad = []
         for i, (f0, f1) in enumerate(runs):
-            # the equal frames after the run: up to the next differing frame, or the file's end
-            nxt = runs[i + 1][0] if i + 1 < len(runs) else end + 1
+            # the equal frames after the run: up to the next differing frame (an
+            # excused one too), or the file's end
+            nxt = next((f for f in diff_all if f > f1), end + 1)
             settle = nxt - f1 - 1
             if f0 in shifted_frames and f1 - f0 + 1 <= SHIFT_MAX and settle >= SHIFT_MAX:
                 shift_count[c] += 1
@@ -324,7 +326,7 @@ def gate(a):
                        f"lasts {f1 - f0 + 1} frames (> {SHIFT_MAX})" if f1 - f0 + 1 > SHIFT_MAX else
                        "it reaches the last frame of the file: the column is never equal again" if f1 == end else
                        f"the column is equal for only {settle} frames after it before the file ends (< {SHIFT_MAX})"
-                       if i + 1 == len(runs) else
+                       if nxt == end + 1 else
                        f"the column is equal for only {settle} frames after it (< {SHIFT_MAX}): the next difference "
                        f"starts at frame {nxt}")
                 col_bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
