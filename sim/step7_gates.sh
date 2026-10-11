@@ -58,7 +58,10 @@
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
 #                row 5: the non-DARIA one and DARIA=1 ARM38=1
-#                PSRAM_CS=50.0. Row 5 needs the game jobs (S4_GAME=FILE and
+#                PSRAM_CS=50.0, the latter with SNAP_REQUIRED=1 once
+#                bup_dbg_snap.sv is in the tree (every tb_s4 run must then
+#                print "snap: ok": the snapshot check of plan 1.2 rows 5 and
+#                10 cannot be skipped). Row 5 needs the game jobs (S4_GAME=FILE and
 #                REFDIR) and the firmware jobs (check.sh reads the tree's
 #                src/fpga/mister/rtl/bupchip.hex): without them the jobs
 #                that can run must pass and the gate reports PARTIAL, which
@@ -74,8 +77,11 @@
 #                in FRAMES_LIST (default Juno-First_demo_final_CGP_NTSC, the
 #                calibration image), GAMES/**/NAME.bin run for as many frames
 #                as R1_DIR/NAME/fp.csv holds plus one, and compared with
-#                frame_gate.py: --strict when R1's run made no call (a
-#                non-ARM image: every column equal), else the gate's rules
+#                frame_gate.py --auto: the scheme tb_frames' real loader
+#                found decides, and R1's detect2600 must have chosen the same
+#                (P27); a DPC+ or CDF image takes the gate's rules with
+#                --scheme (an R1 run without calls is then void, P27), any
+#                other --strict (every column equal, no call on either side)
 #                (FRAMES_GUARD: locked, unlocked or none; default locked).
 #                The images are read by path, never copied; the runs go to
 #                OUT/frames/runs. Needs GAMES and R1_DIR
@@ -300,8 +306,10 @@ g_s4_check() {
 	[ -n "${S4_GAME:-}" ] && game=("$S4_GAME")
 	echo "== s4/check.sh, the non-DARIA set"
 	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
-	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0)"
-	DARIA=1 ARM38=1 PSRAM_CS=50.0 JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	local snap=0
+	[ -f "$REPO/src/fpga/core/bupchip/bup_dbg_snap.sv" ] && snap=1
+	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
+	DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
@@ -315,7 +323,7 @@ g_lint() { bash "$HERE/lint_step7.sh"; }
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
 g_frames() {
-	local rc=0 name img ref n calls d="$OUT/frames"
+	local rc=0 name img ref n d="$OUT/frames"
 	mkdir -p "$d"
 	for name in ${FRAMES_LIST:-Juno-First_demo_final_CGP_NTSC}; do
 		img="$(find "$GAMES" -name "$name.bin" -print -quit)"
@@ -325,20 +333,8 @@ g_frames() {
 		[ -f "$ref/fp.csv" ] || { echo "  FAIL: no $ref/fp.csv"; rc=1; continue; }
 		n=$(( $(wc -l < "$ref/fp.csv") ))      # the header and frames 1..N-1: N lines
 		WORK="$d" NAME="$name" FRAMES="$n" slot bash "$HERE/run_frames.sh" "$img" || rc=1
-		calls="$(python3 - "$ref" <<-'PY'
-			import csv, gzip, io, os, sys
-			d = sys.argv[1]
-			p = os.path.join(d, "calls.csv")
-			t = open(p).read() if os.path.exists(p) else gzip.open(p + ".gz", "rt").read() if os.path.exists(p + ".gz") else ""
-			print(sum(1 for _ in csv.DictReader(io.StringIO(t))))
-			PY
-		)"
-		if [ "${calls:-0}" = 0 ]; then
-			python3 "$HERE/check/frame_gate.py" --strict "$ref/fp.csv" "$d/runs/$name/fp.csv" --frames "$n" || rc=1
-		else
-			python3 "$HERE/check/frame_gate.py" "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-				--expect-guard "${FRAMES_GUARD:-locked}" || rc=1
-		fi
+		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
+			--expect-guard "${FRAMES_GUARD:-locked}" || rc=1
 	done
 	return $rc
 }

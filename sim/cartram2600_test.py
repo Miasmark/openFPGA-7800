@@ -362,6 +362,8 @@ def parse(log):
     r["ports"] = tuple(int(x) for x in m.groups()) if m else None
     m = re.search(r"^CARTRAM post-reset reads: (\d+) .*histogram:(.*)$", t, re.M)
     r["post"] = {int(a): int(b) for a, b in re.findall(r"(\d+):(\d+)", m.group(2))} if m else {}
+    m = re.search(r"^RST armed: .*?, mode (\w+),", t, re.M)
+    r["rst_mode"] = m.group(1) if m else None
     r["rst"] = []
     for m in re.finditer(r"^RST (\d+) K=(\d+): strobe (.*?); (.*?); cart(.*?); bios reads (\d+); bus before E6 (\w+); "
                          r"P2 coincidences (\d+)$", t, re.M):
@@ -491,6 +493,11 @@ def check(log, name, blend, profile="auto", expect_counts=True, ref=None):
 # ------------------------------------------------------------------ runs
 def build(a):
     env = dict(os.environ, WORK=a.work, BUILD_TOP="tb_cartram", VL_JOBS=os.environ.get("VL_JOBS", "2"))
+    # one Verilator for every build (plan 7.5): 5.040 unless VERILATOR names
+    # another (run_sim.sh alone would take PATH's, which may be 5.020)
+    if not env.get("VERILATOR"):
+        v = "/opt/verilator-5.040/bin/verilator"
+        env["VERILATOR"] = v if os.access(v, os.X_OK) else "verilator"
     if a.rtl_tree:
         env["RTL_TREE"] = os.path.abspath(a.rtl_tree)
     r = subprocess.run(["bash", os.path.join(HERE, "run_sim.sh")], env=env, capture_output=True, text=True)
@@ -691,6 +698,17 @@ def check_reset(log, run_name, image_name, profile="auto", ref=None):
             bad.append("no strobe at E1 at K=" + ",".join(str(x["k"]) for x in nos) + " (expected exactly at K=0)")
     elif nos:
         bad.append(f"{len(nos)} resets without a strobe at E1")
+    # the strobe at E1 is the kind the run's mode asks for: a read in an rd
+    # run, a write in a wr or ar run (a cycle search that drifts to the other
+    # kind would test the wrong path unseen)
+    want_kind = {"rd": "read", "wr": "write", "ar": "write"}.get(r["rst_mode"])
+    if r["rst"] and want_kind is None:
+        bad.append(f"no run mode in the RST armed line (mode {r['rst_mode']})")
+    elif want_kind:
+        wk = [x for x in rs if not x["nos"] and not x["strobe"].startswith(want_kind + " ")]
+        if wk:
+            bad.append(f"{len(wk)} resets saw a strobe of the other kind than mode {r['rst_mode']}'s ({want_kind}) "
+                       f"at K=" + ",".join(str(x["k"]) for x in wk))
     wd = [x for x in rs if x["issued"] and x["data"] is not None and not x["strobe"].endswith("data " + x["data"])]
     if wd:
         bad.append(f"{len(wd)} writes issued with another byte than the strobe's")

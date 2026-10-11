@@ -111,8 +111,10 @@
 //                   that reaches it before its pops are done, or a run still
 //                   going 1 s later, ends with "result: timeout"
 //
-// The BUP_DEBUG snapshot (built with -DS4_SNAP: POCKET_DARIA, and a
-// bup_dbg_snap instance dbg_snap in bupchip_pocket.sv; build_s4.sh decides):
+// The BUP_DEBUG snapshot (built with -DS4_SNAP: build_s4.sh sets it in every
+// POCKET_DARIA build once core/bupchip/bup_dbg_snap.sv exists; the bench reads
+// the period from the instance, dut.dbg_snap.PERIOD, so such a build fails to
+// elaborate when bupchip_pocket.sv has no bup_dbg_snap instance dbg_snap):
 // dbg_status and dbg_halt_pc are clk_sys copies of the clk_arm words
 // dut.dbg_status_arm and dut.halt_pc (docs/daria_step7/plan.md P15, open
 // item 11). Checked while it runs: the copies change only on a clk_sys rising
@@ -984,7 +986,7 @@ module tb_s4;
 	// ---- the BUP_DEBUG snapshot (see the header) ---------------------------------------------
 	int snap_chg = 0, snap_off_edge = 0, snap_fast = 0, snap_torn = 0;
 `ifdef S4_SNAP
-	localparam int SNAP_PER = 1024;          // bup_dbg_snap's PERIOD as bupchip_pocket.sv sets it
+	localparam int SNAP_PER = dut.dbg_snap.PERIOD;   // the instance's own period (1,024 clk_sys in D)
 	wire  [63:0] snap_arm = {dut.dbg_status_arm, dut.halt_pc};   // clk_arm
 	wire  [63:0] snap_sys = {dbg_status, dbg_halt_pc};           // clk_sys copies
 	longint      snap_ns = 0;                // clk_sys rising edges since time 0
@@ -1053,7 +1055,7 @@ module tb_s4;
 		$display("snap: %0s changes=%0d off_edge=%0d fast=%0d torn=%0d end_equal=%0d",
 			ok ? "ok" : "FAIL", snap_chg, snap_off_edge, snap_fast, snap_torn, eq);
 `else
-		$display("snap: na (no bup_dbg_snap instance in bupchip_pocket.sv, or not a POCKET_DARIA build)");
+		$display("snap: na (built without S4_SNAP: not a POCKET_DARIA build, or no bup_dbg_snap.sv in the tree)");
 `endif
 	endtask
 

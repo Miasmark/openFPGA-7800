@@ -14,12 +14,14 @@
 #                  instruction (16, no throttle)
 #   DARIA=1        the wrapper built with POCKET_DARIA (docs/DARIA_CORE.md):
 #                  THUMB 1, the cache's two ways, daria_mem, daria_call,
-#                  daria_mmio and daria_smp, in the BupChip profile; and
-#                  bup_dbg_snap.sv when it exists (lane I3's file, which
-#                  arrives with commit D). When bupchip_pocket.sv instantiates
-#                  bup_dbg_snap, the bench is built with -DS4_SNAP and checks
-#                  the snapshot (tb_s4.sv's header; object directory _snap);
-#                  the file must then exist
+#                  daria_mmio and daria_smp, in the BupChip profile; and,
+#                  once bup_dbg_snap.sv exists (lane I3's file, which arrives
+#                  with commit D), that file with -DS4_SNAP: the bench checks
+#                  the snapshot (tb_s4.sv's header; object directory _snap).
+#                  It reads the instance dut.dbg_snap's PERIOD, so the build
+#                  fails when bupchip_pocket.sv does not instantiate
+#                  bup_dbg_snap as dbg_snap (under BUP_DEBUG and POCKET_DARIA):
+#                  a tree that has the file cannot skip the check
 #   PSRAM_CS       psram.sv's CLOCK_SPEED (28.636364)
 #   WORK           build products (default sim/work/bupchip/s4)
 set -e
@@ -48,11 +50,8 @@ if [ "${DARIA:-0}" != 0 ]; then
 	OBJ="${OBJ}_daria"
 	DEFS+=(-DPOCKET_DARIA)
 	SRCS+=("$CORE/daria_mem.sv" "$CORE/daria_call.sv" "$CORE/daria_mmio.sv" "$CORE/daria_smp.sv")
-	[ -f "$CORE/bup_dbg_snap.sv" ] && SRCS+=("$CORE/bup_dbg_snap.sv")
-	# an instance "bup_dbg_snap [#(...)] NAME (", comments removed
-	if sed 's,//.*,,' "$CORE/bupchip_pocket.sv" | tr '\n' ' ' \
-			| grep -qE '(^|[^A-Za-z0-9_$.])bup_dbg_snap\s*(#\s*\([^;]*\))?\s*[A-Za-z_][A-Za-z0-9_$]*\s*\('; then
-		[ -f "$CORE/bup_dbg_snap.sv" ] || { echo "build_s4.sh: bupchip_pocket.sv instantiates bup_dbg_snap, but $CORE/bup_dbg_snap.sv does not exist" >&2; exit 2; }
+	if [ -f "$CORE/bup_dbg_snap.sv" ]; then
+		SRCS+=("$CORE/bup_dbg_snap.sv")
 		OBJ="${OBJ}_snap"
 		DEFS+=(-DS4_SNAP)
 	fi
@@ -74,7 +73,9 @@ rm -rf "$OBJ"
 mkdir -p "$OBJ"
 "$VERILATOR" --binary --timing -O3 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
 	-Wno-MULTIDRIVEN --top-module tb_s4 "${DEFS[@]}" -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
-	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2; echo "build failed: $OBJ.log" >&2; exit 1; }
+	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2
+	     grep -q "dbg_snap" "$OBJ.log" && echo "build_s4.sh: with bup_dbg_snap.sv in the tree, tb_s4 needs bupchip_pocket.sv's bup_dbg_snap instance dbg_snap (S4_SNAP)" >&2
+	     echo "build failed: $OBJ.log" >&2; exit 1; }
 find "$OBJ" -name '*.gch' -delete
 find "$OBJ" -name '*.o' ! -name 'vtb' -delete 2>/dev/null || true
 echo "$OBJ/vtb"

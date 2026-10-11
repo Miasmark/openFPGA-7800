@@ -142,6 +142,9 @@
 	// ends' ports: state RAM port B, call_tog, ret_tog, ready.
 	logic clk_74a = 0;
 	always #6734 clk_74a = ~clk_74a;
+	// top.sv's mapper_ram_size == 32768 is force_bs == BANKCDF && mapper_revision
+	// == 3 (top.sv), the expression atari7800_pocket.sv's daria_ram32 uses on the
+	// same force_bs (its daria_fbs, which it gives main): the same signal
 	wire         d_ram32 = dut.mapper_ram_size == 16'd32768;
 	int          d_await = 0;		// +d_await has no effect here: the cache makes the waits
 	logic  [7:0] d_stb_addr = 0;

@@ -16,7 +16,14 @@
 //               (atari7800_pocket's reset, which main takes): frame 1 starts
 //               at the first VSYNC rise after it. With +frames=N the run stops
 //               at the N-th rise, so fp.csv holds frames 1..N-1 under its
-//               header, as tb_daria's does with +frames=N.
+//               header, as tb_daria's does with +frames=N. A later release
+//               (a retune's pll_busy, an init_busy dip) after a frame or a
+//               call has been written starts every file again, headers
+//               included, with the call numbers, the late-call measure and
+//               the input script (as at time 0); halts, PSRAM violations and
+//               unlocks still count over the whole run. The run.log line
+//               "FRAMES console reset released again ... the files start
+//               again" says so.
 //   calls.csv   call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl,arm_cyc,
 //               thumb,arm: tb_daria's first ten columns, one line per call as
 //               the 6507 sees it, counted as tb_daria counts upstream's: the
@@ -49,6 +56,12 @@
 //               unlocks counted from dbg_unlock (P22's two outputs), each
 //               checked on every clk_sys against u_fe's own guard (u_guard.lk,
 //               ev_unlock), and the line "FRAMES result: PASS|FAIL ...".
+//               The calls are also counted where they are posted and run
+//               (P22: from call_tog): u_fe's call_tog flips (clk_sys),
+//               bupchip's call_go and returned pulses (clk_arm); the line
+//               "FRAMES calls: ..." gives them, and each must equal the busy
+//               periods (C) within one (the call in flight at the end, or
+//               across a restart below), or the result is FAIL.
 //
 // The input script is tb_daria's (+fire_at=F, +reset_at=F, +select_at=F,
 // +play_at=F, +seed=N; defaults 420, 0, 0, 480, 1), applied by frame through
@@ -60,7 +73,16 @@
 //   +out=PREFIX    output path prefix, e.g. dir/              (default ./)
 //   +frames=N      frames to run after the last reset release  (default 1500)
 //   +nostop74      keep clk_74a running after the load (tb_load's +stop74 is
-//                  on by default here: nothing after the load needs it)
+//                  on by default here: nothing after the load needs it). In
+//                  the core clk_74a clocks the APF bridge's sides (the high
+//                  score and SaveKey RAMs' port B, idle after the load) and,
+//                  in bupchip_pocket.sv, only bup_tick48k: the 48 kHz tick
+//                  pops the PCM FIFO and loads the frame register, whose
+//                  audio_l/audio_r are 0 outside the Souper profile; in the
+//                  2600 profile the peripheral is held in reset (POCKET_DARIA),
+//                  so no tick reaches the 2600, daria_fe or the fingerprint.
+//                  Juno First's 1,500 frames are byte-identical with and
+//                  without it (the non-DARIA build).
 //   +region=N      tb_load's region_setting (default 1 here: NTSC forced)
 //   +maxms=MS      give up after MS ms of simulated time (default 2 x the
 //                  frames at 60 Hz, plus 2 s)
@@ -97,6 +119,13 @@ module tb_frames;
 		tb.region_tb = 2'(rg);
 		tb.stop74 = stop74;
 		tb.ext_end = 1'b1;
+		open_files();
+		$display("FRAMES image (tb_load's +image), %0d frames, region_setting %0d, stop74 %0d, out %s",
+			frames, rg, stop74, out);
+	end
+
+	// the five files, opened (truncated) with their headers
+	task automatic open_files();
 		fd_fp = $fopen({out, "fp.csv"}, "w");
 		if (fd_fp == 0) $fatal(1, "tb_frames: cannot open %sfp.csv", out);
 		$fwrite(fd_fp, "frame,len_sys,riot,video,audio\n");
@@ -108,9 +137,7 @@ module tb_frames;
 		$fwrite(fd_zero, "call,slack_zero_sys\n");
 		fd_frames = $fopen({out, "frames.csv"}, "w");
 		$fwrite(fd_frames, "frame,t_sys,len_sys,lines,calls,stall_sys,dma_sys\n");
-		$display("FRAMES image (tb_load's +image), %0d frames, region_setting %0d, stop74 %0d, out %s",
-			frames, rg, stop74, out);
-	end
+	endtask
 
 	// ---- taps inside main (top.sv) ------------------------------------------------------
 	wire        vsync_raw = `TF_M.tia_inst.vsync_o;
@@ -155,7 +182,7 @@ module tb_frames;
 	int     frame = 0;              // frames since the last reset release
 	logic   old_vs = 0, rst_q = 1;
 	logic   running = 0;
-	int     releases = 0;
+	int     releases = 0, restarts = 0;
 	logic [63:0] fp_video = FNV_OFFSET, fp_audio = FNV_OFFSET;
 	logic [31:0] fp_last = 0;
 	// calls (the 6507's view: daria_fe's arm_call_busy)
@@ -181,7 +208,18 @@ module tb_frames;
 	int     halts = 0;
 	logic   d_halted_q = 0;
 	int     g_lk_bad = 0, g_ul_bad = 0, unlocks = 0;
+	// the calls where they are posted and run (P22): call_tog flips, call_go and returned
+	int     n_tog = 0, n_go = 0, n_ret = 0, base_tog = 0, base_go = 0, base_ret = 0;
 `ifdef SIM_DARIA_FE
+	logic   tog_q = 0;
+	always @(posedge tb.clk_sys) begin
+		if (tb.dut.u_fe.call_tog !== tog_q) n_tog++;
+		tog_q <= tb.dut.u_fe.call_tog;
+	end
+	always @(posedge tb.clk_arm) begin
+		if (d_go) n_go++;
+		if (d_ret) n_ret++;
+	end
 	always @(posedge tb.clk_arm) begin
 		if (d_go) begin d_in = 1; d_cyc = 0; d_thumb = 0; d_arm = 0; end
 		else if (d_in) d_cyc++;
@@ -209,8 +247,13 @@ module tb_frames;
 		if (rst_q && !con_reset) begin
 			releases++;
 			running = 1;
+			if (releases > 1 && (frame > 0 || call_id > 0)) begin
+				$display("FRAMES console reset released again at clk_sys %0d, after frame %0d and %0d calls: the files start again, frames counted from here",
+					now, frame, call_id);
+				restart_files();
+			end else if (releases > 1)
+				$display("FRAMES console reset released again at clk_sys %0d: frames counted from here", now);
 			frame = 0;		// (t_vs keeps the last rise, 0 before any: tb_daria's line for a call before frame 1)
-			if (releases > 1) $display("FRAMES console reset released again at clk_sys %0d: frames counted from here", now);
 		end
 		rst_q = con_reset;
 		if (!running) begin
@@ -321,6 +364,25 @@ module tb_frames;
 		end
 	end
 
+	// A later release after something was written: the files and the per-run
+	// counts start again (halts, psram_viol and unlocks keep counting).
+	task automatic restart_files();
+		$fclose(fd_fp); $fclose(fd_calls); $fclose(fd_slack); $fclose(fd_zero); $fclose(fd_frames);
+		open_files();
+		// a call in flight at the release (none expected: the console reset
+		// abandons it) is logged as call 1 of the new files
+		call_id = sys_call ? 1 : 0; sys_calls = 0; overruns = 0; worst_slack = 64'sh7fffffffffffffff;
+		base_tog = n_tog; base_go = n_go; base_ret = n_ret;
+		if (sys_call) $display("FRAMES a call was in flight at the release: logged as call 1 of the new files, with its frame and line from before");
+		t_timer_write = -1; t_expire = -1; expired = 0; zeroed = 0; t_zero = -1;
+		await_poll = 0; pending_slack = 0; pending_zero = 0;
+		f_calls = 0; f_stall = 0; f_dma = 0;
+		fp_video = FNV_OFFSET; fp_audio = FNV_OFFSET;
+		restarts++;
+		script_reset();
+		tb.joy0 = '0;
+	endtask
+
 	// ---- the input script (tb_daria.sv's), by frame, through joy0 -------------------------
 	int fire_at = 420, reset_at = 0, select_at = 0, play_at = 480, seed = 1;
 	logic [15:0] lfsr = 16'hACE1;
@@ -332,8 +394,13 @@ module tb_frames;
 		void'($value$plusargs("select_at=%d", select_at));
 		void'($value$plusargs("play_at=%d", play_at));
 		void'($value$plusargs("seed=%d", seed));
-		lfsr = 16'(seed * 40503 + 1);
+		script_reset();
 	end
+	// as at time 0: nothing pressed (tb_load's joy0 starts at 0), the generator at its seed
+	function automatic void script_reset();
+		lfsr = 16'(seed * 40503 + 1);
+		fire = 0; sw_reset = 0; sw_select = 0; dirs = 0;
+	endfunction
 	function automatic void script();
 		fire      = (fire_at   != 0 && frame >= fire_at   && frame < fire_at + 6);
 		sw_reset  = (reset_at  != 0 && frame >= reset_at  && frame < reset_at + 6);
@@ -362,7 +429,7 @@ module tb_frames;
 
 	// ---- the end ------------------------------------------------------------------------
 	task automatic finish_run();
-		bit ok;
+		bit ok, calls_ok;
 		string guard;
 		int psram_viol;
 		real secs;
@@ -380,14 +447,22 @@ module tb_frames;
 		guard = "none";
 `endif
 		$display("ran %0d frames, %0d calls", frame, sys_calls);
-		$display("FRAMES %0d frames after release %0d of the console reset; %.3f s emulated; %0d calls, %0d late (overruns), worst slack %0d clk_sys",
-			frame, releases, secs, sys_calls, overruns, sys_calls == 0 ? 0 : worst_slack);
+		$display("FRAMES %0d frames after release %0d of the console reset (the files started again %0d times); %.3f s emulated; %0d calls, %0d late (overruns), worst slack %0d clk_sys",
+			frame, releases, restarts, secs, sys_calls, overruns, sys_calls == 0 ? 0 : worst_slack);
 `ifdef SIM_DARIA_FE
 		$display("FRAMES guard: dbg_locked %0d (u_guard.lk %0d), %0d clk_sys where dbg_locked differed from u_guard.lk, %0d where dbg_unlock differed from ev_unlock; halt_code %0d",
 			g_dbg_lk, g_lk, g_lk_bad, g_ul_bad, d_hcode);
+		begin
+			int tg, go, rt;
+			tg = n_tog - base_tog; go = n_go - base_go; rt = n_ret - base_ret;
+			calls_ok = tg - sys_calls inside {[-1:1]} && go - sys_calls inside {[-1:1]} && rt - sys_calls inside {[-1:1]};
+			$display("FRAMES calls: %0d busy periods (the 6507's), %0d call_tog flips, %0d call_go, %0d returned%s: %s",
+				sys_calls, tg, go, rt, restarts ? " (since the last restart)" : "",
+				calls_ok ? "equal (within the call in flight at the end)" : "MISMATCH");
+		end
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
 			sys_calls, overruns, halts, halts != 0 ? int'(d_hcode) : 0, psram_viol, guard, unlocks);
-		ok = halts == 0 && psram_viol == 0 && unlocks == 0 && g_lk_bad == 0 && g_ul_bad == 0 && frame == frames;
+		ok = halts == 0 && psram_viol == 0 && unlocks == 0 && g_lk_bad == 0 && g_ul_bad == 0 && calls_ok && frame == frames;
 `else
 		$display("FRAMES no daria_fe in the wrapper (not a POCKET_DARIA build, or u_fe not wired): calls not seen");
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",

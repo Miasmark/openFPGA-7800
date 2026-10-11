@@ -346,6 +346,11 @@ def reset_cases(log, w):
         "reset_coincidence": first(r"^(RST 0 K=.*P2 coincidences )0$", r"\g<1>1"),
         "reset_incomplete": first(r"^RST summary: (\d+) of", lambda m: f"RST summary: {int(m.group(1)) - 1} of"),
         "reset_no_strobe": first(r"^(RST 0 K=\d+: strobe )[^;]*; [^;]*;", r"\g<1>none; -;"),
+        # the strobe's kind must be the run mode's: a write in this read run
+        "reset_strobe_kind_write_in_a_read_run": first(r"^(RST 0 K=\d+: strobe )read (\$\w+); issued at s(\d+);",
+                                                         r"\g<1>write \g<2> data 00; issued at s\g<3> data 00;"),
+        "reset_run_mode_wr_with_read_strobes": first(r"^(RST armed: .*?, mode )rd,", r"\g<1>wr,"),
+        "reset_run_without_a_mode": first(r"^(RST armed: .*?, )mode rd,", r"\g<1>"),
     }
     for c, fn in cases.items():
         expect(c, [ct, "check-reset", plant(log, os.path.join(w, f"{c}.log"), fn)] + run, False)
@@ -543,6 +548,12 @@ def hygiene_cases(w):
         ("path glued to an option", lambda: write(d, "sim/x.sh", "gcc -I" + tmp + " x.c\n"), False, ["--names", names]),
         ("path as a file URL (file:///)", lambda: write(d, "docs/x.md", "open file://" + tmp + "\n"), False, ["--names", names]),
         ("path with a doubled leading slash", lambda: write(d, "sim/x.sh", "cat /" + tmp + "\n"), False, ["--names", names]),
+        ("path as a file URL with a host", lambda: write(d, "docs/x.md", "open file://localhost" + tmp + "\n"), False,
+         ["--names", names]),
+        ("JSON-escaped path", lambda: write(d, "sim/x.json", '{"log": "' + tmp.replace("/", "\\/") + '"}\n'), False,
+         ["--names", names]),
+        ("JSON-escaped relative path", lambda: write(d, "sim/x.json", '{"log": "work' + tmp.replace("/", "\\/") + '"}\n'), True,
+         ["--names", names]),
         ("a doubled slash inside a relative path", lambda: write(d, "sim/x.sh", "ls work/" + tmp + "\n"), True, ["--names", names]),
         # the directory itself, no path into it (I3's container command)
         ("the directory itself, no path into it", lambda: write(d, "sim/x.sh", "bash -c 'cd " + tmp.rsplit("/", 1)[0] + " && ls'\n"),
@@ -627,7 +638,7 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=()):
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
@@ -659,7 +670,8 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
     open(os.path.join(d, "slack.csv"), "w").write("call,kind,sys_end_to_poll,slack_sys,poll_pc\n" +
                                                   "".join(",".join(map(str, s)) + "\n" for s in slack))
     open(os.path.join(d, "run.log"), "w").write(
-        "detect2600: force_bs 23 revision 2\n"
+        f"detect2600: force_bs {scheme} revision 2\n"
+        f"OPTIONS RAM0 bytes non-zero after load: 0 of 2048; 2600 mapper {scheme} (override 0)\n"
         f"STATUS calls {st['calls']}, late {st['late']}, halts {st['halts']}, halt_code {st['halt_code']}, "
         f"psram_viol {st['psram_viol']}, guard {st['guard']}, unlocks {st['unlocks']}\n"
         f"ran {n} frames, {len(calls)} calls\n")
@@ -715,6 +727,37 @@ def gate_cases(w):
            [fg, xref, synth(w, "cross_inside", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 90), setcol(fp, 91, "riot"))),
             "--frames", "200"], False)
+    # R2's regime: every call's release differs (each frame holds a shifted
+    # release), so only the settle rule and the cap bound what passes
+    def every_call(by):
+        def m(calls):
+            for c in calls:
+                c[4] += by
+        return m
+
+    def sparse(c, every, by, keep):
+        def m(fp, calls, slack, st):
+            every_call(by)(calls)
+            for f in range(1, len(fp) + 1):
+                if (f % every == 0) != keep:
+                    setcol(fp, f, c)
+        return m
+    G("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
+    G("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
+    G("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+
+    def runs_at(spans, c="riot"):
+        def m(fp, calls, slack, st):
+            for lo, hi in spans:
+                shift_call(calls, lo)
+                for f in range(lo, hi + 1):
+                    setcol(fp, f, c)
+        return m
+    G("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
+    G("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
+    G("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
+    G("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
+    G("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
     G("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
     G("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
     G("len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
@@ -730,6 +773,22 @@ def gate_cases(w):
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
+    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found
+    A = lambda name, r, cand, want: expect(name, [fg, "--auto", r, cand, "--frames", "200"], want)
+    A("auto_arm_identical", ref, synth(w, "auto_same"), True)
+    A("auto_arm_one_riot_byte", ref, synth(w, "auto_riot", mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_arm_reference_without_calls", synth(w, "auto_ref_void", calls_per=0),
+      synth(w, "auto_cand_void", calls_per=0), False)
+    A("auto_scheme_differs_from_the_loader's", ref, synth(w, "auto_dpcp", scheme=21), False)
+    A("auto_with_the_mapper_line (control)", ref, synth(w, "auto_nomap"), True)
+    nomap = os.path.join(w, "auto_nomap", "run.log")
+    open(nomap, "w").write("".join(l for l in open(nomap) if not l.startswith("OPTIONS")))
+    A("auto_no_mapper_line", ref, os.path.dirname(nomap), False)
+    nref = synth(w, "auto_f4_ref", calls_per=0, scheme=6)
+    A("auto_non_arm_identical (strict)", nref, synth(w, "auto_f4_same", calls_per=0, scheme=6), True)
+    A("auto_non_arm_one_riot_byte (strict)", nref,
+      synth(w, "auto_f4_riot", calls_per=0, scheme=6, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_non_arm_with_calls", nref, synth(w, "auto_f4_calls", calls_per=1, scheme=6), False)
     # Spiders: overrun frames 150-165 excused when they are the late frames on both sides
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
