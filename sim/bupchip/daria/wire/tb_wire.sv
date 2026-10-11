@@ -92,7 +92,8 @@
 // the PLL and its reconfiguration controller stops and restarts the clocks
 // ("the region switch in the loop", below). +wire_resetat=MS raises reset_in
 // for +wire_reset_clk=N clk_sys (default 49, the menu's Reset: 255 clk_74a)
-// MS ms after the first release.
+// MS ms after the first release; +wire_reset_on_pal=K raises it as the core's
+// region changes (below).
 // With +wire_pcm=FILE it also writes every frame the BupChip's peripheral
 // takes (a push to 0x18's FIFO, 0x10, in the Souper profile) as s16le
 // stereo, and prints "WIRE song start N" at the first command it takes, for
@@ -520,6 +521,28 @@ module tb_wire;
 				#(258 * 13.468);
 			end
 			tb.pll_busy_tb = 1'b0;
+		end
+	end
+
+	// ---- +wire_reset_on_pal=K: a console reset as daria_pal changes ---------------------
+	// With +wire_pll: on the K-th clk_sys at which atari7800_pocket.sv's daria_pal
+	// is about to change (not held, region_select differs), reset_in rises at
+	// that clock's falling edge, so the console reset rises on the edge where
+	// daria_pal changes, about 2 clk_sys before pll_busy_s[1] shows the retune
+	// that the change starts; held for +wire_reset_clk=N clk_sys (default 49).
+	initial begin
+		automatic int k = 0, n = 49, seen = 0;
+		if ($value$plusargs("wire_reset_on_pal=%d", k)) begin
+			void'($value$plusargs("wire_reset_clk=%d", n));
+			while (seen < k) begin
+				@(posedge tb.clk_sys);
+				if (!tb.dut.daria_pal_hold && tb.dut.region_select != tb.dut.daria_pal) seen++;
+			end
+			@(negedge tb.clk_sys);
+			tb.reset_in = 1'b1;
+			$display("WIRE reset_in rises as daria_pal changes to %0d (%0.6f ms)", tb.dut.region_select, ms());
+			repeat (n) @(negedge tb.clk_sys);
+			tb.reset_in = 1'b0;
 		end
 	end
 

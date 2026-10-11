@@ -172,17 +172,17 @@ wire bupfw_dl = 1'b0;
 // holds the console only for an ARM image, so every other load releases on
 // the same edge as in a build without DARIA. daria_rt_hold: a PLL retune
 // (pll_busy) keeps an ARM image's console in reset for 16 clk_sys past
-// pll_busy_s[1]'s fall. daria_fe's cart_reset is masked (daria_rt_mask)
-// while pll_busy_s[1] is high and for the first 4 clk_sys after it falls,
-// so its one rise comes with clk_sys running and no retune under way, and
-// F6 starts 8 clocks after it; init_busy holds the console from the clock
-// after the rise, inside the 16. The 4 clocks cover a retune that follows
-// another at once (pll_region starts again on the next clk_74a when the
-// region changed meanwhile): pll_busy_s can see that one clk_74a low as one
-// clk_sys low, which unmasked would be a rise, and F6 would then run into
-// the second retune. F6 never runs while the PLL is retuned, and no other
-// front-end write reaches its RAMs then (daria_we_ok, below). Nor does a
-// retune start while F6 runs: is_pal_o is held then (daria_pal, below).
+// pll_busy_s[1]'s fall. daria_fe's cart_reset is masked (daria_rt_mask,
+// below) while pll_busy_s[1] is high and for the first 4 clk_sys after it
+// falls, so its one rise comes with clk_sys running and no retune under
+// way, and F6 starts 8 clocks after it; init_busy holds the console from
+// the clock after the rise, inside the 16. The 4 clocks cover a retune that
+// follows another at once (pll_region starts again on the next clk_74a when
+// the region changed meanwhile): pll_busy_s can see that one clk_74a low as
+// one clk_sys low, which unmasked would be a rise, and F6 would then run
+// into the second retune. F6 never runs while the PLL is retuned, and no
+// other front-end write reaches its RAMs then (daria_we_ok, below). Nor
+// does a retune start while F6 runs: is_pal_o is held then (daria_pal).
 wire       daria_hold, daria_arm;
 /* verilator lint_off PROCASSINIT */
 reg        daria_rt_hold = 1'b0;
@@ -195,7 +195,6 @@ always @(posedge clk_sys) begin
 	else if (daria_rt_cnt != 4'd0)
 		daria_rt_cnt <= daria_rt_cnt - 4'd1;
 end
-wire       daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11);
 `endif
 
 always @(posedge clk_sys) begin
@@ -986,6 +985,21 @@ wire daria_pal_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (t
 always @(posedge clk_sys)
 	if (!daria_pal_hold)
 		daria_pal <= region_select;
+
+// daria_fe's cart_reset mask (P20, above): pll_busy_s[1], the 4 clk_sys after
+// it falls, and the 16 after daria_pal changes, which is when pll_region
+// starts a retune that pll_busy_s[1] shows only about 3 clk_sys later; a
+// console reset (the menu's) in that gap would otherwise rise before it, and
+// its F6 would run into the retune.
+/* verilator lint_off PROCASSINIT */
+reg  [3:0] daria_pc_cnt = 4'd0;
+/* verilator lint_on PROCASSINIT */
+always @(posedge clk_sys)
+	if (!daria_pal_hold && region_select != daria_pal)
+		daria_pc_cnt <= 4'd15;
+	else if (daria_pc_cnt != 4'd0)
+		daria_pc_cnt <= daria_pc_cnt - 4'd1;
+wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11) | (daria_pc_cnt != 4'd0);
 `endif
 
 reg [15:0] rnd = 16'h5A5A;
@@ -1411,9 +1425,9 @@ bupchip_pocket bupchip
 // memories in the BupChip (daria_mem) and its calls run by the BupChip's
 // CPU. clk_sys, but for its guard's one clk_arm flop.
 //
-// cart_reset is top.sv's effective_reset, masked while pll_busy_s[1] is
-// high and for 4 clk_sys after it falls (daria_rt_mask, P20, above): a
-// retune never starts F6; F6 runs once, when the retune ends. init_busy
+// cart_reset is top.sv's effective_reset, masked while a retune is under way
+// or about to start (daria_rt_mask, P20, above): a retune never starts F6,
+// nor runs into one; F6 runs once, when the retune ends. init_busy
 // reaches the console reset and .loading through daria_hold (P6). The
 // bench hooks are tied off; dbg_locked and dbg_unlock are for step 8's
 // BUP_DEBUG overlay and the benches (P22).
