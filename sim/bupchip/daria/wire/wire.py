@@ -14,8 +14,9 @@ tb_load as run_sim.sh builds it, plus the checks. No game data: the images
 are fe_dir/mkimg.py's synthetic ARM images, tone_test.py's and make_a78.py's
 tone programs and souper_test.py's Souper cartridge with a synthetic ARSC
 block; GAMES=DIR (game images by path, never copied) adds the Turbo run,
-BIOS=FILE the decision-11 runs, BUPFW=FILE (default the tree's
-src/fpga/mister/rtl/bupchip.hex) the Souper second loads.
+PALGAME=FILE (a PAL 2600 ARM image by path, Stay Frosty 2's PAL build) the
+PAL run on Auto region, BIOS=FILE the decision-11 runs, BUPFW=FILE (default
+the tree's src/fpga/mister/rtl/bupchip.hex) the Souper second loads.
 
 Environment: WORK (default sim/work/step7/wire), VERILATOR (default
 /opt/verilator-5.040/bin/verilator), VL_JOBS (default 2), RTL_TREE (build
@@ -38,6 +39,7 @@ GAMES = os.environ.get("GAMES", "")
 BIOS = os.environ.get("BIOS", "")
 BUPFW = os.environ.get("BUPFW", os.path.join(REPO, "src/fpga/mister/rtl/bupchip.hex"))
 ARM_DIV = os.environ.get("ARM_DIV", "18")
+PALGAME = os.environ.get("PALGAME", "")
 TURBO = "Turbo-Arcade_demo_final_CG_NTSC.bin"
 
 
@@ -85,7 +87,9 @@ def build(kind):
             out += [a, obj]; i += 2; continue
         out.append(a)
         if a.endswith("/tb_load.sv"):
+            # tb_wire, and core_top.v's region switch for its +wire_pll
             out.append(os.path.join(HERE, "tb_wire.sv"))
+            out.append(os.path.join(RTL_TREE, "src/fpga/core/pll_region.v"))
         i += 1
     if os.path.join(HERE, "tb_wire.sv") not in out:
         sys.exit("build: no tb_load.sv in run_sim.sh's command")
@@ -128,6 +132,20 @@ def images():
     r = subprocess.run([sys.executable, os.path.join(SIM, "make_a78.py"), "--bin", os.path.join(d, "rom29696.bin")],
                        capture_output=True)
     open(os.path.join(d, "a78_29696.a78"), "wb").write(r.stdout)
+    # the 7800 tone program as a PAL A78 (header byte 57, the region, 1)
+    a = bytearray(open(os.path.join(d, "load_test.a78"), "rb").read())
+    a[57] = 1
+    open(os.path.join(d, "load_test_pal.a78"), "wb").write(bytes(a))
+    # the 2600 tone program in PAL frames (tone_test.py's "pal")
+    open(os.path.join(d, "pal_test.a26"), "wb").write(
+        bytes(int(l, 16) for l in tone("14", "2600", "pal").split()[:4096]))
+    # two ARM images whose byte 57 (the A78 header's region byte, which the
+    # core reads from every image) has bit 0 set; no .meta, so not in the
+    # directed set
+    for t in ("smoke_dpc", "smoke_cdf"):
+        b = bytearray(open(os.path.join(d, t + ".bin"), "rb").read())
+        b[57] |= 1
+        open(os.path.join(d, t + ".b57.bin"), "wb").write(bytes(b))
     # the Souper cartridge and the firmware (run_sim.sh's BupChip section)
     if os.path.isfile(BUPFW):
         r = subprocess.run([sys.executable, os.path.join(REPO, "tools/hex2bin.py"), BUPFW], capture_output=True)
@@ -256,7 +274,7 @@ def boot(j, s, m):
 def no_daria(j, s):
     """an image that is not an ARM scheme: daria_fe stays out of it"""
     common(j, s)
-    for k in ("f6", "wr_crb", "wr_stb", "hold_rise", "calls", "psram_viol", "halts"):
+    for k in ("f6", "wr_crb", "wr_stb", "hold_rise", "prof_clk", "calls", "psram_viol", "halts"):
         j.eq(s, k, 0)
 
 
@@ -357,10 +375,14 @@ def scenarios(img):
          "P20: a non-ARM 2600 image retuned: released on the plain build's edge after pll_busy falls",
          rel_to_busy=True)
 
-    def resetat(name, t):
+    def resetat(name, t, short=False):
         def f():
-            s = run("daria", name, ["+image=" + I(t + ".bin"), "+wav=300", "+resetat=120"])
+            s = run("daria", name, ["+image=" + I(t + ".bin"), "+wav=300",
+                                    "+wire_resetat=120" if short else "+resetat=120"])
             j = Judge(name); daria_health(j, s, resets=1)
+            if short:
+                j.ok(re.search(r"^WIRE reset_in held for 49 clk_sys", s["text"], re.M) is not None,
+                     "no 49 clk_sys reset_in")
             j.eq(s, "f6", 2); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
             j.eq(s, "releases", 2)
             j.ok(len(s["rel"]) == 2 and len(s["f6end"]) == 2 and s["rel"][1] > s["f6end"][1],
@@ -370,10 +392,13 @@ def scenarios(img):
             j.ok(re.search(r"^BOOT 2 vector: .* from the cartridge slot", s["text"], re.M) is not None,
                  "the 6507 did not restart (no BOOT 2 vector line)")
             return j, s
-        S[name] = (f, "7.3: a console reset (+resetat) in an ARM image: one F6, the reset held through it, "
-                      "the game restarts", True)
+        S[name] = (f, "7.3: a console reset (%s) in an ARM image: one F6, the reset held through it, "
+                      "the game restarts" % ("49 clk_sys, the menu's Reset: daria_hold holds it" if short
+                                             else "+resetat, 10 ms"), True)
     resetat("resetat_dpc", "hard_reset_call_dpc")
     resetat("resetat_cdf", "hard_reset_call_cdf")
+    resetat("resetat_short_dpc", "hard_reset_call_dpc", True)
+    resetat("resetat_short_cdf", "hard_reset_call_cdf", True)
 
     def retune(name, t, at, extra=()):
         def f():
@@ -406,6 +431,88 @@ def scenarios(img):
     retune("retune_call_dpc", "hard_reset_call_dpc", "call")
     retune("retune_call_cdf", "hard_reset_call_cdf", "call")
 
+    def after_retunes(j, s, f6_n):
+        """the F6 that the last retune starts, and none during one"""
+        for k, v in (("f6_busy", 0), ("f6_live", 0), ("wr_busy", 0), ("wr_stop", 0), ("f6_ram_diff", 0),
+                     ("rt_f6_early", 0), ("rt_rst_low", 0), ("f6", f6_n)):
+            j.eq(s, k, v)
+        j.ok(len(s["f6end"]) == f6_n and len(s["busyfall"]) >= 1 and s["f6end"][-1] > s["busyfall"][-1],
+             "no F6 after pll_busy's last fall (F6 ends %s, falls %s)" % (s["f6end"], s["busyfall"]))
+        j.ok(len(s["rel"]) >= 1 and len(s["f6end"]) >= 1 and s["rel"][-1] > s["f6end"][-1],
+             "released before the last F6 ended (releases %s, F6 ends %s)" % (s["rel"], s["f6end"]))
+        j.ge(s, "calls_rt", 1)
+
+    def twice(name, t, catch):
+        def f():
+            s = run("daria", name, ["+image=" + I(t + ".bin"), "+wav=300", "+wire_retune=twice",
+                                    "+wire_retune_after=120", "+wire_retune_catch=%d" % catch])
+            j = Judge(name); daria_health(j, s, resets=1)
+            after_retunes(j, s, 2)
+            j.eq(s, "rt_f6", 1); j.eq(s, "releases", 2)
+            # not vacuous: pll_busy_s saw the one clk_74a gap (catch), or not
+            j.ok(len(s["busyfall"]) == (2 if catch else 1),
+                 "pll_busy_s[1] falls %s: the gap %s" % (s["busyfall"], "not seen" if catch else "seen"))
+            return j, s
+        S[name] = (f, "P20: two retunes back to back mid-game, pll_busy low for one clk_74a between, %s: one F6 "
+                      "after the second, none during either" % ("a clk_sys edge inside it (pll_busy_s sees it)"
+                                                               if catch else "no clk_sys edge inside it"), True)
+    twice("twice_dpc", "hard_reset_call_dpc", 1)
+    twice("twice_cdf", "hard_reset_call_cdf", 1)
+    twice("twice_nc_dpc", "hard_reset_call_dpc", 0)
+
+    # +wire_pll: pll_region in the loop, driven by the core's is_pal_o
+    def loadpal(name, t):
+        def f():
+            s = run("daria", name, ["+image=" + I("load_test_pal.a78"), "+wav=260", "+image2=" + I(t + ".bin"),
+                                    "+image2at=40", "+wire_pll"])
+            j = Judge(name); daria_health(j, s, resets=1)
+            after_retunes(j, s, 2)
+            j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0)
+            j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+            j.ge(s, "marker", meta(I(t + ".bin"))["need"].get("dir_marker", 1))
+            return j, s
+        S[name] = (f, "P20, review: the PLL in PAL from a PAL A78, then %s on Auto (pll_region in the loop): the "
+                      "retune to NTSC starts after the load's F6, not in it; one F6 after it" % t, True)
+    loadpal("loadpal_dpc", "smoke_dpc")
+    loadpal("loadpal_cdf", "smoke_cdf")
+
+    def b57(name, t):
+        def f():
+            s = run("daria", name, ["+image=" + I(t + ".b57.bin"), "+daria=300", "+wire_pll"])
+            j = Judge(name); boot(j, s, meta(I(t + ".bin")))
+            j.eq(s, "retunes", 0); j.eq(s, "is_pal", 0)
+            return j, s
+        S[name] = (f, "P20, review: %s with byte 57's bit 0 set (the A78 region byte) from power-up, pll_region in "
+                      "the loop: no retune (none to PAL and back across F6)" % t, True)
+    b57("b57_dpc", "smoke_dpc")
+    b57("b57_cdf", "smoke_cdf")
+
+    def pal2600():
+        args = ["+image=" + I("pal_test.a26"), "+wav=1300", "+wire_pll"]
+        s = run("daria", "pal2600", args)
+        p = run("plain", "pal2600", args)
+        j = Judge("pal2600"); no_daria(j, s); common(j, p)
+        j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
+        s["note"] = "plain build: retunes=%s b2b=%s releases=%s is_pal=%s" % tuple(
+            p["sum"].get(k) for k in ("retunes", "b2b", "releases", "is_pal"))
+        return j, s
+    S["pal2600"] = (pal2600, "a PAL 2600 image on Auto, pll_region in the loop: one retune, to PAL, once the TIA "
+                    "has scored 48 frames (about 1 s), and the game restarts in PAL (the plain build's count is "
+                    "reported)", True)
+
+    if PALGAME and os.path.isfile(PALGAME):
+        def palgame():
+            s = run("daria", "palgame", ["+image=" + PALGAME, "+daria=1500", "+wire_pll"])
+            j = Judge("palgame"); daria_health(j, s, resets=1, selfcheck=False)
+            after_retunes(j, s, 2)
+            j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
+            j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+            return j, s
+        S["palgame"] = (palgame, "P20: a PAL 2600 ARM game on Auto (PALGAME), pll_region in the loop: one retune "
+                        "to PAL once the TIA sees PAL frames, one F6 after it, the game restarts in PAL", True)
+    else:
+        S["palgame"] = (None, "a PAL ARM game on Auto (needs PALGAME=FILE)", False)
+
     if BIOS and os.path.isfile(BIOS):
         def bios(name, t):
             def f():
@@ -430,6 +537,22 @@ def scenarios(img):
             j.ok(len(s["song"]) == 1, "no song start")
             return j, s
         S["souper_ref"] = (souper_ref, "the Souper cartridge loaded first (the reference for the two below)", True)
+
+        def souper_bs21():
+            ref = run("daria", "souper_ref", ["+image=" + I("souper.a78"), "+bupfw=" + I("bupchip.bin"), "+wav=330",
+                                              "+wire_pcm=s.pcm"])
+            s = run("daria", "souper_bs21", ["+image=" + I("souper.a78"), "+bupfw=" + I("bupchip.bin"), "+wav=330",
+                                             "+wire_pcm=s.pcm", "+bs=21"])
+            j = Judge("souper_bs21"); common(j, s)
+            for k in ("f6", "wr_crb", "wr_stb", "hold_rise", "prof_clk"):
+                j.eq(s, k, 0)
+            m = re.search(r"2600 mapper (\d+)", s["text"])
+            j.ok(m is not None and m.group(1) == "21", "the core's 2600 mapper %s, not 21: the test is void"
+                 % (m.group(1) if m else None))
+            pcm_same(j, s, ref)
+            return j, s
+        S["souper_bs21"] = (souper_bs21, "P5: the Souper cartridge with the bankswitching override 21: the BupChip "
+                            "stays in its Souper profile (daria_profile 0), the song PCM-identical", True)
 
         def arm_then_souper():
             ref = run("daria", "souper_ref", ["+image=" + I("souper.a78"), "+bupfw=" + I("bupchip.bin"), "+wav=330",
@@ -458,7 +581,7 @@ def scenarios(img):
         S["souper_then_cdf"] = (souper_then_arm, "7.3: the Souper cartridge, then an ARM image: it boots; the song "
                                 "PCM-identical to its first-load run up to the second load", True)
     else:
-        for n in ("souper_ref", "dpc_then_souper", "souper_then_cdf"):
+        for n in ("souper_ref", "souper_bs21", "dpc_then_souper", "souper_then_cdf"):
             S[n] = (None, "Souper second loads (needs the BupChip firmware, BUPFW=FILE)", False)
 
     tp = os.path.join(GAMES, TURBO) if GAMES else ""
@@ -526,9 +649,11 @@ def main():
                 rc = 1
             sm = s.get("sum", {})
             keys = ("releases f6 f6_win_dt calls rets abandoned smp_req misses wr_crb wr_busy wr_stop wr_drop hold_rise "
-                    "rt_f6 rs_f6 "
+                    "prof_clk rt_f6 rs_f6 retunes b2b is_pal "
                     "marker errors psram_viol locked unlocks").split()
             line += "\n        " + " ".join("%s=%s" % (k, sm.get(k)) for k in keys if k in sm)
+            if s.get("note"):
+                line += "\n        " + s["note"]
         print(line, flush=True)
         res.write(line + "\n")
         res.flush()

@@ -79,7 +79,7 @@ and waits for STOP or START. `sim/tb_load.sv +i2ctrace` decodes the bus.
 
 ### `rtl/top.sv`: build switches
 
-Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
+Five build switches were added next to upstream's own `NO_ARM_MAPPER`:
 
 | Macro        | Effect |
 |--------------|--------|
@@ -89,8 +89,11 @@ Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
 | `EXTERNAL_FIRMWARE` | Builds the HSC and Supercharger firmware ROMs empty, with a load port (see below). |
 | `POCKET_DARIA` | Only together with `NO_ARM_MAPPER`: hooks for the Pocket's DARIA front end, which runs the 2600 ARM cartridges outside this module. See "DARIA front end hooks" below. |
 
-The Pocket build defines all five (`NO_ARM_MAPPER`, `NO_DDRAM`,
-`NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`.
+The Pocket build defines all six (`NO_ARM_MAPPER`, `NO_DDRAM`,
+`NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`, `POCKET_DARIA`) in
+`../ap_core.qsf`. A build without the DARIA front end deletes
+`POCKET_DARIA` there, with the qsf's two other DARIA lines (`core/daria.qip`
+and `core/daria_constraints.sdc`).
 Without the macros the changed files are identical to upstream in behaviour.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)

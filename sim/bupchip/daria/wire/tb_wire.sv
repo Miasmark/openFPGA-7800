@@ -19,8 +19,17 @@
 //                     which it clears), and whether it equals the first F6's
 //   WIRE pll_busy ...      the synchronised pll_busy (pll_busy_s[1]) rising and
 //                     falling (+retune), in both builds
-//   WIRE reset_in ...      the bench's reset_in rising (+resetat)
+//   WIRE reset_in ...      the bench's reset_in rising (+resetat, +wire_resetat)
+//   WIRE pll_region ...    with +wire_pll: each retune of the region switch
+//                     in the loop (below) and its end
+//   WIRE is_pal ...        with +wire_pll: the core's is_pal_o changing (the
+//                     first 40)
 //   WIRE summary k=v ...   at the end: the counts below
+// Summary keys (both builds), with +wire_pll:
+//   retunes, b2b            retunes of the region switch, and those that
+//                           started at most 4 clk_74a after the last one ended
+//   pal_chg, is_pal         is_pal_o changes (clk_sys samples) and its value
+//                           at the end
 // Summary keys (DARIA build):
 //   f6, f6_win, f6_rst      F6 runs, started by the window or by a reset rise
 //   f6_win_dt               the last window-started F6's delay from cart_win's
@@ -46,6 +55,8 @@
 //                           a retune); the first 40 as WIRE drop lines
 //   wr_after_load2          RAM writes after a +image2 load started
 //   hold_rise               rises of daria_hold (init_busy for an ARM scheme)
+//   prof_clk                clk_sys with daria_profile high (the BupChip in
+//                           its 2600 profile; P5: 0 for an A78)
 //   calls, calls_arm        call_tog flips at daria_fe's output and at the
 //                           BupChip's input
 //   rets, rets_fe           ret_tog flips at the BupChip's output and at
@@ -75,6 +86,13 @@
 //   marker, errors, marker_rs  RIOT $FF (finished test bodies of fe_dir's
 //                           images) and $FE (failed self-checks) at the end,
 //                           and $FF when reset_in rose
+// +wire_pll closes the loop of the PAL/NTSC switch: core_top.v's pll_region
+// (core/pll_region.v itself) takes the core's is_pal_o and a model of the
+// Pocket's is_downloading, and its busy is the core's pll_busy; a model of
+// the PLL and its reconfiguration controller stops and restarts the clocks
+// ("the region switch in the loop", below). +wire_resetat=MS raises reset_in
+// for +wire_reset_clk=N clk_sys (default 49, the menu's Reset: 255 clk_74a)
+// MS ms after the first release.
 // With +wire_pcm=FILE it also writes every frame the BupChip's peripheral
 // takes (a push to 0x18's FIFO, 0x10, in the Souper profile) as s16le
 // stereo, and prints "WIRE song start N" at the first command it takes, for
@@ -140,6 +158,139 @@ module tb_wire;
 			if (dl_n == 2) t_load2 = t_sys;
 		end
 		dl_d <= tb.cart_download;
+	end
+
+	// ---- the PLL's outputs stopped and restarted ---------------------------------------
+	// As tb_load's +retune: stopped between edges on their common lattice, for
+	// US us rounded up to whole common periods, so each restarts on its
+	// lattice; pll_locked low while they are stopped and for 1 us after.
+	task automatic pll_stop_restart(input int us);
+		longint lcm, now_ps, t_ps, w_ps;
+		lcm = 69840;
+`ifdef POCKET_DARIA
+		lcm = tb.arm_div == 19 ? 1326960 : 209520;
+`endif
+		now_ps = longint'(t_ns() * 1000.0);
+		t_ps = (now_ps / lcm + 1) * lcm + 1;
+		while (t_ps % 8730 == 0
+`ifdef POCKET_DARIA
+			|| (t_ps - tb.arm_ofs) % (tb.arm_div == 19 ? 27645 : 13095) == 0
+			|| (tb.arm_div == 19 && (t_ps - tb.arm_ofs) % 27645 == 13823)
+`endif
+			) t_ps++;
+		w_ps = (longint'(us) * 1000000 + lcm - 1) / lcm * lcm;
+		#((t_ps - now_ps) * 0.001);
+		tb.clk_run = 1'b0;
+		tb.pll_locked_tb = 1'b0;
+		#(w_ps * 0.001);
+		tb.clk_run = 1'b1;
+		#1000.0;
+		tb.pll_locked_tb = 1'b1;
+	endtask
+
+	// ---- +wire_pll: the region switch in the loop ----------------------------------------
+	// pll_region (core_top.v's instance) on clk_74a. is_pal: the core's
+	// is_pal_o (tb_load's region setting is Auto). loading: is_downloading,
+	// which on the Pocket rises at a slot's requestwrite and falls at
+	// allcomplete; core_top.v's cart_download follows it through four
+	// clk_sys registers (dl_s, cart_download), so it falls 4 clk_sys (21
+	// clk_74a) after is_downloading. Here it rises with any of the bench's
+	// download flags, and for a cartridge (the last slot) it falls 2,058
+	// clk_74a after the last bridge write, 21 before the bench drops
+	// cart_download (2,079 after it). pll_locked: through three clk_74a
+	// flops, as core_top.v's synch_3. The controller: waitrequest for 3
+	// clk_74a after each write (sim/tb_pll_region.sv's model); the start
+	// (register 2) stops the PLL's outputs for +wire_pll_us=N us (default
+	// 20), and waitrequest stays high until it locks again.
+	bit   pll_on = 1'b0;
+	int   pll_us = 20;
+	initial begin
+		pll_on = $test$plusargs("wire_pll");
+		void'($value$plusargs("wire_pll_us=%d", pll_us));
+	end
+	logic [2:0] pr_lk_s = 3'b111;
+	logic pr_waitreq = 1'b0;
+	wire  pr_busy, pr_cfg_write;
+	wire  [5:0] pr_cfg_addr;
+	/* verilator lint_off UNUSEDSIGNAL */
+	wire [31:0] pr_cfg_data;
+	/* verilator lint_on UNUSEDSIGNAL */
+	logic dl_cart = 1'b0, dl_cd_d = 1'b0, dl_wr = 1'b0;
+	int   dl_n74 = 0;
+	wire  pr_loading = dl_cart | tb.bios_download | tb.hscfw_download | tb.arfw_download | tb.bupfw_download;
+	always @(posedge tb.clk_74a) begin
+		pr_lk_s <= {pr_lk_s[1:0], tb.pll_locked_tb};
+		if (tb.cart_download && !dl_cd_d) begin
+			dl_cart <= 1'b1; dl_wr <= 1'b0; dl_n74 <= 0;
+		end else begin
+			if (tb.bridge_wr) begin dl_n74 <= 0; dl_wr <= 1'b1; end
+			else dl_n74 <= dl_n74 + 1;
+			if (!tb.cart_download || (dl_wr && dl_n74 >= 2057)) dl_cart <= 1'b0;
+		end
+		dl_cd_d <= tb.cart_download;
+	end
+	pll_region u_pr (
+		.clk (tb.clk_74a), .is_pal (tb.is_pal), .loading (pr_loading), .pll_locked (pr_lk_s[2]),
+		.busy (pr_busy), .cfg_waitrequest (pr_waitreq), .cfg_write (pr_cfg_write),
+		.cfg_address (pr_cfg_addr), .cfg_writedata (pr_cfg_data));
+	int   pr_hold = 0;
+	bit   pr_relock = 1'b0;
+	event pr_go;
+	int   retunes = 0, b2b = 0, pal_chg = 0;
+	int   pr_low74 = 1000;
+	logic pr_busy_d = 1'b0, pal_d = 1'b0;
+	always @(posedge tb.clk_74a) if (pll_on) begin
+		if (pr_hold > 0) begin
+			pr_hold--;
+			if (pr_hold == 0 && !pr_relock) pr_waitreq <= 1'b0;
+		end
+		if (pr_cfg_write) begin
+			pr_waitreq <= 1'b1;
+			pr_hold = 3;
+			if (pr_cfg_addr == 6'd2) begin
+				pr_relock = 1'b1;
+				-> pr_go;
+			end
+		end
+		if (pr_busy && !pr_busy_d) begin
+			retunes++;
+			if (pr_low74 <= 4) b2b++;
+			$display("WIRE pll_region retune %0d to %0s at clk_sys %0d (%0.6f ms), %0d clk_74a after the last ended",
+				retunes, u_pr.target ? "PAL" : "NTSC", t_sys, ms(), pr_low74);
+		end
+		if (!pr_busy && pr_busy_d)
+			$display("WIRE pll_region done at clk_sys %0d (%0.6f ms): the PLL is %0s", t_sys, ms(), u_pr.pll_pal ? "PAL" : "NTSC");
+		pr_low74 <= pr_busy ? 0 : (pr_low74 < 1000 ? pr_low74 + 1 : pr_low74);
+		pr_busy_d <= pr_busy;
+	end
+	always @(pr_busy) if (pll_on) tb.pll_busy_tb = pr_busy;
+	initial forever begin
+		@(pr_go);
+		pll_stop_restart(pll_us);
+		pr_relock = 1'b0;
+		pr_waitreq = 1'b0;
+	end
+	always @(posedge tb.clk_sys) if (pll_on) begin
+		if (t_sys > 4 && tb.is_pal != pal_d) begin
+			pal_chg++;
+			if (pal_chg <= 40) $display("WIRE is_pal %0d at clk_sys %0d (%0.3f ms)", tb.is_pal, t_sys, ms());
+		end
+		pal_d <= tb.is_pal;
+	end
+
+	// ---- +wire_resetat: a console reset as short as the menu's ------------------------
+	initial begin
+		automatic int at = 0, n = 49;
+		if ($value$plusargs("wire_resetat=%d", at)) begin
+			void'($value$plusargs("wire_reset_clk=%d", n));
+			wait (tb.reset_in == 1'b0);
+			for (int i = 0; i < at; i++) repeat (14318) @(posedge tb.clk_sys);
+			@(negedge tb.clk_sys);
+			tb.reset_in = 1'b1;
+			repeat (n) @(negedge tb.clk_sys);
+			tb.reset_in = 1'b0;
+			$display("WIRE reset_in held for %0d clk_sys, low again at %0.3f ms", n, ms());
+		end
 	end
 
 `ifdef POCKET_DARIA
@@ -233,6 +384,7 @@ module tb_wire;
 
 	// ---- daria_fe's RAM writes, daria_hold ------------------------------------------------
 	int  wr_crb = 0, wr_stb = 0, wr_busy = 0, wr_stop = 0, wr_drop = 0, wr_after_load2 = 0, hold_rise = 0;
+	longint prof_clk = 0;
 	logic hold_d = 1'b0;
 	always @(posedge tb.clk_sys) begin
 		automatic bit cwe = `W_BC.daria_crb_we, swe = `W_BC.daria_stb_we;
@@ -255,6 +407,7 @@ module tb_wire;
 		if ((cwe || swe) && t_load2 >= 0) wr_after_load2++;
 		if (tb.dut.daria_hold && !hold_d) hold_rise++;
 		hold_d <= tb.dut.daria_hold;
+		if (tb.dut.daria_profile) prof_clk++;
 	end
 	// the write enables as the PLL's outputs stop and restart
 	always @(tb.clk_run) begin
@@ -305,48 +458,67 @@ module tb_wire;
 		sa_d <= `W_BC.daria_smp_ack;
 	end
 
-	// ---- +wire_retune=svc|call: a retune that lands in a service or a call ---------------
+	// ---- +wire_retune=svc|call|twice: a retune that lands in a service or a call,
+	// or two retunes back to back ------------------------------------------------------
 	// The sequence of tb_load's +retune (pll_region's: pll_busy, 258 clk_74a,
 	// the PLL's outputs stopped between edges on their lattice for 20 us,
 	// pll_locked 1 us after they restart, pll_busy 258 clk_74a after that),
 	// started +wire_retune_dly=D clk_sys (default 2) after the K-th
 	// (+wire_retune_k, default 3) start of a copy-engine service (u_copy.run
 	// rising: svc) or call (call_tog flipping: call) from
-	// +wire_retune_after=MS ms (default 60) after reset_in falls. Not with
-	// tb_load's own +retune.
+	// +wire_retune_after=MS ms (default 60) after reset_in falls. twice: MS
+	// ms after reset_in falls, two of them, with pll_busy low for one clk_74a
+	// between, as pll_region makes it when the region changed during the first
+	// (it starts again on the next clk_74a); +wire_retune_catch=1 (default)
+	// puts a clk_sys rising edge inside that clk_74a, so pll_busy_s sees one
+	// clk_sys low, 0 puts it between two. Not with tb_load's own +retune, nor
+	// with +wire_pll.
+	longint sys_rise_ps = -1;
+	always @(posedge tb.clk_sys) sys_rise_ps = longint'(t_ns() * 1000.0);
 	initial begin
 		automatic string what;
-		automatic int k = 3, dly = 2, after = 60;
-		automatic longint lcm, now_ps, t_ps, w_ps;
+		automatic int k = 3, dly = 2, after = 60, gap_catch = 1;
 		if ($value$plusargs("wire_retune=%s", what)) begin
 			void'($value$plusargs("wire_retune_k=%d", k));
 			void'($value$plusargs("wire_retune_dly=%d", dly));
 			void'($value$plusargs("wire_retune_after=%d", after));
-			if (what != "svc" && what != "call") $fatal(1, "+wire_retune=%0s: svc or call", what);
+			void'($value$plusargs("wire_retune_catch=%d", gap_catch));
+			if (what != "svc" && what != "call" && what != "twice")
+				$fatal(1, "+wire_retune=%0s: svc, call or twice", what);
 			wait (tb.reset_in == 1'b0);
 			for (int i = 0; i < after; i++) repeat (14318) @(posedge tb.clk_sys);
-			for (int i = 0; i < k; i++)
-				if (what == "svc") @(posedge `W_CP.run);
-				else @(`W_FE.call_tog);
+			if (what != "twice")
+				for (int i = 0; i < k; i++)
+					if (what == "svc") @(posedge `W_CP.run);
+					else @(`W_FE.call_tog);
 			repeat (dly) @(posedge tb.clk_sys);
 			$display("WIRE retune at %0.3f ms: %0d clk_sys after %0s %0d (u_copy.run %0d, open calls %0d)",
 				ms(), dly, what, k, `W_CP.run, call_t.size());
 			tb.pll_busy_tb = 1'b1;
 			#(258 * 13.468);
-			lcm = tb.arm_div == 19 ? 1326960 : 209520;
-			now_ps = longint'(t_ns() * 1000.0);
-			t_ps = (now_ps / lcm + 1) * lcm + 1;
-			while (t_ps % 8730 == 0 || (t_ps - tb.arm_ofs) % (tb.arm_div == 19 ? 27645 : 13095) == 0
-				|| (tb.arm_div == 19 && (t_ps - tb.arm_ofs) % 27645 == 13823)) t_ps++;
-			w_ps = (longint'(20) * 1000000 + lcm - 1) / lcm * lcm;
-			#((t_ps - now_ps) * 0.001);
-			tb.clk_run = 1'b0;
-			tb.pll_locked_tb = 1'b0;
-			#(w_ps * 0.001);
-			tb.clk_run = 1'b1;
-			#1000.0;
-			tb.pll_locked_tb = 1'b1;
+			pll_stop_restart(20);
 			#(258 * 13.468);
+			if (what == "twice") begin
+				// the clk_74a edge where busy falls for one clk_74a: d ps to
+				// the next clk_sys rising edge (the clocks run on a lattice)
+				automatic longint now_ps, ph, d;
+				automatic bit found = 1'b0;
+				while (!found) begin
+					@(posedge tb.clk_74a);
+					now_ps = longint'(t_ns() * 1000.0);
+					ph = (now_ps - sys_rise_ps) % 69840;
+					d = ph == 0 ? 0 : 69840 - ph;
+					found = gap_catch != 0 ? (d > 1000 && d < 12400) : (d > 14500);
+				end
+				tb.pll_busy_tb = 1'b0;
+				@(posedge tb.clk_74a);
+				tb.pll_busy_tb = 1'b1;
+				$display("WIRE retune twice: pll_busy low for one clk_74a at %0.6f ms, a clk_sys rising edge %0.3f ns after it fell (%0s)",
+					ms(), d / 1000.0, gap_catch != 0 ? "inside" : "after it");
+				#(258 * 13.468);
+				pll_stop_restart(20);
+				#(258 * 13.468);
+			end
 			tb.pll_busy_tb = 1'b0;
 		end
 	end
@@ -391,8 +563,8 @@ module tb_wire;
 			rel_n, f6_n, f6_win, f6_rst, f6_win_dt);
 		w = {w, $sformatf(" f6_rst_low=%0d f6_busy=%0d f6_noib=%0d f6_live=%0d f6_ram_diff=%0d",
 			f6_rst_low, f6_busy, f6_noib, f6_live, f6_ram_diff)};
-		w = {w, $sformatf(" wr_crb=%0d wr_stb=%0d wr_busy=%0d wr_stop=%0d wr_drop=%0d wr_after_load2=%0d hold_rise=%0d",
-			wr_crb, wr_stb, wr_busy, wr_stop, wr_drop, wr_after_load2, hold_rise)};
+		w = {w, $sformatf(" wr_crb=%0d wr_stb=%0d wr_busy=%0d wr_stop=%0d wr_drop=%0d wr_after_load2=%0d hold_rise=%0d prof_clk=%0d",
+			wr_crb, wr_stb, wr_busy, wr_stop, wr_drop, wr_after_load2, hold_rise, prof_clk)};
 		w = {w, $sformatf(" calls=%0d calls_arm=%0d rets=%0d rets_fe=%0d ret_max_us=%0d open_old=%0d abandoned=%0d orphans=%0d",
 			calls, calls_arm, rets, rets_fe, int'(ret_max / 1000.0), open_old, abandoned, orphans)};
 		w = {w, $sformatf(" smp_req=%0d smp_ack=%0d", smp_req, smp_ack)};
@@ -403,9 +575,11 @@ module tb_wire;
 		w = {w, $sformatf(" calls_rs=%0d calls_rt=%0d marker=%0d errors=%0d marker_rs=%0d",
 			calls_rs0 < 0 ? -1 : calls - calls_rs0, calls_rt0 < 0 ? -1 : calls - calls_rt0,
 			tb.dut.main.riot_inst.riot_ram.mem_q[127], tb.dut.main.riot_inst.riot_ram.mem_q[126], marker_rs)};
+		w = {w, $sformatf(" retunes=%0d b2b=%0d pal_chg=%0d is_pal=%0d", retunes, b2b, pal_chg, tb.is_pal)};
 		$display("%s", w);
 	end
 `else
-	final $display("WIRE summary build=plain releases=%0d", rel_n);
+	final $display("WIRE summary build=plain releases=%0d retunes=%0d b2b=%0d pal_chg=%0d is_pal=%0d",
+		rel_n, retunes, b2b, pal_chg, tb.is_pal);
 `endif
 endmodule
