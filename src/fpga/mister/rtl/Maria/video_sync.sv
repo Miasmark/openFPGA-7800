@@ -126,13 +126,16 @@ localparam VBLANK_START = 258;
 localparam VBLANK_START_PAL = 308;
 localparam VBLANK_END = 16;
 
-localparam VBLANK_EX_START = 248;
+// Pocket: the 224 line window is lines 27-250 (upstream 24-247), where
+// 7800basic's 224 line screens and Commando draw; see POCKET_CHANGES.md.
+localparam VBLANK_EX_START = 251;
 localparam VBLANK_EX_START_PAL = 298;
-localparam VBLANK_EX_END = 24;
+localparam VBLANK_EX_END = 27;
+localparam VBLANK_EX_END_PAL = 24;  // PAL unchanged: 274 lines, 24-297
 
 assign VSync      = (row < VSYNC_END);
 assign vblank     = (row >= (PAL ? VBLANK_START_PAL : VBLANK_START)) || (row < VBLANK_END);
-assign vblank_ex  = (row >= (PAL ? VBLANK_EX_START_PAL : VBLANK_EX_START)) || (row < VBLANK_EX_END);
+assign vblank_ex  = (row >= (PAL ? VBLANK_EX_START_PAL : VBLANK_EX_START)) || (row < (PAL ? VBLANK_EX_END_PAL : VBLANK_EX_END));
 
 assign HSync      = col < HSYNC_END;
 assign hblank     = hide_border ? border : ((col >= HBLANK_START) || (col < HBLANK_END));
