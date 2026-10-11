@@ -82,3 +82,28 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 - **Lane I4** (`s7/I4` at `092e63e`, reviewed, fixes made): `tb_frames`, whose Juno First `fp.csv` is byte-identical to R1's over 1,500 frames (with and without `+stop74`); about 196 s of wall time per emulated second for the plain build. The console-reset sweep, `+midswap` and the forced coincidence are in the in-tree cartram harness; `frame_gate.py` gained the settle and cap rules (plan 7.4 amended); `s4_check` requires the snapshot check in the DARIA set.
 - **Merges:** B1 (`eead112`) and M, main's 2.1.3 (`492a3b8`), on DARIA-dev. Non-DARIA stream hashes: F `6ea867f0…`, M `0ec75217…`.
 - **The D candidate** (`s7/D`, local): DARIA-dev + I1 + all of I3 (including the three `ap_core.qsf` lines) + `daria_smp.sv` in `core.qip`, check (h) at +4.5 ns, and `POCKET_CHANGES.md` naming `video_mux.sv`. With `POCKET_DARIA` undefined it preprocesses to M's stream. Phase 2 (fits Q1' and Q2, mode B, the frame runs, every regression gate, a whole-commit review) runs on it.
+
+### Fit Q1' and commit P, the PAL 2600 loop (2026-10-11)
+
+- **Q1'** [sta] (M, `492a3b8`, seed 2, non-DARIA): `clk_sdram` +2.437 ns, worst hold +0.117 ns, 12,870 ALMs. The worst path is the 7800 SDRAM request.
+- **The owner's decision:** fix the shipped core's PAL 2600 loop in 2.2.1, in both builds. **Commit P** (`b1e57ef`): `is_pal_o` is now `region_pll`, a `clk_sys` register. It follows `region_select` one clock later and is held while a 2600 image's region is not known: during its download, on the clock after it, and while its console is in reset (`tia_mode & ~tia_en`). The hold is token for token lane I1's `daria_pal`, so D takes `region_pll` in its place. Renamed back, D's DARIA stream is byte-identical.
+- **Results:**
+  - A PAL 2600 game on Auto retunes once, to PAL, at 955 ms, on both builds. Before the fix: 41,293 retunes in 1.3 simulated seconds, ending NTSC.
+  - tb_wire: the other 27 retune, reset, second-load and PLL scenarios pass.
+  - The run_sim and extra_tests gates pass, and all 58 fingerprints are byte-identical to M's.
+  - Lint adds no warning, and hygiene passes.
+  - The non-DARIA stream is now `9b9e7e5e…`, and D's identity gate compares against it. It differs from M's only in the `region_pll` lines.
+- **Q1''** [sta] (P, seed 2, non-DARIA): `clk_sdram` +2.380 ns, worst hold +0.100 ns, 12,990 ALMs; Q4 compares with this fit.
+- **Review:** signed off with 5 minor findings and no RTL change. A reviewer ran 63 more plain-build runs with `pll_region` in the loop: reset timings around the region change, manual Region changes, second loads both ways at 9 offsets, and 5 hold mutants (3 killed; one equivalent on all but one clock; one visible only against M).
+- **Release edges, against M:**
+  - Unchanged for regions set at load time: A78 header loads, the manual-PAL 2600 load, A78 after A78, and A78 after a 2600.
+  - A Region setting changed mid-game releases 1 `clk_sys` later.
+  - When a 2600 image's region changes while its console is in reset, the console is first released at the old region for about 7-15 `clk_sys`, then retuned. Both cases where this happens are listed below.
+- **Accepted costs.** The DARIA build has had all three since I1, and the final region is correct in each:
+  1. An unmeasured 2600 load after a PAL image runs about 14 `clk_sys` at PAL before its NTSC retune.
+  2. A Region setting changed inside a 2600 image's reset is applied at the release.
+  3. A 2600 load that starts within about 4-5 `clk_sys` of the previous PAL game's change gets one extra PAL retune at the load's end.
+- **For the owner:**
+  - After its one retune, a PAL 2600 game is shown in the NTSC picture window, at the PAL clock, for about 0.96 s more. The reset clears the TIA's measurement (`TIA.sv:1708`), and the game switches windows when the TIA decides again.
+  - A 7800 image that the BIOS drops into 2600 mode is not covered by the hold. It could loop if its 2600-mode video measured PAL against an NTSC header. This is not simulated; M has the same exposure.
+- **For step 8, already in M:** `pll_region.v` checks `loading` only before a retune starts. A load that starts inside a retune's clock stop holds PSRAM CE# low for about 20 µs, where the part's maximum is 4 µs. P reduces the exposure to one retune per PAL game.
