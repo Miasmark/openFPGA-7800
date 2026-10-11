@@ -6,6 +6,7 @@ diff against the copy before the edits.
 
 Usage: step7_prep.py FPGA_COPY [--nodaria] [--pin-id] [--oldpad] [--div 18|19]
                      [--seed N] [--oldpad-ref FILE]
+       step7_prep.py FPGA_DIR --tree-div
 
   --nodaria     delete the three DARIA lines of ap_core.qsf (the macro
                 POCKET_DARIA, QIP_FILE core/daria.qip, SDC_FILE
@@ -24,11 +25,21 @@ Usage: step7_prep.py FPGA_COPY [--nodaria] [--pin-id] [--oldpad] [--div 18|19]
                 (setup into clk_sdram 1.0 ns, no hold line from clk_sys into
                 clk_sdram): commit F's padding taken out again (Q1b, P11).
                 Verified against --oldpad-ref, aeee6d2's file
-  --div 19      clk_arm at VCO/19 under POCKET_DARIA: pll_core.v's
-                POCKET_DARIA branches take ip-generate's C3 = 19 counter-3
-                lines, and the four display strings the tool prints with
-                them, so that the copy, preprocessed with POCKET_DARIA, is
-                the tool's C3 = 19 output (plan P10, 5.2)
+  --div 18|19   clk_arm at VCO/18 or VCO/19 under POCKET_DARIA. pll_core.v
+                selects ip-generate's counter-3 lines, and the four display
+                strings the tool prints with them at C3 = 19 (the other
+                outputs' frequencies and the VCO's, one digit lower), with
+                `ifdef POCKET_DARIA (plan P10, 5.2); the tree's setting is
+                read from the POCKET_DARIA view of the file (the lines Quartus
+                compiles with the macro). A --div other than the tree's
+                rewrites those lines in the copy to the tool's output for that
+                divider, so that the copy, preprocessed with POCKET_DARIA, is
+                ip-generate's output at that C3; the tree's own setting, or no
+                --div, leaves pll_core.v as it is. A display string that a
+                tree keeps outside the `ifdef (as at 70a63ca, C3 = 18) is
+                rewritten where it stands: the copy is a DARIA build
+  --tree-div    print the tree's divider under POCKET_DARIA (18 or 19; 24 when
+                pll_core.v has no POCKET_DARIA branch) and exit
   --seed N      the SEED line
 Writes FPGA_COPY/step7_prep.txt: the settings and the kind of build
 (base: no Fix B, no DARIA; builda: Fix B, no DARIA; daria; q5: DARIA and
@@ -68,22 +79,69 @@ BEGIN
 
 END;
 """
-# ip-generate's C3 = 19 output against its C3 = 24 output (the tree's lines
-# outside POCKET_DARIA). The counter-3 lines go into the POCKET_DARIA branches;
-# the four display strings are outside them.
-DIV19_C3 = [
-    ('.output_clock_frequency3("38.181816 MHz")', '.output_clock_frequency3("36.172244 MHz")'),
-    (".c_cnt_hi_div3(9)", ".c_cnt_hi_div3(10)"),
-    (".c_cnt_lo_div3(9)", ".c_cnt_lo_div3(9)"),
-    ('.c_cnt_odd_div_duty_en3("false")', '.c_cnt_odd_div_duty_en3("true")'),
-]
-DIV19_DISPLAY = [
-    ('.output_clock_frequency0("14.318181 MHz")', '.output_clock_frequency0("14.318180 MHz")'),
-    ('.output_clock_frequency1("57.272724 MHz")', '.output_clock_frequency1("57.272722 MHz")'),
-    ('.output_clock_frequency2("14.318181 MHz")', '.output_clock_frequency2("14.318180 MHz")'),
-    ('.pll_output_clk_frequency("687.272687 MHz")', '.pll_output_clk_frequency("687.272644 MHz")'),
-]
+# ip-generate's output (docs/DEVELOPING.md, "Regenerate the PLL") for the
+# lines that differ between C3 = 18, 19 and 24: per parameter, its value at
+# each C3. C3 = 18 differs from 24 in counter 3's lines alone; C3 = 19 also in
+# four display strings (the other outputs' and the VCO's frequencies, printed
+# one digit lower for the same M, N, K and C0-C2).
+C3_VALUES = {
+    #  parameter                   C3 = 18             C3 = 19             C3 = 24
+    "output_clock_frequency0":  ('"14.318181 MHz"', '"14.318180 MHz"', '"14.318181 MHz"'),
+    "output_clock_frequency1":  ('"57.272724 MHz"', '"57.272722 MHz"', '"57.272724 MHz"'),
+    "output_clock_frequency2":  ('"14.318181 MHz"', '"14.318180 MHz"', '"14.318181 MHz"'),
+    "output_clock_frequency3":  ('"38.181816 MHz"', '"36.172244 MHz"', '"28.636362 MHz"'),
+    "c_cnt_hi_div3":            ("9", "10", "12"),
+    "c_cnt_lo_div3":            ("9", "9", "12"),
+    "c_cnt_odd_div_duty_en3":   ('"false"', '"true"', '"false"'),
+    "pll_output_clk_frequency": ('"687.272687 MHz"', '"687.272644 MHz"', '"687.272687 MHz"'),
+}
+C3_COL = {18: 0, 19: 1, 24: 2}
+PARAM_RE = re.compile(r"^\s*\.(\w+)\((.*)\),?\s*$")
 
+
+def pll_lines(text):
+    """pll_core.v's lines, each with where it sits: 'all' (outside any `ifdef
+    POCKET_DARIA), 'daria' (its POCKET_DARIA branch), 'else' (the other
+    branch), or 'directive'. The file's `ifdefs are not nested."""
+    out, state = [], "all"
+    for line in text.splitlines(keepends=True):
+        t = line.strip()
+        if t.startswith("`ifdef POCKET_DARIA"):
+            if state != "all":
+                die("pll_core.v: a nested `ifdef POCKET_DARIA")
+            state = "daria"; out.append(("directive", line)); continue
+        if t.startswith("`else") and state == "daria":
+            state = "else"; out.append(("directive", line)); continue
+        if t.startswith("`endif") and state in ("daria", "else"):
+            state = "all"; out.append(("directive", line)); continue
+        if t.startswith("`if") or t.startswith("`else") or t.startswith("`elsif"):
+            die(f"pll_core.v: an `ifdef this script does not know: {t}")
+        out.append((state, line))
+    if state != "all":
+        die("pll_core.v: an `ifdef POCKET_DARIA without its `endif")
+    return out
+
+
+def daria_view(text):
+    """The C3_VALUES parameters as Quartus reads them with POCKET_DARIA."""
+    v = {}
+    for where, line in pll_lines(text):
+        m = PARAM_RE.match(line)
+        if m and where in ("all", "daria") and m.group(1) in C3_VALUES:
+            if m.group(1) in v:
+                die(f"pll_core.v: .{m.group(1)} twice in the POCKET_DARIA view")
+            v[m.group(1)] = m.group(2)
+    return v
+
+
+def view_div(text):
+    """Which ip-generate output the POCKET_DARIA view is: 18, 19 or 24."""
+    v = daria_view(text)
+    for div, col in C3_COL.items():
+        if all(v.get(k) == vals[col] for k, vals in C3_VALUES.items()):
+            return div
+    die("pll_core.v's POCKET_DARIA view is none of ip-generate's C3 = 18, 19 or 24 outputs: "
+        + ", ".join(f"{k}={v.get(k)}" for k in C3_VALUES))
 
 def die(msg):
     sys.exit("step7_prep.py: " + msg)
@@ -133,10 +191,16 @@ def main():
     ap.add_argument("--pin-id", action="store_true")
     ap.add_argument("--oldpad", action="store_true")
     ap.add_argument("--oldpad-ref")
-    ap.add_argument("--div", type=int, default=18, choices=(18, 19))
+    ap.add_argument("--div", type=int, choices=(18, 19))
+    ap.add_argument("--tree-div", action="store_true")
     ap.add_argument("--seed", type=int)
     a = ap.parse_args()
     root = a.fpga
+    pll_p = os.path.join(root, "core", "pll", "pll_core.v")
+    if a.tree_div:
+        print(view_div(read(pll_p)))
+        return
+    tree_div = view_div(read(pll_p))
     qsf_p = os.path.join(root, "ap_core.qsf")
     qsf0 = qsf = read(qsf_p)
     notes = []
@@ -232,34 +296,28 @@ def main():
             notes.append("OLDPAD: core_constraints.sdc's constraints are aeee6d2's (comments as in the tree)")
 
     # ---- DIV ---------------------------------------------------------------------------------------------
-    pll_p = os.path.join(root, "core", "pll", "pll_core.v")
-    if a.div == 19:
+    want = tree_div if a.div is None else a.div
+    if want != tree_div:
         if not daria:
-            die("DIV=19 needs a DARIA build (counter 3 is selected by POCKET_DARIA)")
-        pll0 = pll = read(pll_p)
-        blocks = list(re.finditer(r"`ifdef POCKET_DARIA\n(.*?)`else\n", pll, re.S))
-        if len(blocks) != 2:
-            die(f"pll_core.v has {len(blocks)} `ifdef POCKET_DARIA branches, expected 2")
-        out, pos = [], 0
-        for m in blocks:
-            body = m.group(1)
-            for old, new in DIV19_C3:
-                if old == new:
-                    continue
-                body = body.replace(old, new) if body.count(old) == 1 else body
-            out.append(pll[pos:m.start(1)] + body)
-            pos = m.end(1)
-        pll = "".join(out) + pll[pos:]
-        for old, new in DIV19_C3:
-            if old != new and pll.count(new) != 1:
-                die(f"DIV=19: '{new}' should appear once in pll_core.v after the edit")
-        for old, new in DIV19_DISPLAY:
-            if pll.count(old) != 1:
-                die(f"DIV=19: '{old}' is not in pll_core.v once")
-            pll = pll.replace(old, new)
+            die(f"--div {want} needs a DARIA build (counter 3 is selected by POCKET_DARIA)")
+        if tree_div == 24:
+            die(f"--div {want}: pll_core.v has no POCKET_DARIA branch for counter 3")
+        pll0 = read(pll_p)
+        col = C3_COL[want]
+        out = []
+        for where, line in pll_lines(pll0):
+            m = PARAM_RE.match(line)
+            if m and where in ("all", "daria") and m.group(1) in C3_VALUES:
+                line = line.replace(f".{m.group(1)}({m.group(2)})", f".{m.group(1)}({C3_VALUES[m.group(1)][col]})", 1)
+            out.append(line)
+        pll = "".join(out)
+        if view_div(pll) != want:
+            die(f"DIV={want}: the edited pll_core.v's POCKET_DARIA view is not ip-generate's C3 = {want}")
         write(pll_p, pll)
         show(pll_p, pll0, pll, root)
-        notes.append("DIV=19: pll_core.v's POCKET_DARIA counter 3 is ip-generate's C3 = 19, with its display strings")
+        notes.append(f"DIV={want}: pll_core.v's POCKET_DARIA view is ip-generate's C3 = {want} (the tree's is {tree_div})")
+    elif daria:
+        notes.append(f"DIV={want}: the tree's own divider; pll_core.v as it is")
 
     # ---- what kind of build: from the copy as written -----------------------------------------------------
     final = read(qsf_p).splitlines()
@@ -272,8 +330,7 @@ def main():
     sram = read(os.path.join(root, "core", "sram_ctrl.sv"))
     fixb = bool(re.search(r"\bt_(rd|wr)_q\b", sram))
     kind = ("q5" if debug else "daria") if daria else ("builda" if fixb else "base")
-    pll = read(pll_p)
-    div = a.div if daria else 24
+    div = view_div(read(pll_p)) if daria else 24
     with open(os.path.join(root, "step7_prep.txt"), "w") as f:
         f.write(f"kind {kind}\ndaria {int(daria)}\nbup_debug {int(debug)}\nfixb {int(fixb)}\ndiv {div}\n"
                 f"seed {a.seed if a.seed is not None else '-'}\npin_id {int(a.pin_id)}\noldpad {int(a.oldpad)}\n")

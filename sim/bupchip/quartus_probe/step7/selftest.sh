@@ -82,6 +82,35 @@ if grep -qxF "$macro" "$T/p/fpga/ap_core.qsf"; then
 		|| bad "BUP_DEBUG with NODARIA: kind $(kind)"
 fi
 
+echo "-- 1b. step7_prep.py: the clk_arm divider (pll_core.v's POCKET_DARIA view)"
+pll="core/pll/pll_core.v"
+fresh
+tdiv="$(python3 "$HERE/step7_prep.py" "$T/p/fpga" --tree-div 2>&1)"
+case "$tdiv" in 18|19|24) ok "--tree-div: the tree's divider is $tdiv" ;; *) bad "--tree-div: $tdiv" ;; esac
+divline() { sed -n 's/^div //p' "$T/p/fpga/step7_prep.txt" 2>/dev/null; }
+if [ "$tdiv" = 18 ] || [ "$tdiv" = 19 ]; then
+	other=$((37 - tdiv))
+	prep && cmp -s "$ROOT/src/fpga/$pll" "$T/p/fpga/$pll" && [ "$(divline)" = "$tdiv" ] \
+		&& ok "no --div: pll_core.v as in the tree, div $tdiv" || bad "no --div: $(tail -1 "$T/prep.out"), div $(divline)"
+	fresh
+	prep --div "$tdiv" && cmp -s "$ROOT/src/fpga/$pll" "$T/p/fpga/$pll" \
+		&& ok "--div $tdiv (the tree's): pll_core.v as in the tree" || bad "--div $tdiv: pll_core.v changed or refused"
+	fresh
+	if prep --div "$other" && [ "$(python3 "$HERE/step7_prep.py" "$T/p/fpga" --tree-div)" = "$other" ] && [ "$(divline)" = "$other" ]; then
+		ok "--div $other: the copy's POCKET_DARIA view is ip-generate's C3 = $other, div $other"
+		# and back: the round trip gives the tree's file byte for byte
+		python3 "$HERE/step7_prep.py" "$T/p/fpga" --div "$tdiv" > "$T/prep2.out" 2>&1 && cmp -s "$ROOT/src/fpga/$pll" "$T/p/fpga/$pll" \
+			&& ok "--div $tdiv on that copy restores the tree's pll_core.v exactly" || bad "the round trip $tdiv -> $other -> $tdiv differs"
+	else
+		bad "--div $other: $(tail -2 "$T/prep.out")"
+	fi
+	fresh
+	if prep --nodaria --div "$other"; then bad "--nodaria --div $other was not refused"; else ok "--nodaria --div $other is refused"; fi
+	fresh
+	sed -i 's/\.c_cnt_lo_div3(9)/.c_cnt_lo_div3(8)/' "$T/p/fpga/$pll"
+	if prep; then bad "a counter 3 that is no ip-generate output was not refused"; else ok "a counter 3 that is no ip-generate output is refused"; fi
+fi
+
 # ---- 2. step7_checks.py ------------------------------------------------------------------------------------
 echo "-- 2. step7_checks.py: the verdict and (k') on made-up report files"
 cat > "$T/fixture.py" <<'PY'

@@ -132,19 +132,25 @@ else:
         if len(cols) >= 3 and "|" in cols[0]:
             rows.append(cols)
     watch = [t for t in firsts_here] + [dict(ep="*|daria_fe_guard:u_guard|pd_tog", re=glob_re("*|daria_fe_guard:u_guard|pd_tog"))]
+    # Each row of the table that duplicates or retimes a watched register, by
+    # the register's own name (a duplicate's suffix stripped), named in full:
+    # the node, what was done (action, operation, reason) and the node it made
+    # (the Destination Node column: the duplicate, "<name>~DUPLICATE").
     bad = []
     for t in watch:
         for cols in rows:
             if t["re"].match(strip_suffix(cols[0])) and re.search(r"Duplicat|Retim", " ".join(cols[1:3]), re.I):
-                bad.append(f"{cols[0]}: {cols[1]} / {cols[2]}")
+                made = cols[6] if len(cols) > 6 and cols[6] else "-"
+                bad.append(f"{cols[0]} {cols[1].lower()} as {made} ({cols[2]}; {cols[3] if len(cols) > 3 else '-'})")
     tbad = [f"{c[0]}: {c[1]} / {c[2]}" for c in rows
             if re.search(r"\|sram_ctrl:sram\|t_\w+_q", c[0]) and re.search(r"Retim", " ".join(c[1:3]), re.I)]
     if i < 0:
         check("c", "INFO", "the fit report has no Fitter Netlist Optimizations table (nothing optimized)")
     elif daria:
         check("c", "FAIL" if bad else "PASS",
-              f"{len(rows)} optimized nodes; pd_tog, pd_rx and the {len(firsts_here)} first flops of this build: "
-              + ("; ".join(bad) if bad else "none duplicated or retimed"))
+              f"{len(rows)} optimized nodes; pd_tog, pd_rx and the {len([t for t in firsts_here if t['cls'] != 'guard'])} "
+              "first flops of this build: "
+              + (f"{len(bad)} duplicated or retimed: " + "; ".join(bad) if bad else "none duplicated or retimed"))
     else:
         check("c", "FAIL", "no DARIA in this build: the first flops of plan 2.7 are not there (no such cell)")
     if prep.get("fixb") == "1":
