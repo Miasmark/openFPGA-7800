@@ -59,9 +59,10 @@
 //               The calls are also counted where they are posted and run
 //               (P22: from call_tog): u_fe's call_tog flips (clk_sys),
 //               bupchip's call_go and returned pulses (clk_arm); the line
-//               "FRAMES calls: ..." gives them, and each must equal the busy
-//               periods (C) within one (the call in flight at the end, or
-//               across a restart below), or the result is FAIL.
+//               "FRAMES calls: ..." gives them: each must equal the busy
+//               periods (C), but for the one call that may be in flight at
+//               the end (posted, and maybe started or returned, its busy not
+//               yet fallen), or the result is FAIL.
 //
 // The input script is tb_daria's (+fire_at=F, +reset_at=F, +select_at=F,
 // +play_at=F, +seed=N; defaults 420, 0, 0, 480, 1), applied by frame through
@@ -210,10 +211,12 @@ module tb_frames;
 	int     g_lk_bad = 0, g_ul_bad = 0, unlocks = 0;
 	// the calls where they are posted and run (P22): call_tog flips, call_go and returned
 	int     n_tog = 0, n_go = 0, n_ret = 0, base_tog = 0, base_go = 0, base_ret = 0;
+	bit     cross_off = 0;
 `ifdef SIM_DARIA_FE
 	logic   tog_q = 0;
+	longint t_last_tog = -100;
 	always @(posedge tb.clk_sys) begin
-		if (tb.dut.u_fe.call_tog !== tog_q) n_tog++;
+		if (tb.dut.u_fe.call_tog !== tog_q) begin n_tog++; t_last_tog = now; end
 		tog_q <= tb.dut.u_fe.call_tog;
 	end
 	always @(posedge tb.clk_arm) begin
@@ -373,7 +376,10 @@ module tb_frames;
 		// abandons it) is logged as call 1 of the new files
 		call_id = sys_call ? 1 : 0; sys_calls = 0; overruns = 0; worst_slack = 64'sh7fffffffffffffff;
 		base_tog = n_tog; base_go = n_go; base_ret = n_ret;
-		if (sys_call) $display("FRAMES a call was in flight at the release: logged as call 1 of the new files, with its frame and line from before");
+		if (sys_call) begin
+			$display("FRAMES a call was in flight at the release: logged as call 1 of the new files, with its frame and line from before; the call counts are not cross-checked");
+			cross_off = 1;
+		end
 		t_timer_write = -1; t_expire = -1; expired = 0; zeroed = 0; t_zero = -1;
 		await_poll = 0; pending_slack = 0; pending_zero = 0;
 		f_calls = 0; f_stall = 0; f_dma = 0;
@@ -454,15 +460,20 @@ module tb_frames;
 			g_dbg_lk, g_lk, g_lk_bad, g_ul_bad, d_hcode);
 		begin
 			int tg, go, rt;
+			bit flight;
 			string since;
 			tg = n_tog - base_tog; go = n_go - base_go; rt = n_ret - base_ret;
-			// each within one of the busy periods (the call in flight at the end)
-			calls_ok = tg >= sys_calls - 1 && tg <= sys_calls + 1 && go >= sys_calls - 1 && go <= sys_calls + 1 &&
-				rt >= sys_calls - 1 && rt <= sys_calls + 1;
+			// One call at most in flight at the end: posted (call_tog flipped,
+			// the busy up or about to rise) and not yet ended. Every ended call
+			// was posted, started and returned once; a started one was posted,
+			// a returned one started.
+			flight = sys_call || fe_busy || now - t_last_tog <= 4;
+			calls_ok = cross_off || (tg == sys_calls + (flight ? 1 : 0) && go >= sys_calls && go <= tg && rt >= sys_calls && rt <= go);
 			since = "";
 			if (restarts != 0) since = " (since the last restart)";
-			$display("FRAMES calls: %0d busy periods (the 6507's), %0d call_tog flips, %0d call_go, %0d returned%s: %s",
-				sys_calls, tg, go, rt, since, calls_ok ? "equal within one" : "MISMATCH");
+			$display("FRAMES calls: %0d busy periods (the 6507's), %0d call_tog flips, %0d call_go, %0d returned%s, %0d in flight at the end: %s",
+				sys_calls, tg, go, rt, since, flight, cross_off ? "not checked (a call in flight at a restart)" :
+				calls_ok ? "consistent" : "MISMATCH");
 		end
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
 			sys_calls, overruns, halts, halts != 0 ? int'(d_hcode) : 0, psram_viol, guard, unlocks);
