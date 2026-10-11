@@ -120,7 +120,8 @@
 // item 11). Checked while it runs: the copies change only on a clk_sys rising
 // edge, at most once per snapshot period, and every word they take is one the
 // clk_arm side held (no torn word); at the end, once both clk_arm words have
-// held still for two snapshot periods, the copies equal them. The shadow
+// held still for two snapshot periods (the pops paused first when the FIFO
+// is still playing, as in a run of 0 s), the copies equal them. The shadow
 // minimum (dbg_status[10:0]) is reported beside the bench's minlev. The "snap:"
 // line gives the verdict: ok, FAIL, or na in a build without the snapshot.
 //
@@ -1033,17 +1034,27 @@ module tb_s4;
 	task automatic snap_final();
 `ifdef S4_SNAP
 		longint n0, t_still;
-		bit ok, eq;
+		bit ok, eq, paused_end;
 		logic [63:0] w;
 		// Wait (at most 64 periods) until both clk_arm words have held still
-		// for two periods, then two periods more for the copy to arrive.
-		n0 = snap_ns;
-		w = snap_arm;
-		t_still = snap_ns;
-		while (snap_ns - t_still < 2 * SNAP_PER + 16 && snap_ns - n0 < 64 * SNAP_PER) begin
-			@(posedge clk_sys);
-			if (snap_arm !== w) begin w = snap_arm; t_still = snap_ns; end
+		// for two periods, then two periods more for the copy to arrive. A
+		// FIFO still playing (a run of 0 s: the lowest level still falling)
+		// keeps the status word moving: then the pops are paused, so that
+		// the FIFO goes idle (plan 3.6), and the wait starts again.
+		paused_end = 0;
+		for (int pass = 0; pass < 2; pass++) begin
+			n0 = snap_ns;
+			w = snap_arm;
+			t_still = snap_ns;
+			while (snap_ns - t_still < 2 * SNAP_PER + 16 && snap_ns - n0 < 64 * SNAP_PER) begin
+				@(posedge clk_sys);
+				if (snap_arm !== w) begin w = snap_arm; t_still = snap_ns; end
+			end
+			if (snap_ns - t_still >= 2 * SNAP_PER + 16 || pass == 1) break;
+			pause <= 1;
+			paused_end = 1;
 		end
+		if (paused_end) $display("snapshot   the clk_arm words kept changing for 64 periods: pops paused at %.3f ms, the FIFO idle, then compared", ms($time));
 		eq = snap_ns - t_still >= 2 * SNAP_PER + 16 && snap_sys === snap_arm;
 		ok = eq && snap_off_edge == 0 && snap_fast == 0 && snap_torn == 0 && snap_chg > 0;
 		$display("snapshot   %0d changes of the clk_sys copies, %0d off a clk_sys edge, %0d within half a period of the last, %0d torn; at the end (still %0d clk_sys) dbg_status %08x / clk_arm %08x, dbg_halt_pc %08x / %08x",
