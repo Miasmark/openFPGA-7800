@@ -161,8 +161,11 @@ def images():
 
 def pal_dpc(path):
     """fe_dir's smoke_dpc (tests.py) with PAL frames: its body, then 60 lines
-    and 255 more, about 320 lines a frame, which the TIA scores as PAL after
-    48 frames (about 1 s). No .meta: not in the directed set."""
+    (61 in every other frame) and 255 more, about 320 lines a frame, which the
+    TIA scores as PAL after 48 frames (about 1 s). The TIA scores a frame of
+    an odd line count at half (TIA.sv's frame_score), so frames of one parity
+    only could score even and read NTSC; alternating frames cannot. No .meta:
+    not in the directed set."""
     fd = os.path.join(SIM, "bupchip/daria/fe_dir")
     if fd not in sys.path:
         sys.path.insert(0, fd)
@@ -184,7 +187,12 @@ def pal_dpc(path):
         LDA DF0DATA
         STA $81
         INC M_DONE
-        LDX #256-60
+        LDA $82
+        EOR #1
+        STA $82
+        BEQ palodd
+        STA WSYNC
+palodd: LDX #256-60
 paldly: STA WSYNC
         INX
         BNE paldly
