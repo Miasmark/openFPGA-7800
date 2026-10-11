@@ -967,17 +967,18 @@ wire region_select = (region_setting == 2'd0) ?
 
 `ifdef POCKET_DARIA
 // The region asked of the PLL (is_pal_o, core_top.v's pll_region), held while
-// a 2600 image's region is not known: from its download (once the header
-// shows no A78) to the clock after it, and while its console is in reset
+// a 2600 image's region is not known: during its download (once the header
+// shows no A78) and the clock after it, and while its console is in reset
 // (tia_mode, tia_en low). An ARM image's front end runs F6 only with the
 // console in reset, so no retune starts during F6 (P20); the retune that the
 // image's region asks for starts when the console is released, on P20's
-// mid-game path, which runs F6 again after it. In reset, region_select would
-// fall to cart_region[0], which is 0 for a 2600 image (cleared at its end)
-// or, during its download, the image's byte 57; a PAL game's reset (its own
-// retune's, the menu's) would then retune to NTSC, and the release back to
-// PAL, every time. An A78 is not held: its region follows its header as in
-// a build without DARIA.
+// mid-game path, which runs F6 again after it. Unheld, region_select falls
+// to cart_region[0] whenever a 2600 image's console is in reset: 0 (cleared
+// at the image's end), or the image's byte 57 during its download. A PAL
+// game's own retune, whose reset outlasts it, would then ask for NTSC, that
+// retune's reset for PAL again, and so on without end; and a load's end
+// could start a retune that its F6 runs into. An A78 is not held: its region
+// follows its header as in a build without DARIA.
 /* verilator lint_off PROCASSINIT */
 reg daria_pal = 1'b0;
 /* verilator lint_on PROCASSINIT */
@@ -1412,9 +1413,10 @@ bupchip_pocket bupchip
 //
 // cart_reset is top.sv's effective_reset, masked while pll_busy_s[1] is
 // high and for 4 clk_sys after it falls (daria_rt_mask, P20, above): a
-// retune never starts F6; F6 runs once, when the retune ends. init_busy reaches the console reset and .loading through
-// daria_hold (P6). The bench hooks are tied off; dbg_locked and dbg_unlock
-// are for step 8's BUP_DEBUG overlay and the benches (P22).
+// retune never starts F6; F6 runs once, when the retune ends. init_busy
+// reaches the console reset and .loading through daria_hold (P6). The
+// bench hooks are tied off; dbg_locked and dbg_unlock are for step 8's
+// BUP_DEBUG overlay and the benches (P22).
 daria_fe u_fe
 (
 	.clk_sys         (clk_sys),

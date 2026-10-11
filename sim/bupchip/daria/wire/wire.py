@@ -22,7 +22,8 @@ Environment: WORK (default sim/work/step7/wire), VERILATOR (default
 /opt/verilator-5.040/bin/verilator), VL_JOBS (default 2), RTL_TREE (build
 another checkout's RTL with these benches: a mutant's scratch worktree),
 ARM_DIV (19: clk_arm at VCO/19; the guard is then expected unlocked), DIRECTED=1
-(also every fe_dir directed image, the whole-core directed set).
+(also every fe_dir directed image, the whole-core directed set), PAL2600_PLAIN=0
+(pal2600 without its plain-build run, which is only reported).
 The log starts with the tree's HEAD and status, the tool and the binaries'
 md5 (plan P23). Results: WORK/results.txt, one line per scenario.
 SPDX-License-Identifier: MIT
@@ -490,11 +491,13 @@ def scenarios(img):
     def pal2600():
         args = ["+image=" + I("pal_test.a26"), "+wav=1300", "+wire_pll"]
         s = run("daria", "pal2600", args)
-        p = run("plain", "pal2600", args)
-        j = Judge("pal2600"); no_daria(j, s); common(j, p)
+        j = Judge("pal2600"); no_daria(j, s)
         j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
-        s["note"] = "plain build: retunes=%s b2b=%s releases=%s is_pal=%s" % tuple(
-            p["sum"].get(k) for k in ("retunes", "b2b", "releases", "is_pal"))
+        if os.environ.get("PAL2600_PLAIN", "1") == "1":
+            p = run("plain", "pal2600", args)
+            common(j, p)
+            s["note"] = "plain build: retunes=%s b2b=%s releases=%s is_pal=%s" % tuple(
+                p["sum"].get(k) for k in ("retunes", "b2b", "releases", "is_pal"))
         return j, s
     S["pal2600"] = (pal2600, "a PAL 2600 image on Auto, pll_region in the loop: one retune, to PAL, once the TIA "
                     "has scored 48 frames (about 1 s), and the game restarts in PAL (the plain build's count is "
