@@ -10,6 +10,9 @@ Related documents:
 - [ENVIRONMENT.md](ENVIRONMENT.md): setting up a fresh container (tools,
   Quartus in Docker, simulators, where data lives, every bench and its
   command, working conventions and pitfalls).
+- [AGENT_RUNS.md](AGENT_RUNS.md): running long multi-agent work here
+  (poll at most every 4 minutes, restarts and resuming, simulation slots,
+  disk).
 - [README.md](../README.md): features, installing, credits, test results.
 - [src/fpga/mister/POCKET_CHANGES.md](../src/fpga/mister/POCKET_CHANGES.md):
   every change made to the vendored MiSTer sources, and how to update them.
