@@ -37,7 +37,7 @@ A call that follows a gap of 5 minutes or more and has a large cache write is a 
 
 ## 2. Restarts
 
-**How often.** Five restarts hit in three days (2026-10-09 to 10-12). A session restart kills the agents but not the processes they started. A machine restart kills the processes as well, and dockerd with them (ENVIRONMENT.md 3.3, 8.1).
+**How often.** Five restarts hit in about 52 hours (2026-10-09 to 10-12): one of the container, four of the session only. A session restart kills the agents but not the processes they started. A machine restart kills the processes as well, and dockerd with them (ENVIRONMENT.md 3.3, 8.1).
 
 **Commit and log early:**
 - Commit verified work early on the lane branch. `WIP: ...` commits are fine there.
