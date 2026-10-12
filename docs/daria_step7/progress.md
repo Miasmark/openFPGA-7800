@@ -178,4 +178,51 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
   - Clean Galagon (599 frames) and SF2fix (29 frames) pass both runs.
   - The planted fault fails the aligned run on SF2fix (17 of 29 frames). Galagon never exercises it.
   - Not yet run: the aligned run on Turbo and draconian, tick-phase matching for CDF music, and SF2fix beyond frame 29 (its natural audio differences span frames 4-119 and 325-599).
-- **For the owner, outside DARIA:** the shipped Pocket core presents a 2600 image's paddle inputs differently from `tb_daria`, so Genesis-aware games detect a different controller mode. With the Pocket's inputs, Turbo's ARM code runs a different instruction count from R1's on 438 of 1,197 calls, from the second call on. The D review is checking where the mapping comes from and what a player sees.
+- **For the owner, outside DARIA:** the Pocket core reads INPT0-3 as 0 for a 2600 image with a joystick. The D review found that this mapping is inherited unchanged from upstream's MiSTer wrapper and matches a real 2600 with a standard joystick, whose paddle pins are unconnected. `tb_daria`'s `1010` is instead a Sega Genesis pad with button C released, so R1 ran the Genesis-aware games in their Genesis mode. On the Pocket these games boot in standard joystick mode, and a second-button function they offer with a Genesis pad is unavailable; nothing breaks. With the Pocket's inputs, Turbo's ARM code runs a different instruction count from R1's on 438 of 1,197 calls, from the second call on. A Genesis-pad input option would be a 2600 feature, not a DARIA item.
+
+### Phase 2 gates, the ÷19 branch and the D review (2026-10-12)
+
+- **Every regression gate passes on D** (`70a63ca`, clean tree, both builds):
+  - hygiene, pp_equiv (M's non-DARIA stream), pp_guards, lint (no warning added in the three sets);
+  - the cart RAM matrix and directed s19, with the nohold and nocmp mutants caught;
+  - `run_sim` and `extra_tests`, with every non-BupChip fingerprint identical across builds and BupChip equal by PCM;
+  - the selftest (167 cases), `daria_smp` and `dbg_snap` benches;
+  - `tb_wire`'s 88 scenarios;
+  - `s4/check.sh`, 28 of 28 on each set; every DARIA run prints "snap: ok".
+  - Not run: `AR_TAPE=1` (plan 1.2 row 4).
+  - The PAL 2600 scenario gives 1 retune on the DARIA build and the loop (41,293 retunes) on the plain build, as expected before P.
+- **The ÷19 branch** (`s7/G`, local, not merged; the owner decides the divider):
+  - **Commits:**
+    - `b177e64`: `pll_core.v`'s counter 3 at 19 under `POCKET_DARIA`, with the four display strings the generator prints for it. The bench and gate defaults move to 19.
+    - `3201313`: `ROUTER_REGISTER_DUPLICATION OFF`, set from `daria_sync.tcl`, so DARIA builds only. Quartus 21.1 accepts the router's duplication settings only globally: per-instance forms stop the compile, and `ADV_NETLIST_OPT_ALLOWED` on the two registers is ignored by the router.
+    - `618b5c3`: the guard pair asked of the fitter at 5.5 ns. The Timing Analyzer still checks 6 / 1 ns.
+    - `cbe4e89`: check (k) recognises a duplicate's name, and (c) names each duplicate.
+  - **What the duplication setting costs,** against Q3c on the same netlist: `clk_sdram` mean +2.740 against +2.761 ns, `clk_arm` +1.642 against +1.576 ns, and the same ALMs, LABs and peak interconnect. About 1,050 router-duplicated registers go away. Within seed noise.
+  - **Without the 5.5 ns constraint** (g1-g3), seed 3 missed the guard's 6 ns window at −0.109 ns, through clock skew.
+  - **Fits of `s7/G`** [sta], ÷19, seeds 1 / 2 / 3, every step-7 check passing on each:
+
+    | | `clk_arm` | `clk_sdram` | Worst hold | Guard window (6 ns, slow 85 °C) | ALMs needed | Router duplicates |
+    |---|---|---|---|---|---|---|
+    | h1-h3 | +1.662 / +2.276 / +1.993 | +2.368 / +3.074 / +3.039 | +0.103 / +0.113 / +0.123 | +0.178 / +0.102 / +0.205 | 15,478 / 15,505 / 15,497 | 0 |
+
+  - These fits were made without P; once P is adopted, the merged tree needs its own.
+- **Mode B at ÷19** (bench branch `s7/C19`, which adds each pair's edge distance to the shadow):
+  - Galagon and Mappy ran 600 frames, SF2fix, draconian RC8 and Turbo 300, and Spiders 600. All six pass: every call equals upstream's, 0 halts, 0 PSRAM violations.
+  - The guard never locked.
+  - The 600-frame runs match R1 on frames 1-599. Spiders has the same 16 late calls as at ÷18.
+  - The collision counts, and `tb_s4` at ÷19, are recorded when their independent check is done.
+- **The D review** (D, P's adoption, `s7/G` and `s7/C19`; no sign-off yet):
+  - **Blocker, both dividers:** the guard's registers are duplicated in D's fits. The fix exists only on `s7/G` (`3201313`, `618b5c3`). It has never been fitted at ÷18.
+  - **Blocker at ÷18:** no fit set meets 5.2 on three seeds. ÷18 needs a waiver of P12 for `clk_arm`, or a lever the plan does not have.
+  - **Major, both dividers:** a retune can still start inside F6.
+    - How it happens: `pll_region` starts no retune while a load sequence is in progress, so a region change between a load's slots can wait past `daria_rt_mask`'s 16-clock window. A console reset in that time starts F6, and the load's end then starts the retune while F6 writes cart RAM.
+    - Shown with a scratch tap: F6 wrote cart RAM while `pll_busy` was high.
+    - `tb_wire` cannot reach it, because it drives the loading flag per slot.
+    - The fix: treat a pending retune like `pll_busy`, plus a `tb_wire` scenario that fails before the fix. Or the owner accepts it as a residual for step 8.
+  - **Major, both dividers:** the tree that will ship (D + P + the chosen divider) has no gate or fit evidence yet. Never run on any D-line tree: Q-mut, Q4 (now against Q1''), Q5, `AR_TAPE=1`, and a frame gate under an agreed P13 rule with bench parity. Plan 7.6 lists the reruns.
+  - **Minor:**
+    - `bupchip`'s timer rate takes `region_select`, not the region the PLL runs (plan 2.5 says `region_select`).
+    - `s7/G` selects four PLL display strings beyond P10's "counter 3 only": P10's wording should say "the tool's output for the selected counter".
+    - Nothing checks that the benches' default divider equals `pll_core.v`'s.
+  - **The guard at ÷19 is inert by construction:** on the 48:19 lattice any 13-sample window holds 6 or 7 matching samples, where a lock needs exactly 5. A transient lock would only delay front-end grants; F6 keeps its priority.
+- **Owner (2026-10-11), still in force:** nothing major starts before Tuesday 13 October, 7 PM Eastern (23:00 UTC). After the ÷19 results the owner decides the divider. The review's findings, P's adoption into D and the reruns follow in the D fix round.
