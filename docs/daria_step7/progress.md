@@ -274,3 +274,9 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 - the lane's final report.
 
 Everything is in the lane's gitignored work directory, with resume notes. The decisions waiting for the owner are listed above: the divider, the "same frames" rule with bench parity, and the retune-inside-F6 finding.
+
+### Owner decisions (2026-10-12)
+
+- **Divider: ÷19 for the first release.** ÷19 is the more promising divider, and it can be V1 even if it is not exact. Plan 5.2's ÷19 path applies: `s7/G`'s PLL lines, router setting and guard-pair constraint go into D, together with 5.2's ÷19 checks. The guard is inert at ÷19, and the rare audio-read coincidences recorded above are accepted for V1.
+- **"Same frames": wanted, not required for V1.** Small discrepancies are acceptable in a first version; they are measured and documented instead of blocking the release. The P13 rule is amended on this basis when work resumes. The frame runs' proposal is the starting point: bench parity, then a natural run gating `len_sys`, video, RIOT and ARM instruction counts.
+- **The retune-inside-F6 race is fixed,** not deferred to step 8. The fix is the first item when work resumes on Tuesday 13 October at 7 PM Eastern (23:00 UTC). The D review's proposal: treat a pending retune like `pll_busy`, with a `tb_wire` scenario that models the loading flag across slots and fails before the fix.
