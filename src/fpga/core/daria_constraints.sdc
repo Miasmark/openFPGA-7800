@@ -70,5 +70,14 @@ set_min_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
 #     for every transfer both name.
 # clk_arm -> clk_arm (plan 5.2) has no padding in core_constraints.sdc, so
 # its rung is the whole amount there.
+#
+# The guard pair asked of the fitter at 5.5 ns instead of 6.0 (a register to
+# register line: it replaces the 6.000 above for the fitter alone; the
+# Timing Analyzer and plan 5.4 (a) keep 6.000). With the router's register
+# duplication off (daria_sync.tcl) the fitter left the pair at -0.109 ns on
+# seed 3 at VCO/19 (+0.133 and +0.264 on seeds 1 and 2): its skew, about
+# -0.6 to -1.1 ns at the slow corners, eats most of the 6 ns.
 if {$::TimeQuestInfo(nameofexecutable) eq "quartus_fit"} {
+	set_max_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
+	              -to   [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_rx}] 5.500
 }
