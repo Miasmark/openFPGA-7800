@@ -149,3 +149,25 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
   - Plan 5.2's checks at ÷19: mode B at ÷19 with each collision's edge distance recorded (Galagon and Mappy first, then phase 2's set), and `tb_s4` at ÷19.
   - The guard's registers: a fix that keeps each a single register, and ÷19 fits of it on seeds 1-3.
 - **Owner (2026-10-11):** nothing major starts before Tuesday 13 October, 7 PM Eastern (23:00 UTC). The owner decides between ÷18 and ÷19 after the ÷19 collision results. D's fixes, P's adoption into D, and R2 wait for that decision.
+
+### Frame runs on D against R1 (2026-10-11)
+
+- **The runs:** `tb_frames`, DARIA build, ÷18, phase 0, 600 frames each, checked with `frame_gate.py` against R1's first 600:
+  - draconian RC8 passes, with all four columns equal on 599 of 599 frames.
+  - Galagon, SF2fix and Turbo fail.
+  - In every run: no halt, no PSRAM violation, no guard unlock and no late call. Call counts equal R1's, and the call cross-check is consistent.
+- **The main cause is the bench.** `tb_daria`, R1's bench, drives the TIA's paddle inputs INPT0-3 as `1010`. The Pocket wrapper drives INPT1 and INPT3 low for a 2600 image on Auto (`atari7800_pocket.sv:901`, the same in `aeee6d2`, M, F and D). Galagon, SF2fix and Turbo read INPT1 at boot to detect a Genesis pad and keep the result in RIOT RAM, so their state differs from R1's from frame 1.
+- **With the inputs matched** (`tb_frames` forced to `tb_daria`'s values):
+  - `len_sys`, video and RIOT are equal on every frame for all three. SF2fix keeps one extra unblanked black line in frame 1.
+  - Every call's ARM instruction count equals R1's.
+  - Only audio still differs: Galagon on 61 frames, Turbo 107, SF2fix 391.
+- **Where the audio differences come from:**
+  - **Galagon and Turbo:** the 6507 writes the TIA audio registers right after a call. Those writes move by the call's release difference, with the same values in the same order. With R1's release times, Galagon equals R1 on every column of all 599 frames.
+  - **SF2fix:** its DPC+ music tick runs 520 `clk_sys` off upstream's. DARIA's first call runs on a cold asset cache, takes 579 `clk_sys` longer and so starts frame 1 a scanline later. With the tick delayed to match and R1's release times, its audio is equal on frames 2-29, the frames tested. Under the same setup a planted audio fault shows on 17 of 29 frames.
+- **Release differences** (DARIA's 6507 hold minus R1's): most calls are shorter, with medians of −286 (Galagon), −137 (SF2fix), −54 (Turbo) and −406 `clk_sys` (draconian). Over all calls, the total hold is 0.84-0.97 of R1's.
+- **The current P13 rule cannot pass a correct DARIA** on Galagon, SF2fix or Turbo, even with matched inputs. Against R1's hashes it also cannot tell a planted audio fault from a correct build.
+- **A rule that can, proposed for the owner's "same frames" decision:**
+  0. **Bench parity:** `tb_frames` presents INPT0-3 as `tb_daria` does, or R1 is re-run with the Pocket's mapping.
+  1. **A natural run** gates `len_sys`, video and RIOT on every frame, each call's ARM instruction count, and the call, late-call and status checks. Frame 1's video is excused only when a frame-0 call's hold differs. Audio is counted, not gated.
+  2. **An aligned run** holds each call's release to R1's and matches the tick phase of DPC+ and CDF music; it gates every column on every frame. Clean Galagon (599 frames) and SF2fix (29 frames) pass, and the planted fault fails.
+- **For the owner, outside DARIA:** the shipped Pocket core presents INPT1 and INPT3 low for a 2600 image on Auto, so Genesis-aware games detect a different controller mode than with `tb_daria`'s inputs. With the Pocket's inputs, Turbo's ARM output differs from R1's from the second call on. The D review is checking where this comes from and what a player sees.
