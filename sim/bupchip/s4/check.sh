@@ -94,10 +94,11 @@ done
 T0=$SECONDS
 
 # The retune job's hold must land while psram.sv is mid-access: 2 clk_arm
-# after the trigger at 28.64 MHz, 3 at 38.18 MHz (ARM38=1) or 36.17 MHz
-# (ARM19=1), where a read takes a clock more with PSRAM_CS=50.0.
+# after the trigger at 28.64 MHz, 3 at 38.18 MHz (ARM38=1, where a read takes
+# a clock more with PSRAM_CS=50.0) and at 36.17 MHz (ARM19=1, the same
+# PSRAM_CS=50.0 clock counts).
 HOLD_MID=2
-[ "${ARM38:-0}" = 0 ] && [ "${ARM19:-0}" = 0 ] || HOLD_MID=3
+{ [ "${ARM38:-0}" = 0 ] && [ "${ARM19:-0}" = 0 ]; } || HOLD_MID=3
 
 # ---- the job pool -------------------------------------------------------------------------
 NAMES=(); PIDS=(); LOGS=()
