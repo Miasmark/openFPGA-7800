@@ -240,3 +240,37 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
     - Nothing in the simulation gates checks that the benches' default divider equals `pll_core.v`'s. Only the fit driver reads the tree's divider.
   - **The guard at ÷19 is inert by construction:** on the 48:19 lattice any 13-sample window holds 6 or 7 matching samples, where the period-3 lock needs exactly 5. A transient lock would only delay front-end grants; F6 keeps its priority.
 - **Owner (2026-10-11), still in force:** nothing major starts before Tuesday 13 October, 7 PM Eastern (23:00 UTC). After the ÷19 results the owner decides the divider. The review's findings, P's adoption into D and the reruns follow in the D fix round.
+
+### Halt (2026-10-12, 17:18 UTC)
+
+**The owner halted all work.** Every agent and simulation was stopped; no Quartus job was running. Nothing is merged beyond DARIA-dev; the local branches `s7/D`, `s7/G` and `s7/C19` keep their commits.
+
+**Mode B at ÷19: the cart RAM coincidences.** These were counted by the lane but **not yet checked by a second reader**. Each pair is a DARIA store and a front-end read of the same cart RAM word within 69.84 ns. The distance is between their clock edges, in VCO periods of 1.455 ns:
+
+| Image (frames) | Pairs | At 0 / 1 / 2 periods | At 3-6 periods | Over 6 | Pairs where the value changed | Per minute, all pairs |
+|---|---|---|---|---|---|---|
+| Galagon (600) | 8 | 0 / 1 / 0 | 2 | 5 | 3: the 1-period pair and 2 over 6 | 48 |
+| Mappy (600) | 22 | 1 / 0 / 1 | 3 | 17 | 2, both over 6 | 132 |
+| draconian RC8 (300) | 2 | 0 / 0 / 0 | 0 | 2 | 0 | 24 |
+| SF2fix (300), Turbo (300), Spiders (600) | 0 | — | — | — | — | 0 |
+
+- **Every pair is a front-end audio read** during a DARIA call. There are no write-write or write-load pairs.
+- **The races to watch:** pairs at 0-2 periods (under 3 ns) are the likely races. There are three:
+  - Galagon's 1-period pair, the only one whose value changed;
+  - Mappy's 0-period pair, a store of 0 over 0;
+  - Mappy's 2-period pair, which did not change.
+- **The pair rate is the games', not the divider's:** step 5's counts within the same window were 50 per minute for Galagon and 134-151 for Mappy.
+- **The runs are short** (5-10 seconds of play each), so the counts of near pairs are rough.
+- **What a race gives:** in the Quartus image's own `altsyncram` model, a dual-clock read of a word being written in the same step gives X on the written byte lanes and the stored value on the others. The Cyclone V handbook was not in the image, so this was not checked against it.
+
+**`tb_s4` at ÷19 was stopped at job 27 of 28:**
+- By the lane's notes, 25 of jobs 1-26 pass, with 0 PSRAM model violations throughout; the stress mutants are caught as at ÷18.
+- `synth_reloads` failed only its placement requirement: both of its holds fell mid-access at ÷19. Its data checks were clean: PCM identical, 0 violations, snap ok. A re-placed rerun was queued but not run.
+- Job 27 (song 13 across a 20 ms pause) was interrupted, and job 28 never started.
+
+**Not done:**
+- the rest of `tb_s4` at ÷19 and the `synth_reloads` rerun;
+- the second reader's recount of the coincidences;
+- the lane's final report.
+
+Everything is in the lane's gitignored work directory, with resume notes. The decisions waiting for the owner are listed above: the divider, the "same frames" rule with bench parity, and the retune-inside-F6 finding.
