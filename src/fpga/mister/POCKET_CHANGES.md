@@ -138,10 +138,16 @@ Upstream 0dc8ad2 also moved PAL timing into the PLL (MiSTer retunes it to
 14.18758 MHz). The Pocket does the same with its own PLL
 (`../core/pll/pll_core.v`, `../core/pll_region.v`), from its 74.25 MHz
 reference. One difference: the TIA's 2600 region detection is cleared by
-the core reset that a retune causes, which as upstream's wrapper is written
-could send a PAL 2600 game back to NTSC and into another retune.
+the core reset that a retune causes, and while the console is in reset the
+Auto region falls back to the A78 header's region byte, which a 2600 image
+does not have; as upstream's wrapper is written, that sends a PAL 2600 game
+back to NTSC and into another retune, without end.
 `../core/atari7800_pocket.sv` latches the detected region until the next
-cart load instead.
+cart load (`tia_pal_seen`), and asks the PLL for `region_pll`, which holds
+a 2600 image's region during its download and while its console is in
+reset, so a PAL 2600 game retunes once. An A78's region (its header) and
+the Region setting reach the PLL as before, one `clk_sys` later (a setting
+changed while a 2600 image's console is in reset, when it is released).
 
 `TIA.sv`, `video_stabilize`: the stabilised 2600 window ends 1 line before
 the frame's end instead of 4. Upstream's 4 gives a standard 262-line frame

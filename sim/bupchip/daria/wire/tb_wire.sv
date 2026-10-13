@@ -524,11 +524,11 @@ module tb_wire;
 		end
 	end
 
-	// ---- +wire_reset_on_pal=K: a console reset as daria_pal changes ---------------------
-	// With +wire_pll: on the K-th clk_sys at which atari7800_pocket.sv's daria_pal
+	// ---- +wire_reset_on_pal=K: a console reset as region_pll changes ---------------------
+	// With +wire_pll: on the K-th clk_sys at which atari7800_pocket.sv's region_pll
 	// is about to change (not held, region_select differs), reset_in rises at
 	// that clock's falling edge, so the console reset rises on the edge where
-	// daria_pal changes, about 2 clk_sys before pll_busy_s[1] shows the retune
+	// region_pll changes, about 2 clk_sys before pll_busy_s[1] shows the retune
 	// that the change starts; held for +wire_reset_clk=N clk_sys (default 49).
 	initial begin
 		automatic int k = 0, n = 49, seen = 0;
@@ -536,11 +536,11 @@ module tb_wire;
 			void'($value$plusargs("wire_reset_clk=%d", n));
 			while (seen < k) begin
 				@(posedge tb.clk_sys);
-				if (!tb.dut.daria_pal_hold && tb.dut.region_select != tb.dut.daria_pal) seen++;
+				if (!tb.dut.region_pll_hold && tb.dut.region_select != tb.dut.region_pll) seen++;
 			end
 			@(negedge tb.clk_sys);
 			tb.reset_in = 1'b1;
-			$display("WIRE reset_in rises as daria_pal changes to %0d (%0.6f ms)", tb.dut.region_select, ms());
+			$display("WIRE reset_in rises as region_pll changes to %0d (%0.6f ms)", tb.dut.region_select, ms());
 			repeat (n) @(negedge tb.clk_sys);
 			tb.reset_in = 1'b0;
 		end

@@ -182,7 +182,7 @@ wire bupfw_dl = 1'b0;
 // one clk_sys low, which unmasked would be a rise, and F6 would then run
 // into the second retune. F6 never runs while the PLL is retuned, and no
 // other front-end write reaches its RAMs then (daria_we_ok, below). Nor
-// does a retune start while F6 runs: is_pal_o is held then (daria_pal).
+// does a retune start while F6 runs: is_pal_o is held then (region_pll).
 wire       daria_hold, daria_arm;
 /* verilator lint_off PROCASSINIT */
 reg        daria_rt_hold = 1'b0;
@@ -414,7 +414,7 @@ assign      daria_hold = daria_init_busy & daria_arm;
 // the cart RAM and clears the front end's state RAM words ($00-$1F), as at
 // power-up, so a dropped write is never missed (the 6507, held in reset,
 // posts no call). F6 itself (init_busy) is not gated: it never meets a
-// retune, which starts only with the console out of reset (daria_pal) and
+// retune, which starts only with the console out of reset (region_pll) and
 // starts F6 only after it ends (daria_rt_mask).
 wire        daria_we_ok = ~pll_busy_s[1] | daria_init_busy;
 `endif
@@ -953,7 +953,10 @@ assign PBin[0] = ~joya[8] & ~joyb[8];     // Reset
 // A 2600 image's region is measured from its video (the TIA's auto_pal). That
 // measurement restarts with the core's reset, and switching the master clock
 // to PAL resets the core, so the result is latched here until the next cart
-// load; otherwise a PAL 2600 game would flip back to NTSC and retune forever.
+// load. The latch alone does not keep a PAL 2600 game in PAL: while the
+// console is in reset (tia_en low, as through every retune) Auto reads
+// cart_region[0] instead. The PLL is therefore asked for region_pll (below),
+// which holds a 2600 image's region through its console resets.
 reg tia_pal_seen = 1'b0;
 always @(posedge clk_sys)
 	if (cart_download)
@@ -964,30 +967,37 @@ always @(posedge clk_sys)
 wire region_select = (region_setting == 2'd0) ?
 	(tia_en ? (tia_pal | tia_pal_seen) : cart_region[0]) : (region_setting == 2'd2);
 
-`ifdef POCKET_DARIA
-// The region asked of the PLL (is_pal_o, core_top.v's pll_region), held while
-// a 2600 image's region is not known: during its download (once the header
-// shows no A78) and the clock after it, and while its console is in reset
-// (tia_mode, tia_en low). An ARM image's front end runs F6 only with the
-// console in reset, so no retune starts during F6 (P20); the retune that the
-// image's region asks for starts when the console is released, on P20's
-// mid-game path, which runs F6 again after it. Unheld, region_select falls
-// to cart_region[0] whenever a 2600 image's console is in reset: 0 (cleared
-// at the image's end), or the image's byte 57 during its download. A PAL
-// game's own retune, whose reset outlasts it, would then ask for NTSC, that
-// retune's reset for PAL again, and so on without end; and a load's end
-// could start a retune that its F6 runs into. An A78 is not held: its region
-// follows its header as in a build without DARIA.
+// The region asked of the PLL (is_pal_o, core_top.v's pll_region, whose
+// retune holds the console in reset through pll_busy). It follows
+// region_select a clock later, but is held while a 2600 image's region is not
+// known: during its download (once the header shows no A78) and the clock
+// after it, and while its console is in reset (tia_mode, tia_en low).
+// Unheld, region_select falls to cart_region[0] whenever a 2600 image's
+// console is in reset: 0 (cleared at the image's end), or the image's byte
+// 57 during its download. A PAL game's own retune, whose reset outlasts it,
+// would then ask for NTSC, that retune's reset for PAL again, and so on
+// without end; and a load's end could start a retune to a stale byte 57's
+// region. An A78 is not held: its region follows its header. A Region
+// setting changed while a 2600 image's console is in reset reaches the PLL
+// when it is released. A register, so that is_pal_o leaves clk_sys without
+// glitches (pll_region samples it on clk_74a).
 /* verilator lint_off PROCASSINIT */
-reg daria_pal = 1'b0;
+reg region_pll = 1'b0;
 /* verilator lint_on PROCASSINIT */
-wire daria_pal_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (tia_mode & ~tia_en);
+wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (tia_mode & ~tia_en);
 always @(posedge clk_sys)
-	if (!daria_pal_hold)
-		daria_pal <= region_select;
+	if (!region_pll_hold)
+		region_pll <= region_select;
 
+`ifdef POCKET_DARIA
+// The DARIA build relies on region_pll's hold (above; P20). An ARM image's
+// front end runs F6 only with the console in reset, so no retune starts
+// during F6; the retune that the image's region asks for starts when the
+// console is released, on P20's mid-game path, which runs F6 again after it;
+// and a load's end cannot start a retune that its F6 runs into.
+//
 // daria_fe's cart_reset mask (P20, above): pll_busy_s[1], the 4 clk_sys after
-// it falls, and the 16 after daria_pal changes, which is when pll_region
+// it falls, and the 16 after region_pll changes, which is when pll_region
 // starts a retune that pll_busy_s[1] shows only about 3 clk_sys later; a
 // console reset (the menu's) in that gap would otherwise rise before it, and
 // its F6 would run into the retune.
@@ -995,7 +1005,7 @@ always @(posedge clk_sys)
 reg  [3:0] daria_pc_cnt = 4'd0;
 /* verilator lint_on PROCASSINIT */
 always @(posedge clk_sys)
-	if (!daria_pal_hold && region_select != daria_pal)
+	if (!region_pll_hold && region_select != region_pll)
 		daria_pc_cnt <= 4'd15;
 	else if (daria_pc_cnt != 4'd0)
 		daria_pc_cnt <= daria_pc_cnt - 4'd1;
@@ -1565,11 +1575,7 @@ assign B = pic_b;
 `endif
 
 assign tia_mode_o = tia_en;
-`ifdef POCKET_DARIA
-assign is_pal_o = daria_pal;
-`else
-assign is_pal_o = region_select;
-`endif
+assign is_pal_o = region_pll;
 // MARIA's frame follows region_select (274 visible lines for PAL, 224 NTSC).
 // A 2600 image's window follows the TIA's own region measurement (288 / 240),
 // which is what the stabiliser uses, whatever the Region setting says.

@@ -529,8 +529,8 @@ def scenarios(img):
             after_retunes(j, s, 2)
             j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0)
             j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
-            j.ok(re.search(r"^WIRE reset_in rises as daria_pal changes to 0", s["text"], re.M) is not None,
-                 "no reset_in as daria_pal changed: the test is void")
+            j.ok(re.search(r"^WIRE reset_in rises as region_pll changes to 0", s["text"], re.M) is not None,
+                 "no reset_in as region_pll changed: the test is void")
             j.ge(s, "marker", meta(I(t + ".bin"))["need"].get("dir_marker", 1))
             return j, s
         S[name] = (f, "P20: as loadpal_*, with a console reset (49 clk_sys) rising on the clock where the region "
