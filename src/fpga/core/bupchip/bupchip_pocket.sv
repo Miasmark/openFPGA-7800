@@ -191,7 +191,7 @@ module bupchip_pocket #(
 	// DARIA, clk_sys: the profile, and the front ends' side of the CPU.
 	input  wire        daria_profile,   // a 2600 ARM cartridge; static while the CPU runs
 	input  wire        daria_ram32,     // its cart RAM is 32 KB (CDFJ+), else 8 KB
-	input  wire        daria_pal,       // the region, for timer 1's rate
+	input  wire        daria_pal,       // the region clk_sys runs at, for timer 1's rate
 	input  wire        daria_mreset,    // the mapper reset, a level
 	input  wire        daria_call_tog,  // a call is posted in the call block
 	output wire        daria_ret_tog,   // its return words are in the call block (clk_arm)

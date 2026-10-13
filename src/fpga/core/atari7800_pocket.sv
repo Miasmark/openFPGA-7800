@@ -1021,6 +1021,9 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 // So no retune is pending or under way when F6 starts (daria_rt_mask keeps
 // cart_reset low while one is, and a window-close F6 follows a withdrawal),
 // and none can become pending while F6 runs: no retune starts inside F6.
+// daria_rgn is also bupchip's daria_pal (daria_mmio's timer rate, below):
+// the region clk_sys runs at. It changes only on the clock after a retune
+// ends, with the console, and so daria_mmio, still in reset.
 /* verilator lint_off PROCASSINIT */
 reg  daria_rgn = 1'b0;
 /* verilator lint_on PROCASSINIT */
@@ -1427,7 +1430,7 @@ bupchip_pocket bupchip
 	,
 	.daria_profile  (daria_profile),
 	.daria_ram32    (daria_ram32_r),
-	.daria_pal      (region_select),
+	.daria_pal      (daria_rgn),      // timer 1's rate: the region clk_sys runs at
 	.daria_mreset   (daria_mres_r),
 	.daria_call_tog (daria_call_tog),
 	.daria_ret_tog  (daria_ret_tog),
