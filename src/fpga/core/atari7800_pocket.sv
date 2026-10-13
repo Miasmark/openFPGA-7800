@@ -182,8 +182,13 @@ wire bupfw_dl = 1'b0;
 // one clk_sys low, which unmasked would be a rise, and F6 would then run
 // into the second retune. F6 never runs while the PLL is retuned, and no
 // other front-end write reaches its RAMs then (daria_we_ok, below). Nor
-// does a retune start while F6 runs: is_pal_o is held then (region_pll).
-wire       daria_hold, daria_arm;
+// does a retune start while F6 runs, or F6 while one is pending: pll_region
+// starts a retune only when no load sequence is in progress, so one asked
+// for during a sequence waits for its end (core_top.v's is_downloading),
+// and daria_rt_pend (below, with region_pll) marks it pending until it
+// ends. While it is pending, cart_reset is masked too, and a console reset
+// of an ARM image lasts until the retune, so F6 runs once, after it.
+wire       daria_hold, daria_arm, daria_rt_pend;
 /* verilator lint_off PROCASSINIT */
 reg        daria_rt_hold = 1'b0;
 reg  [3:0] daria_rt_cnt = 4'd0;
@@ -203,7 +208,8 @@ always @(posedge clk_sys) begin
 `ifdef POCKET_DARIA
 	reset <= reset_in | cart_download | bios_download | hscfw_download |
 		arfw_download | bupfw_dl | old_cart_download | mapper_init_busy | ~pll_locked |
-		pll_busy_s[1] | daria_hold | (daria_rt_hold & daria_arm);
+		pll_busy_s[1] | daria_hold | (daria_rt_hold & daria_arm) |
+		(daria_rt_pend & reset & daria_arm);
 `else
 	reset <= reset_in | cart_download | bios_download | hscfw_download |
 		arfw_download | bupfw_dl | old_cart_download | mapper_init_busy | ~pll_locked |
@@ -414,8 +420,9 @@ assign      daria_hold = daria_init_busy & daria_arm;
 // the cart RAM and clears the front end's state RAM words ($00-$1F), as at
 // power-up, so a dropped write is never missed (the 6507, held in reset,
 // posts no call). F6 itself (init_busy) is not gated: it never meets a
-// retune, which starts only with the console out of reset (region_pll) and
-// starts F6 only after it ends (daria_rt_mask).
+// retune, as none is pending or under way when F6 starts and none can be
+// asked for while it runs (daria_rt_pend, region_pll), and a retune starts
+// F6 only after it ends (daria_rt_mask).
 wire        daria_we_ok = ~pll_busy_s[1] | daria_init_busy;
 `endif
 
@@ -985,31 +992,59 @@ wire region_select = (region_setting == 2'd0) ?
 reg region_pll = 1'b0;
 /* verilator lint_on PROCASSINIT */
 wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (tia_mode & ~tia_en);
+`ifdef POCKET_DARIA
+// DARIA (P20; the D review's finding 3). pll_region starts a retune only
+// while no load sequence is in progress (its loading input, core_top.v's
+// is_downloading, high from a slot's requestwrite to allcomplete, across
+// every slot), so a region asked for during a sequence waits for the
+// sequence's end, which can come at any time, during an F6 too. daria_rgn
+// is the region of the PLL's last completed retune (pll_region's pll_pal,
+// on clk_sys: region_pll, taken on the clock after pll_busy_s[1] falls),
+// and daria_rt_pend marks a retune asked for and not yet completed. For
+// daria_rgn to be exact, region_pll changes only when none is pending or
+// under way, so each retune is to the one region asked for since the last,
+// and pll_region never starts a second one as the first ends. region_pll is
+// - frozen while pll_busy_s[1] is high or a retune is pending;
+// - frozen while an ARM image's console is in reset (daria_reset), so that
+//   it never changes on the clock where daria_fe sees a reset rise (tia_en,
+//   which region_pll_hold reads, falls a clock after the reset rises) or
+//   while F6 runs; a 2600 image's region is held then anyway;
+// - withdrawn, set to daria_rgn, while a 2600 image downloads (when
+//   region_pll_hold holds it anyway): a retune still pending from earlier
+//   in the sequence (a region change while the console ran between slots)
+//   would otherwise start at allcomplete, inside the F6 that the window's
+//   close starts at the download's end. pll_region's loading is high from
+//   the slot's requestwrite, 4 clk_sys before cart_download, so it starts
+//   nothing as region_pll returns to the PLL's region; the image's own
+//   region is asked for when its console is released, on P20's mid-game
+//   path, which runs F6 again after the retune.
+// So no retune is pending or under way when F6 starts (daria_rt_mask keeps
+// cart_reset low while one is, and a window-close F6 follows a withdrawal),
+// and none can become pending while F6 runs: no retune starts inside F6.
+/* verilator lint_off PROCASSINIT */
+reg  daria_rgn = 1'b0;
+/* verilator lint_on PROCASSINIT */
+assign daria_rt_pend = region_pll != daria_rgn;
+always @(posedge clk_sys) begin
+	if (!pll_busy_s[1] && daria_rt_cnt == 4'd15)
+		daria_rgn <= region_pll;
+	if (!pll_busy_s[1]) begin
+		if ((cart_download | old_cart_download) & ~cart_is_7800)
+			region_pll <= daria_rgn;
+		else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))
+			region_pll <= region_select;
+	end
+end
+
+// daria_fe's cart_reset mask (P20, above): pll_busy_s[1], the 4 clk_sys after
+// it falls, and while a retune is pending: pll_region can start it on any
+// clk_74a once no load sequence is in progress, and pll_busy_s[1] shows it
+// only about 3 clk_sys later.
+wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11) | daria_rt_pend;
+`else
 always @(posedge clk_sys)
 	if (!region_pll_hold)
 		region_pll <= region_select;
-
-`ifdef POCKET_DARIA
-// The DARIA build relies on region_pll's hold (above; P20). An ARM image's
-// front end runs F6 only with the console in reset, so no retune starts
-// during F6; the retune that the image's region asks for starts when the
-// console is released, on P20's mid-game path, which runs F6 again after it;
-// and a load's end cannot start a retune that its F6 runs into.
-//
-// daria_fe's cart_reset mask (P20, above): pll_busy_s[1], the 4 clk_sys after
-// it falls, and the 16 after region_pll changes, which is when pll_region
-// starts a retune that pll_busy_s[1] shows only about 3 clk_sys later; a
-// console reset (the menu's) in that gap would otherwise rise before it, and
-// its F6 would run into the retune.
-/* verilator lint_off PROCASSINIT */
-reg  [3:0] daria_pc_cnt = 4'd0;
-/* verilator lint_on PROCASSINIT */
-always @(posedge clk_sys)
-	if (!region_pll_hold && region_select != region_pll)
-		daria_pc_cnt <= 4'd15;
-	else if (daria_pc_cnt != 4'd0)
-		daria_pc_cnt <= daria_pc_cnt - 4'd1;
-wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11) | (daria_pc_cnt != 4'd0);
 `endif
 
 reg [15:0] rnd = 16'h5A5A;
@@ -1436,7 +1471,7 @@ bupchip_pocket bupchip
 // CPU. clk_sys, but for its guard's one clk_arm flop.
 //
 // cart_reset is top.sv's effective_reset, masked while a retune is under way
-// or about to start (daria_rt_mask, P20, above): a retune never starts F6,
+// or pending (daria_rt_mask, P20, above): a retune never starts F6,
 // nor runs into one; F6 runs once, when the retune ends. init_busy
 // reaches the console reset and .loading through daria_hold (P6). The
 // bench hooks are tied off; dbg_locked and dbg_unlock are for step 8's

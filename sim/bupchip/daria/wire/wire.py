@@ -6,6 +6,12 @@
   wire.py run [SCENARIO ...]     run scenarios (default: every one whose inputs
                                  exist) and judge them; exit 0 when all pass
   wire.py list                   the scenarios and what each needs
+  wire.py mutant NAME [SCENARIO ...]
+                                 build the DARIA tb_wire on a copy of the tree's
+                                 src/fpga with one of MUTANTS (the fix of the D
+                                 review's finding 3 undone in part) and run the
+                                 scenarios (default: SEQ_MUT); CAUGHT (exit 0)
+                                 when any fails
 
 Each build first runs sim/run_sim.sh with BUILD_TOP=tb_load (its sources,
 defines and patched copies, DARIA=1 or 0), then builds tb_wire.sv with the
@@ -549,6 +555,52 @@ def scenarios(img):
     b57("b57_dpc", "smoke_dpc")
     b57("b57_cdf", "smoke_cdf")
 
+    # +wire_seq: is_downloading held across a whole load sequence, as core_top.v
+    # makes it (the D review's finding 3): a region change that pll_region must
+    # hold until allcomplete, and allcomplete where it would land inside an F6
+    def seq(name, mode, args, f6_n, releases, is_pal, retunes, desc, rs=True):
+        def f():
+            s = run("daria", name, list(args) + ["+wire_pll", "+wire_seq=" + mode])
+            j = Judge(name); daria_health(j, s, resets=1)
+            after_retunes(j, s, f6_n)
+            j.eq(s, "f6_pend", 0); j.eq(s, "retunes", retunes); j.eq(s, "b2b", 0); j.eq(s, "is_pal", is_pal)
+            j.eq(s, "releases", releases)
+            if rs:
+                # the console reset held from reset_in's rise to the end of the F6 after the retune
+                j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
+            # not vacuous: at the reset (or the slot's start) a retune was pending
+            # in pll_region's own view (is_pal_o is not the region the PLL is set
+            # to, loading high, not busy), and allcomplete came
+            m = re.search(r"^WIRE seq (reset_in rises|reset-causing slot starts|cartridge slot starts)[^:]* at [\d.]+ ms: "
+                          r"is_pal_o (\d), the PLL (PAL|NTSC), pll_region busy 0, loading 1", s["text"], re.M)
+            j.ok(m is not None and int(m.group(2)) != (m.group(3) == "PAL"),
+                 "no retune pending at the reset or slot (the test is void)")
+            j.ok(re.search(r"^WIRE seq allcomplete", s["text"], re.M) is not None, "no allcomplete (the test is void)")
+            return j, s
+        S[name] = (f, "finding 3: " + desc, True)
+    seq("seq_menu_dpc", "menu", ["+image=" + I("hard_reset_call_dpc.bin"), "+daria=40"], 2, 2, 1, 1,
+        "a load sequence runs (a save slot), the Region setting asks for PAL, the menu's Reset 1 ms later, "
+        "allcomplete 30 us after it: the console held from the reset through the retune, one F6 after it, "
+        "none while it is pending or under way")
+    seq("seq_menu_cdf", "menu", ["+image=" + I("hard_reset_call_cdf.bin"), "+daria=40"], 2, 2, 1, 1,
+        "as seq_menu_dpc, a CDF image")
+    seq("seq_auto_dpc", "auto", ["+image=" + I("load_test_pal.a78"), "+wav=90", "+image2=" + I("smoke_dpc.bin"),
+                                  "+image2at=40"], 2, 3, 0, 2,
+        "a PAL A78, then an ARM image as the first slot of a load sequence, Region on Auto: Auto asks for NTSC when "
+        "its console is released, the menu's Reset 1 ms later, allcomplete 30 us after it: as seq_menu_dpc")
+    seq("seq_tia_dpc", "tia", ["+image=" + I("pal_dpc.bin"), "+daria=1150"], 2, 2, 1, 1,
+        "a PAL ARM image on Auto, a load sequence from 500 ms: the TIA's PAL decision asks for PAL, the menu's "
+        "Reset 1 ms later, allcomplete 30 us after it: as seq_menu_dpc")
+    seq("seq_load_cdf", "load", ["+image=" + I("smoke_cdf.bin"), "+wav=90", "+image2=" + I("smoke_cdf.bin"),
+                                  "+image2at=30"], 3, 3, 1, 1,
+        "a load sequence runs, the Region setting asks for PAL, an ARM cartridge is the sequence's last slot: no "
+        "retune pending at its window-close F6 (allcomplete just before it), one retune after its F6, one F6 "
+        "after the retune", rs=False)
+    seq("seq_slot_dpc", "slot", ["+image=" + I("hard_reset_call_dpc.bin"), "+daria=40"], 2, 2, 1, 1,
+        "a load sequence runs, the Region setting asks for PAL, a short reset-causing slot (0x107) is its last: "
+        "the console held from the slot through the retune, one F6 after it, none while the retune is pending or "
+        "under way", rs=False)
+
     def pal2600():
         args = ["+image=" + I("pal_test.a26"), "+wav=1300", "+wire_pll"]
         s = run("daria", "pal2600", args)
@@ -674,9 +726,63 @@ def scenarios(img):
     return S
 
 
+# ---------------------------------------------------------------- mutants
+# atari7800_pocket.sv's fix of the D review's finding 3, each mutant undoing
+# one of its parts: (the text, its replacement)
+MUTANTS = {
+    # cart_reset not masked while a retune is pending: a console reset then
+    # starts F6, and allcomplete can start the retune inside it
+    "nomask": ("wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11) | daria_rt_pend;\n",
+               "wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11);\n"),
+    # no withdrawal during a 2600 download: a retune pending from earlier in
+    # the sequence starts at allcomplete, inside the window-close F6
+    "nowd": ("\t\tif ((cart_download | old_cart_download) & ~cart_is_7800)\n\t\t\tregion_pll <= daria_rgn;\n",
+             "\t\tif (1'b0)\n\t\t\tregion_pll <= daria_rgn;\n"),
+    # a console reset during a pending retune not held to the retune: the
+    # 6507 restarts without F6, then again after the retune's F6
+    "nohold": ("\t\t(daria_rt_pend & reset & daria_arm);\n", "\t\t1'b0;\n"),
+}
+SEQ_MUT = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc"]
+
+
+def mutant(name, names):
+    if name not in MUTANTS:
+        sys.exit("unknown mutant %s: %s" % (name, ", ".join(sorted(MUTANTS))))
+    d = os.path.join(WORK, "mut_" + name)
+    tree = os.path.join(d, "tree")
+    files = sh(["git", "-C", RTL_TREE, "ls-files", "src/fpga"]).stdout.split()
+    for f in files:
+        dst = os.path.join(tree, f)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(os.path.join(RTL_TREE, f), dst)
+    p = os.path.join(tree, "src/fpga/core/atari7800_pocket.sv")
+    t = open(p).read()
+    old, new = MUTANTS[name]
+    if t.count(old) != 1:
+        sys.exit("mutant %s: its text is not in %s once" % (name, p))
+    open(p, "w").write(t.replace(old, new))
+    print("-- mutant %s: atari7800_pocket.sv mutated in %s (from %s)" % (name, tree, RTL_TREE), flush=True)
+    env = dict(os.environ, WORK=d, RTL_TREE=tree)
+    me = os.path.abspath(__file__)
+    r = subprocess.run([sys.executable, me, "build", "daria"], env=env, capture_output=True, text=True)
+    open(os.path.join(d, "build.log"), "w").write(r.stdout + r.stderr)
+    if r.returncode:
+        sys.exit("mutant %s: build failed (%s)" % (name, os.path.join(d, "build.log")))
+    r = subprocess.run([sys.executable, me, "run"] + (names or SEQ_MUT), env=env, capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    caught = r.returncode == 1
+    print("MUTANT %s: %s" % (name, "CAUGHT" if caught else "NOT CAUGHT (exit %d)" % r.returncode), flush=True)
+    return 0 if caught else 1
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     os.makedirs(WORK, exist_ok=True)
+    if cmd == "mutant":
+        if len(sys.argv) < 3:
+            sys.exit("wire.py mutant NAME [SCENARIO ...] (%s)" % ", ".join(sorted(MUTANTS)))
+        header()
+        return mutant(sys.argv[2], sys.argv[3:])
     if cmd == "build":
         header()
         for k in (sys.argv[2:] or ("daria", "plain")):

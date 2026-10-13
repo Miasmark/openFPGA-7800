@@ -94,6 +94,15 @@
 // for +wire_reset_clk=N clk_sys (default 49, the menu's Reset: 255 clk_74a)
 // MS ms after the first release; +wire_reset_on_pal=K raises it as the core's
 // region changes (below).
+// With +wire_pll, also (DARIA build):
+//   f6_pend                 clk_sys with F6 running while pll_region is busy
+//                           or could start a retune (the core's is_pal_o
+//                           differs from the region the PLL is set to: it
+//                           starts one as soon as its loading input is low);
+//                           -1 without +wire_pll
+// +wire_seq=MODE (with +wire_pll) models is_downloading across a whole load
+// sequence, as core_top.v makes it, and runs one of the scripts of the D
+// review's finding 3 (a retune that waits for a load sequence's end; below).
 // With +wire_pcm=FILE it also writes every frame the BupChip's peripheral
 // takes (a push to 0x18's FIFO, 0x10, in the Souper profile) as s16le
 // stereo, and prints "WIRE song start N" at the first command it takes, for
@@ -218,7 +227,8 @@ module tb_wire;
 	/* verilator lint_on UNUSEDSIGNAL */
 	logic dl_cart = 1'b0, dl_cd_d = 1'b0, dl_wr = 1'b0;
 	int   dl_n74 = 0;
-	wire  pr_loading = dl_cart | tb.bios_download | tb.hscfw_download | tb.arfw_download | tb.bupfw_download;
+	bit   seq_ld = 1'b0;      // +wire_seq: is_downloading across a load sequence (below)
+	wire  pr_loading = seq_ld | dl_cart | tb.bios_download | tb.hscfw_download | tb.arfw_download | tb.bupfw_download;
 	always @(posedge tb.clk_74a) begin
 		pr_lk_s <= {pr_lk_s[1:0], tb.pll_locked_tb};
 		if (tb.cart_download && !dl_cd_d) begin
@@ -319,7 +329,7 @@ module tb_wire;
 	int     f6_n = 0, f6_win = 0, f6_rst = 0, f6_rst_low = 0, f6_busy = 0, f6_noib = 0, f6_live = 0, f6_ram_diff = 0;
 	longint f6_win_dt = -1, t_cw_fall = -1, t_crst_rise = -1, t_busy_rise = -1, t_busy_fall = -1;
 	logic [63:0] f6_h0 = '0;
-	int     rt_f6 = 0, rt_f6_early = 0, rt_rst_low = 0, rs_f6 = 0, rs_f6_rst_low = 0;
+	int     rt_f6 = 0, rt_f6_early = 0, rt_rst_low = 0, rs_f6 = 0, rs_f6_rst_low = 0, f6_pend = 0;
 	bit     rt_win = 1'b0, rs_win = 1'b0;
 	int     marker_rs = -1, calls_rs0 = -1, calls_rt0 = -1;
 	logic   rin_f6 = 1'b1;
@@ -371,6 +381,9 @@ module tb_wire;
 			if (!`W_FE.init_busy) f6_noib++;
 		end
 		if (`W_CP.a_f6_live) f6_live++;
+		// +wire_pll: F6 running while pll_region is busy, or would start a
+		// retune as soon as its loading input is low
+		if (`W_CP.f6_q && pll_on && (u_pr.busy || tb.is_pal != u_pr.pll_pal)) f6_pend++;
 		// the console reset from pll_busy_s[1]'s rise (+1: the register follows it)
 		// to the end of the F6 after it; a non-ARM image has none: to the fall
 		if (rt_win && t_sys > t_busy_rise + 1 && !tb.dut.reset) rt_rst_low++;
@@ -546,6 +559,123 @@ module tb_wire;
 		end
 	end
 
+	// ---- +wire_seq=MODE: a retune that waits for a load sequence's end (finding 3) ------
+	// The Pocket's is_downloading (core_top.v) rises at a slot's requestwrite
+	// and falls at allcomplete, after the last slot of a load sequence;
+	// pll_region starts no retune while it is high. The slot model above lets
+	// it fall at the end of each slot. Here (with +wire_pll) seq_ld holds it
+	// high across a sequence that the script starts, with the console running
+	// wherever no slot holds it in reset (a save slot, hsc.sav or savekey.sav,
+	// raises no download flag in the core), and drops it at the script's
+	// allcomplete. Each script asks for a region change while the sequence
+	// runs, so pll_region waits for allcomplete, and lands allcomplete where,
+	// without the fix of finding 3, it starts that retune inside an F6:
+	//   menu  the Region setting to PAL (the sequence starts +wire_seq_at=MS
+	//         after the first F6's console release, default 3), then the
+	//         menu's Reset (reset_in for +wire_reset_clk=N clk_sys, default
+	//         49) +wire_seq_hold=US later (default 1000), then allcomplete
+	//         +wire_seq_ac=US after reset_in rose (default 30): the reset's F6
+	//         would run then (the review's scratch tap);
+	//   auto  (+image2, an ARM image after a PAL A78, Region on Auto) the
+	//         second cartridge is the sequence's first slot; when its console
+	//         is released, Auto asks for NTSC; then the menu's Reset and
+	//         allcomplete as in menu, from that release;
+	//   tia   (a PAL ARM image on Auto) the sequence starts +wire_seq_at=MS
+	//         after the first F6's release (default 500); the TIA's PAL
+	//         decision asks for PAL; then the menu's Reset and allcomplete as
+	//         in menu, from that decision;
+	//   load  the Region setting to PAL as in menu; the +image2 cartridge (an
+	//         ARM image) is the sequence's last slot: allcomplete with the
+	//         slot model's end (21 clk_74a before cart_download falls), so its
+	//         window-close F6 starts a few clk_sys after allcomplete;
+	//   slot  the Region setting to PAL as in menu; +wire_seq_hold=US later a
+	//         reset-causing slot (the Supercharger BIOS slot, 0x107, at bridge
+	//         address 0x06000000), the sequence's last, of +wire_seq_words=N
+	//         words of $FF (default 64, about 0.1 ms with its gaps):
+	//         allcomplete 2,058 clk_74a after its last write, with its flag's
+	//         fall (as the slot model has it for the bench's firmware slots).
+	// The "WIRE seq" lines give pll_region's own view (is_pal_o, the region
+	// the PLL is set to, busy, loading) at each step.
+	task automatic seq_state(input string what);
+		$display("WIRE seq %0s at %0.6f ms: is_pal_o %0d, the PLL %0s, pll_region busy %0d, loading %0d, console reset %0d, F6 %0d",
+			what, ms(), tb.is_pal, u_pr.pll_pal ? "PAL" : "NTSC", u_pr.busy,
+			seq_ld | dl_cart | tb.bios_download | tb.hscfw_download | tb.arfw_download | tb.bupfw_download,
+			tb.dut.reset, `W_CP.f6_q);
+	endtask
+	initial begin
+		automatic string mode;
+		automatic int at = -1, hold_us = 1000, ac_us = 30, rclk = 49, words = 64;
+		if ($value$plusargs("wire_seq=%s", mode)) begin
+			if (!$test$plusargs("wire_pll")) $fatal(1, "+wire_seq needs +wire_pll");
+			if (mode != "menu" && mode != "auto" && mode != "tia" && mode != "load" && mode != "slot")
+				$fatal(1, "+wire_seq=%0s: menu, auto, tia, load or slot", mode);
+			void'($value$plusargs("wire_seq_at=%d", at));
+			if (at < 0) at = mode == "tia" ? 500 : 3;
+			void'($value$plusargs("wire_seq_hold=%d", hold_us));
+			void'($value$plusargs("wire_seq_ac=%d", ac_us));
+			void'($value$plusargs("wire_reset_clk=%d", rclk));
+			void'($value$plusargs("wire_seq_words=%d", words));
+			wait (tb.reset_in == 1'b0);
+			if (mode == "auto") begin
+				@(posedge tb.cart_download);
+				seq_ld = 1'b1;
+				seq_state("starts with a cartridge slot");
+				@(negedge `W_CP.f6_q);
+				wait (tb.dut.reset == 1'b0);
+				seq_state("console released");
+			end else begin
+				@(negedge `W_CP.f6_q);
+				wait (tb.dut.reset == 1'b0);
+				for (int i = 0; i < at; i++) repeat (14318) @(posedge tb.clk_sys);
+				seq_ld = 1'b1;
+				seq_state("starts (a save slot)");
+				if (mode == "tia") begin
+					@(posedge tb.is_pal);
+					seq_state("the TIA's PAL decision");
+				end else begin
+					repeat (10) @(posedge tb.clk_sys);
+					tb.region_tb = 2'd2;
+					$display("WIRE seq the Region setting to PAL at %0.6f ms", ms());
+				end
+			end
+			if (mode == "load") begin
+				@(posedge tb.cart_download);
+				seq_state("cartridge slot starts");
+				@(negedge dl_cart);
+				seq_ld = 1'b0;
+				seq_state("allcomplete, the cartridge slot the last");
+			end else if (mode == "slot") begin
+				#(hold_us * 1000.0);
+				@(posedge tb.clk_74a);
+				seq_state("reset-causing slot starts");
+				tb.arfw_download = 1'b1;
+				repeat (100) @(posedge tb.clk_74a);
+				for (int i = 0; i < words; i++) begin
+					@(posedge tb.clk_74a);
+					tb.bridge_addr = 32'h06000000 + 4 * i;
+					tb.bridge_wr_data = 32'hFFFFFFFF;
+					tb.bridge_wr = 1'b1;
+					@(posedge tb.clk_74a);
+					tb.bridge_wr = 1'b0;
+					repeat (78) @(posedge tb.clk_74a);
+				end
+				repeat (2058) @(posedge tb.clk_74a);
+				seq_ld = 1'b0;
+				tb.arfw_download = 1'b0;
+				seq_state("allcomplete, the slot the last");
+			end else begin
+				#(hold_us * 1000.0);
+				@(negedge tb.clk_sys);
+				seq_state("reset_in rises (the menu's Reset)");
+				tb.reset_in = 1'b1;
+				fork
+					begin repeat (rclk) @(negedge tb.clk_sys); tb.reset_in = 1'b0; end
+					begin #(ac_us * 1000.0); seq_ld = 1'b0; seq_state("allcomplete"); end
+				join
+			end
+		end
+	end
+
 	// ---- the BupChip ----------------------------------------------------------------------
 	int  halts = 0, unlocks = 0, misses = 0;
 	logic halt_d = 1'b0;
@@ -595,6 +725,7 @@ module tb_wire;
 			halts, unlocks, `W_FE.dbg_locked, tb.cram0_chip.n_viol, tb.dut.bup_psram.CLOCK_SPEED, misses)};
 		w = {w, $sformatf(" rt_rst_low=%0d rt_f6=%0d rt_f6_early=%0d rs_f6=%0d rs_f6_rst_low=%0d",
 			rt_rst_low, rt_f6, rt_f6_early, rs_f6, rs_f6_rst_low)};
+		w = {w, $sformatf(" f6_pend=%0d", pll_on ? f6_pend : -1)};
 		w = {w, $sformatf(" calls_rs=%0d calls_rt=%0d marker=%0d errors=%0d marker_rs=%0d",
 			calls_rs0 < 0 ? -1 : calls - calls_rs0, calls_rt0 < 0 ? -1 : calls - calls_rt0,
 			tb.dut.main.riot_inst.riot_ram.mem_q[127], tb.dut.main.riot_inst.riot_ram.mem_q[126], marker_rs)};
