@@ -624,6 +624,134 @@
 	function automatic logic mb_shared_d(input longint t);	// a clk_d edge that is a clk_sys edge
 		return t >= 34920 && (t - 34920) % 69840 == 0;
 	endfunction
+	// ---- c19 (step 7 phase 2, plan 5.2 at VCO/19; branch s7/C19; information, never checked) ----
+	// Every pair of accesses to one cart RAM word, one on DARIA's port A (clk_d) and one on
+	// daria_fe's port B (clk_sys), less than one clk_sys apart (69,840 ps, 48 VCO periods of
+	// 1,455 ps), in either order, by the classes of the coincidence counters above: SR (a DARIA
+	// store and a consumed daria_fe read), WL (a daria_fe write and a DARIA load, at the clk_d
+	// edge where port A registered the address), WW (a daria_fe write and a DARIA store). A pair
+	// is recorded once, when its later access is seen (a load one clk_d late), with its signed
+	// distance in VCO periods (DARIA's edge less daria_fe's) and whether the bytes involved
+	// change (SR: the store changes the word; WL: the write does; WW: the two writes' common
+	// bytes differ), into <out>c19.csv; the histogram by |d| (0..6, 7-47) is printed at the end,
+	// and its d = 0 bins are compared there with coll_d_same, coll_d_ld_same and coll_ww_same.
+	localparam longint C19_VCO = 1455, C19_KEEP = 2 * 69840;
+	typedef struct packed {
+		logic [63:0] t;		// ps: the edge at which the RAM port registers the access
+		logic  [7:0] own;	// daria_fe: u_arb.own_r (bit 0 F6, 1 FIX, 2 AUD, 3 P32, 4 WB, 5 COPY), 8'h80 injected
+		logic  [3:0] be;	// a write's byte enables
+		logic [31:0] old_v;	// a write: the word before it
+		logic [31:0] new_v;	// a write: the word after it
+		logic [31:0] fr;	// tb_daria's frame
+		logic  [3:0] ln;	// a DARIA load: acc_addr[1:0], acc_size
+		logic        call;	// DARIA in a call (d_in_call)
+	} c19_ev_t;
+	c19_ev_t c19_fr [int][$], c19_fw [int][$], c19_ds [int][$], c19_dl [int][$];
+	longint  c19_h [3][8], c19_hc [3][8], c19_neg [3], c19_pos [3], c19_lines = 0, c19_odd = 0;
+	int      fd_c19 = 0;
+	initial begin
+		for (int c = 0; c < 3; c++) begin
+			c19_neg[c] = 0; c19_pos[c] = 0;
+			for (int b = 0; b < 8; b++) begin c19_h[c][b] = 0; c19_hc[c][b] = 0; end
+		end
+		#1;
+		fd_c19 = $fopen({out, "c19.csv"}, "w");
+		$fwrite(fd_c19, "cls,t_d,t_fe,d_vco,word,frame_d,frame_fe,fe_own,d_be,d_old,d_new,fe_be,fe_old,fe_new,ld_lane_size,changed,d_in_call\n");
+	end
+	function automatic logic [31:0] c19_merge(input logic [31:0] o, input logic [3:0] be, input logic [31:0] wd);
+		logic [31:0] v;
+		v = o;
+		for (int b = 0; b < 4; b++) if (be[b]) v[8 * b +: 8] = wd[8 * b +: 8];
+		return v;
+	endfunction
+	task automatic c19_pair(input int cls, input int w, input c19_ev_t d, input c19_ev_t f);
+		longint dt, dv, ad;
+		int bin;
+		logic ch;
+		logic [31:0] m;
+		dt = longint'(d.t) - longint'(f.t);
+		if (dt < 69840 && dt > -69840) begin
+			if (dt % C19_VCO != 0) c19_odd++;
+			dv = dt / C19_VCO;
+			ad = dv < 0 ? -dv : dv;
+			bin = ad > 6 ? 7 : int'(ad);
+			m = '0;
+			for (int b = 0; b < 4; b++) if (d.be[b] && f.be[b]) m[8 * b +: 8] = 8'hFF;
+			ch = cls == 0 ? d.old_v != d.new_v : (cls == 1 ? f.old_v != f.new_v : ((d.new_v ^ f.new_v) & m) != '0);
+			c19_h[cls][bin]++;
+			if (ch) c19_hc[cls][bin]++;
+			if (dv < 0) c19_neg[cls]++;
+			else if (dv > 0) c19_pos[cls]++;
+			if (c19_lines < 1000000) begin
+				c19_lines++;
+				$fwrite(fd_c19, "%s,%0d,%0d,%0d,%04x,%0d,%0d,%02x,%x,%08x,%08x,%x,%08x,%08x,%x,%0d,%0d\n",
+					cls == 0 ? "SR" : (cls == 1 ? "WL" : "WW"), d.t, f.t, dv, w, d.fr, f.fr, f.own, d.be, d.old_v, d.new_v,
+					f.be, f.old_v, f.new_v, d.ln, ch, d.call);
+			end
+		end
+	endtask
+	// daria_fe's access at this clk_sys edge (wr: a write; inj: a positive control's, +mb_inj=4/5)
+	task automatic c19_fe(input logic wr, input int w, input logic inj);
+		c19_ev_t e, tq [$];
+		e = '0;
+		e.t = $time;
+		e.own = inj ? 8'h80 : {2'b00, u_fe.u_arb.own_r};
+		e.be = wr && !inj ? fu_crb_be : 4'd0;
+		e.old_v = `D_CART_RAM.mem_q[w];
+		e.new_v = c19_merge(e.old_v, e.be, fu_crb_wd);
+		e.fr = frame;
+		while (c19_ds.exists(w) && c19_ds[w].size() > 0 && longint'(c19_ds[w][0].t) < $time - C19_KEEP) c19_ds[w].delete(0);
+		while (c19_dl.exists(w) && c19_dl[w].size() > 0 && longint'(c19_dl[w][0].t) < $time - C19_KEEP) c19_dl[w].delete(0);
+		if (c19_ds.exists(w)) begin tq = c19_ds[w]; foreach (tq[i]) c19_pair(wr ? 2 : 0, w, tq[i], e); end
+		if (wr && c19_dl.exists(w)) begin tq = c19_dl[w]; foreach (tq[i]) c19_pair(1, w, tq[i], e); end
+		if (wr) c19_fw[w].push_back(e);
+		else c19_fr[w].push_back(e);
+	endtask
+	// DARIA's store at this clk_d edge
+	task automatic c19_store(input int w);
+		c19_ev_t e, tq [$];
+		e = '0;
+		e.t = $time;
+		e.be = d_ram_be;
+		e.old_v = `D_CART_RAM.mem_q[w];
+		e.new_v = c19_merge(e.old_v, d_ram_be, d_ram_wdata);
+		e.fr = frame;
+		e.call = d_in_call;
+		while (c19_fr.exists(w) && c19_fr[w].size() > 0 && longint'(c19_fr[w][0].t) < $time - C19_KEEP) c19_fr[w].delete(0);
+		while (c19_fw.exists(w) && c19_fw[w].size() > 0 && longint'(c19_fw[w][0].t) < $time - C19_KEEP) c19_fw[w].delete(0);
+		if (c19_fr.exists(w)) begin tq = c19_fr[w]; foreach (tq[i]) c19_pair(0, w, e, tq[i]); end
+		if (c19_fw.exists(w)) begin tq = c19_fw[w]; foreach (tq[i]) c19_pair(2, w, e, tq[i]); end
+		c19_ds[w].push_back(e);
+	endtask
+	// DARIA's load, seen one clk_d late: port A registered the address at t
+	task automatic c19_load(input int w, input longint t);
+		c19_ev_t e, tq [$];
+		e = '0;
+		e.t = t;
+		e.ln = {`D_CPU.acc_addr[1:0], `D_CPU.acc_size};
+		e.fr = frame;
+		e.call = d_in_call;
+		while (c19_fw.exists(w) && c19_fw[w].size() > 0 && longint'(c19_fw[w][0].t) < $time - C19_KEEP) c19_fw[w].delete(0);
+		if (c19_fw.exists(w)) begin tq = c19_fw[w]; foreach (tq[i]) c19_pair(1, w, e, tq[i]); end
+		c19_dl[w].push_back(e);
+	endtask
+	final begin
+		string nm [3];
+		nm[0] = "SR (DARIA store, daria_fe consumed read)";
+		nm[1] = "WL (daria_fe write, DARIA load)";
+		nm[2] = "WW (daria_fe write, DARIA store)";
+		$display("C19 pairs on one cart RAM word less than 69.84 ns (48 VCO periods) apart, by |d| = |DARIA's edge - daria_fe's| in VCO periods of 1,455 ps: 0 1 2 3 4 5 6 7-47; [of them with the bytes changing]; d < 0: DARIA's edge first");
+		for (int c = 0; c < 3; c++)
+			$display("C19 %s: %0d %0d %0d %0d %0d %0d %0d %0d [%0d %0d %0d %0d %0d %0d %0d %0d]; d < 0 %0d, d > 0 %0d",
+				nm[c], c19_h[c][0], c19_h[c][1], c19_h[c][2], c19_h[c][3], c19_h[c][4], c19_h[c][5], c19_h[c][6], c19_h[c][7],
+				c19_hc[c][0], c19_hc[c][1], c19_hc[c][2], c19_hc[c][3], c19_hc[c][4], c19_hc[c][5], c19_hc[c][6], c19_hc[c][7],
+				c19_neg[c], c19_pos[c]);
+		$display("C19 check: d = 0 against the coincidence counters: SR %0d coll_d_same %0d, WL %0d coll_d_ld_same %0d, WW %0d coll_ww_same %0d: %s; off-lattice distances %0d; c19.csv lines %0d",
+			c19_h[0][0], coll_d_same, c19_h[1][0], coll_d_ld_same, c19_h[2][0], coll_ww_same,
+			c19_h[0][0] == coll_d_same && c19_h[1][0] == coll_d_ld_same && c19_h[2][0] == coll_ww_same ? "equal" : "DIFFER",
+			c19_odd, c19_lines);
+		if (fd_c19 != 0) $fclose(fd_c19);
+	end
 	always @(posedge clk_sys) begin
 		if (running && dut.cartram_rd && !dut.cartram_wr && dut.cartram_addr[17:15] == 3'd0) begin
 			int w;
@@ -641,6 +769,7 @@
 			if ($time - d_wt[w] < COLL_PS) coll_d++;
 			if (d_wt[w] == $time) coll_d_same++;
 			fe_rt[w] = $time;
+			c19_fe(1'b0, w, 1'b0);
 		end
 		if (mb_fe_wr) begin
 			int w;
@@ -649,6 +778,7 @@
 			if (mb_inj == 8 && (dut.arm_call_busy || u_fe.arm_call_busy)) mb_hist_add(w, fu_crb_be, fu_crb_wd);
 			if (d_wt[w] == $time) coll_ww_same++;
 			fe_wt[w] = $time;
+			c19_fe(1'b1, w, 1'b0);
 		end
 		// The positive controls (+mb_inj=4/5), on a shared edge (this clk_sys edge is a clk_d
 		// edge) where DARIA's port A is in cart RAM: the access is counted here exactly as a
@@ -662,11 +792,13 @@
 				mb_pc_n++;
 				if (d_wt[w] == $time) coll_d_same++;
 				fe_rt[w] = $time;
+				c19_fe(1'b0, w, 1'b1);
 			end
 			if (mb_inj == 5) begin			// a write of the word port A registers
 				mb_pc_n++;
 				if (d_wt[w] == $time) coll_ww_same++;
 				fe_wt[w] = $time;
+				c19_fe(1'b1, w, 1'b1);
 			end
 		end
 	end
@@ -685,6 +817,7 @@
 			if (fe_rt[w] == $time) coll_d_same++;
 			if (fe_wt[w] == $time) coll_ww_same++;
 			d_wt[w] = $time;
+			c19_store(w);
 		end
 		// A cart RAM load: port A registered its address at the last edge, and the core
 		// takes the word in W now (bup_cpu: chk_v, acc_load, acc_addr in the 2600 map's
@@ -696,6 +829,7 @@
 			d_loads++;
 			if (mb_shared_d(mb_d_prev_t)) d_shared_loads++;
 			if (fe_wt[w] == mb_d_prev_t) coll_d_ld_same++;
+			c19_load(w, mb_d_prev_t);
 		end
 		mb_d_prev_t = $time;
 	end
