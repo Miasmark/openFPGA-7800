@@ -47,7 +47,10 @@
 #   PIN_ID=1    no build_id_gen.tcl and a fixed apf/build_id.mif, so that two
 #               compiles of one tree can give the same .rbf (Q1r, Q4)
 #   OLDPAD=1    aeee6d2's core_constraints.sdc padding in the copy (Q1b)
-#   DIV=18|19   clk_arm at VCO/18 (the tree's POCKET_DARIA setting) or VCO/19
+#   DIV=18|19   clk_arm at VCO/18 or VCO/19 under POCKET_DARIA (default: the
+#               tree's own setting, read from pll_core.v by step7_prep.py
+#               --tree-div; another divider edits the copy's counter 3 to
+#               ip-generate's output for it)
 #   KEEP_DB=1   keep db/ and incremental_db/ (111 MB for Q0; at most two
 #               kept databases machine-wide); otherwise they and the .sof go
 #   DRYRUN=1    print the commands and the edits to the copy, run no Quartus
@@ -73,7 +76,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SELF_ROOT="$(cd "$HERE/../../../.." && pwd)"
 TREE="$(cd "${TREE:-$SELF_ROOT}" && pwd)"
 IMAGE="${IMAGE:-raetro/quartus:21.1}"
-DIV="${DIV:-18}"
+DIV="${DIV:-}"
 LOCK="${QUARTUS_LOCK:-}"
 die() { echo "run_step7.sh: $*" >&2; exit 2; }
 
@@ -91,8 +94,12 @@ holds_protected() {	# DIR: does it hold such a directory?
 }
 
 [ -f "$TREE/src/fpga/ap_core.qsf" ] || die "TREE=$TREE has no src/fpga/ap_core.qsf"
-case "$DIV" in 18|19) ;; *) die "DIV must be 18 or 19" ;; esac
-[ "${NODARIA:-0}" = 0 ] || [ "$DIV" = 18 ] || die "DIV=19 with NODARIA=1 means nothing: counter 3 is selected by POCKET_DARIA"
+case "$DIV" in ""|18|19) ;; *) die "DIV must be 18 or 19" ;; esac
+TREE_DIV="$(python3 "$HERE/step7_prep.py" "$TREE/src/fpga" --tree-div)" \
+	|| die "cannot read the tree's clk_arm divider from $TREE/src/fpga/core/pll/pll_core.v"
+[ -n "$DIV" ] || DIV="$TREE_DIV"
+[ "${NODARIA:-0}" = 0 ] || [ "$DIV" = "$TREE_DIV" ] \
+	|| die "DIV=$DIV with NODARIA=1 means nothing: counter 3 is selected by POCKET_DARIA"
 [ -z "$SEED" ] || [[ "$SEED" =~ ^[0-9]+$ ]] || die "SEED must be a number"
 WORK="$(realpath -m "${WORK:-$TREE/sim/work/step7/fit}")"
 case "$WORK/" in
@@ -117,7 +124,7 @@ PREP=()
 [ "${NODARIA:-0}" = 0 ] || PREP+=(--nodaria)
 [ "${PIN_ID:-0}" = 0 ] || PREP+=(--pin-id)
 [ -z "$SEED" ] || PREP+=(--seed "$SEED")
-PREP+=(--div "$DIV")
+[ "${NODARIA:-0}" != 0 ] || PREP+=(--div "$DIV")
 if [ "${OLDPAD:-0}" != 0 ]; then
 	PREP+=(--oldpad --oldpad-ref "$WORK/.aeee6d2_core_constraints.sdc")
 	git -C "$TREE" show aeee6d2:src/fpga/core/core_constraints.sdc > "$WORK/.aeee6d2_core_constraints.sdc" \

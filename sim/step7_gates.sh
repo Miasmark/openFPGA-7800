@@ -57,7 +57,8 @@
 #                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
-#                row 5: the non-DARIA one and DARIA=1 ARM38=1
+#                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
+#                pll_core.v's divider; plan 5.2's tb_s4 check at it)
 #                PSRAM_CS=50.0, the latter with SNAP_REQUIRED=1 once
 #                bup_dbg_snap.sv is in the tree (every tb_s4 run must then
 #                print "snap: ok": the snapshot check of plan 1.2 rows 5 and
@@ -82,7 +83,8 @@
 #                (P27); a DPC+ or CDF image takes the gate's rules with
 #                --scheme (an R1 run without calls is then void, P27), any
 #                other --strict (every column equal, no call on either side)
-#                (FRAMES_GUARD: locked, unlocked or none; default locked).
+#                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
+#                as at VCO/19, pll_core.v's divider and tb_load's default).
 #                The images are read by path, never copied; the runs go to
 #                OUT/frames/runs. Needs GAMES and R1_DIR
 # A gate whose script or input does not exist yet is NOT AVAILABLE, and one
@@ -308,8 +310,8 @@ g_s4_check() {
 	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	local snap=0
 	[ -f "$REPO/src/fpga/core/bupchip/bup_dbg_snap.sv" ] && snap=1
-	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
-	DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
+	DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
@@ -334,7 +336,7 @@ g_frames() {
 		n=$(( $(wc -l < "$ref/fp.csv") ))      # the header and frames 1..N-1: N lines
 		WORK="$d" NAME="$name" FRAMES="$n" slot bash "$HERE/run_frames.sh" "$img" || rc=1
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-			--expect-guard "${FRAMES_GUARD:-locked}" || rc=1
+			--expect-guard "${FRAMES_GUARD:-unlocked}" || rc=1
 	done
 	return $rc
 }

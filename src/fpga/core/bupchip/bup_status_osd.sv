@@ -42,7 +42,7 @@
 //
 // The status comes from clk_arm and clk_sys registers and is sampled here on
 // clk_sys. Without POCKET_DARIA clk_arm is 2 x clk_sys from the same VCO, so
-// the clk_arm bits are timed paths. With it clk_arm is VCO/18, and
+// the clk_arm bits are timed paths. With it clk_arm is VCO/19, and
 // bupchip_pocket.sv passes its clk_arm bits through bup_dbg_snap.sv, a
 // snapshot taken every 1,024 clk_sys, so every bit arrives here from a clk_sys
 // register (open item 11, docs/DARIA_CORE.md). Display only; nothing else

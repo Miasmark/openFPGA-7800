@@ -36,7 +36,7 @@ read_sdc
 update_timing_netlist
 
 # ---- the build ---------------------------------------------------------------------------
-array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 18}
+array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 19}
 if {[file exists step7_prep.txt]} {
 	set fh [open step7_prep.txt]
 	foreach line [split [read $fh] "\n"] {
@@ -585,7 +585,13 @@ foreach {dir from to} [list s2a $sys $arm a2s $arm $sys] {
 		set key "$f\t$t"
 		if {[info exists hold_of($key)]} { lassign $hold_of($key) hrel hsl } else { set hrel "-"; set hsl "-" }
 		puts $ct [format "%s\t%.3f\t%.3f\t%s\t%s\t%d\t%s\t%s" $dir $rel $sl $hrel $hsl $lv $f $t]
-		set guard [expr {[string match {*|daria_fe_guard:u_guard|pd_tog} $f] && [string match {*|daria_fe_guard:u_guard|pd_rx} $t]}]
+		# The guard pair by the registers' own names: a duplicate the router
+		# made ("pd_tog~DUPLICATE", "pd_rx~DUPLICATE") is matched by the SDC's
+		# get_registers patterns as well, so its paths carry the 6 / 1 ns pair
+		# and are judged against it here; (a), (b) and (c) fail the duplicate.
+		regsub {~DUPLICATE\S*$} $f "" f0
+		regsub {~DUPLICATE\S*$} $t "" t0
+		set guard [expr {[string match {*|daria_fe_guard:u_guard|pd_tog} $f0] && [string match {*|daria_fe_guard:u_guard|pd_rx} $t0]}]
 		set wr [expr {$guard ? 6.0 : 20.0}]
 		set wrh [expr {$guard ? 1.0 : -20.0}]
 		if {abs($rel - $wr) > 0.0005 || $hrel eq "-" || abs($hrel - $wrh) > 0.0005} {

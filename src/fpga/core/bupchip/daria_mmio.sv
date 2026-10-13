@@ -69,7 +69,7 @@
 // most 5 clk_sys earlier (6 with clk_arm below 28.6 MHz), about 24 counts: a
 // snapshot every 4 clocks, of the counter as it was the clock before, taken 2
 // to 3 clk_arm later. A flight lasts at most 7 clk_sys and 3 clk_arm, about
-// 570 ns at 38.18 MHz (3 clocks to merge, up to 4 to the next snapshot, and
+// 570 ns at 36.17 MHz (3 clocks to merge, up to 4 to the next snapshot, and
 // its crossing). A word write rewrites the whole mirror; after a byte or
 // halfword the other lanes keep the older snapshot until the flight ends.
 //

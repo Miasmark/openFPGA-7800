@@ -6,8 +6,8 @@
 //
 // Clocks. clk_sys (console, loader, audio out); clk_arm (the CPU and
 // everything around it), from the same VCO as clk_sys (VCO/48): VCO/24, 2 x
-// clk_sys, for the BupChip alone; VCO/18, 38.18 MHz, with POCKET_DARIA, so 8
-// clk_arm to 3 clk_sys with one clk_sys edge in three shared; clk_74a (the
+// clk_sys, for the BupChip alone; VCO/19, 36.17 MHz, with POCKET_DARIA, so 48
+// clk_arm to 19 clk_sys with one clk_sys edge in 19 shared; clk_74a (the
 // 48 kHz tick only). Crossings (design, "Crossings"):
 //
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect

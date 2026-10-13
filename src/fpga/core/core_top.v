@@ -310,7 +310,7 @@ assign vpll_feed = 1'bZ;
 // the CPU and hands the TIA a 7.16 MHz (2x colour clock) enable; that ratio
 // is what puts TIA audio at the right pitch, so nothing here may run the
 // system from any other clock. clk_arm, from the same VCO, runs only the
-// BupChip (POCKET_BUPCHIP): 2 x clk_sys, or VCO/18 (38.18 MHz) with DARIA
+// BupChip (POCKET_BUPCHIP): 2 x clk_sys, or VCO/19 (36.17 MHz) with DARIA
 // (POCKET_DARIA; pll/pll_core.v).
 ////////////////////////////////////////////////////////////////////////////////
 

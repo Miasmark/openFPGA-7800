@@ -9,8 +9,8 @@
 # its constraint set changes. Padding for the DARIA build alone goes here,
 # never in core_constraints.sdc.
 #
-# Under POCKET_DARIA clk_arm (counter[3]) is VCO/18 (pll_core.v): its rising
-# edges meet clk_sys's only every 3 clk_sys (8 clk_arm), so the requirement
+# Under POCKET_DARIA clk_arm (counter[3]) is VCO/19 (pll_core.v): its rising
+# edges meet clk_sys's only every 19 clk_sys (48 clk_arm), so the requirement
 # derived from the edges can be as little as one VCO period. Every crossing
 # between the two goes through a synchroniser (two or three flops on a level
 # or a toggle), and the buses that go with a toggle are held until the far
@@ -38,7 +38,9 @@ set_min_delay -from [get_clocks $daria_arm] -to [get_clocks $daria_sys] -20.000
 # 8.1-8.2): one clk_arm toggle (pd_tog) into one clk_sys flop (pd_rx), which
 # is not a synchroniser (SYNCHRONIZER_IDENTIFICATION OFF in the RTL). 6 ns:
 # a toggle launched 8.73 ns before a clk_sys edge is always caught there.
-# 1 ns: the toggle launched on the shared edge is never caught on it.
+# 1 ns: the toggle launched on the shared edge is never caught on it. (That
+# is VCO/18's lattice, design.md 8.2; at VCO/19, the build's divider, the
+# guard never locks, 8.3, and the pair only bounds this one path.)
 # Register to register, so these two lines take precedence over the
 # clock-to-clock pair above on this one path.
 set_max_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
@@ -68,5 +70,14 @@ set_min_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
 #     for every transfer both name.
 # clk_arm -> clk_arm (plan 5.2) has no padding in core_constraints.sdc, so
 # its rung is the whole amount there.
+#
+# The guard pair asked of the fitter at 5.5 ns instead of 6.0 (a register to
+# register line: it replaces the 6.000 above for the fitter alone; the
+# Timing Analyzer and plan 5.4 (a) keep 6.000). With the router's register
+# duplication off (daria_sync.tcl) the fitter left the pair at -0.109 ns on
+# seed 3 at VCO/19 (+0.133 and +0.264 on seeds 1 and 2): its skew, about
+# -0.6 to -1.1 ns at the slow corners, eats most of the 6 ns.
 if {$::TimeQuestInfo(nameofexecutable) eq "quartus_fit"} {
+	set_max_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
+	              -to   [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_rx}] 5.500
 }

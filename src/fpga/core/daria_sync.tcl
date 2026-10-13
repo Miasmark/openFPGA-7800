@@ -1,5 +1,7 @@
 # DARIA's synchroniser marks (POCKET_DARIA; docs/DARIA_CORE.md 7.1-7.3),
-# sourced by core/daria.qip.
+# sourced by core/daria.qip, and the one fitter setting the DARIA build
+# changes (at the end: the router's register duplication, off so that the
+# guard's pd_tog and pd_rx stay single registers).
 #
 # Each line marks the first flop of a clk_sys <-> clk_arm synchroniser whose
 # first flop is not a scalar declaration of its own, so that the fitter keeps
@@ -63,3 +65,25 @@ set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_
 # bupchip/daria_mmio.sv: TCR bit 0, and the TC write toggle (w_data, w_strb held)
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|daria_mmio:*|en_s\[0\]"
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|daria_mmio:*|w_s\[0\]"
+
+# The router's register duplication, off for the DARIA build (step 7, plan
+# 5.4 (a)-(c)). daria_fe_guard's pd_tog -> pd_rx pair must be one register
+# each, so that one path carries the 6 / 1 ns window (daria_constraints.sdc)
+# and the detector reads one sample. With ap_core.qsf's
+# ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION ON, "Auto Register
+# Duplication" (this assignment, default Auto) let the router duplicate
+# about 1,000 registers per fit for routability, pd_tog and pd_rx among them
+# in 8 of 12 step-7 fits ("Router Logic Cell Insertion and Logic
+# Duplication"), although PRESERVE_REGISTER marks both "Not to be Touched by
+# Netlist Optimizations". Nothing narrower holds them in Quartus 21.1 Lite:
+# - ROUTER_REGISTER_DUPLICATION and ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION
+#   are global only; with -to Quartus stops ("Error (125024): Assignment
+#   value ... specified in -to option ... not required");
+# - ADV_NETLIST_OPT_ALLOWED "NEVER ALLOW" on both registers is accepted and
+#   changes nothing: the router duplicated both again, in a fit otherwise
+#   identical to the one without it (same slacks, same 1,054 duplicates).
+# The logic cell insertion (routing buffers) and the duplication of
+# combinational cells stay on (ap_core.qsf). A global assignment in a qip
+# is refused like SYNCHRONIZER_IDENTIFICATION (Error 125091, -qip), so it
+# is here; a build without DARIA keeps Auto.
+set_global_assignment -name ROUTER_REGISTER_DUPLICATION OFF

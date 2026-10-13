@@ -53,8 +53,10 @@ PASS needs all of:
     sides;
   - CAND's status line (unless --no-status), which tb_frames prints as
       STATUS calls C, late L, halts H, halt_code X, psram_viol V, guard G, unlocks U
-    with halts 0, psram_viol 0, unlocks 0, guard locked (--expect-guard;
-    "unlocked" at VCO/19, "none" skips it), and C and L equal to REF's.
+    with halts 0, psram_viol 0, unlocks 0, guard unlocked (--expect-guard:
+    "unlocked", the default, at VCO/19, pll_core.v's divider and tb_load's
+    default, where the guard never locks; "locked" at VCO/18, +arm_div=18;
+    "none" skips it), and C and L equal to REF's.
 --ref-prefix: REF is a longer run (R1 at 1,500 frames) and CAND ran N
 frames: REF's fp.csv is cut to frames 1..N-1, and both sides' calls to those
 requested in frames 0..N-2 (a call in the last frame may still be running
@@ -436,7 +438,7 @@ def main():
                    help="release_shift frames allowed per column (default the larger of 8 and 1%% of the run's frames)")
     p.add_argument("--name")
     p.add_argument("--excuse", help="F0-F1: frames excused as overrun frames (default 557-572 for Spiders)")
-    p.add_argument("--expect-guard", default="locked", choices=("locked", "unlocked", "none"))
+    p.add_argument("--expect-guard", default="unlocked", choices=("locked", "unlocked", "none"))
     p.add_argument("--no-status", action="store_true")
     p.add_argument("--scheme", type=int)
     p.add_argument("--ref-prefix", action="store_true",
