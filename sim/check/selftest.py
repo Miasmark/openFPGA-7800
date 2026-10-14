@@ -63,7 +63,11 @@ pass or FAIL, and so is the exit status (0 or 1).
                    removed macro change it; --expect and --max-token fail;
                    an excluded daria_ file holding a directive that reaches
                    later files is refused); needs git and VERILATOR
-  always           frame_gate on synthetic R1/R2 run directories. The V1
+  always           div_check.py on a copy of the tree's divider sites:
+                   passes as it is, fails when one default names the other
+                   divider (each site in turn) or pll_core.v's counter 3
+                   moves without the benches; and
+                   frame_gate on synthetic R1/R2 run directories. The V1
                    rule (the default): identical; audio differences counted,
                    not gated (sparse, long, after Spiders' overrun); a RIOT
                    difference (also one of the release_shift class), a
@@ -692,6 +696,84 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="unlocked", 
     return d
 
 
+DIV_SITES = [   # (file, the default's text at VCO/19, the same at VCO/18)
+    ("sim/tb_load.sv", "int arm_div = 19,", "int arm_div = 18,"),
+    ("sim/tb_system.sv", "int arm_div = 19,", "int arm_div = 18,"),
+    ("sim/bupchip/daria/wire/wire.py", 'os.environ.get("ARM_DIV", "19")', 'os.environ.get("ARM_DIV", "18")'),
+    ("sim/run_sim.sh", "guard=unlocked; [ \"${ARM_DIV:-19}\" = 18 ] && guard=locked",
+     "guard=locked; [ \"${ARM_DIV:-18}\" = 19 ] && guard=unlocked"),
+    ("sim/check/frame_gate.py", '"--expect-guard", default="unlocked"', '"--expect-guard", default="locked"'),
+    ("sim/step7_gates.sh", "${FRAMES_GUARD:-unlocked}", "${FRAMES_GUARD:-locked}"),
+    ("sim/step7_gates.sh", "\tDARIA=1 ARM19=1 PSRAM_CS=", "\tDARIA=1 ARM38=1 PSRAM_CS="),
+    ("sim/bupchip/quartus_probe/step7/step7_report.tcl", "fixb 1 div 19}", "fixb 1 div 18}"),
+    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV=19'),
+]
+
+
+def div_cases(w):
+    """div_check.py on a scratch copy of the files it reads (the tree's, at
+    VCO/19): it passes; each site moved to the other divider fails it; and
+    pll_core.v's counter 3 at VCO/18 (step7_prep.py's own C3 table) with
+    the benches left at 19 fails it."""
+    dc = os.path.join(HERE, "div_check.py")
+    repo = os.path.dirname(SIM)
+    d = os.path.join(w, "divtree")
+    print("div_check.py on a copy of the tree's divider sites:")
+    files = sorted({s[0] for s in DIV_SITES} | {"src/fpga/core/pll/pll_core.v",
+                                                  "sim/bupchip/quartus_probe/step7/step7_prep.py"})
+
+    def fresh():
+        shutil.rmtree(d, ignore_errors=True)
+        for f in files:
+            os.makedirs(os.path.dirname(os.path.join(d, f)), exist_ok=True)
+            shutil.copyfile(os.path.join(repo, f), os.path.join(d, f))
+    fresh()
+    tree = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
+                           os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
+    if tree != "19":
+        print(f"  (the tree's divider is {tree or 'unreadable'}, not 19: the planted cases assume 19; skipped)")
+        expect("div_check on the tree's copy", [dc, "--repo", d], True)
+        return
+    expect("div_check on the tree's copy", [dc, "--repo", d], True)
+    for f, at19, at18 in DIV_SITES:
+        fresh()
+        p = os.path.join(d, f)
+        t = open(p).read()
+        if t.count(at19) != 1:
+            print(f"  WRONG the site's text in {f} is not there once: {at19!r}")
+            results.append(False)
+            continue
+        open(p, "w").write(t.replace(at19, at18))
+        expect(f"div_check with {f} at the other divider", [dc, "--repo", d], False)
+    # pll_core.v moved to C3 = 18 (step7_prep.py's table of ip-generate's
+    # values, read from its source: the script runs at import), the benches
+    # left at 19
+    fresh()
+    import ast
+    src = open(os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py")).read()
+    tab = {}
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], "id", "") in ("C3_VALUES", "C3_COL"):
+            tab[node.targets[0].id] = ast.literal_eval(node.value)
+    p = os.path.join(d, "src/fpga/core/pll/pll_core.v")
+    n, out = 0, []
+    for line in open(p).read().split("\n"):
+        m = re.match(r"^\s*\.(\w+)\((.*)\),?\s*$", line)
+        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][19]]:
+            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][18]], 1)
+            n += 1
+        out.append(line)
+    open(p, "w").write("\n".join(out))
+    got = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
+                          os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
+    if got != "18":
+        print(f"  WRONG pll_core.v's copy did not move to C3 = 18 ({n} lines edited; --tree-div {got or 'failed'})")
+        results.append(False)
+    else:
+        expect(f"div_check with pll_core.v at C3 = 18 ({n} lines), the benches at 19", [dc, "--repo", d], False)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def gate_cases(w):
     fg = os.path.join(HERE, "frame_gate.py")
     print("frame_gate.py on synthetic runs:")
@@ -951,6 +1033,7 @@ def main():
         guard_cases(w)
         hygiene_cases(w)
         pp_equiv_cases(w)
+    div_cases(w)
     gate_cases(w)
     print(f"SELFTEST {'pass' if all(results) else 'FAIL'} ({sum(results)} of {len(results)} cases as expected)")
     sys.exit(0 if all(results) else 1)

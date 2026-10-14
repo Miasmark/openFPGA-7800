@@ -16,6 +16,12 @@
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
 #                the qsf has POCKET_DARIA, else --qsf comments)
+#   divider      sim/check/div_check.py: every bench's and gate's default
+#                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
+#                ARM_DIV, run_sim.sh's and this script's guard expectations
+#                and s4 set, frame_gate.py's --expect-guard, the fit driver's
+#                DIV) is pll_core.v's DARIA counter 3 (step7_prep.py
+#                --tree-div; the D review's finding 7)
 #   cartram      cartram2600_test.py matrix and the directed s19 run
 #                (CARTRAM_ONLY=e7,... runs a subset of the matrix: a quick
 #                look, never the gate); with Fix B in the tree (sram_ctrl.sv's
@@ -130,7 +136,7 @@ OUT="$(cd "$OUT" && pwd)"
 QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
-GATES=(hygiene pp_equiv pp_guards cartram run_sim extra_tests selftest s4_check lint daria_smp dbg_snap frames)
+GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest s4_check lint daria_smp dbg_snap frames)
 
 header() {   # the P23 header of every gate log
 	echo "HEAD $(git -C "$REPO" rev-parse HEAD)"
@@ -148,6 +154,7 @@ avail() {
 		hygiene) [ -n "${HYGIENE_NAMES:-}" ] || echo "HYGIENE_NAMES (the name list, outside the repository) not given" ;;
 		pp_equiv) [ -n "${PP_EXPECT:-}" ] || echo "PP_EXPECT (the expected non-DARIA stream hash) not given" ;;
 		pp_guards) [ -n "${PP_GUARD_FROM:-}" ] || echo "PP_GUARD_FROM (commit F) not given" ;;
+		divider) [ -f "$HERE/bupchip/quartus_probe/step7/step7_prep.py" ] || echo "step7_prep.py (--tree-div) does not exist" ;;
 		extra_tests) [ -n "${EXTRA_REF:-}" ] && [ -f "${EXTRA_REF:-}" ] || echo "EXTRA_REF (the reference build's extra_tests.sh log) not given" ;;
 		lint) [ -f "$HERE/lint_step7.sh" ] || echo "sim/lint_step7.sh does not exist" ;;
 		daria_smp) [ -f "$HERE/bupchip/daria/smp/run_smp.sh" ] || echo "sim/bupchip/daria/smp/run_smp.sh does not exist yet (lane I1)" ;;
@@ -230,6 +237,7 @@ g_pp_guards() {
 	local q=comments; [ "$QSF_DARIA" = 1 ] && q=daria
 	python3 "$REPO/sim/tools/pp_guards.py" --repo "$REPO" --from "$PP_GUARD_FROM" --to HEAD --qsf "$q"
 }
+g_divider() { python3 "$HERE/check/div_check.py" --repo "$REPO"; }
 g_cartram() {
 	local w="$OUT/cartram_work" p="$OUT/cartram_plain" rc=0 fp=() only=()
 	[ "$QSF_DARIA" = 1 ] && fp=(--fp)
