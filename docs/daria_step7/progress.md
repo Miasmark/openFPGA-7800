@@ -298,3 +298,33 @@ Everything is in the lane's gitignored work directory, with resume notes. The de
     - It still starts at registers: (g), (g.legs) and (h.retime) pass.
   - **Why not a lever:** a fitter or SDC lever would void Q2, Q-mut and Q5 for about a day of fits, with no sign that it would work.
 - **The shipped SEED is 2,** already `ap_core.qsf`'s. It is the only seed that passes every check as first written. The held fits, Q-mut and Q5, are released.
+
+### The D fix round (2026-10-13 to 10-14)
+
+On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the verification campaign's results on `317eaa8` carry to the head.
+
+- **Merges:** DARIA-dev with commit P (`03e3b09`), the ÷19 branch (`2247bef`) and the bench branch (`68c3f41`). The non-DARIA stream equals P's (`9b9e7e5e…`), and the DARIA stream equals the ÷19 branch's apart from the `region_pll` rename.
+- **The retune-inside-F6 race is fixed** (`f2c305e`, DARIA only):
+  - **The mechanism.** The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune. A retune is pending while `region_pll` differs from it. While one is pending, F6 is held off (`daria_rt_mask`), and a console reset of an ARM image lasts until the retune. `region_pll` is frozen while a retune is pending or under way, and withdrawn during a 2600 image's download.
+  - **Evidence:**
+    - `tb_wire` gained a mode that holds the loading flag across a whole load sequence, as `core_top` does. Its scenarios fail before the fix and pass after it.
+    - Seven mutants of the fix are each caught.
+    - A random model of the interlock is clean over 13 seeds with the fix, and finds violations without it.
+    - The full `tb_wire` set passes, 96 scenarios.
+- **DARIA's timer prescale** now takes `daria_rgn`, the region `clk_sys` actually runs at (`c5fb23f`).
+- **Benches, rules and docs:**
+  - `tb_frames` can present the reference bench's paddle inputs (bench parity).
+  - `frame_gate.py`'s default is the V1 rule, with the strict rule as an option.
+  - `synth_reloads` places its holds correctly at ÷19.
+  - Two new gates: one checks every bench's default divider against `pll_core.v`'s, the other runs the fit driver's selftest.
+  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error.
+  - The plan and the docs are amended for the owner's and the lead's decisions.
+- **The amended checks** of 5.4 (the lead's decision above) are in `step7_checks.py`, by divider. Judged again from the fits' report files, without refitting:
+  - Q2 seeds 1-3 pass as amended, and fail as before by the rules as first written.
+  - The I3 STA mutants and Q-mut still fail as required.
+- **Q5** (`BUP_DEBUG` + DARIA, seeds 1-3) first failed (c.cells), (f) and (k'), on a table error: it expected `cap_err_a[0]`, a flop with no load in any build. With the table corrected, all three seeds pass. The guard pair runs at +0.603 / +0.131 / −0.060 ns, gating only at ÷18.
+- **Review:** five rounds. The last signed off at `0b2f9e1`, with three minor findings left.
+- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`):
+  - **Done:** the static gates, `run_sim`, the cartram matrix, the unit benches, `tb_wire`'s full set, Q2 seeds 1-3, Q4 (equal to Q1''), Q-mut, Q5 seeds 1-3, and the three I3 STA mutants.
+  - **Running:** `s4/check.sh` on both sets, `extra_tests` with `AR_TAPE=1`, the V1 frame gate on 16 images at 1,500 frames, and mode B.
+- **An incident.** A reviewer's test harness wrote through a symbolic link into one of the campaign's fit reports. The intact copy was restored and its md5 checked; the campaign's verdict for that fit had been written before the change.
