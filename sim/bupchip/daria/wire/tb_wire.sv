@@ -100,6 +100,13 @@
 //                           differs from the region the PLL is set to: it
 //                           starts one as soon as its loading input is low);
 //                           -1 without +wire_pll
+//   rgn_bad                 clk_sys where daria_rgn (bupchip's daria_pal: the
+//                           region of the PLL's last completed retune, P20)
+//                           differs from the region pll_region has set the
+//                           PLL to, outside a retune (pll_region busy or
+//                           pll_busy_s[1] high on this clock or the last)
+//                           and the clock daria_rgn takes region_pll on;
+//                           -1 without +wire_pll
 // +wire_seq=MODE (with +wire_pll) models is_downloading across a whole load
 // sequence, as core_top.v makes it, and runs one of the scripts of the D
 // review's finding 3 (a retune that waits for a load sequence's end; below).
@@ -329,7 +336,7 @@ module tb_wire;
 	int     f6_n = 0, f6_win = 0, f6_rst = 0, f6_rst_low = 0, f6_busy = 0, f6_noib = 0, f6_live = 0, f6_ram_diff = 0;
 	longint f6_win_dt = -1, t_cw_fall = -1, t_crst_rise = -1, t_busy_rise = -1, t_busy_fall = -1;
 	logic [63:0] f6_h0 = '0;
-	int     rt_f6 = 0, rt_f6_early = 0, rt_rst_low = 0, rs_f6 = 0, rs_f6_rst_low = 0, f6_pend = 0;
+	int     rt_f6 = 0, rt_f6_early = 0, rt_rst_low = 0, rs_f6 = 0, rs_f6_rst_low = 0, f6_pend = 0, rgn_bad = 0;
 	bit     rt_win = 1'b0, rs_win = 1'b0;
 	int     marker_rs = -1, calls_rs0 = -1, calls_rt0 = -1;
 	logic   rin_f6 = 1'b1;
@@ -384,6 +391,9 @@ module tb_wire;
 		// +wire_pll: F6 running while pll_region is busy, or would start a
 		// retune as soon as its loading input is low
 		if (`W_CP.f6_q && pll_on && (u_pr.busy || tb.is_pal != u_pr.pll_pal)) f6_pend++;
+		// +wire_pll: daria_rgn against the region the PLL is set to (rgn_bad)
+		if (pll_on && t_sys > 4 && !u_pr.busy && !busy && !busy_d && tb.dut.daria_rt_cnt != 4'd15 &&
+				tb.dut.daria_rgn != u_pr.pll_pal) rgn_bad++;
 		// the console reset from pll_busy_s[1]'s rise (+1: the register follows it)
 		// to the end of the F6 after it; a non-ARM image has none: to the fall
 		if (rt_win && t_sys > t_busy_rise + 1 && !tb.dut.reset) rt_rst_low++;
@@ -594,6 +604,27 @@ module tb_wire;
 	//         words of $FF (default 64, about 0.1 ms with its gaps):
 	//         allcomplete 2,058 clk_74a after its last write, with its flag's
 	//         fall (as the slot model has it for the bench's firmware slots).
+	// Two scripts aim at the parts of the fix that freeze region_pll (the fix
+	// round's review: each freeze removed alone passed the five above):
+	//   rfirst the sequence starts as in menu, then the menu's Reset with no
+	//         retune pending, and the Region setting to PAL
+	//         +wire_seq_hold_clk=N clk_sys after reset_in rose (at a falling
+	//         edge, default 1): region_pll would take it on the clock after
+	//         the console reset rose, before tia_en falls, where only the
+	//         freeze in an ARM image's console reset holds it; allcomplete
+	//         +wire_seq_ac=US after reset_in rose, inside the reset's F6.
+	//         The line "the Region setting to PAL ... (reset first)" gives
+	//         region_pll's holds at that clock;
+	//   back  the Region setting to PAL as in menu, so a retune is pending
+	//         with the console running; allcomplete +wire_seq_hold=US later
+	//         (default 1000); as pll_region starts the retune (its busy
+	//         rising), the Region setting back to Auto (NTSC for an NTSC
+	//         image) at the next clk_sys falling edge, before pll_busy_s[1]
+	//         rises, where only the freeze while a retune is pending holds
+	//         region_pll (the line "the Region setting back to Auto ..." gives
+	//         its holds there). Unfrozen, daria_rgn would take NTSC from a
+	//         retune to PAL, and pll_region would start a second retune as
+	//         the first ends; frozen, the second comes after the first's F6.
 	// The "WIRE seq" lines give pll_region's own view (is_pal_o, the region
 	// the PLL is set to, busy, loading) at each step.
 	task automatic seq_state(input string what);
@@ -604,14 +635,16 @@ module tb_wire;
 	endtask
 	initial begin
 		automatic string mode;
-		automatic int at = -1, hold_us = 1000, ac_us = 30, rclk = 49, words = 64;
+		automatic int at = -1, hold_us = 1000, ac_us = 30, rclk = 49, words = 64, hold_clk = 1;
 		if ($value$plusargs("wire_seq=%s", mode)) begin
 			if (!$test$plusargs("wire_pll")) $fatal(1, "+wire_seq needs +wire_pll");
-			if (mode != "menu" && mode != "auto" && mode != "tia" && mode != "load" && mode != "slot")
-				$fatal(1, "+wire_seq=%0s: menu, auto, tia, load or slot", mode);
+			if (mode != "menu" && mode != "auto" && mode != "tia" && mode != "load" && mode != "slot" &&
+					mode != "rfirst" && mode != "back")
+				$fatal(1, "+wire_seq=%0s: menu, auto, tia, load, slot, rfirst or back", mode);
 			void'($value$plusargs("wire_seq_at=%d", at));
 			if (at < 0) at = mode == "tia" ? 500 : 3;
 			void'($value$plusargs("wire_seq_hold=%d", hold_us));
+			void'($value$plusargs("wire_seq_hold_clk=%d", hold_clk));
 			void'($value$plusargs("wire_seq_ac=%d", ac_us));
 			void'($value$plusargs("wire_reset_clk=%d", rclk));
 			void'($value$plusargs("wire_seq_words=%d", words));
@@ -632,13 +665,43 @@ module tb_wire;
 				if (mode == "tia") begin
 					@(posedge tb.is_pal);
 					seq_state("the TIA's PAL decision");
+				end else if (mode == "rfirst") begin
+					repeat (10) @(negedge tb.clk_sys);
+					seq_state("reset_in rises first (the menu's Reset)");
+					tb.reset_in = 1'b1;
+					fork
+						begin repeat (rclk) @(negedge tb.clk_sys); tb.reset_in = 1'b0; end
+						begin
+							repeat (hold_clk) @(negedge tb.clk_sys);
+							// what region_pll's register sees on the next rising edge
+							tb.region_tb = 2'd2;
+							$display("WIRE seq the Region setting to PAL at %0.6f ms (reset first, %0d clk_sys after reset_in): region_pll_hold %0d, ARM console reset %0d, retune pending %0d, pll_busy_s %0d, F6 %0d",
+								ms(), hold_clk, tb.dut.region_pll_hold, tb.dut.daria_reset & tb.dut.daria_arm,
+								tb.dut.daria_rt_pend, tb.dut.pll_busy_s[1], `W_CP.f6_q);
+						end
+						begin #(ac_us * 1000.0); seq_ld = 1'b0; seq_state("allcomplete"); end
+					join
 				end else begin
 					repeat (10) @(posedge tb.clk_sys);
 					tb.region_tb = 2'd2;
 					$display("WIRE seq the Region setting to PAL at %0.6f ms", ms());
 				end
 			end
-			if (mode == "load") begin
+			if (mode == "rfirst") begin
+				// (all done above)
+			end else if (mode == "back") begin
+				#(hold_us * 1000.0);
+				@(negedge tb.clk_sys);
+				seq_state("allcomplete comes, the console running");
+				seq_ld = 1'b0;
+				@(posedge pr_busy);
+				@(negedge tb.clk_sys);
+				// what region_pll's register sees on the next rising edge
+				tb.region_tb = 2'd0;
+				$display("WIRE seq the Region setting back to Auto at %0.6f ms, pll_region retuning: pll_region busy %0d to %0s, pll_busy_s %0d, region_pll_hold %0d, ARM console reset %0d, retune pending %0d",
+					ms(), u_pr.busy, u_pr.target ? "PAL" : "NTSC", tb.dut.pll_busy_s[1], tb.dut.region_pll_hold,
+					tb.dut.daria_reset & tb.dut.daria_arm, tb.dut.daria_rt_pend);
+			end else if (mode == "load") begin
 				@(posedge tb.cart_download);
 				seq_state("cartridge slot starts");
 				@(negedge dl_cart);
@@ -725,7 +788,7 @@ module tb_wire;
 			halts, unlocks, `W_FE.dbg_locked, tb.cram0_chip.n_viol, tb.dut.bup_psram.CLOCK_SPEED, misses)};
 		w = {w, $sformatf(" rt_rst_low=%0d rt_f6=%0d rt_f6_early=%0d rs_f6=%0d rs_f6_rst_low=%0d",
 			rt_rst_low, rt_f6, rt_f6_early, rs_f6, rs_f6_rst_low)};
-		w = {w, $sformatf(" f6_pend=%0d", pll_on ? f6_pend : -1)};
+		w = {w, $sformatf(" f6_pend=%0d rgn_bad=%0d", pll_on ? f6_pend : -1, pll_on ? rgn_bad : -1)};
 		w = {w, $sformatf(" calls_rs=%0d calls_rt=%0d marker=%0d errors=%0d marker_rs=%0d",
 			calls_rs0 < 0 ? -1 : calls - calls_rs0, calls_rt0 < 0 ? -1 : calls - calls_rt0,
 			tb.dut.main.riot_inst.riot_ram.mem_q[127], tb.dut.main.riot_inst.riot_ram.mem_q[126], marker_rs)};

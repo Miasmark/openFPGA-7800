@@ -558,23 +558,46 @@ def scenarios(img):
     # +wire_seq: is_downloading held across a whole load sequence, as core_top.v
     # makes it (the D review's finding 3): a region change that pll_region must
     # hold until allcomplete, and allcomplete where it would land inside an F6
-    def seq(name, mode, args, f6_n, releases, is_pal, retunes, desc, rs=True):
+    def seq(name, mode, args, f6_n, releases, is_pal, retunes, desc, rs=True, resets=1, land=None):
         def f():
             s = run("daria", name, list(args) + ["+wire_pll", "+wire_seq=" + mode])
-            j = Judge(name); daria_health(j, s, resets=1)
+            j = Judge(name); daria_health(j, s, resets=resets)
             after_retunes(j, s, f6_n)
             j.eq(s, "f6_pend", 0); j.eq(s, "retunes", retunes); j.eq(s, "b2b", 0); j.eq(s, "is_pal", is_pal)
-            j.eq(s, "releases", releases)
+            j.eq(s, "releases", releases); j.eq(s, "rgn_bad", 0)
             if rs:
-                # the console reset held from reset_in's rise to the end of the F6 after the retune
+                # the console reset held from reset_in's rise to the end of the F6 after it
                 j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
-            # not vacuous: at the reset (or the slot's start) a retune was pending
-            # in pll_region's own view (is_pal_o is not the region the PLL is set
-            # to, loading high, not busy), and allcomplete came
-            m = re.search(r"^WIRE seq (reset_in rises|reset-causing slot starts|cartridge slot starts)[^:]* at [\d.]+ ms: "
-                          r"is_pal_o (\d), the PLL (PAL|NTSC), pll_region busy 0, loading 1", s["text"], re.M)
-            j.ok(m is not None and int(m.group(2)) != (m.group(3) == "PAL"),
-                 "no retune pending at the reset or slot (the test is void)")
+            if mode == "rfirst":
+                # not vacuous: no retune pending at the reset (it comes first), the
+                # Region setting lands where only the freeze in an ARM image's console
+                # reset holds region_pll, and allcomplete inside the reset's F6
+                m = re.search(r"^WIRE seq reset_in rises first[^:]* at [\d.]+ ms: "
+                              r"is_pal_o (\d), the PLL (PAL|NTSC), pll_region busy 0, loading 1", s["text"], re.M)
+                j.ok(m is not None and int(m.group(1)) == (m.group(2) == "PAL"),
+                     "a retune pending at the reset, or no reset (the test is void)")
+                j.ok(re.search(r"^WIRE seq the Region setting to PAL at [\d.]+ ms \(reset first[^)]*\): region_pll_hold 0, "
+                               r"ARM console reset 1, retune pending 0, pll_busy_s 0", s["text"], re.M) is not None,
+                     "the Region setting did not land where only the ARM-console freeze holds region_pll (void)")
+                j.ok(re.search(r"^WIRE seq allcomplete at [\d.]+ ms: .*, F6 1$", s["text"], re.M) is not None,
+                     "allcomplete not inside the reset's F6 (the test is void)")
+            else:
+                # not vacuous: at the reset (or the slot's start, or allcomplete with
+                # the console running) a retune was pending in pll_region's own view
+                # (is_pal_o is not the region the PLL is set to, loading high, not busy)
+                m = re.search(r"^WIRE seq (reset_in rises|reset-causing slot starts|cartridge slot starts|"
+                              r"allcomplete comes)[^:]* at [\d.]+ ms: "
+                              r"is_pal_o (\d), the PLL (PAL|NTSC), pll_region busy 0, loading 1", s["text"], re.M)
+                j.ok(m is not None and int(m.group(2)) != (m.group(3) == "PAL"),
+                     "no retune pending at the reset or slot (the test is void)")
+            if mode == "back":
+                # not vacuous: the setting moved back as pll_region started the retune
+                # to PAL, before pll_busy_s[1] rose, with the console running, so
+                # that only the freeze while a retune is pending holds region_pll
+                j.ok(re.search(r"^WIRE seq the Region setting back to Auto at [\d.]+ ms, pll_region retuning: "
+                               r"pll_region busy 1 to PAL, pll_busy_s 0, region_pll_hold 0, ARM console reset 0",
+                               s["text"], re.M) is not None,
+                     "the Region setting did not move back inside the retune's start (the test is void)")
             j.ok(re.search(r"^WIRE seq allcomplete", s["text"], re.M) is not None, "no allcomplete (the test is void)")
             return j, s
         S[name] = (f, "finding 3: " + desc, True)
@@ -600,6 +623,16 @@ def scenarios(img):
         "a load sequence runs, the Region setting asks for PAL, a short reset-causing slot (0x107) is its last: "
         "the console held from the slot through the retune, one F6 after it, none while the retune is pending or "
         "under way", rs=False)
+    seq("seq_rfirst_dpc", "rfirst", ["+image=" + I("hard_reset_call_dpc.bin"), "+daria=40", "+wire_seq_hold_clk=1",
+                                      "+wire_seq_ac=60"], 3, 3, 1, 1,
+        "a load sequence runs, the menu's Reset with no retune pending, the Region setting to PAL one clk_sys later "
+        "(where only the freeze in an ARM image's console reset holds region_pll), allcomplete 60 us after the "
+        "reset, inside its F6: no retune then; the region asked for at the release, one retune, one F6 after it")
+    seq("seq_back_dpc", "back", ["+image=" + I("hard_reset_call_dpc.bin"), "+daria=40"], 3, 3, 0, 2,
+        "a load sequence runs, the Region setting asks for PAL with the console running, allcomplete 1 ms later; as "
+        "pll_region starts that retune, the Region setting back to Auto before pll_busy_s shows it (where only the "
+        "freeze while a retune is pending holds region_pll): the retune to PAL, its F6, then one to NTSC and its F6, "
+        "not back to back", rs=False, resets=2)
 
     def pal2600():
         args = ["+image=" + I("pal_test.a26"), "+wav=1300", "+wire_pll"]
@@ -741,8 +774,20 @@ MUTANTS = {
     # a console reset during a pending retune not held to the retune: the
     # 6507 restarts without F6, then again after the retune's F6
     "nohold": ("\t\t(daria_rt_pend & reset & daria_arm);\n", "\t\t1'b0;\n"),
+    # region_pll not frozen while a retune is pending: a Region setting moved
+    # as pll_region starts a retune (before pll_busy_s shows it) reaches
+    # region_pll, daria_rgn takes it from a retune to the other region, and
+    # pll_region starts a second retune as the first ends (seq_back_dpc)
+    "nofrzpend": ("else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))",
+                  "else if (!region_pll_hold && !(daria_reset & daria_arm))"),
+    # region_pll not frozen while an ARM image's console is in reset: a region
+    # change on the clock after the reset rises (before tia_en falls) becomes
+    # pending after daria_fe saw the reset rise, so the reset's F6 runs, and
+    # allcomplete starts the retune inside it, with no F6 after it (seq_rfirst_dpc)
+    "nofrzarm": ("else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))",
+                 "else if (!region_pll_hold && !daria_rt_pend)"),
 }
-SEQ_MUT = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc"]
+SEQ_MUT = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_rfirst_dpc", "seq_back_dpc"]
 
 
 def mutant(name, names):
@@ -817,7 +862,7 @@ def main():
                 rc = 1
             sm = s.get("sum", {})
             keys = ("releases f6 f6_win_dt calls rets abandoned smp_req misses wr_crb wr_busy wr_stop wr_drop hold_rise "
-                    "prof_clk rt_f6 rs_f6 retunes b2b is_pal "
+                    "prof_clk rt_f6 rs_f6 retunes b2b is_pal f6_pend rgn_bad "
                     "marker errors psram_viol locked unlocks").split()
             line += "\n        " + " ".join("%s=%s" % (k, sm.get(k)) for k in keys if k in sm)
             if s.get("note"):
