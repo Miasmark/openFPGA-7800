@@ -24,7 +24,7 @@
 //   d18_stop     /18 with long stops: every 2,000-22,000 clocks clk_arm
 //                stops for 20-400 clk_sys periods, then resumes on a random
 //                offset (the unlock rule: nothing to lock on without clk_arm)
-//   d19_*        /19 (the fallback, 19 steps = 27,645 ps) at five offsets
+//   d19_*        /19 (the shipped divider, 19 steps = 27,645 ps) at five offsets
 //   x5_*         clk_arm = 5 x clk_sys (mode A's upstream clk_arm), two offsets
 //   x1           clk_arm = clk_sys (coincident)
 //   d18_bad      negative control: /18 with d in [1, 10] ns (outside 8.2's

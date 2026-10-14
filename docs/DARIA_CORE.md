@@ -1100,7 +1100,7 @@ The budget fits with 113 M10K spare (49 with the 128 KB window), which decision 
 |---|---|---|---|---|---|
 | New cartridge | rewritten from offset 0; words past the new file keep old data, which the size checks make unreachable | invalidated by its sweep after the release | cleared at START (P4) | held from START; registers cleared; released at END | zeroed, then F6 when the window closes |
 | Console reset (mapper reset) | kept | swept | cleared (P4) | reset through two `clk_arm` flops: any call is abandoned and the registers are cleared | F6 again, the console held (`mapper_init_busy`) |
-| PAL retune, `pll_busy` | kept | swept | TC cleared by reset | held, as ARIA | kept |
+| PAL retune, `pll_busy` | kept | swept | TC cleared by reset | held, as ARIA | an ARM image's re-imaged: F6 runs once after the retune, the console held through it (step 7 plan P20; this row said "kept" before step 7) |
 
 ##### 2.4 The RAM image (F6): who does it
 
