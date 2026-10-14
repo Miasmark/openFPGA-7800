@@ -363,7 +363,7 @@ def gate(a):
             counts[c + "_excused"] = len(inside)
         if c == "video" and boot_differs and diff[:1] == [1]:
             diff = diff[1:]
-            counts["video_excused"] = counts.get("video_excused", 0) + 1
+            counts["video_frame1_excused"] = 1
             notes.append(f"frame 1's video excused: the calls requested in frame 0 have other holds "
                          f"(busy_sys: REF {boot_r}, CAND {boot_c})")
         counts[c] = len(diff)
