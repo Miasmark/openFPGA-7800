@@ -315,7 +315,9 @@ module tb_system;
 `ifdef POCKET_DARIA
 	// ---------------- P18: psram.sv's CLOCK_SPEED ----------------
 	// 50.0 under POCKET_DARIA (docs/daria_step7/plan.md P18). No PSRAM model
-	// run tells it from 28.636364 at 38.18 MHz, so the parameter is checked.
+	// run told it from 28.636364 at 38.18 MHz (VCO/18, DARIA's clock when
+	// this check was written; the benches now default to VCO/19, 36.17 MHz),
+	// so the parameter is checked.
 	initial begin
 		$display("P18 bup_psram CLOCK_SPEED %0.6f", dut.bup_psram.CLOCK_SPEED);
 		if (dut.bup_psram.CLOCK_SPEED != 50.0)
