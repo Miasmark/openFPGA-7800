@@ -148,7 +148,7 @@ apt-get install -y dasm
 - **The `sim/bupchip` scripts** default to `/opt/verilator-5.040` when it exists, and `VERILATOR` overrides the default. They are:
   - `run_bupchip.sh:11`
   - `verif/build.sh:12`
-  - `daria/run_daria.sh:50`
+  - `daria/run_daria.sh:63`
   - `daria/fe_unit/run_unit.sh:27`
   - `daria/fe_rand/run_rand.sh:34`
   - `daria/fe_dir/run_dir.sh:35` (as `VERILATOR_REAL`)
@@ -283,7 +283,7 @@ Python is 3.11.15. The only third-party imports in tracked files are unicorn and
 
 ### 5.1 Work directories
 
-- Every script writes to `sim/work` by default, through `WORK` (for example `sim/run_sim.sh:9` and `sim/bupchip/daria/run_daria.sh:49`).
+- Every script writes to `sim/work` by default, through `WORK` (for example `sim/run_sim.sh:9` and `sim/bupchip/daria/run_daria.sh:62`).
 - `.gitignore` (lines 1-18) ignores:
   - `sim/work*`, which covers `sim/work_rel` and the like;
   - `release/`;
@@ -435,7 +435,7 @@ How to read the table:
   - `campaign.sh` runs two at a time, and `daria/run_all.sh` defaults to `JOBS=2`.
   - `s4/check.sh` defaults to `JOBS=3`, so pass `JOBS=2`.
 - **Quartus parallelism.** `daria/frontend_study/run_study.sh` runs 4 Quartus builds at once. Run it alone.
-- **Nice.** Builds and runs are niced: `run_daria.sh` runs `nice -n 10` itself (lines 137 and 156). Use `nice -n 10` for your own long jobs.
+- **Nice.** Builds and runs are niced: `run_daria.sh` runs `nice -n 10` itself (lines 166 and 185). Use `nice -n 10` for your own long jobs.
 
 ### 7.5 Long runs
 
@@ -449,9 +449,9 @@ How to read the table:
 ### 7.6 Verilator build directories
 
 - **`run_daria.sh`:**
-  - It uses one object directory per build flavour: `obj`, `obj_shadow<WIN_KB>` and `obj_wrap<WIN_KB>`, with the suffixes `_fe`, `_fe_s0`, `_fe_poison` and `_fe_modeB` (header lines 16-37).
+  - It uses one object directory per build flavour: `obj`, `obj_shadow<WIN_KB>` and `obj_wrap<WIN_KB>`, with the suffixes `_fe`, `_fe_s0`, `_fe_poison` and `_fe_modeB` (header lines 15-51). With `MODE_B=1` it passes `+d_div` from `D_DIV`, by default the tree's divider (`step7_prep.py --tree-div`), and notes it at the end of `run.log`.
   - It rebuilds when a source is newer than `vtb`, unless `NOBUILD=1` is set.
-  - It deletes `*.gch` after each build (line 142).
+  - It deletes `*.gch` after each build (line 171).
 - **`run_rand.sh`:**
   - It stamps each build with an md5 of the Verilator version, the options, the source names and every source's content.
   - It builds under `flock` on `$WORK/.build_<BUILD>.lock`.
