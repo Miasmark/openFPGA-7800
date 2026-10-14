@@ -85,6 +85,14 @@
 //                  Juno First's 1,500 frames are byte-identical with and
 //                  without it (the non-DARIA build).
 //   +region=N      tb_load's region_setting (default 1 here: NTSC forced)
+//   +inputs_tbdaria  present the TIA's paddle inputs (INPT0-3: the wrapper's
+//                  idump) as tb_daria does (tb_daria.sv's idump = 4'b1010:
+//                  INPT1 and INPT3 high), not as the wrapper maps them (for a
+//                  2600 image with a joystick on Auto, INPT1 = INPT3 = 0);
+//                  the frame gate against R1's tb_daria runs passes it
+//                  (sim/run_frames.sh INPUTS=tb_daria, sim/step7_gates.sh):
+//                  bench parity, plan P13. run.log says which in its line
+//                  "FRAMES inputs: ...", which frame_gate.py reads.
 //   +maxms=MS      give up after MS ms of simulated time (default 2 x the
 //                  frames at 60 Hz, plus 2 s)
 // Build with run_sim.sh BUILD_TOP=tb_frames (BUP_DEBUG off, -O3 --x-assign
@@ -388,6 +396,22 @@ module tb_frames;
 		script_reset();
 		tb.joy0 = '0;
 	endtask
+
+	// ---- the TIA's paddle inputs (+inputs_tbdaria) -------------------------------------
+	// R1's bench (tb_daria) drives INPT0-3 with a constant 4'b1010; the
+	// Pocket's wrapper drives 0 on INPT1 and INPT3 for a 2600 image with a
+	// joystick. A Genesis-pad-aware game takes INPT1 high as a Genesis pad
+	// with button C released, so R1 ran such games in their Genesis mode and
+	// the Pocket's inputs run them in another: the gate against R1 holds the
+	// inputs to tb_daria's value. Without the option the wrapper's mapping
+	// stands.
+	initial begin
+		if ($test$plusargs("inputs_tbdaria")) begin
+			force tb.dut.idump = 4'b1010;
+			$display("FRAMES inputs: tb_daria's (the TIA's INPT0-3, the wrapper's idump, held at 4'b1010; +inputs_tbdaria)");
+		end else
+			$display("FRAMES inputs: the Pocket's (INPT0-3 as the wrapper maps them)");
+	end
 
 	// ---- the input script (tb_daria.sv's), by frame, through joy0 -------------------------
 	int fire_at = 420, reset_at = 0, select_at = 0, play_at = 480, seed = 1;

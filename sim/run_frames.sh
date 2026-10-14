@@ -11,6 +11,12 @@
 #   NOBUILD=1    run the binary that is there, without checking its sources
 #   NAME=NAME    the run directory, WORK/runs/NAME (default the image's name)
 #   FRAMES=N     +frames (default 1500)
+#   INPUTS=tb_daria  +inputs_tbdaria: the TIA's paddle inputs (INPT0-3) held
+#                as tb_daria presents them (4'b1010), for a comparison with
+#                R1's tb_daria runs (bench parity, plan P13; sim/step7_gates.sh's
+#                frames gate sets it); INPUTS=pocket (the default) leaves the
+#                wrapper's own mapping (0 on INPT1 and INPT3 for a 2600 image
+#                with a joystick)
 #   DARIA, ARM_DIV, VERILATOR, VL_JOBS, RTL_TREE: passed to run_sim.sh's build
 #                (ARM_DIV=18 or 19 also adds +arm_div to the run; tb_load's
 #                default is 19, pll_core.v's divider)
@@ -42,6 +48,11 @@ OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"
 ARGS=(+image="$IMG" +frames="${FRAMES:-1500}" +out="$OUT/")
 [ -n "${ARM_DIV:-}" ] && ARGS+=(+arm_div="$ARM_DIV")
+case "${INPUTS:-pocket}" in
+	tb_daria) ARGS+=(+inputs_tbdaria) ;;
+	pocket) ;;
+	*) echo "run_frames.sh: INPUTS=$INPUTS: tb_daria or pocket" >&2; exit 2 ;;
+esac
 {
 	echo "HEAD $(git -C "$HERE/.." rev-parse HEAD)"
 	echo "status: [$(git -C "$HERE/.." status --porcelain | tr '\n' ';')]"
