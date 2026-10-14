@@ -276,11 +276,11 @@ port has already had:
 `src/fpga/core/pll/` is generated. Don't edit the parameter list by hand.
 The tool writes a scratch file, never the tree's `pll_core.v`, which holds
 two settings (below). From the repository root, for the `POCKET_DARIA`
-setting, C3 = 18 (`sim/work/` is not tracked):
+setting, C3 = 19 (`sim/work/` is not tracked):
 
 ```sh
-mkdir -p sim/work/pll/c18
-docker run --rm -v "$PWD/sim/work/pll/c18:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
+mkdir -p sim/work/pll/c19
+docker run --rm -v "$PWD/sim/work/pll/c19:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
  ip-generate --remove-qsys-generate-warning --project-directory=/tmp --output-directory=/tmp/pll_core \
   --file-set=QUARTUS_SYNTH --component-name=altera_pll --output-name=pll_core \
   --system-info=DEVICE_FAMILY="Cyclone V" --system-info=DEVICE=5CEBA4F23C8 --system-info=DEVICE_SPEEDGRADE=8_H6 \
@@ -290,42 +290,50 @@ docker run --rm -v "$PWD/sim/work/pll/c18:/out" raetro/quartus:21.1 bash -c 'cd 
   --component-parameter=gui_en_reconf=true --component-parameter=gui_number_of_clocks=4 \
   --component-parameter=gui_output_clock_frequency0=14.318181 --component-parameter=gui_output_clock_frequency1=57.272727 \
   --component-parameter=gui_output_clock_frequency2=14.318181 --component-parameter=gui_ps_units2=degrees \
-  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=38.181818 \
+  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=36.172249 \
   --component-parameter=gui_en_adv_params=true \
   --component-parameter=gui_multiply_factor=9 --component-parameter=gui_frac_multiply_factor=1100363522 \
   --component-parameter=gui_divide_factor_n=1 --component-parameter=gui_divide_factor_c0=48 \
   --component-parameter=gui_divide_factor_c1=12 --component-parameter=gui_divide_factor_c2=48 \
-  --component-parameter=gui_divide_factor_c3=18 \
+  --component-parameter=gui_divide_factor_c3=19 \
   --component-parameter=gui_pll_auto_reset=Off &&
  cp /tmp/pll_core/pll_core.v /out/'
 ```
 
-`pll_core.v` holds two settings of counter 3, selected by `ifdef
-POCKET_DARIA`: C3 = 18 (38.18 MHz) for DARIA, and C3 = 24 (28.64 MHz,
-2 × `clk_sys`) otherwise. Each is the tool's output; only the selection is
-by hand. To regenerate, run the command once as above and once with
-`gui_divide_factor_c3=24` and `gui_output_clock_frequency3=28.636363` into
-`sim/work/pll/c24`. Diff each against the tree's file: only counter 3's
-lines (`output_clock_frequency3`, `c_cnt_*3`) may differ. Copy only those
-lines into the matching `ifdef` branch, C3 = 18 under `POCKET_DARIA` and
-C3 = 24 in its `else`; the rest of the tree's file, the selection and the
-explanatory header comment included, stays as it is. Copying a whole
-generated file over it would drop the selection, and a build without
-DARIA would then run `clk_arm` at the other setting. With advanced parameters on, the tool
-takes the counters from the `gui_divide_factor_*` values; the frequency
-strings it writes are computed from them. The ÷19 fallback (C3 = 19,
-36.17 MHz) is generated the same way. Its counter 3 is `c_cnt_hi_div3(10)`,
-`c_cnt_lo_div3(9)` and `c_cnt_odd_div_duty_en3("true")`; the tool then also
-prints the C0-C2 and VCO frequency strings rounded differently (VCO
-687.272644 against 687.272687 MHz), with M, N, K and the other counters
-unchanged.
+`pll_core.v` holds two settings, selected by `ifdef POCKET_DARIA`: C3 = 19
+(VCO/19, 36.172249 MHz) for DARIA, and C3 = 24 (28.64 MHz, 2 × `clk_sys`)
+otherwise. Each is the tool's output for its C3; only the selection is by
+hand. ÷19 is DARIA's divider since 2026-10-12: at C3 = 18 (38.18 MHz)
+`clk_arm` missed setup on one of three seeds, with or without fitter
+padding ([daria_step7/plan.md](daria_step7/plan.md) 5.2). To regenerate,
+run the command once as above and once with `gui_divide_factor_c3=24` and
+`gui_output_clock_frequency3=28.636363` into `sim/work/pll/c24`. Diff each
+against the tree's file. At C3 = 19 eight lines differ from C3 = 24's:
+counter 3's (`output_clock_frequency3`, `c_cnt_hi_div3(10)`,
+`c_cnt_lo_div3(9)`, `c_cnt_odd_div_duty_en3("true")`) and four display
+strings, which the tool prints one digit lower for the same M, N, K and
+C0-C2 (`output_clock_frequency0`-`2`, 14.318180 and 57.272722 MHz, and
+`pll_output_clk_frequency`, the VCO, 687.272644 against 687.272687 MHz).
+Copy those lines into the matching `ifdef` branch, the C3 = 19 output under
+`POCKET_DARIA` and the C3 = 24 output in its `else`; the rest of the tree's
+file, the selection and the explanatory header comment included, stays as
+it is. Copying a whole generated file over it would drop the selection,
+and a build without DARIA would then run `clk_arm` at the other setting.
+`sim/bupchip/quartus_probe/step7/step7_prep.py --tree-div` reads which
+output the `POCKET_DARIA` view is (18, 19 or 24, from all eight values),
+and the step-7 gate `divider` (`sim/check/div_check.py`) holds every
+bench's and gate's default divider to it. With advanced parameters on, the
+tool takes the counters from the `gui_divide_factor_*` values; the
+frequency strings it writes are computed from them. C3 = 18 (38.181818 MHz)
+is generated the same way and differs from C3 = 24 in counter 3's lines
+alone.
 The reconfiguration controller (`pll/pll_cfg/`) comes from
 `--component-name=altera_pll_reconfig --output-name=pll_cfg`.
 
 The PLL has four outputs: `clk_sys` (C0 = 48), `clk_sdram` (C1 = 12),
 `clk_sys_90` (C2 = 48, 90 degrees) and `clk_arm`, the BupChip's CPU
-([BUPCHIP_CORE.md](BUPCHIP_CORE.md), "Clocking"): C3 = 18 (VCO/18,
-38.18 MHz) with `POCKET_DARIA` ([DARIA_CORE.md](DARIA_CORE.md), decision 7),
+([BUPCHIP_CORE.md](BUPCHIP_CORE.md), "Clocking"): C3 = 19 (VCO/19,
+36.17 MHz) with `POCKET_DARIA` ([DARIA_CORE.md](DARIA_CORE.md), decision 7),
 otherwise C3 = 24 (2 × `clk_sys`, 28.636 MHz, ARIA). The clock plan has four
 rules:
 
@@ -343,17 +351,31 @@ rules:
   Adding or changing a C counter alone (as C3 was added) leaves M, N and
   both values as they are.
 - `clk_arm` comes from the same VCO, so every BupChip crossing to and from
-  `clk_sys` is timed. At C3 = 24 its edges are `clk_sys`'s; at C3 = 18 they
-  meet every 3 `clk_sys` (8 `clk_arm`), and every crossing is a
-  synchroniser with held data, bounded at ±20 ns in
+  `clk_sys` is timed. At C3 = 24 its edges are `clk_sys`'s; at C3 = 19 they
+  meet every 19 `clk_sys` (48 `clk_arm`; at C3 = 18 every 3 `clk_sys`), and
+  every crossing is a synchroniser with held data, bounded at ±20 ns in
   `core/daria_constraints.sdc`. Its 48 kHz pop runs from `clk_74a`.
   `psram.sv`'s `CLOCK_SPEED` is 50.0 under `POCKET_DARIA` and 28.636364
   otherwise: it sets the controller's read and write state sequence, and
   50.0 adds a clock after `oe_n` falls ([DARIA_CORE.md](DARIA_CORE.md),
   7.4); it is the value for both C3 = 18 and 19. A retune scales `clk_arm`
-  with the rest (in PAL, 28.375 MHz at C3 = 24 or 37.83 MHz at C3 = 18) and
-  holds the BupChip. `pll_region.v` writes only the fraction and the start
-  register, so C3 is kept.
+  with the rest (in PAL, 28.375 MHz at C3 = 24 or 35.842 MHz at C3 = 19)
+  and holds the BupChip. `pll_region.v` writes only the fraction and the
+  start register, so C3 is kept.
+- Two DARIA-only fitter settings come with C3 = 19, both for daria_fe's
+  shared-edge guard pair `u_guard|pd_tog` → `pd_rx`, which the Timing
+  Analyzer holds to 6 ns setup and 1 ns hold
+  ([daria_fe/design.md](daria_fe/design.md) 8.2-8.3). `core/daria_sync.tcl`
+  ends with `ROUTER_REGISTER_DUPLICATION OFF`: the router copied the pair's
+  registers for routability in 8 of 12 step-7 fits, which breaks the single
+  path the guard's checks need, and Quartus 21.1 takes the router's
+  duplication settings only globally (a per-instance form stops the
+  compile). It applies to DARIA builds only, since `daria.qip` sources the
+  file. And `core/daria_constraints.sdc`'s fitter-only block asks the
+  fitter for 5.5 ns on the pair (a `set_max_delay` read only by
+  `quartus_fit`), 0.5 ns under the 6 ns that the Timing Analyzer checks:
+  without it one of three ÷19 seeds missed the window by 0.109 ns, through
+  clock skew.
 
 ### Change the PAL/NTSC switch
 

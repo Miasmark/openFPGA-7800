@@ -1461,7 +1461,7 @@ So `pd_same` = 1 exactly in the clock after the shared edge, the flywheel's `ph 
 
 ### 8.2 SDC and QSF lines
 
-In `core_constraints.sdc`, beside DC 7.3's ±20 ns `clk_sys`/`clk_arm` exceptions (`-nowarn` because the registers exist only in POCKET_DARIA builds; the pattern style is the file's own, `*|entity:instance|reg`):
+In `core_constraints.sdc`, beside DC 7.3's ±20 ns `clk_sys`/`clk_arm` exceptions (`-nowarn` because the registers exist only in POCKET_DARIA builds; the pattern style is the file's own, `*|entity:instance|reg`). **As built (step 7):** the lines live in `core/daria_constraints.sdc`, the DARIA-only file that `ap_core.qsf` lists after the clocks exist (`docs/daria_step7/plan.md` P9), with the ±20 ns pair; `core_constraints.sdc` is the non-DARIA build's and stays unchanged:
 
 ```tcl
 # DARIA front end: the shared-edge phase detector (docs/DARIA_CORE.md; daria_fe_guard.sv).
@@ -1493,6 +1493,8 @@ set_min_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
 - the fitter's register report shows `pd_rx` neither duplicated nor retimed by physical synthesis;
 - the clock-network skew on that path is read off the report (DI:726).
 
+**What step 7's fits showed, and the fix.** `PRESERVE_REGISTER` stops synthesis and physical synthesis, but not the router: with `ap_core.qsf`'s router duplication on (`ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION`), the router copied `pd_tog`, `pd_rx` or both for routability in 8 of the first 12 step-7 fits (÷18 and ÷19). Each copy was timed at 6/1 ns, but the checks above, which need one register and one path, failed. Quartus 21.1 takes the router's duplication settings only globally (a per-instance assignment stops the compile, and `ADV_NETLIST_OPT_ALLOWED` on the two registers is ignored by the router), so `core/daria_sync.tcl`, which `daria.qip` sources for DARIA builds only, ends with `ROUTER_REGISTER_DUPLICATION OFF`. Over three ÷19 seeds that cost nothing measurable (`clk_sdram` +2.740 against +2.761 ns, `clk_arm` +1.642 against +1.576 ns, the same ALMs and LABs) and removed the 1,014-1,061 router-duplicated registers of each fit. With the pair single, its own skew (about −0.6 to −1.1 ns at the slow corners) left seed 3 at −0.109 ns against the 6 ns window, so `daria_constraints.sdc`'s fitter-only block asks the fitter for 5.5 ns on this one path (a `set_max_delay` read by `quartus_fit` only); the Timing Analyzer and the check above keep 6/1 ns. ÷19's fits on seeds 1-3 then pass every check, with the window at +0.178, +0.102 and +0.205 ns (`docs/daria_step7/plan.md` 5.2, 5.4).
+
 ### 8.3 Lock rule and inert cases
 
 - Lock after 12 consecutive predictions that match (four frames). Unlock on the first mismatch.
@@ -1500,8 +1502,8 @@ set_min_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \
 
 | Configuration | What the detector sees | Result |
 |---|---|---|
-| ÷48/÷18 (Pocket) | 2/3/3 toggles, period 3 | locks within 3 + 12 clocks of start or of any phase move |
-| ÷19 fallback | longest consistent run 4-5 (lattice simulation) | never locks (12 > 5); `guard_on` = 0; back to the counted race (DI 9.3) |
+| ÷48/÷18 (the Pocket's divider until step 7) | 2/3/3 toggles, period 3 | locks within 3 + 12 clocks of start or of any phase move |
+| ÷19 (the Pocket's divider since step 7, 2026-10-12) | longest consistent run 4-5 (lattice simulation); and (the step-7 D review) any 13-sample window of the 48:19 lattice holds 6 or 7 matching samples, where the period-3 lock needs exactly 5 | never locks (12 > 5); `guard_on` = 0; back to the counted race (DI 9.3). Mode B at ÷19 (step 7): never locked on six images; the cart RAM coincidences are counted (`DARIA_CORE.md`, open item 7) and accepted for the first release |
 | Mode A (`clk_arm` = 5 × `clk_sys`, or `clk_sys`) | `pd_rx` changes on every edge | never locks (`det_lock_a` must stay 0) |
 
 ### 8.4 Bench checks (mode B, `clk_d` aligned, `+d_ofs` ∈ {0, 8730, 17460}; BEN 6.3)

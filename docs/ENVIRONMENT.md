@@ -196,6 +196,12 @@ The image was pulled on 2026-10-03 with `timeout 580 docker pull raetro/quartus:
 
   - Running Quartus from the local image needs no network, so this does not matter for builds.
 
+- **"containerd is still running" after a VM restart** (2026-10-13). dockerd can refuse to start with a message that containerd is still running, although no containerd process exists: the restart left a stale `/var/run/docker/containerd/containerd.pid`. Check that no containerd runs (`pgrep -a containerd`), delete that file, and start dockerd again with one of the forms above:
+
+  ```sh
+  rm /var/run/docker/containerd/containerd.pid
+  ```
+
 ### 3.4 Running Quartus
 
 To compile the full core, run the CI form (`.github/workflows/build.yml:18-22`) from the repo root:
@@ -424,7 +430,7 @@ How to read the table:
 
 ### 7.4 Load
 
-- **At most 2 simulations at once.**
+- **At most 3 simulations at once while no Quartus job runs, and 2 while one does** (the owner's rule from 2026-10-09; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used). Quartus itself runs one job at a time, under the lock of 3.5.
   - `run_rand.sh` defaults to `JOBS=1`, caps it at 2, and states "the machine rule is at most 2".
   - `campaign.sh` runs two at a time, and `daria/run_all.sh` defaults to `JOBS=2`.
   - `s4/check.sh` defaults to `JOBS=3`, so pass `JOBS=2`.
@@ -504,6 +510,8 @@ Run these detached with `setsid` instead of as tool background commands.
 
 - There is no init, so start dockerd by hand after every VM restart (section 3.3), then check it with `docker info`.
   - Quartus runs from the local image are not affected.
+- If dockerd then fails with "containerd is still running", the restart left a stale `/var/run/docker/containerd/containerd.pid`: delete it and start dockerd again (3.3). This happened on 2026-10-13.
+- In October 2026 the VM restarted about every two hours (2026-10-13 23:01, 10-14 02:40 and 04:40 UTC), killing every process. Split long runs into pieces of an hour or less that write their own results and skip finished pieces when run again (`wire.py run` takes scenario names, `s4/check.sh` takes `ONLY=`, frame and mode-B runs go one image at a time).
 
 ### 8.5 The wrong Verilator
 
