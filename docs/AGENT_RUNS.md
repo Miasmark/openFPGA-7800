@@ -37,7 +37,12 @@ A call that follows a gap of 5 minutes or more and has a large cache write is a 
 
 ## 2. Restarts
 
-**How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. A session restart kills the agents but not the processes they started. A machine restart kills the processes as well, and dockerd with them (ENVIRONMENT.md 3.3, 8.1).
+**How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. Then, on the night of 2026-10-13 to 14, the VM itself rebooted three times, at 23:01, 02:40 and 04:40 UTC. That is about every two hours, with no cause visible from inside the machine, and at least once with nothing running. After that it stayed up.
+
+**When the VM reboots too.** A two-hour cadence kills any job longer than that, whatever its checkpoints: a three-hour regression never finished in one piece.
+- Split long runs into pieces of at most about an hour. Each piece writes its own results, and a rerun skips finished pieces. `wire.py run` takes scenario names, `s4/check.sh` takes `ONLY=`, and frame and mode-B runs go per image.
+- Keep `progress.txt` current after every piece, so a successor agent resumes from it.
+- dockerd can then fail with "containerd is still running", from a stale `/var/run/docker/containerd/containerd.pid`; delete it and start dockerd again (ENVIRONMENT.md). A session restart kills the agents but not the processes they started. A machine restart kills the processes as well, and dockerd with them (ENVIRONMENT.md 3.3, 8.1).
 
 **Commit and log early:**
 - Commit verified work early on the lane branch. `WIP: ...` commits are fine there.
