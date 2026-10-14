@@ -100,13 +100,14 @@
 //                           differs from the region the PLL is set to: it
 //                           starts one as soon as its loading input is low);
 //                           -1 without +wire_pll
-//   rgn_bad                 clk_sys where daria_rgn (bupchip's daria_pal: the
-//                           region of the PLL's last completed retune, P20)
-//                           differs from the region pll_region has set the
-//                           PLL to, outside a retune (pll_region busy or
-//                           pll_busy_s[1] high on this clock or the last)
-//                           and the clock daria_rgn takes region_pll on;
-//                           -1 without +wire_pll
+//   rgn_bad                 clk_sys where daria_rgn (the region of the PLL's
+//                           last completed retune, P20) or the timer's
+//                           region input it drives (daria_mmio's pal, through
+//                           bupchip's daria_pal port) differs from the region
+//                           pll_region has set the PLL to, outside a retune
+//                           (pll_region busy or pll_busy_s[1] high on this
+//                           clock or the last) and the clock daria_rgn takes
+//                           region_pll on; -1 without +wire_pll
 // +wire_seq=MODE (with +wire_pll) models is_downloading across a whole load
 // sequence, as core_top.v makes it, and runs one of the scripts of the D
 // review's finding 3 (a retune that waits for a load sequence's end; below).
@@ -391,9 +392,11 @@ module tb_wire;
 		// +wire_pll: F6 running while pll_region is busy, or would start a
 		// retune as soon as its loading input is low
 		if (`W_CP.f6_q && pll_on && (u_pr.busy || tb.is_pal != u_pr.pll_pal)) f6_pend++;
-		// +wire_pll: daria_rgn against the region the PLL is set to (rgn_bad)
+		// +wire_pll: daria_rgn, and daria_mmio's pal at the end of its wiring
+		// (the wrapper's .daria_pal, bupchip's .pal), against the region the
+		// PLL is set to (rgn_bad)
 		if (pll_on && t_sys > 4 && !u_pr.busy && !busy && !busy_d && tb.dut.daria_rt_cnt != 4'd15 &&
-				tb.dut.daria_rgn != u_pr.pll_pal) rgn_bad++;
+				(tb.dut.daria_rgn != u_pr.pll_pal || `W_BC.mmio.pal != u_pr.pll_pal)) rgn_bad++;
 		// the console reset from pll_busy_s[1]'s rise (+1: the register follows it)
 		// to the end of the F6 after it; a non-ARM image has none: to the fall
 		if (rt_win && t_sys > t_busy_rise + 1 && !tb.dut.reset) rt_rst_low++;

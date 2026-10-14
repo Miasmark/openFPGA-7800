@@ -8,10 +8,10 @@
   wire.py list                   the scenarios and what each needs
   wire.py mutant NAME [SCENARIO ...]
                                  build the DARIA tb_wire on a copy of the tree's
-                                 src/fpga with one of MUTANTS (the fix of the D
-                                 review's finding 3 undone in part) and run the
-                                 scenarios (default: SEQ_MUT); CAUGHT (exit 0)
-                                 when any fails
+                                 src/fpga with one of MUTANTS (the fixes of the
+                                 D review's findings 3 and 5 undone in part) and
+                                 run the scenarios (default: SEQ_MUT); CAUGHT
+                                 (exit 0) when any fails
 
 Each build first runs sim/run_sim.sh with BUILD_TOP=tb_load (its sources,
 defines and patched copies, DARIA=1 or 0), then builds tb_wire.sv with the
@@ -519,7 +519,7 @@ def scenarios(img):
                                     "+image2at=40", "+wire_pll"])
             j = Judge(name); daria_health(j, s, resets=1)
             after_retunes(j, s, 2)
-            j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0)
+            j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
             j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
             j.ge(s, "marker", meta(I(t + ".bin"))["need"].get("dir_marker", 1))
             return j, s
@@ -534,7 +534,7 @@ def scenarios(img):
                                     "+image2at=40", "+wire_pll", "+wire_reset_on_pal=2"])
             j = Judge(name); daria_health(j, s, resets=1)
             after_retunes(j, s, 2)
-            j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0)
+            j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
             j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
             j.ok(re.search(r"^WIRE reset_in rises as region_pll changes to 0", s["text"], re.M) is not None,
                  "no reset_in as region_pll changed: the test is void")
@@ -548,7 +548,7 @@ def scenarios(img):
         def f():
             s = run("daria", name, ["+image=" + I(t + ".b57.bin"), "+daria=300", "+wire_pll"])
             j = Judge(name); boot(j, s, meta(I(t + ".bin")))
-            j.eq(s, "retunes", 0); j.eq(s, "is_pal", 0)
+            j.eq(s, "retunes", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
             return j, s
         S[name] = (f, "P20, review: %s with byte 57's bit 0 set (the A78 region byte) from power-up, pll_region in "
                       "the loop: no retune (none to PAL and back across F6)" % t, True)
@@ -639,6 +639,7 @@ def scenarios(img):
         s = run("daria", "pal2600", args)
         j = Judge("pal2600"); no_daria(j, s)
         j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
+        j.eq(s, "rgn_bad", 0)
         if os.environ.get("PAL2600_PLAIN", "1") == "1":
             p = run("plain", "pal2600", args)
             common(j, p)
@@ -654,7 +655,7 @@ def scenarios(img):
         j = Judge("pal_dpc"); daria_health(j, s, resets=1)
         after_retunes(j, s, 2)
         j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
-        j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+        j.eq(s, "rgn_bad", 0); j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
         j.ge(s, "marker", 3)
         return j, s
     S["pal_dpc"] = (pal_arm, "P20: a PAL DPC+ image on Auto (smoke_dpc in PAL frames), pll_region in the loop: one "
@@ -760,8 +761,8 @@ def scenarios(img):
 
 
 # ---------------------------------------------------------------- mutants
-# atari7800_pocket.sv's fix of the D review's finding 3, each mutant undoing
-# one of its parts: (the text, its replacement)
+# atari7800_pocket.sv's fixes of the D review's findings 3 and 5, each mutant
+# undoing one of their parts: (the text, its replacement)
 MUTANTS = {
     # cart_reset not masked while a retune is pending: a console reset then
     # starts F6, and allcomplete can start the retune inside it
@@ -786,6 +787,13 @@ MUTANTS = {
     # allcomplete starts the retune inside it, with no F6 after it (seq_rfirst_dpc)
     "nofrzarm": ("else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))",
                  "else if (!region_pll_hold && !daria_rt_pend)"),
+    # finding 5 undone: daria_mmio's timer rate (bupchip's daria_pal) from the
+    # Region setting, not from the region the PLL runs at; it differs while a
+    # retune waits for a load sequence's end (seq_*: rgn_bad)
+    "palsel": (".daria_pal      (daria_rgn),", ".daria_pal      (region_select),"),
+    # the region asked for (region_pll, is_pal_o) instead of the one the PLL
+    # last took: it differs from the PLL's while a retune is pending
+    "palpll": (".daria_pal      (daria_rgn),", ".daria_pal      (region_pll),"),
 }
 SEQ_MUT = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_rfirst_dpc", "seq_back_dpc"]
 
