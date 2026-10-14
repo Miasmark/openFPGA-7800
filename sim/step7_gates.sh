@@ -62,6 +62,17 @@
 #                and fingerprints (so it runs after them), the guards'
 #                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees, and
 #                wire.py's mutant verdict on a fake tb_wire
+#   fit_selftest the fit driver's self-test, no Quartus
+#                (sim/bupchip/quartus_probe/step7/selftest.sh, plan 5.4):
+#                step7_prep.py's DARIA lines and divider, step7_checks.py's
+#                verdicts on made-up report files (among them plan 5.4's (a),
+#                (l) and (h) as amended 2026-10-14, judged by the divider, and
+#                the misread cross-check), its (k') rule, the two copies of plan
+#                2.7's table (step7_report.tcl's ff_table, f3_crossings.txt)
+#                against each other, and run_step7.sh's refusals with a
+#                stand-in docker; about a minute. It needs 2,100 MB free on /
+#                (run_step7.sh's refusals are tested above its 2 GB floor):
+#                with less it fails and says so
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
 #                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
@@ -157,7 +168,7 @@ OUT="$(cd "$OUT" && pwd)"
 QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
-GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest s4_check lint wire daria_smp dbg_snap frames)
+GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames)
 
 header() {   # the P23 header of every gate log
 	echo "HEAD $(git -C "$REPO" rev-parse HEAD)"
@@ -176,6 +187,7 @@ avail() {
 		pp_equiv) [ -n "${PP_EXPECT:-}" ] || echo "PP_EXPECT (the expected non-DARIA stream hash) not given" ;;
 		pp_guards) [ -n "${PP_GUARD_FROM:-}" ] || echo "PP_GUARD_FROM (commit F) not given" ;;
 		divider) [ -f "$HERE/bupchip/quartus_probe/step7/step7_prep.py" ] || echo "step7_prep.py (--tree-div) does not exist" ;;
+		fit_selftest) [ -f "$HERE/bupchip/quartus_probe/step7/selftest.sh" ] || echo "sim/bupchip/quartus_probe/step7/selftest.sh does not exist" ;;
 		extra_tests) [ -n "${EXTRA_REF:-}" ] && [ -f "${EXTRA_REF:-}" ] || echo "EXTRA_REF (the reference build's extra_tests.sh log) not given" ;;
 		lint) [ -f "$HERE/lint_step7.sh" ] || echo "sim/lint_step7.sh does not exist" ;;
 		wire) if [ ! -f "$HERE/bupchip/daria/wire/wire.py" ]; then echo "sim/bupchip/daria/wire/wire.py does not exist"
@@ -319,6 +331,7 @@ g_selftest() {
 	[ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ] && args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
 	python3 "$HERE/check/selftest.py" "${args[@]}"
 }
+g_fit_selftest() { bash "$HERE/bupchip/quartus_probe/step7/selftest.sh"; }
 g_extra_tests() {
 	[ -x "$OUT/rs/obj_load/vtb" ] || { echo "no run_sim build in $OUT/rs: run the run_sim gate first"; return 1; }
 	local tape=() rc=0
