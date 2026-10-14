@@ -280,3 +280,21 @@ Everything is in the lane's gitignored work directory, with resume notes. The de
 - **Divider: ÷19 for the first release.** ÷19 is the more promising divider, and it can be V1 even if it is not exact. Plan 5.2's ÷19 path applies: `s7/G`'s PLL lines, router setting and guard-pair constraint go into D, together with 5.2's ÷19 checks. The guard is inert at ÷19, and the rare audio-read coincidences recorded above are accepted for V1.
 - **"Same frames": wanted, not required for V1.** Small discrepancies are acceptable in a first version; they are measured and documented instead of blocking the release. The P13 rule is amended on this basis when work resumes. The frame runs' proposal is the starting point: bench parity, then a natural run gating `len_sys`, video, RIOT and ARM instruction counts.
 - **The retune-inside-F6 race is fixed,** not deferred to step 8. The fix is the first item when work resumes on Tuesday 13 October at 7 PM Eastern (23:00 UTC). The D review's proposal: treat a pending retune like `pll_busy`, with a `tb_wire` scenario that models the loading flag across slots and fails before the fix.
+
+### The lead's decision on Q2 at ÷19 (2026-10-14)
+
+- **Q2 on the shipping tree** [sta] (the D fix round's `src/`, ÷19, slow 85 °C), seeds 1 / 2 / 3:
+  - `clk_arm` +1.241 / +1.077 / +1.765 ns; `clk_sdram` +2.462 / +2.683 / +2.919 ns; worst hold +0.120 / +0.098 / +0.119 ns. Every P12 gate passes on all three seeds.
+  - Seed 1 fails check (h) alone: `t_*_q` → `clk_sdram` +4.298 ns against +4.5.
+  - Seed 3 fails (a) and (l) alone: the guard pair `pd_tog` → `pd_rx` at −0.046 ns against its 6 ns window.
+  - Seed 2 passes every check. Q4 (the non-DARIA identity fit) gives a `.rbf` equal to Q1''.
+- **Decision: amend the two checks, not add a lever.** The owner's guidance is that ÷19 may be V1 even if not exact.
+  - **(a) and (l) at ÷19.** At ÷19 the guard cannot lock whatever this path's delay is, so its window guards no function there.
+    - The window is set by the clock skew between corners and the 1 ns hold bound: the data delay must sit in about 4.1-4.75 ns at slow 85 °C. The 5.5 ns fitter target was reached on none of six fits.
+    - (a) keeps checking that the constraint is applied and that the pair is single. It reports the slack and gates only at ÷18.
+    - (l) leaves this one path out at ÷19.
+  - **(h): the threshold drops from +4.5 ns to +3.0 ns,** which still keeps the leg 1.5 ns clear of the +1.5 ns release gate.
+    - Over ten ÷19 fits the leg ran 4.298-6.697 ns.
+    - It still starts at registers: (g), (g.legs) and (h.retime) pass.
+  - **Why not a lever:** a fitter or SDC lever would void Q2, Q-mut and Q5 for about a day of fits, with no sign that it would work.
+- **The shipped SEED is 2,** already `ap_core.qsf`'s. It is the only seed that passes every check as first written. The held fits, Q-mut and Q5, are released.
