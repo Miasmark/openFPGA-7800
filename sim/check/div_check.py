@@ -20,11 +20,15 @@ implies (at VCO/19 daria_fe's guard never locks, so the guard is expected
   sim/bupchip/quartus_probe/step7/step7_report.tcl   prep's div N
   sim/bupchip/quartus_probe/step7/run_step7.sh       DIV's default is the
                                           tree's (--tree-div), not a number
+  sim/bupchip/daria/run_daria.sh          MODE_B=1's +d_div: D_DIV, by default
+                                          the tree's (--tree-div), passed to
+                                          the mode-B shadow (the D fix round's
+                                          review)
 Benches on a fixed lattice by design are listed, not checked: the mode-B
-shadow's +d_div (daria_shadow.svh, default 18; the VCO/19 runs pass
-+d_div=19), tb_dbg_snap's +div (both lattices, run_dbgsnap.sh passes
-+div=19 for its VCO/19 cases) and tb_fe_call's +arm_div (18 or 5, its
-lattice built in).
+shadow's own +d_div default (daria_shadow.svh, 18; run_daria.sh always
+passes +d_div, so only a binary run by hand takes it), tb_dbg_snap's +div
+(both lattices, run_dbgsnap.sh passes +div=19 for its VCO/19 cases) and
+tb_fe_call's +arm_div (18 or 5, its lattice built in).
 A tree whose pll_core.v has no POCKET_DARIA branch (divider 24) has nothing
 to check. Prints one line per site and a verdict; exit 0 pass, 1 fail.
 SPDX-License-Identifier: MIT
@@ -112,7 +116,16 @@ def main():
         print(f"  {'ok  ' if ok else 'FAIL'} sim/bupchip/quartus_probe/step7/run_step7.sh: DIV defaults to the tree's (--tree-div)")
         if not ok:
             bad.append("run_step7.sh: DIV's default is not the tree's divider")
-    print("  not checked (a fixed lattice by design): daria_shadow.svh +d_div (mode B; VCO/19 runs pass +d_div=19), "
+    t = read("sim/bupchip/daria/run_daria.sh")
+    if t is not None:
+        ok = re.search(r'^\s*D_DIV="\$\{D_DIV:-\$TREE_DIV\}"$', t, re.M) is not None \
+            and re.search(r'TREE_DIV="\$\(python3 "\$HERE/\.\./quartus_probe/step7/step7_prep\.py" "\$FPGA" --tree-div\)"',
+                          t) is not None \
+            and re.search(r'^\s*set -- "\$@" "\+d_div=\$D_DIV"$', t, re.M) is not None
+        print(f"  {'ok  ' if ok else 'FAIL'} sim/bupchip/daria/run_daria.sh: MODE_B's +d_div defaults to the tree's (--tree-div)")
+        if not ok:
+            bad.append("run_daria.sh: MODE_B's +d_div does not default to the tree's divider")
+    print("  not checked (a fixed lattice by design): daria_shadow.svh's own +d_div default (18; run_daria.sh passes the tree's), "
           "tb_dbg_snap.sv +div (run_dbgsnap.sh passes +div=19 for its VCO/19 cases), tb_fe_call.sv +arm_div (18 or 5)")
     for b in bad:
         print("  FAIL: " + b)

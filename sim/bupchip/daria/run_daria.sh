@@ -34,9 +34,14 @@
 # MODE_B=1 builds mode B of the front-end shadow (docs/daria_fe/spec/bench.md
 # 7.1; design.md 12.2 step 8; -DFE_MODE_B): daria_fe posts the calls to DARIA's
 # own CPU (dcall) and shares DARIA's cart RAM (dmem), clk_d is on the PLL's
-# lattice (+d_ofs=PS; +d_div=19 puts it on the VCO/19 fallback's lattice, where
-# the guard must never lock and port B's coincidences with DARIA are counted,
-# docs/daria_step7/plan.md 5.2), the 6507 is held for daria_fe's calls too. It
+# lattice (+d_ofs=PS; +d_div=N, VCO/N, 18 or 19: at VCO/19, the shipped
+# divider, the guard must never lock and port B's coincidences with DARIA are
+# counted, docs/daria_step7/plan.md 5.2), the 6507 is held for daria_fe's
+# calls too. The divider is D_DIV, by default the tree's own (pll_core.v's
+# DARIA counter 3, as step7_prep.py --tree-div reads it): this script adds
+# +d_div=D_DIV, refuses a +d_div=N among the plusargs that differs from it,
+# and notes the divider at the end of run.log (the shadow's own default,
+# VCO/18, is reached only by running the binary by hand). It
 # sets SHADOW=1 and FE=1 itself, and refuses FE_STAGE0=1:
 # obj_shadow<WIN_KB>_fe_modeB, runs/shadow<WIN_KB>_fe_modeB/ (with FE_POISON=1
 # _fe_modeB_poison). MODE_B=1 WRAPPER=1 runs daria_fe on the whole wrapper's
@@ -61,6 +66,18 @@ if [ "$1" = --build-only ]; then BUILD_ONLY=1; else
 	ROM="$(realpath "${1:?usage: run_daria.sh ROM.bin|--build-only [+plusargs...]}")"
 fi
 shift
+# Mode B's clk_d lattice (the D fix round's review): the tree's divider unless
+# D_DIV says otherwise, so that a rerun cannot fall back to the shadow's own
+# default unnoticed
+if [ "${MODE_B:-0}" != 0 ] && [ -z "$BUILD_ONLY" ]; then
+	TREE_DIV="$(python3 "$HERE/../quartus_probe/step7/step7_prep.py" "$FPGA" --tree-div)"
+	D_DIV="${D_DIV:-$TREE_DIV}"
+	case "$D_DIV" in 18|19) ;; *) echo "run_daria.sh: MODE_B=1 runs at VCO/18 or VCO/19; D_DIV is $D_DIV (the tree's divider: VCO/$TREE_DIV)" >&2; exit 1 ;; esac
+	for a in "$@"; do
+		case "$a" in +d_div=*) [ "${a#+d_div=}" = "$D_DIV" ] || { echo "run_daria.sh: $a differs from D_DIV=$D_DIV (default: the tree's VCO/$TREE_DIV); set D_DIV instead" >&2; exit 1; } ;; esac
+	done
+	set -- "$@" "+d_div=$D_DIV"
+fi
 mkdir -p "$WORK/rtl"
 WORK="$(cd "$WORK" && pwd)"
 
@@ -167,6 +184,7 @@ cd "$WORK"
 start=$(date +%s)
 nice -n 10 "$BIN" +rom="$ROM" +out="$OUT/" +dtrace="${DTRACE:-1}" "$@" > "$OUT/run.log" 2>&1
 echo "wall $(( $(date +%s) - start )) s" >> "$OUT/run.log"
+[ "${MODE_B:-0}" = 0 ] || echo "run_daria.sh: mode B's clk_d at VCO/$D_DIV (+d_div=$D_DIV; the tree's pll_core.v: VCO/$TREE_DIV)" >> "$OUT/run.log"
 python3 "$HERE/ppm2png.py" "$OUT"/snap_*.ppm 2>/dev/null && rm -f "$OUT"/snap_*.ppm || true
 gzip -f "$OUT/calls.csv" "$OUT/pcs.txt"
 [ ! -f "$OUT/dtrace.txt" ] || gzip -f "$OUT/dtrace.txt"

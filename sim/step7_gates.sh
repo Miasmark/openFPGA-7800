@@ -20,8 +20,8 @@
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
 #                and s4 set, frame_gate.py's --expect-guard, the fit driver's
-#                DIV) is pll_core.v's DARIA counter 3 (step7_prep.py
-#                --tree-div; the D review's finding 7)
+#                DIV, run_daria.sh's MODE_B +d_div) is pll_core.v's DARIA
+#                counter 3 (step7_prep.py --tree-div; the D review's finding 7)
 #   cartram      cartram2600_test.py matrix and the directed s19 run
 #                (CARTRAM_ONLY=e7,... runs a subset of the matrix: a quick
 #                look, never the gate); with Fix B in the tree (sram_ctrl.sv's

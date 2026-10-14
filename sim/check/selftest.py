@@ -707,6 +707,7 @@ DIV_SITES = [   # (file, the default's text at VCO/19, the same at VCO/18)
     ("sim/step7_gates.sh", "\tDARIA=1 ARM19=1 PSRAM_CS=", "\tDARIA=1 ARM38=1 PSRAM_CS="),
     ("sim/bupchip/quartus_probe/step7/step7_report.tcl", "fixb 1 div 19}", "fixb 1 div 18}"),
     ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV=19'),
+    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-18}"'),
 ]
 
 
