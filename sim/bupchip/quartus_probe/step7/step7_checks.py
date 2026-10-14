@@ -32,12 +32,29 @@ Reads checks.txt (step7_report.tcl's STA checks) and adds:
   (report) step7_report.tcl ran to its end ("# step7_report.tcl: end" in
       checks.txt) and quartus_sta exited 0 (fpga/report_rc.txt, written by
       run_step7.sh)
+and judges (a), (l) and (h) again by the build's divider (plan 5.4 as
+amended 2026-10-14, the lead's decision on Q2 at VCO/19), from the figures
+that step7_report.tcl wrote and judged by the rules as first written:
+  (a) at VCO/19 the guard pair's setup slack is reported, not gated; there
+      must still be exactly one setup path pd_tog -> pd_rx at every corner,
+      with the 6.000 ns relationship (the constraint applied, the pair single)
+  (l) at VCO/19 the guard pair's setup, and only it, is left out: a negative
+      clk_sys setup slack at a corner passes when it is pd_tog -> pd_rx's
+      slack there and the compile's Timing Analyzer summary (ap_core.sta.rpt)
+      shows no other failing clk_sys endpoint (its Slack and End Point TNS
+      both equal to the pair's slack), pd_rx's only timed fan-in being pd_tog
+      (fanin.tsv). The pair's hold stays in (l), (b) and gate.hold
+  (h) t_*_q -> clk_sdram setup >= +3.0 ns at VCO/19 (+4.5 ns otherwise)
+  Any other divider (VCO/18; 24, a build without DARIA) keeps the rules as
+  first written. This script's own reading of the figures by those rules
+  must give the report script's verdict, or the check fails (a misread).
 Then prints every check with PASS, FAIL or INFO, and the verdict: the checks
 that gate this kind of build (5.4: the chain checks only with DARIA; the Fix B
 checks with Fix B; on aeee6d2, kind base, (g) is the negative control and must
 FAIL). Every gating check must be present: one that never ran (quartus_sta
 stopped, a report file missing) fails as "not reported". Exit status 0 when
-every gating check passes.
+every gating check passes. The line after it, "rules as first written: ...",
+gives the verdict with (a), (l) and (h) as step7_report.tcl judged them.
 """
 import os
 import re
@@ -333,6 +350,188 @@ for line in ds.splitlines():
         pins.append(" ".join(cols[:6]))
 check("o", "INFO", f"{len(pins)} datasheet rows for cram0_a, adv_n, oe_n, dq (datasheet.rpt); first: {pins[:4]}")
 
+# ---- (a), (l), (h) by the divider (plan 5.4 as amended 2026-10-14) ---------------------------------------------
+# step7_report.tcl judges (a), (l) and (h) by the rules as first written. The lead's decision on Q2 at VCO/19
+# (2026-10-14) amends them for a build at VCO/19, the shipped divider (step7_prep.txt's div 19): the guard
+# cannot lock at VCO/19 whatever the pair's delay, so its 6 ns window guards no function there, and (h)'s
+# threshold drops to +3.0 ns. Any other divider keeps the rules as first written. The figures come from the
+# report script's files: (a)'s per-corner lines and the corner list in checks.txt, timing.txt (every clock's
+# worst setup and hold per corner, what (l) reads) and (h)'s lines; for (l), the compile's Timing Analyzer
+# summary and fanin.tsv as well.
+div = prep.get("div", "?")
+AT19 = div == "19"
+H_MIN = 3.0 if AT19 else 4.5
+SYS = "ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk"
+first = {}            # check id -> its verdict by the rules as first written (the report script's)
+
+
+def num(s):
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def fmt(x):
+    return "?" if x is None else f"{x:.3f}"
+
+
+def same(x, y):       # figures printed to 1 ps
+    return x is not None and y is not None and abs(x - y) < 0.0005
+
+
+fig = {"corners": None, "a": {}, "h": None, "hin": None}
+in_ab = False
+for line in (ct or "").splitlines():
+    m = re.match(r"# corners: (.+)$", line)
+    if m:
+        fig["corners"] = m.group(1).split()
+    if line.startswith("## "):
+        in_ab = line.startswith("## (a) (b) (d)")
+        continue
+    m = re.match(r"  (\S+) setup: (\d+) path\(s\);(.*)$", line)
+    if in_ab and m:
+        fig["a"][m.group(1)] = (int(m.group(2)), [(num(r), num(s)) for r, s in
+                                                  re.findall(r" rel (\S+) slack (\S+) skew \S+ data \S+;", m.group(3))])
+    m = re.match(r"  t_\*_q -> clk_sdram: worst setup (\S+) ns .*worst hold over corners (\S+) ns", line)
+    if m:
+        fig["h"] = (num(m.group(1)), num(m.group(2)))
+    m = re.match(r"  into t_\*_q: worst setup (\S+) ns", line)
+    if m:
+        fig["hin"] = num(m.group(1))
+
+tt = rd(os.path.join(fpga, "timing.txt"))
+tim = {}              # (corner, clock) -> (setup, hold), as printed
+cond = None
+for line in (tt or "").splitlines():
+    m = re.match(r"== (\S+)$", line)
+    if m:
+        cond = m.group(1)
+        continue
+    m = re.match(r"  (\S+)\s+setup\s+(\S+)\s+hold\s+(\S+)\s*$", line)
+    if m and cond:
+        tim[(cond, m.group(1))] = (m.group(2), m.group(3))
+
+sta = None            # (corner, clock) -> (Slack, End Point TNS) from the compile's Setup Summary tables
+srpt = rd(os.path.join(out, "ap_core.sta.rpt"))
+if srpt is not None:
+    sta = {}
+    for m in re.finditer(r"; (Slow|Fast) (\d+)mV (-?\d+)C Model Setup Summary\s*;\n(.*?)\n\n", srpt, re.S):
+        key = f"{m.group(1).lower()}_{m.group(2)}mv_{m.group(3)}c"
+        for row in m.group(4).splitlines():
+            cols = [c.strip() for c in row.strip().strip(";").split(";")]
+            if len(cols) == 3 and cols[0] != "Clock":
+                sta[(key, cols[0])] = (num(cols[1]), num(cols[2]))
+
+
+def sta_key(c):       # 8_slow_1100mv_85c -> slow_1100mv_85c (the summary table's "Slow 1100mV 85C")
+    return re.sub(r"^[^_]*_", "", c).lower()
+
+
+rx_src = set()        # pd_rx's timed fan-in, by register (fanin.tsv)
+for row in (fan or "").splitlines()[1:]:
+    cols = row.split("\t")
+    if len(cols) >= 7 and re.search(r"\|daria_fe_guard:u_guard\|pd_rx$", strip_suffix(cols[1])):
+        rx_src.add(strip_suffix(cols[3]))
+rx_only_tog = bool(rx_src) and all(re.search(r"\|daria_fe_guard:u_guard\|pd_tog$", s) for s in rx_src)
+
+
+def judge_a():
+    """(first, amended, text); first is None when the figures are missing."""
+    cs = fig["corners"]
+    if not cs:
+        return None, "FAIL", "the corner list ('# corners:') is not in checks.txt"
+    miss = [c for c in cs if c not in fig["a"]]
+    if miss:
+        return None, "FAIL", f"no setup figures for pd_tog -> pd_rx at {miss} in checks.txt"
+    single = all(fig["a"][c][0] == 1 and len(fig["a"][c][1]) == 1 for c in cs)
+    rel = all(fig["a"][c][1] and all(same(r, 6.0) for r, _ in fig["a"][c][1]) for c in cs)
+    met = all(s is not None and s >= 0 for c in cs for _, s in fig["a"][c][1])
+    sl = "; ".join(f"{c} {fig['a'][c][0]} path(s)" + "".join(f" rel {fmt(r)} slack {fmt(s)}" for r, s in fig["a"][c][1])
+                   for c in cs)
+    f = "PASS" if single and rel and met else "FAIL"
+    if not AT19:
+        return f, f, f"VCO/{div}: exactly one setup path pd_tog -> pd_rx at every corner, relationship 6.000 ns, met: {sl}"
+    a = "PASS" if single and rel else "FAIL"
+    return f, a, (f"VCO/19 (plan 5.4 (a) as amended 2026-10-14): exactly one setup path pd_tog -> pd_rx at every corner "
+                  f"({'yes' if single else 'NO'}), relationship 6.000 ns, the constraint applied ({'yes' if rel else 'NO'}); "
+                  f"its slack reported, not gated: {sl}")
+
+
+def judge_l():
+    if tt is None or not tim:
+        return None, "FAIL", "timing.txt missing or empty"
+    neg = []
+    for (c, lab), (ss, hs) in sorted(tim.items()):
+        for k, v in (("setup", ss), ("hold", hs)):
+            if v != "-" and (num(v) is None or num(v) < 0):
+                neg.append((c, lab, k, v))
+    f = "FAIL" if neg else "PASS"
+    shown = "; ".join(f"{lab} {k} {v} at {c}" for c, lab, k, v in neg)
+    if not AT19:
+        return f, f, f"VCO/{div}: setup and hold slack >= 0 for every clock at every corner" + (f"; failing: {shown}" if neg else "")
+    left, out_ = [], []
+    for c, lab, k, v in neg:
+        why = None
+        if lab != "clk_sys" or k != "setup":
+            why = "not the guard pair's setup"
+        else:
+            ga = fig["a"].get(c)
+            sa = sta.get((sta_key(c), SYS)) if sta is not None else None
+            if not ga or ga[0] != 1 or len(ga[1]) != 1:
+                why = "no single pd_tog -> pd_rx setup path at this corner in (a)'s figures"
+            elif not same(ga[1][0][1], num(v)):
+                why = f"not the guard pair's (its slack here is {fmt(ga[1][0][1])}): another clk_sys path is worse"
+            elif sta is None:
+                why = "no ap_core.sta.rpt: the other clk_sys endpoints are not known"
+            elif sa is None:
+                why = "clk_sys is not in the compile's Setup Summary for this corner"
+            elif not same(sa[0], num(v)):
+                why = f"the compile's Setup Summary has clk_sys at {fmt(sa[0])}, not {v} (another analysis)"
+            elif not same(sa[1], num(v)):
+                why = f"End Point TNS {fmt(sa[1])}: another clk_sys endpoint fails too"
+            elif not rx_only_tog:
+                why = f"pd_rx's timed fan-in is not pd_tog alone (fanin.tsv: {sorted(rx_src)[:4] or 'none'})"
+            else:
+                out_.append(f"clk_sys setup {v} at {c} is pd_tog -> pd_rx's (Setup Summary: slack {sa[0]:.3f}, End Point "
+                            f"TNS {sa[1]:.3f}, so no other clk_sys endpoint fails; pd_rx's only fan-in pd_tog)")
+        if why:
+            left.append(f"{lab} {k} {v} at {c} ({why})")
+    a = "FAIL" if left else "PASS"
+    return f, a, ("VCO/19 (plan 5.4 (l) as amended 2026-10-14): setup and hold slack >= 0 for every clock at every corner, "
+                  "the guard pair's setup left out" + (f"; left out: {'; '.join(out_)}" if out_ else " (nothing to leave out)")
+                  + (f"; failing: {'; '.join(left)}" if left else ""))
+
+
+def judge_h():
+    if fig["h"] is None or fig["hin"] is None:
+        return None, "FAIL", "the t_*_q figures are not in checks.txt"
+    (ws, wh), wi = fig["h"], fig["hin"]
+    rest = wh is not None and wh >= 0 and wi is not None and wi >= 40.0
+    f = "PASS" if ws is not None and ws >= 4.5 and rest else "FAIL"
+    a = "PASS" if ws is not None and ws >= H_MIN and rest else "FAIL"
+    return f, a, (f"VCO/{div}" + (" (plan 5.4 (h) as amended 2026-10-14)" if AT19 else "")
+                  + f": t_*_q -> clk_sdram setup {fmt(ws)} (>= +{H_MIN:.1f}), hold {fmt(wh)} (>= 0); into t_*_q {fmt(wi)} (>= +40)")
+
+
+for cid, judge in (("a", judge_a), ("l", judge_l), ("h", judge_h)):
+    idx = [i for i, r in enumerate(results) if r[0] == cid]
+    if len(idx) != 1:
+        continue          # never ran: "not reported" below, if it gates
+    i = idx[0]
+    _, tv, ttext = results[i]
+    if tv not in ("PASS", "FAIL") or "Tcl error" in ttext or "no such cell" in ttext:
+        continue          # the report script's failure stands
+    first[cid] = tv
+    fv, av, text = judge()
+    if fv is None:
+        results[i] = (cid, "FAIL", f"{text}; the report script said {tv}")
+    elif fv != tv:
+        results[i] = (cid, "FAIL", f"misread: this script reads the report script's figures as {fv} by the rules as first "
+                                   f"written, the report script said {tv}; {text}")
+    else:
+        results[i] = (cid, av, f"{text}; as first written (the report script): {tv}")
+
 # ---- verdict -----------------------------------------------------------------------------------------------------
 DARIA_CHECKS = {"a", "b", "c", "c.cells", "e", "f", "k", "k'", "j", "gate.clk_arm"}
 FIXB_CHECKS = {"g", "g.legs", "h", "h.retime"}
@@ -353,18 +552,26 @@ for cid in sorted(required - {c for c, _, _ in results}):
 print(f"== step-7 checks: {d}")
 print(f"   kind {kind}; " + " ".join(f"{k}={v}" for k, v in prep.items() if k != "kind"))
 fails = []
+fails_first = []      # the same with (a), (l) and (h) by the rules as first written (the report script's verdicts)
 for cid, verdict, text in results:
     role = "gating" if cid in gating else "info"
     if kind == "base" and cid == "g":
         role = "negative control (must FAIL on aeee6d2)"
         if verdict == "PASS" or text.startswith("not reported") or "no such cell" in text or "Tcl error" in text:
             fails.append(cid)
-    elif role == "gating" and verdict == "FAIL":
-        fails.append(cid)
+            fails_first.append(cid)
+    elif role == "gating":
+        if verdict == "FAIL":
+            fails.append(cid)
+        if first.get(cid, verdict) == "FAIL":
+            fails_first.append(cid)
     print(f"  ({cid}) {verdict} [{role}] {text}")
-print("verdict: " + ("PASS" if not fails else "FAIL: " + " ".join(fails)))
+line = "verdict: " + ("PASS" if not fails else "FAIL: " + " ".join(fails))
+line_first = "rules as first written: " + ("PASS" if not fails_first else "FAIL: " + " ".join(fails_first))
+print(line)
+print(line_first)
 with open(os.path.join(d, "checks_summary.txt"), "w") as f:
     f.write("\n".join(f"({c}) {v} {t}" for c, v, t in results) + "\n")
-    f.write("verdict: " + ("PASS" if not fails else "FAIL: " + " ".join(fails)) + "\n")
+    f.write(line + "\n" + line_first + "\n")
     f.write("\n# step7_report.tcl's detail\n" + "\n".join(detail) + "\n")
 sys.exit(1 if fails else 0)

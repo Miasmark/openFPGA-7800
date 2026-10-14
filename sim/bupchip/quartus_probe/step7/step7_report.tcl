@@ -23,6 +23,14 @@
 #   cross.rpt, guard.rpt, fixb.rpt
 # step7_checks.py reads these and the compile's reports and gives the
 # verdicts per kind of build.
+#
+# (a), (l) and (h) are judged here by plan 5.4's rules as first written, the
+# threshold printed on (h)'s line included. step7_checks.py reads the figures
+# this script writes for them, the per-corner pd_tog -> pd_rx lines, the
+# corner list, timing.txt and (h)'s lines, and judges them again by the
+# build's divider: plan 5.4 as amended 2026-10-14 at VCO/19 (the guard pair's
+# setup slack reported, not gated, in (a) and left out of (l); (h) at +3.0
+# ns), as first written at any other. Keep those lines' format.
 
 project_open ap_core
 # "post_map" as an argument: the netlist after synthesis only (a smoke test
