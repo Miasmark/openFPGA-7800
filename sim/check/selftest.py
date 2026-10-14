@@ -86,7 +86,18 @@ pass or FAIL, and so is the exit status (0 or 1).
                    len_sys and a cpu difference; a truncated file; a call
                    count and a late-call difference; the STATUS line's halts,
                    PSRAM violations, guard and unlocks; Spiders' excused
-                   overrun frames, and the same frames when later ones differ
+                   overrun frames, and the same frames when later ones differ;
+                   and wire.py's mutant verdict (plan 7.2, 7.3's wire gate) on
+                   the records (WIRE_JSON) of wire.py run on a fake tb_wire:
+                   CAUGHT when each scenario that catches the mutant fails on
+                   its key; NOT CAUGHT when one fails only on other checks;
+                   ERROR when a run exits 127, gives no WIRE summary, hits a
+                   %Fatal (also with the key failing), times out
+                   (WIRE_TIMEOUT), or reports no value for a judged key, when
+                   a scenario left no record, when none of the mutant's
+                   scenarios ran; and wire.py mutant with an unknown mutant,
+                   an unknown scenario or none of its scenarios named: ERROR
+                   before it copies or builds anything
 SPDX-License-Identifier: MIT
 """
 import argparse
@@ -775,6 +786,88 @@ def div_cases(w):
     shutil.rmtree(d, ignore_errors=True)
 
 
+# a fake tb_wire (wire.py run's binary): its output depends on the scenario,
+# its run directory. The summary's counts are made up; the keys are tb_wire's
+WIRE_FAKE = r"""#!/bin/bash
+S="WIRE summary build=daria releases=2 f6=2 f6_win=1 f6_rst=1 f6_win_dt=1 f6_rst_low=0 f6_busy=0 f6_noib=0"
+S="$S f6_live=0 f6_ram_diff=0 wr_crb=100 wr_stb=10 wr_busy=0 wr_stop=0 wr_drop=0 wr_after_load2=0 hold_rise=2"
+S="$S prof_clk=1000 calls=5 calls_arm=5 rets=5 rets_fe=5 ret_max_us=2 open_old=0 abandoned=0 orphans=0 smp_req=0"
+S="$S smp_ack=0 halts=0 unlocks=0 locked=0 psram_viol=0 psram_cs=50.000000 misses=0 rt_rst_low=0 rt_f6=1"
+S="$S rt_f6_early=0 rs_f6=1 rs_f6_rst_low=0 f6_pend=0 rgn_bad=0 calls_rs=5 calls_rt=5 marker=5 errors=0"
+S="$S marker_rs=2 retunes=1 b2b=0 pal_chg=1 is_pal=1"
+case "${PWD##*/}" in
+seq_menu_dpc) echo "${S/rgn_bad=0/rgn_bad=7}" ;;
+seq_auto_dpc) echo "cannot start" >&2; exit 127 ;;
+seq_load_cdf) exit 0 ;;
+seq_slot_dpc) echo "${S/rgn_bad=0/rgn_bad=7}"; echo "%Fatal: tb_wire.sv:1: an assertion" ;;
+seq_rfirst_dpc) exec sleep 60 ;;
+seq_back_dpc) echo "$S" ;;
+pal_dpc) echo "${S/ rgn_bad=0/}" ;;
+*) exit 3 ;;
+esac
+"""
+
+
+def wire_cases(w):
+    """wire.py run on a fake tb_wire (WIRE_FAKE) writes a record per
+    scenario; wire.py verdict judges a mutant from them, as wire.py mutant
+    does after its run: palsel's key is rgn_bad, nofrzpend's scenario is
+    seq_back_dpc (wire.py's CATCH)."""
+    wp = os.path.join(SIM, "bupchip/daria/wire/wire.py")
+    d = os.path.join(w, "wire")
+    shutil.rmtree(d, ignore_errors=True)
+    vtb = os.path.join(d, "daria", "obj_wire", "vtb")
+    os.makedirs(os.path.dirname(vtb))
+    open(vtb, "w").write(WIRE_FAKE)
+    os.chmod(vtb, 0o755)
+    js = os.path.join(d, "results.json")
+    env = dict(os.environ, WORK=d, WIRE_JSON=js, WIRE_TIMEOUT="2", BUPFW=os.path.join(d, "no_firmware"),
+               GAMES="", BIOS="")
+    for k in ("DIRECTED", "RTL_TREE"):
+        env.pop(k, None)
+    print("wire.py's mutant verdict on a fake tb_wire:")
+    names = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_rfirst_dpc", "seq_back_dpc", "pal_dpc"]
+    r = subprocess.run([sys.executable, wp, "run"] + names, env=env, capture_output=True, text=True)
+    got = set()
+    if os.path.isfile(js):
+        import json
+        got = {json.loads(l)["name"] for l in open(js) if l.strip()}
+    ok = r.returncode == 1 and "Traceback" not in r.stderr and got == set(names)
+    results.append(ok)
+    print(f"  {'ok   ' if ok else 'WRONG'} wire.py run on the fake tb_wire: expected exit 1 and a record for each of "
+          f"{len(names)} scenarios, got exit {r.returncode} and {len(got)}")
+    if not ok:
+        print("\n".join("        " + l for l in (r.stdout + r.stderr).splitlines()[-12:]))
+        return
+
+    def case(label, args, want):
+        word = {0: "CAUGHT", 1: "NOT CAUGHT", 2: "ERROR"}[want]
+        r = subprocess.run([sys.executable, wp] + args, env=env, capture_output=True, text=True)
+        last = (r.stdout.strip().splitlines() or ["(no output)"])[-1]
+        ok = r.returncode == want and "Traceback" not in r.stderr and re.match(r"MUTANT \w+: %s\b" % word, last)
+        if args[0] == "mutant" and os.path.exists(os.path.join(d, "mut_" + args[1])):
+            ok, last = False, last + " [it made " + os.path.join(d, "mut_" + args[1]) + "]"
+        results.append(bool(ok))
+        print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected {word}, got rc {r.returncode} ({last[:200]})")
+        if not ok:
+            print("\n".join("        " + l for l in (r.stdout + r.stderr).splitlines()[-8:]))
+    v = lambda mut, *n: ["verdict", mut, js] + list(n)
+    case("palsel, seq_menu_dpc failing on rgn_bad", v("palsel", "seq_menu_dpc"), 0)
+    case("palsel, seq_back_dpc failing only on other checks", v("palsel", "seq_back_dpc"), 1)
+    case("palsel, one of its two scenarios failing on rgn_bad", v("palsel", "seq_menu_dpc", "seq_back_dpc"), 1)
+    case("palsel, a run that exits 127", v("palsel", "seq_menu_dpc", "seq_auto_dpc"), 2)
+    case("palsel, a run with no WIRE summary", v("palsel", "seq_menu_dpc", "seq_load_cdf"), 2)
+    case("palsel, a %Fatal in a run failing on rgn_bad", v("palsel", "seq_menu_dpc", "seq_slot_dpc"), 2)
+    case("palsel, a run killed at WIRE_TIMEOUT", v("palsel", "seq_menu_dpc", "seq_rfirst_dpc"), 2)
+    case("palsel, a summary without rgn_bad", v("palsel", "seq_menu_dpc", "pal_dpc"), 2)
+    case("palsel, a scenario with no record", v("palsel", "seq_menu_dpc", "seq_tia_dpc"), 2)
+    case("nofrzpend, none of its scenarios run", v("nofrzpend", "seq_menu_dpc"), 2)
+    case("wire.py mutant, an unknown scenario", ["mutant", "palsel", "no_such_scenario"], 2)
+    case("wire.py mutant, an unknown mutant", ["mutant", "no_such_mutant"], 2)
+    case("wire.py mutant, none of its scenarios named", ["mutant", "nofrzpend", "seq_menu_dpc"], 2)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def gate_cases(w):
     fg = os.path.join(HERE, "frame_gate.py")
     print("frame_gate.py on synthetic runs:")
@@ -1036,6 +1129,7 @@ def main():
         pp_equiv_cases(w)
     div_cases(w)
     gate_cases(w)
+    wire_cases(w)
     print(f"SELFTEST {'pass' if all(results) else 'FAIL'} ({sum(results)} of {len(results)} cases as expected)")
     sys.exit(0 if all(results) else 1)
 

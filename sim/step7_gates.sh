@@ -59,8 +59,9 @@
 #                builds but the ARM image's (plan 7.5 row 5, 1.2 row 4)
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
-#                and fingerprints (so it runs after them), and the guards'
-#                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees
+#                and fingerprints (so it runs after them), the guards'
+#                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees, and
+#                wire.py's mutant verdict on a fake tb_wire
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
 #                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
@@ -81,13 +82,21 @@
 #                1.2 row 1; sim/bupchip/daria/wire/wire.py): tb_wire built in
 #                both builds, every scenario (DIRECTED=1: the whole-core
 #                directed set; GAMES adds the Turbo run, found under it by
-#                name, BIOS decision 11's runs), then every mutant of
+#                name, BIOS decision 11's runs, BUPFW the four Souper runs:
+#                the BupChip firmware, by default the tree's gitignored
+#                src/fpga/mister/rtl/bupchip.hex), then every mutant of
 #                wire.py's MUTANTS (plan 7.2: P20's fix and daria_pal's source,
-#                each undone on a scratch copy of the tree) CAUGHT on its
-#                default scenarios. A scenario not run for want of GAMES or
-#                BIOS makes it PARTIAL; WIRE_ONLY=S,... runs only those
-#                scenarios, and the mutants on them alone, and WIRE_MUT=M,...
-#                only those mutants (a quick look, never the gate: PARTIAL).
+#                each undone on a scratch copy of the tree) CAUGHT: each
+#                scenario that plan 7.2 names for it (wire.py's CATCH) fails
+#                on one of its keys; a mutant run that crashes, times out,
+#                hits a %Fatal, gives no WIRE summary or leaves a scenario
+#                without a result is an ERROR, and fails the gate as NOT
+#                CAUGHT does. A scenario not run for want of GAMES, BIOS or
+#                BUPFW makes it PARTIAL; WIRE_ONLY=S,... runs only those
+#                scenarios, and each mutant on those of them that catch it
+#                (none: ERROR, so name the mutants with WIRE_MUT), and
+#                WIRE_MUT=M,... only those mutants (a quick look, never the
+#                gate: PARTIAL).
 #                Needs POCKET_DARIA in the qsf; about 6 hours in one slot
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
@@ -358,19 +367,23 @@ g_wire() {
 	WORK="$w" slot python3 "$wp" build daria plain || return 1
 	echo "== wire.py run ${scn[*]:-(every scenario)}; Turbo from ${tdir:-nowhere (no GAMES)}; BIOS ${BIOS:-not given}"
 	WORK="$w" DIRECTED=1 GAMES="$tdir" slot python3 "$wp" run "${scn[@]}"; r=$?
-	case $r in 0) ;; 3) why="scenarios not run (GAMES with the Turbo image, or BIOS, not given)" ;; *) rc=1 ;; esac
+	case $r in
+	0) ;;
+	3) why="scenarios not run (wire.py's NOT RUN lines: GAMES with the Turbo image, BIOS, or BUPFW, the BupChip firmware, not given)" ;;
+	*) rc=1 ;;
+	esac
 	mut="$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import wire; print(" ".join(wire.MUTANTS))' "$(dirname "$wp")")" || return 1
 	[ -z "${WIRE_MUT:-}" ] || mut="${WIRE_MUT//,/ }"
 	echo "== the mutants of plan 7.2 (wire.py's MUTANTS): $mut"
 	for m in $mut; do
-		WORK="$w/mut" slot python3 "$wp" mutant "$m" "${scn[@]}" || { echo "FAIL: mutant $m not caught, or not run"; rc=1; }
+		WORK="$w/mut" slot python3 "$wp" mutant "$m" "${scn[@]}" || { echo "FAIL: mutant $m NOT CAUGHT or ERROR (its MUTANT line)"; rc=1; }
 		rm -rf -- "$w/mut/mut_$m"
 	done
 	[ $rc = 0 ] || return 1
 	[ -z "${WIRE_ONLY:-}" ] || why="${why:+$why; }WIRE_ONLY=$WIRE_ONLY"
 	[ -z "${WIRE_MUT:-}" ] || why="${why:+$why; }WIRE_MUT=$WIRE_MUT"
 	if [ -n "$why" ]; then
-		echo "PARTIAL: every scenario that ran passed and every mutant run was caught; $why"
+		echo "PARTIAL: every scenario that ran passed and every mutant run was CAUGHT; $why"
 		return 3
 	fi
 	return 0

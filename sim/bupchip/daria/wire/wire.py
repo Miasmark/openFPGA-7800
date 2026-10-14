@@ -10,8 +10,21 @@
                                  build the DARIA tb_wire on a copy of the tree's
                                  src/fpga with one of MUTANTS (the fixes of the
                                  D review's findings 3 and 5 undone in part) and
-                                 run the scenarios (default: SEQ_MUT); CAUGHT
-                                 (exit 0) when any fails
+                                 run the scenarios that catch it, CATCH[NAME]
+                                 (plan 7.2's; with SCENARIO ..., those of them
+                                 named); judged as "wire.py verdict" below
+  wire.py verdict NAME FILE [SCENARIO ...]
+                                 a mutant's verdict from its run's records (FILE,
+                                 WIRE_JSON's lines; default CATCH[NAME]): CAUGHT
+                                 (exit 0) when each of CATCH[NAME]'s scenarios
+                                 that ran fails on one of CATCH's keys for it;
+                                 NOT CAUGHT (exit 1) when one of them passes or
+                                 fails only on other checks; ERROR (exit 2) when
+                                 a scenario's run crashed, timed out, hit a
+                                 %Fatal or %Error, gave no WIRE summary or one
+                                 without a judged key, or left no record, or when
+                                 none of CATCH[NAME]'s scenarios ran. A mutant
+                                 that is not CAUGHT fails the wire gate
 
 Each build first runs sim/run_sim.sh with BUILD_TOP=tb_load (its sources,
 defines and patched copies, DARIA=1 or 0), then builds tb_wire.sv with the
@@ -30,12 +43,16 @@ another checkout's RTL with these benches: a mutant's scratch worktree),
 ARM_DIV (19, the default and pll_core.v's divider: clk_arm at VCO/19, where
 the guard never locks; 18: VCO/18, the guard expected locked), DIRECTED=1
 (also every fe_dir directed image, the whole-core directed set), PAL2600_PLAIN=0
-(pal2600 without its plain-build run, which is only reported).
+(pal2600 without its plain-build run, which is only reported), WIRE_JSON=FILE
+(run: append one JSON line per scenario judged: name, result, every failed
+check, the summary keys among them and the run's own failures; mutant sets it),
+WIRE_TIMEOUT (seconds per simulation, default 7200; a run that exceeds it is
+killed and its scenario fails).
 The log starts with the tree's HEAD and status, the tool and the binaries'
 md5 (plan P23). Results: WORK/results.txt, one line per scenario.
 SPDX-License-Identifier: MIT
 """
-import hashlib, os, re, shlex, shutil, subprocess, sys
+import hashlib, json, os, re, shlex, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIM = os.path.abspath(os.path.join(HERE, "../../.."))
@@ -47,6 +64,7 @@ GAMES = os.environ.get("GAMES", "")
 BIOS = os.environ.get("BIOS", "")
 BUPFW = os.environ.get("BUPFW", os.path.join(REPO, "src/fpga/mister/rtl/bupchip.hex"))
 ARM_DIV = os.environ.get("ARM_DIV", "19")
+TIMEOUT = int(os.environ.get("WIRE_TIMEOUT", "7200"))
 TURBO = "Turbo-Arcade_demo_final_CG_NTSC.bin"
 
 
@@ -64,7 +82,11 @@ def header():
     print("-- status: [%s]" % st.replace("\n", "; "))
     if RTL_TREE != REPO:
         print("-- benches from %s HEAD %s" % (REPO, sh(["git", "-C", REPO, "rev-parse", "HEAD"]).stdout.strip()))
-    print("-- tool: %s (%s)" % (VL, sh([VL, "--version"]).stdout.strip()))
+    try:
+        v = sh([VL, "--version"]).stdout.strip()
+    except OSError as e:
+        v = "not runnable: %s" % e
+    print("-- tool: %s (%s)" % (VL, v))
 
 
 # ---------------------------------------------------------------- build
@@ -245,10 +267,13 @@ def run1(kind, name, args):
     with open(os.path.join(d, "run.log"), "w") as log:
         log.write("-- %s %s\n" % (binary(kind), " ".join(a)))
         log.flush()
-        r = subprocess.run(["nice", "-n", "10", binary(kind)] + a, cwd=d, stdout=log, stderr=subprocess.STDOUT,
-                           stdin=subprocess.DEVNULL, timeout=7200)
+        try:
+            rc = subprocess.run(["nice", "-n", "10", binary(kind)] + a, cwd=d, stdout=log, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, timeout=TIMEOUT).returncode
+        except subprocess.TimeoutExpired:
+            rc = "timeout (killed after %d s)" % TIMEOUT
     text = open(os.path.join(d, "run.log"), errors="replace").read()
-    return parse(text, r.returncode, d)
+    return parse(text, rc, d)
 
 
 def parse(text, rc, d):
@@ -271,25 +296,34 @@ def parse(text, rc, d):
 
 
 class Judge:
+    """bad: every failed check; keys: the WIRE summary keys of the failed
+    checks on a value the run reported; infra: the failures that say nothing
+    of the design (the run crashed, timed out, hit a %Fatal or %Error, gave no
+    summary, or a judged key is missing from it), which make a mutant's
+    verdict ERROR"""
     def __init__(self, name):
-        self.name, self.bad = name, []
+        self.name, self.bad, self.keys, self.infra = name, [], [], []
 
-    def ok(self, cond, what):
+    def ok(self, cond, what, key=None, infra=False):
         if not cond:
             self.bad.append(what)
+            if infra:
+                self.infra.append(what)
+            elif key is not None and key not in self.keys:
+                self.keys.append(key)
 
     def eq(self, s, k, v):
         got = s["sum"].get(k)
-        self.ok(got == v, "%s=%s (want %s)" % (k, got, v))
+        self.ok(got == v, "%s=%s (want %s)" % (k, got, v), key=k, infra=got is None)
 
     def ge(self, s, k, v):
         got = s["sum"].get(k)
-        self.ok(got is not None and got >= v, "%s=%s (want >= %s)" % (k, got, v))
+        self.ok(got is not None and got >= v, "%s=%s (want >= %s)" % (k, got, v), key=k, infra=got is None)
 
 
 def common(j, s):
-    j.ok(s["rc"] == 0 and not s["fatal"], "exit %s %s" % (s["rc"], "; ".join(s["fatal"])[:300]))
-    j.ok(bool(s["sum"]), "no WIRE summary")
+    j.ok(s["rc"] == 0 and not s["fatal"], "exit %s %s" % (s["rc"], "; ".join(s["fatal"])[:300]), infra=True)
+    j.ok(bool(s["sum"]), "no WIRE summary", infra=True)
 
 
 def daria_health(j, s, guard=True, resets=0, selfcheck=True):
@@ -520,7 +554,7 @@ def scenarios(img):
             j = Judge(name); daria_health(j, s, resets=1)
             after_retunes(j, s, 2)
             j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
-            j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+            j.eq(s, "f6_pend", 0); j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
             j.ge(s, "marker", meta(I(t + ".bin"))["need"].get("dir_marker", 1))
             return j, s
         S[name] = (f, "P20, review: the PLL in PAL from a PAL A78, then %s on Auto (pll_region in the loop): the "
@@ -535,7 +569,8 @@ def scenarios(img):
             j = Judge(name); daria_health(j, s, resets=1)
             after_retunes(j, s, 2)
             j.eq(s, "retunes", 2); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
-            j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1); j.eq(s, "rs_f6_rst_low", 0)
+            j.eq(s, "f6_pend", 0); j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1); j.eq(s, "rs_f6", 1)
+            j.eq(s, "rs_f6_rst_low", 0)
             j.ok(re.search(r"^WIRE reset_in rises as region_pll changes to 0", s["text"], re.M) is not None,
                  "no reset_in as region_pll changed: the test is void")
             j.ge(s, "marker", meta(I(t + ".bin"))["need"].get("dir_marker", 1))
@@ -548,7 +583,7 @@ def scenarios(img):
         def f():
             s = run("daria", name, ["+image=" + I(t + ".b57.bin"), "+daria=300", "+wire_pll"])
             j = Judge(name); boot(j, s, meta(I(t + ".bin")))
-            j.eq(s, "retunes", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0)
+            j.eq(s, "retunes", 0); j.eq(s, "is_pal", 0); j.eq(s, "rgn_bad", 0); j.eq(s, "f6_pend", 0)
             return j, s
         S[name] = (f, "P20, review: %s with byte 57's bit 0 set (the A78 region byte) from power-up, pll_region in "
                       "the loop: no retune (none to PAL and back across F6)" % t, True)
@@ -639,7 +674,7 @@ def scenarios(img):
         s = run("daria", "pal2600", args)
         j = Judge("pal2600"); no_daria(j, s)
         j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
-        j.eq(s, "rgn_bad", 0)
+        j.eq(s, "rgn_bad", 0); j.eq(s, "f6_pend", 0)
         if os.environ.get("PAL2600_PLAIN", "1") == "1":
             p = run("plain", "pal2600", args)
             common(j, p)
@@ -655,7 +690,7 @@ def scenarios(img):
         j = Judge("pal_dpc"); daria_health(j, s, resets=1)
         after_retunes(j, s, 2)
         j.eq(s, "retunes", 1); j.eq(s, "b2b", 0); j.eq(s, "is_pal", 1); j.eq(s, "releases", 2)
-        j.eq(s, "rgn_bad", 0); j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
+        j.eq(s, "rgn_bad", 0); j.eq(s, "f6_pend", 0); j.eq(s, "f6_win", 1); j.eq(s, "f6_rst", 1)
         j.ge(s, "marker", 3)
         return j, s
     S["pal_dpc"] = (pal_arm, "P20: a PAL DPC+ image on Auto (smoke_dpc in PAL frames), pll_region in the loop: one "
@@ -796,11 +831,73 @@ MUTANTS = {
     "palpll": (".daria_pal      (daria_rgn),", ".daria_pal      (region_pll),"),
 }
 SEQ_MUT = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_rfirst_dpc", "seq_back_dpc"]
+# plan 7.2: the scenarios that catch each mutant, and the WIRE summary keys
+# they catch it on; each of these scenarios that runs must fail on one of
+# the keys (verdict)
+CATCH = {
+    "nomask": (("seq_menu_dpc", "seq_auto_dpc", "seq_slot_dpc"), ("f6_busy", "wr_busy", "f6_live")),
+    "nowd": (("seq_load_cdf",), ("rt_f6_early", "f6")),
+    "nohold": (("seq_menu_dpc", "seq_auto_dpc", "seq_slot_dpc"), ("releases", "rs_f6_rst_low")),
+    "nofrzarm": (("seq_rfirst_dpc",), ("f6_busy", "f6")),
+    "nofrzpend": (("seq_back_dpc",), ("b2b", "f6")),
+    "palsel": (tuple(SEQ_MUT) + ("pal_dpc",), ("rgn_bad",)),
+    "palpll": (("seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_back_dpc"), ("rgn_bad",)),
+}
+assert set(CATCH) == set(MUTANTS), "every mutant needs its CATCH entry"
+
+
+def records(path):
+    """the JSON lines WIRE_JSON collected; a scenario's last one counts"""
+    recs = {}
+    if os.path.isfile(path):
+        for l in open(path):
+            if l.strip():
+                r = json.loads(l)
+                recs[r["name"]] = r
+    return recs
+
+
+def verdict(name, names, recs):
+    """(exit status, text): 0 CAUGHT, 1 NOT CAUGHT, 2 ERROR (wire.py verdict)"""
+    scn, keys = CATCH[name]
+    err = []
+    for n in names:
+        r = recs.get(n)
+        if r is None:
+            err.append("%s: no result (its run ended early)" % n)
+        elif r["infra"]:
+            err.append("%s: %s" % (n, "; ".join(r["infra"])[:240]))
+    if err:
+        return 2, "ERROR (" + " | ".join(err) + ")"
+    ran = [n for n in names if n in scn and recs[n]["result"] in ("PASS", "FAIL")]
+    if not ran:
+        return 2, "ERROR (none of the scenarios that catch it ran: %s)" % ", ".join(scn)
+    hit = {n: [k for k in recs[n]["keys"] if k in keys] for n in ran}
+    missed = [n for n in ran if not hit[n]]
+    if missed:
+        return 1, "NOT CAUGHT: %s %s not fail on %s" % (", ".join(missed), "does" if len(missed) == 1 else "do",
+                                                    " or ".join(keys)) + (
+            "; caught by %s" % ", ".join(n for n in ran if hit[n]) if len(missed) < len(ran) else "")
+    return 0, "CAUGHT by %s" % ", ".join("%s (%s)" % (n, ", ".join(hit[n])) for n in ran)
 
 
 def mutant(name, names):
+    """build and run a mutant; its verdict (exit 0, 1 or 2) as verdict()'s"""
     if name not in MUTANTS:
-        sys.exit("unknown mutant %s: %s" % (name, ", ".join(sorted(MUTANTS))))
+        print("MUTANT %s: ERROR (unknown; the mutants: %s)" % (name, ", ".join(sorted(MUTANTS))), flush=True)
+        return 2
+    scn = CATCH[name][0]
+    S = scenarios(images())
+    bad = [n for n in names if n not in S]
+    if bad:
+        print("MUTANT %s: ERROR (unknown scenario %s)" % (name, ", ".join(bad)), flush=True)
+        return 2
+    names = [n for n in names if n in scn] if names else list(scn)
+    if not names:
+        print("MUTANT %s: ERROR (none of the scenarios that catch it, %s, among those named)" % (name, ", ".join(scn)),
+              flush=True)
+        return 2
+    print("-- mutant %s: scenarios %s" % (name, " ".join(names)), flush=True)
     d = os.path.join(WORK, "mut_" + name)
     tree = os.path.join(d, "tree")
     files = sh(["git", "-C", RTL_TREE, "ls-files", "src/fpga"]).stdout.split()
@@ -812,7 +909,8 @@ def mutant(name, names):
     t = open(p).read()
     old, new = MUTANTS[name]
     if t.count(old) != 1:
-        sys.exit("mutant %s: its text is not in %s once" % (name, p))
+        print("MUTANT %s: ERROR (its text is not in %s once)" % (name, p), flush=True)
+        return 2
     open(p, "w").write(t.replace(old, new))
     print("-- mutant %s: atari7800_pocket.sv mutated in %s (from %s)" % (name, tree, RTL_TREE), flush=True)
     env = dict(os.environ, WORK=d, RTL_TREE=tree)
@@ -820,12 +918,20 @@ def mutant(name, names):
     r = subprocess.run([sys.executable, me, "build", "daria"], env=env, capture_output=True, text=True)
     open(os.path.join(d, "build.log"), "w").write(r.stdout + r.stderr)
     if r.returncode:
-        sys.exit("mutant %s: build failed (%s)" % (name, os.path.join(d, "build.log")))
-    r = subprocess.run([sys.executable, me, "run"] + (names or SEQ_MUT), env=env, capture_output=True, text=True)
+        print("MUTANT %s: ERROR (build failed: %s)" % (name, os.path.join(d, "build.log")), flush=True)
+        return 2
+    js = os.path.join(d, "results.json")
+    if os.path.exists(js):
+        os.remove(js)
+    env["WIRE_JSON"] = js
+    r = subprocess.run([sys.executable, me, "run"] + names, env=env, capture_output=True, text=True)
     sys.stdout.write(r.stdout)
-    caught = r.returncode == 1
-    print("MUTANT %s: %s" % (name, "CAUGHT" if caught else "NOT CAUGHT (exit %d)" % r.returncode), flush=True)
-    return 0 if caught else 1
+    if r.returncode not in (0, 1, 3) or "Traceback" in r.stderr:
+        sys.stdout.write(r.stderr[-3000:])
+    print("-- wire.py run exit %d; records in %s" % (r.returncode, js))
+    rc, why = verdict(name, names, records(js))
+    print("MUTANT %s: %s" % (name, why), flush=True)
+    return rc
 
 
 def main():
@@ -836,6 +942,12 @@ def main():
             sys.exit("wire.py mutant NAME [SCENARIO ...] (%s)" % ", ".join(sorted(MUTANTS)))
         header()
         return mutant(sys.argv[2], sys.argv[3:])
+    if cmd == "verdict":
+        if len(sys.argv) < 4 or sys.argv[2] not in CATCH:
+            sys.exit("wire.py verdict NAME FILE [SCENARIO ...] (%s)" % ", ".join(sorted(CATCH)))
+        rc, why = verdict(sys.argv[2], sys.argv[4:] or CATCH[sys.argv[2]][0], records(sys.argv[3]))
+        print("MUTANT %s: %s" % (sys.argv[2], why))
+        return rc
     if cmd == "build":
         header()
         for k in (sys.argv[2:] or ("daria", "plain")):
@@ -854,17 +966,21 @@ def main():
         else:
             print("-- no %s (wire.py build %s): its scenarios fail" % (binary(k), k))
     names = sys.argv[2:] or list(S)
-    rc = 0
-    res = open(os.path.join(WORK, "results.txt"), "a")
     for n in names:
         if n not in S:
             sys.exit("unknown scenario %s" % n)
+    rc = 0
+    res = open(os.path.join(WORK, "results.txt"), "a")
+    js = open(os.environ["WIRE_JSON"], "a") if os.environ.get("WIRE_JSON") else None
+    for n in names:
         f, d, av = S[n]
+        rec = {"name": n, "result": "NOT RUN", "bad": [], "keys": [], "infra": []}
         if not av:
             line = "NOT RUN %-18s %s" % (n, d)
             rc = rc or 3
         else:
             j, s = f()
+            rec.update(result="FAIL" if j.bad else "PASS", bad=j.bad, keys=j.keys, infra=j.infra)
             line = ("PASS    %-18s" % n) if not j.bad else ("FAIL    %-18s %s" % (n, "; ".join(j.bad)))
             if j.bad:
                 rc = 1
@@ -878,6 +994,9 @@ def main():
         print(line, flush=True)
         res.write(line + "\n")
         res.flush()
+        if js:
+            js.write(json.dumps(rec) + "\n")
+            js.flush()
     print("VERDICT %s" % {0: "PASS", 1: "FAIL", 3: "INCOMPLETE (some scenarios not run)"}[rc])
     return rc
 
