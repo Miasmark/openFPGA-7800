@@ -37,9 +37,15 @@ A call that follows a gap of 5 minutes or more and has a large cache write is a 
 
 ## 2. Restarts
 
-**How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. Then, on the night of 2026-10-13 to 14, the VM itself rebooted three times, at 23:01, 02:40 and 04:40 UTC. That is about every two hours, with no cause visible from inside the machine, and at least once with nothing running. After that it stayed up.
+**How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. On 2026-10-13 and 14 the machine came up fresh at 23:01, 02:40, 04:40, 20:39 and 23:48 UTC.
 
-**When the VM reboots too.** A two-hour cadence kills any job longer than that, whatever its checkpoints: a three-hour regression never finished in one piece.
+**Why the machine stops.** Found on 2026-10-14 from the times of the campaign's last file writes:
+- The machine runs only while the session runs. A session ends about five minutes after it goes idle: no turn running, no tool call in progress, no agent working. Detached processes and background shell jobs do not count. On 10-14 the campaign's last writes were at 19:35:21 and 20:51:27 UTC, the moments the session ended, the second time four minutes after its last turn. Nothing ran again until the next session start (20:39 and 23:48, each a scheduled check-in). The "reboot" at 23:01 on 10-13 was the same: the session had been idle since 13:49.
+- A session that is working also ends after about 13 hours (seen six times from 10-10 to 10-14). Each time the next one started within seconds; at 17:36 on 10-14 the machine stayed up through it.
+- Two working sessions ended early, at 02:40 (after 3.7 hours) and 04:40 (after 2.0 hours) on 10-14, with an agent working. The machine restarted with them. No cause was found.
+- So keep one agent working for as long as detached runs must go on: a watcher that waits about 4 minutes per call (section 1's rule) and returns when something changes. Keep a scheduled check-in as well, to restart the runs after a stop.
+
+**Split long runs.** A stop kills every job running at the time, whatever its checkpoints: a three-hour regression never finished in one piece.
 - Split long runs into pieces of at most about an hour. Each piece writes its own results, and a rerun skips finished pieces. `wire.py run` takes scenario names, `s4/check.sh` takes `ONLY=`, and frame and mode-B runs go per image.
 - Keep `progress.txt` current after every piece, so a successor agent resumes from it.
 - dockerd can then fail with "containerd is still running", from a stale `/var/run/docker/containerd/containerd.pid`; delete it and start dockerd again (ENVIRONMENT.md). A session restart kills the agents but not the processes they started. A machine restart kills the processes as well, and dockerd with them (ENVIRONMENT.md 3.3, 8.1).

@@ -483,6 +483,7 @@ Background work started from the session died on restart. Task notifications rec
 - After a restart, find the runs by PID with `ps -o pid,ppid,pgid,sid,args` and read their logs.
 - Resume `fe_rand` campaigns with `SKIP_DONE=1`.
 - A VM reboot (when `uptime` resets) stops every process, detached or not, including dockerd.
+- The machine stops about five minutes after the session goes idle, and comes up fresh at the next session start. Keep an agent working while detached runs must continue ([AGENT_RUNS.md](AGENT_RUNS.md) section 2).
 
 ### 8.2 The 2-hour background limit
 
