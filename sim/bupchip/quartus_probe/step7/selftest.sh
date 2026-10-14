@@ -2,6 +2,8 @@
 # Self-test of the step-7 fit driver's parts that need no Quartus
 # (docs/daria_step7/plan.md 3.5 "Fit scripts", 5.4): step7_prep.py's DARIA
 # lines, step7_checks.py's verdict and its (k') rule on made-up report files,
+# the two copies of plan 2.7's table (step7_report.tcl's ff_table and
+# f3_crossings.txt) against each other,
 # and run_step7.sh's refusals, with a stand-in docker and a lock file of its
 # own (never the machine's Quartus lock). Every directory it makes is under
 # one mktemp -d, removed at the end; nothing in the tree is written.
@@ -24,7 +26,7 @@ echo "== selftest.sh $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "HEAD $(git -C "$ROOT" rev-parse HEAD); status $(git -C "$ROOT" status --porcelain | wc -l) lines"
 git -C "$ROOT" status --porcelain | sed 's/^/  /'
 echo "bash $BASH_VERSION; $(python3 --version 2>&1); flock $(flock --version 2>&1 | head -1)"
-echo "md5: $(cd "$HERE" && md5sum selftest.sh run_step7.sh step7_lock.sh step7_prep.py step7_checks.py f3_crossings.txt | awk '{printf "%s %s; ", $2, substr($1,1,12)}')"
+echo "md5: $(cd "$HERE" && md5sum selftest.sh run_step7.sh step7_lock.sh step7_prep.py step7_checks.py f3_crossings.txt step7_report.tcl | awk '{printf "%s %s; ", $2, substr($1,1,12)}')"
 
 # ---- 1. step7_prep.py ------------------------------------------------------------------------------------
 echo "-- 1. step7_prep.py: the three DARIA lines"
@@ -364,6 +366,54 @@ checker "FAIL: h" builda "Build A (no DARIA, divider 24) with t_*_q at +4.298: +
 checker "FAIL: l" daria "VCO/19, the report script said (l) PASS on figures with a failing clock (a misread)" \
 	t:div=19 t:sys=-0.080 t:tcl_l=PASS
 grep -q "misread" "$T/c/$case_n.out" && ok "     the misread is named" || bad "     the misread is not named: $T/c/$case_n.out"
+
+# ---- 2b. the two copies of plan 2.7's table -------------------------------------------------------------------
+echo "-- 2b. step7_report.tcl's ff_table and f3_crossings.txt: the same first flops, present in the same kinds"
+cat > "$T/tables.py" <<'PY'
+"""Compares step7_report.tcl's ff_table (pattern, in Build B, in Q5) with
+f3_crossings.txt's first, reset and guard rows (the kinds each is expected
+in): the same registers, each present in the same kinds. A register is named
+by its entity and its own name, since the instance part of a pattern may be
+'*' in one table and the instance in the other."""
+import re, sys
+tcl, f3 = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+def key(p):
+    m = re.match(r"^\*\|(\w+):[^|]+\|(\S+)$", p)
+    return (m.group(1), m.group(2)) if m else ("?", p)
+m = re.search(r"(?ms)^set ff_table \{\n(.*?)^\}", tcl)
+ff = {}
+for line in (m.group(1) if m else "").splitlines():
+    r = re.match(r"\s*\{([^}]+)\}\s+([01])\s+([01])\s*$", line)
+    if r:
+        ff[key(r.group(1))] = {"daria": r.group(2) == "1", "q5": r.group(3) == "1"}
+tab = {}
+for line in f3.splitlines():
+    c = line.split("#", 1)[0].split()
+    if len(c) == 5 and c[2] in ("first", "reset", "guard"):
+        tab[key(c[3])] = {"daria": "daria" in c[1].split(","), "q5": "q5" in c[1].split(",")}
+bad = []
+if not ff or not tab:
+    bad.append(f"a table not read: ff_table {len(ff)} rows, f3_crossings.txt {len(tab)} rows")
+for k in sorted(set(ff) | set(tab)):
+    if k not in ff or k not in tab:
+        bad.append(f"{k[0]}|{k[1]} only in {'ff_table' if k in ff else 'f3_crossings.txt'}")
+    elif ff[k] != tab[k]:
+        bad.append(f"{k[0]}|{k[1]}: ff_table {ff[k]}, f3_crossings.txt {tab[k]}")
+print(f"{len(ff)} ff_table rows, {len(tab)} f3_crossings.txt rows; " + ("; ".join(bad) if bad else "the same"))
+sys.exit(1 if bad else 0)
+PY
+tables() { python3 "$T/tables.py" "$1" "$2" > "$T/tables.out" 2>&1; }
+if tables "$HERE/step7_report.tcl" "$HERE/f3_crossings.txt"; then ok "tables: the tree's two tables agree: $(cat "$T/tables.out")"
+else bad "tables: the tree's two tables differ: $(cat "$T/tables.out")"; fi
+sed 's/^\(\t{\*|bupchip_pocket:bupchip|cap_err_a\[0\]}\) 0 0$/\1 0 1/' "$HERE/step7_report.tcl" > "$T/ff_q5.tcl"
+if cmp -s "$HERE/step7_report.tcl" "$T/ff_q5.tcl"; then bad "tables: could not plant cap_err_a[0] present in Q5 in a copy of ff_table"
+elif tables "$T/ff_q5.tcl" "$HERE/f3_crossings.txt"; then bad "tables: ff_table with cap_err_a[0] in Q5 passed: $(cat "$T/tables.out")"
+else grep -q "cap_err_a\[0\]" "$T/tables.out" && ok "tables: ff_table with cap_err_a[0] in Q5 is caught: $(cut -c1-200 "$T/tables.out")" \
+	|| bad "tables: caught, but not on cap_err_a[0]: $(cat "$T/tables.out")"; fi
+grep -v 'ftog_s\[0\]' "$HERE/f3_crossings.txt" > "$T/f3_noftog.txt"
+if tables "$HERE/step7_report.tcl" "$T/f3_noftog.txt"; then bad "tables: f3_crossings.txt without ftog_s[0] passed: $(cat "$T/tables.out")"
+else grep -q "ftog_s\[0\] only in ff_table" "$T/tables.out" && ok "tables: f3_crossings.txt without ftog_s[0] is caught: $(cut -c1-200 "$T/tables.out")" \
+	|| bad "tables: caught, but not as ftog_s[0] missing: $(cat "$T/tables.out")"; fi
 
 # ---- 3. run_step7.sh's refusals ------------------------------------------------------------------------------
 echo "-- 3. run_step7.sh: protected directories, existing run directories, the lock (a stand-in docker)"

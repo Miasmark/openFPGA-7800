@@ -260,7 +260,7 @@ The table below is the synchroniser list (P8) and contract F3. I3 writes it and 
 | | `t1` (`bup_asset_wr.sv:109`) | yes | yes |
 | | `req_s0` (`daria_smp`, new) | yes | yes |
 | | the snapshot's request flop (`bup_dbg_snap`, new) | no (`BUP_DEBUG`) | yes |
-| | `cap_err_a[0]` (`bupchip_pocket.sv:550`) | no (`BUP_DEBUG`) | yes |
+| | `cap_err_a[0]` (`bupchip_pocket.sv:608`) | no (`BUP_DEBUG`) | no: it feeds only the status word's bit 11 (`cap_err_a[1] \| wr_overrun`, `:613-615`), which `bup_status_osd.sv` does not show: since `b4ea8a9` its row 0 shows the capture's `seq_err` and `lost` and the receiver's overrun from `dbg_load`'s `clk_sys` bits (`bup_status_osd.sv:113`), so synthesis removes the chain. Corrected in the D fix round, after Q5 seed 1 failed (c), (f) and (k') on this row alone; `f3_crossings.txt` and `step7_report.tcl`'s table say the same, and `selftest.sh` checks that those two agree. `daria_sync.tcl`'s FORCED line for it (`:49`) and its comment (`:34`) now match no build; they go with the next change to `src/` (step 8) |
 | `clk_arm` → `clk_sys` | `ready_s[0]` (`:372`) | yes | yes |
 | | `halted_s[0]` (`:372`) | no: `daria_halted` has no load until step 8 (2.5) | no |
 | | `run_s[0]` (`:455`) | yes | yes |

@@ -14,10 +14,11 @@
 // real files.
 //
 // Variants (macros):
-//   SMOKE_Q5     BUP_DEBUG's chains (cap_err_a, the snapshot's rq_s0/ak_s0):
-//                a Q5 build, whose expected crossings f3_crossings.txt lists
-//   SMOKE_ALL16  also pause_a and halted_s, absent from the release build:
-//                all 16 registers daria.qip marks are present
+//   SMOKE_Q5     BUP_DEBUG's chains (the snapshot's rq_s0/ak_s0): a Q5
+//                build, whose expected crossings f3_crossings.txt lists
+//   SMOKE_ALL16  also pause_a, halted_s and cap_err_a, absent from the
+//                release build (cap_err_a from Q5 too, plan 2.7): all 16
+//                registers daria.qip marks are present
 //   SMOKE_MUT    planted faults, each of which (k') must report:
 //                prof_a[0]  samples an XOR of two clk_sys registers (a
 //                           two-register cone)
@@ -353,14 +354,21 @@ module bupchip_pocket (
 	wire raw = 1'b0;
 `endif
 
-	// ---- BUP_DEBUG: the capture's error flags, the status word's snapshot -----------------------------------
+	// ---- BUP_DEBUG: the status word's snapshot, and the capture's error flags -------------------------------
+	// cap_err_a only with SMOKE_ALL16: the core's has no load in any build
+	// (bup_status_osd.sv does not show the status word's bit 11), so a Q5
+	// build has no such chain (plan 2.7)
 	wire [7:0] dbg;
 `ifdef SMOKE_Q5
+`ifdef SMOKE_ALL16
 	logic cap_err_sys = 1'b0;
 	always_ff @(posedge clk_sys) cap_err_sys <= cap_err_sys | (a == 8'hA5);
 	logic [1:0] cap_err_a = 2'b00;
 	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
 	bup_dbg_snap #(.N(8)) dbg_snap (.clk_sys, .clk_arm, .d_arm(frame_arm[7:0] ^ {7'd0, cap_err_a[1]}), .q_sys(dbg));
+`else
+	bup_dbg_snap #(.N(8)) dbg_snap (.clk_sys, .clk_arm, .d_arm(frame_arm[7:0]), .q_sys(dbg));
+`endif
 `else
 	assign dbg = 8'd0;
 `endif

@@ -41,7 +41,10 @@ s2a daria,q5 reset *|daria_mmio:mmio|sn_a[0]                       *|daria_mmio:
 s2a daria,q5 first *|bup_asset_wr:writer|t1                        *|bup_capture:capture|msg_tog
 s2a daria,q5 first *|daria_smp:smp|req_s0                          *|daria_fe_audio:u_audio|req_q
 s2a q5       first *|bup_dbg_snap:*|rq_s0                          *|bup_dbg_snap:*|req
-s2a q5       first *|bupchip_pocket:bupchip|cap_err_a[0]           *|bupchip_pocket:bupchip|cap_err_sys
+# cap_err_a: absent from Q5 too (plan 2.7, corrected in the D fix round): it feeds only bit 11 of
+# the status word, which bup_status_osd.sv does not show (it shows the capture's seq_err and lost
+# and the receiver's overrun from dbg_load's clk_sys bits), so synthesis removes the chain
+s2a -        first *|bupchip_pocket:bupchip|cap_err_a[0]           *|bupchip_pocket:bupchip|cap_err_sys
 
 # ---- clk_sys -> clk_arm: held buses ----------------------------------------------------------------------
 # the $8007 byte (cmd_byte)

@@ -108,6 +108,9 @@ proc regs {label pattern {nodup 0}} {
 
 # The synchroniser table of plan 2.7, and the guard's receiver. Columns:
 # pattern, present in Build B (daria), present in Q5 (DARIA + BUP_DEBUG).
+# f3_crossings.txt holds the same presence per kind (selftest.sh compares
+# the two). cap_err_a is absent from Q5 too: it feeds only the status
+# word's bit 11, which bup_status_osd.sv does not show (plan 2.7).
 set ff_table {
 	{*|bupchip_pocket:bupchip|hold_a[0]} 1 1
 	{*|bupchip_pocket:bupchip|pause_a[0]} 0 0
@@ -120,7 +123,7 @@ set ff_table {
 	{*|bup_asset_wr:writer|t1} 1 1
 	{*|daria_smp:*|req_s0} 1 1
 	{*|bup_dbg_snap:*|rq_s0} 0 1
-	{*|bupchip_pocket:bupchip|cap_err_a[0]} 0 1
+	{*|bupchip_pocket:bupchip|cap_err_a[0]} 0 0
 	{*|bupchip_pocket:bupchip|ready_s[0]} 1 1
 	{*|bupchip_pocket:bupchip|halted_s[0]} 0 0
 	{*|bupchip_pocket:bupchip|run_s[0]} 1 1
