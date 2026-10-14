@@ -283,14 +283,14 @@ Everything is in the lane's gitignored work directory, with resume notes. The de
 
 ### The lead's decision on Q2 at ÷19 (2026-10-14)
 
-- **Q2 on the shipping tree** [sta] (the D fix round's `src/`, ÷19, slow 85 °C), seeds 1 / 2 / 3:
+- **Q2 on the shipping tree** [sta] (the D fix round's `src/`, ÷19; setup at the worse slow corner, worst hold over every corner), seeds 1 / 2 / 3:
   - `clk_arm` +1.241 / +1.077 / +1.765 ns; `clk_sdram` +2.462 / +2.683 / +2.919 ns; worst hold +0.120 / +0.098 / +0.119 ns. Every P12 gate passes on all three seeds.
   - Seed 1 fails check (h) alone: `t_*_q` → `clk_sdram` +4.298 ns against +4.5.
-  - Seed 3 fails (a) and (l) alone: the guard pair `pd_tog` → `pd_rx` at −0.046 ns against its 6 ns window.
+  - Seed 3 fails (a) and (l) alone: the guard pair `pd_tog` → `pd_rx` at −0.046 ns against its 6 ns window, at slow 85 °C.
   - Seed 2 passes every check. Q4 (the non-DARIA identity fit) gives a `.rbf` equal to Q1''.
 - **Decision: amend the two checks, not add a lever.** The owner's guidance is that ÷19 may be V1 even if not exact.
   - **(a) and (l) at ÷19.** At ÷19 the guard cannot lock whatever this path's delay is, so its window guards no function there.
-    - The window is set by the clock skew between corners and the 1 ns hold bound: the data delay must sit in about 4.1-4.75 ns at slow 85 °C. The 5.5 ns fitter target was reached on none of six fits.
+    - The window is set by the clock skew between corners and the 1 ns hold bound, not by placement. On seed 3, where the skew at slow 85 °C is −1.127 ns, the data delay must sit in about 4.1-4.75 ns. The 5.5 ns fitter target was reached on none of six fits.
     - (a) keeps checking that the constraint is applied and that the pair is single. It reports the slack and gates only at ÷18.
     - (l) leaves this one path out at ÷19.
   - **(h): the threshold drops from +4.5 ns to +3.0 ns,** which still keeps the leg 1.5 ns clear of the +1.5 ns release gate.
@@ -303,28 +303,40 @@ Everything is in the lane's gitignored work directory, with resume notes. The de
 
 On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the verification campaign's results on `317eaa8` carry to the head.
 
-- **Merges:** DARIA-dev with commit P (`03e3b09`), the ÷19 branch (`2247bef`) and the bench branch (`68c3f41`). The non-DARIA stream equals P's (`9b9e7e5e…`), and the DARIA stream equals the ÷19 branch's apart from the `region_pll` rename.
+- **Merges:** DARIA-dev with commit P (`03e3b09`), the ÷19 branch `s7/G` (`2247bef`) and the bench branch `s7/C19` (`68c3f41`). The non-DARIA stream equals P's (`9b9e7e5e…`), and the DARIA stream equals `s7/G`'s apart from the `region_pll` rename.
 - **The retune-inside-F6 race is fixed** (`f2c305e`, DARIA only):
-  - **The mechanism.** The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune. A retune is pending while `region_pll` differs from it. While one is pending, F6 is held off (`daria_rt_mask`), and a console reset of an ARM image lasts until the retune. `region_pll` is frozen while a retune is pending or under way, and withdrawn during a 2600 image's download.
+  - **The mechanism.** The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune. A retune is pending while `region_pll` differs from it.
+    - `region_pll` is frozen while a retune is pending or under way, and while an ARM image's console is in reset.
+    - During a 2600 image's download it is set back to `daria_rgn`, which cancels any pending retune; the image's own region is asked for when its console is released.
+    - While a retune is pending, `daria_rt_mask` stops a console reset from starting F6. A console reset of an ARM image lasts until the retune completes, and F6 then runs once, after it.
   - **Evidence:**
-    - `tb_wire` gained a mode that holds the loading flag across a whole load sequence, as `core_top` does. Its scenarios fail before the fix and pass after it.
-    - Seven mutants of the fix are each caught.
-    - A random model of the interlock is clean over 13 seeds with the fix, and finds violations without it.
+    - `tb_wire` gained a mode that holds the loading flag across a whole load sequence, as `core_top` does. Its first six scenarios fail on the RTL before the fix and pass after it. Two added later each catch a mutant that removes one of the freezes.
+    - Five mutants of the fix, each undoing one part (the mask, the withdrawal, the reset hold and the two freezes), are each caught. So are two mutants of the timer's region input (`c5fb23f`).
+    - A random model of the interlock, kept outside the repository and not a gate, is clean over 13 seeds with the fix and finds violations without it.
     - The full `tb_wire` set passes, 96 scenarios.
 - **DARIA's timer prescale** now takes `daria_rgn`, the region `clk_sys` actually runs at (`c5fb23f`).
 - **Benches, rules and docs:**
-  - `tb_frames` can present the reference bench's paddle inputs (bench parity).
+  - `tb_frames` can present `tb_daria`'s paddle inputs, the bench R1 used (bench parity).
   - `frame_gate.py`'s default is the V1 rule, with the strict rule as an option.
   - `synth_reloads` places its holds correctly at ÷19.
-  - Two new gates: one checks every bench's default divider against `pll_core.v`'s, the other runs the fit driver's selftest.
-  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error.
+  - Three new gates: `divider` checks every bench's default divider against `pll_core.v`'s, `wire` runs `tb_wire`'s full set and its mutants, and `fit_selftest` runs the fit driver's selftest.
+  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error. This stricter verdict has so far been checked only by re-judging earlier logs (all 7 caught) and by selftest cases; its run on real simulations waits for a slot.
   - The plan and the docs are amended for the owner's and the lead's decisions.
 - **The amended checks** of 5.4 (the lead's decision above) are in `step7_checks.py`, by divider. Judged again from the fits' report files, without refitting:
-  - Q2 seeds 1-3 pass as amended, and fail as before by the rules as first written.
+  - Q2 seeds 1-3, and seed 3's `KEEP_DB` refit, pass as amended.
+  - By the rules as first written their verdicts are unchanged: seed 1 fails (h), seed 3 fails (a) and (l), and seed 2 passes. Q4 passes both ways.
   - The I3 STA mutants and Q-mut still fail as required.
-- **Q5** (`BUP_DEBUG` + DARIA, seeds 1-3) first failed (c.cells), (f) and (k'), on a table error: it expected `cap_err_a[0]`, a flop with no load in any build. With the table corrected, all three seeds pass. The guard pair runs at +0.603 / +0.131 / −0.060 ns, gating only at ÷18.
-- **Review:** five rounds. The last signed off at `0b2f9e1`, with three minor findings left.
-- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`):
+- **Q5** (`BUP_DEBUG` + DARIA, seeds 1-3):
+  - Each fit's own verdict failed (c.cells), (f) and (k') on a table error: the table expected `cap_err_a[0]`, a flop with no load in any build. Seed 3 also failed (a) and (l) as first written, on the guard pair.
+  - Judged again from the fits' report files, with the corrected table and the amended (a), (l) and (h), all three seeds pass. That re-judge of (c.cells) relies on a helper outside the repository; the tracked checker on the fits as fitted still reports the old table's failure.
+  - The guard pair's setup slack at slow 85 °C is +0.603 / +0.131 / −0.060 ns; (a) gates on it only at ÷18.
+  - `daria_sync.tcl`'s line for `cap_err_a` now matches no build. It goes with the next `src/` change.
+- **Review:** five rounds. The last signed off the fix round's changes at `0b2f9e1`; it does not cover the campaign's open results, which the release still needs. Three minor findings are open:
+  - Q5's re-judge relies on the untracked helper above, and plan 7.6's rule overstates what the tracked tools can re-judge.
+  - `fit_selftest` fails below 2,100 MB free, so a fresh-clone run (7.7) on this machine may fail for disk alone. Two branches of the amended checks, (h)'s hold test and (a)'s every-corner requirement, are not covered by it.
+  - The plan header's list of amendments is incomplete, and the 2.7 correction is undated.
+- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`), at 19:24 UTC on 2026-10-14:
   - **Done:** the static gates, `run_sim`, the cartram matrix, the unit benches, `tb_wire`'s full set, Q2 seeds 1-3, Q4 (equal to Q1''), Q-mut, Q5 seeds 1-3, and the three I3 STA mutants.
-  - **Running:** `s4/check.sh` on both sets, `extra_tests` with `AR_TAPE=1`, the V1 frame gate on 16 images at 1,500 frames, and mode B.
+  - **Running:** `s4/check.sh`'s DARIA set (17 of 28 jobs passed), `extra_tests` with `AR_TAPE=1` on both builds, and the V1 frame gate on 16 images at 1,500 frames (2 passed, 1 running).
+  - **Waiting:** the gate `selftest`, `s4/check.sh`'s non-DARIA set, and mode B with the wrapper (10 runs) and without it (9 runs).
 - **An incident.** A reviewer's test harness wrote through a symbolic link into one of the campaign's fit reports. The intact copy was restored and its md5 checked; the campaign's verdict for that fit had been written before the change.
