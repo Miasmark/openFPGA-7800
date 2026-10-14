@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The frame gate (DARIA step 7, docs/daria_step7/plan.md P13 and 7.4).
 
-  frame_gate.py REF CAND --frames N [--name NAME] [--excuse F0-F1]
-                [--expect-guard locked|unlocked|none] [--no-status] [--scheme S]
-                [--ref-prefix] [--shift-cap K]
+  frame_gate.py REF CAND --frames N [--rule v1|shift] [--name NAME]
+                [--excuse F0-F1] [--expect-guard locked|unlocked|none]
+                [--no-status] [--scheme S] [--ref-prefix] [--shift-cap K]
+                [--any-inputs]
   frame_gate.py --strict A B [--frames N]
   frame_gate.py --auto REF CAND --frames N [the gate's options]
 
@@ -17,7 +18,30 @@ the integrated core (R2, tb_frames). N is the run's +frames: frames are
 counted from the reset release, and a run of N frames records frames 1..N-1
 ("ran N frames").
 
-PASS needs all of:
+Two rules (plan P13; the owner's decision of 2026-10-12: the same frames
+are wanted, not required, for the first release):
+
+--rule v1 (the default). PASS needs all of:
+  - both fp.csv hold exactly frames 1..N-1, in order;
+  - len_sys, video and riot equal on every frame, but frame 1's video when a
+    call requested in frame 0 has a different hold (busy_sys) on the two
+    sides (DARIA's first call runs on a cold asset cache, and the 6507 then
+    reaches frame 1's VBLANK end a line off: the frames lane's finding on
+    SF2fix); a cpu column, when both files have it, too;
+  - every call's ARM instruction count (calls.csv's thumb + arm: the two
+    cores class one instruction of each call differently, R1 as THUMB and
+    the BupChip CPU as ARM, so their sum is compared) equal to REF's, call
+    by call;
+  - CAND run with tb_daria's paddle inputs (bench parity: run.log's line
+    "FRAMES inputs: tb_daria's", tb_frames +inputs_tbdaria, run_frames.sh
+    INPUTS=tb_daria); --any-inputs accepts another run, for information;
+  - Spiders' overrun frames, the calls and late calls, REF's load (P27) and
+    CAND's status line, all as below.
+  The audio column is counted and reported, not gated: the frames and runs
+  of frames that differ, and which runs are of the release_shift class
+  below (a different 6507 release moves the TIA's audio writes, and so the
+  phase of its square waves, by up to a few hundred clk_sys).
+--rule shift (the strict rule, plan P13 before 2026-10-12). PASS needs all of:
   - both fp.csv hold exactly frames 1..N-1, in order (a truncated, padded
     or shifted file fails);
   - len_sys and video equal on every frame;
@@ -45,7 +69,8 @@ PASS needs all of:
     its own reset release and tb_daria from its own;
   - Spiders (--excuse 557-572, set by default when NAME contains "Spiders"):
     frames F0..F1 are excused when they are the overrun frames on both sides
-    (the frames of the late calls) and every column matches from F1+1;
+    (the frames of the late calls) and every column matches from F1+1 (with
+    --rule v1 every gated column; audio is counted there as anywhere);
   - REF's load was seen (P27): calls.csv has calls, and with --scheme S its
     run.log names detect2600's force_bs S;
   - the call count and the late calls (slack.csv rows kind 1 with slack <= 0:
@@ -88,6 +113,7 @@ import re
 import sys
 
 COLS = ["len_sys", "riot", "video", "audio"]
+RULES = ("v1", "shift")
 SHIFT_MAX = 8                       # the longest release_shift run, and the equal frames that must follow it
 ARM_SCHEMES = {21: "DPC+", 23: "CDF"}   # detect2600's BANKDPCP and BANKCDF
 
@@ -182,6 +208,29 @@ def status_of(d):
     return m.groups() if m else None
 
 
+def inputs_of(d):
+    """The paddle inputs tb_frames presented (its run.log line "FRAMES inputs:"):
+    'tb_daria', 'pocket' or None (no such line)."""
+    p = os.path.join(d, "run.log") if os.path.isdir(d) else None
+    if not p or not os.path.exists(p):
+        return None
+    m = re.search(r"^FRAMES inputs: (tb_daria's|the Pocket's)", open(p, errors="replace").read(), re.M)
+    return None if not m else "tb_daria" if m.group(1) == "tb_daria's" else "pocket"
+
+
+def boot_holds(calls):
+    """{call: busy_sys} of the calls requested in frame 0."""
+    return {int(c["call"]): int(c["busy_sys"]) for c in calls or [] if c.get("frame") == "0"}
+
+
+def instr_of(c):
+    """A call's ARM instructions, thumb + arm; None without those columns."""
+    try:
+        return int(c["thumb"]) + int(c["arm"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def header_of(p):
     raw = gzip.open(p, "rb").read() if p.endswith(".gz") else open(p, "rb").read()
     first = raw.decode("utf-8", "replace").split("\n", 1)[0].strip()
@@ -223,6 +272,7 @@ def strict(a, b, n):
 
 def gate(a):
     bad, notes = [], []
+    v1 = a.rule == "v1"
     rr, rc = load_fp(a.ref), load_fp(a.cand)
     if a.ref_prefix:
         rr = [r for r in rr if r.get("frame", "").isdigit() and int(r["frame"]) < a.frames]
@@ -277,6 +327,9 @@ def gate(a):
                     if rel_f is not None and rel_f > last:
                         last = rel_f
             shifted_frames |= set(range(f0, last + 1))
+    # --rule v1: frame 1's video is excused when a frame-0 call's hold differs
+    boot_r, boot_c = boot_holds(calls_r), boot_holds(calls_c)
+    boot_differs = v1 and boot_r != boot_c
     # Spiders' overrun frames
     excuse = None
     if a.excuse:
@@ -294,22 +347,29 @@ def gate(a):
     shift_count = {"riot": 0, "audio": 0}
     shift_frames = {"riot": 0, "audio": 0}
     cap = a.shift_cap if a.shift_cap is not None else shift_cap(a.frames)
+    audio_v1 = None                     # --rule v1: (frames, runs, shift runs, shift frames, other runs)
     for c in COLS + (["cpu"] if rr and rc and "cpu" in rr[0] and "cpu" in rc[0] else []):
         diff = [f for f in common if fr[f][c] != fc[f][c]]
         diff_all = diff[:]                  # the settle rule counts truly equal frames only
+        counted = v1 and c == "audio"       # v1: audio counted, not gated
         if excuse:
             inside = [f for f in diff if excuse[0] <= f <= excuse[1]]
             after = [f for f in diff if f > excuse[1]]
-            if after:
+            if after and not counted:
                 bad.append(f"{c}: differs after the excused frames, from frame {after[0]} ({len(after)} frames)")
                 if not [f for f in diff if f < excuse[0]]:
                     notes.append("frames before the overrun match: owner question 3 (plan 6.2) applies")
-            diff = [f for f in diff if f < excuse[0]]
+            diff = [f for f in diff if f < excuse[0] or (counted and f > excuse[1])]
             counts[c + "_excused"] = len(inside)
+        if c == "video" and boot_differs and diff[:1] == [1]:
+            diff = diff[1:]
+            counts["video_excused"] = counts.get("video_excused", 0) + 1
+            notes.append(f"frame 1's video excused: the calls requested in frame 0 have other holds "
+                         f"(busy_sys: REF {boot_r}, CAND {boot_c})")
         counts[c] = len(diff)
         if not diff:
             continue
-        if c in ("len_sys", "video", "cpu"):
+        if c in ("len_sys", "video", "cpu") or (v1 and c == "riot"):
             bad.append(f"{c}: {len(diff)} frames differ, the first is {diff[0]}")
             continue
         end = common[-1] if common else None
@@ -332,6 +392,9 @@ def gate(a):
                        f"the column is equal for only {settle} frames after it (< {SHIFT_MAX}): the next difference "
                        f"starts at frame {nxt}")
                 col_bad.append(f"{c}: frames {f0}-{f1} differ, not release_shift ({why})")
+        if counted:
+            audio_v1 = (len(diff), len(runs), shift_count[c], shift_frames[c], col_bad)
+            continue
         bad += col_bad[:8]
         if len(col_bad) > 8:
             bad.append(f"{c}: {len(col_bad) - 8} more runs of differing frames not release_shift "
@@ -347,6 +410,30 @@ def gate(a):
         bad.append(f"calls: REF {nr}, CAND {nc}")
     if late_r is not None and late_c is not None and len(late_r) != len(late_c):
         bad.append(f"late calls: REF {len(late_r)}, CAND {len(late_c)}")
+    # --rule v1: each call's ARM instruction count, and bench parity
+    instr = None
+    if v1:
+        ir = {int(c["call"]): instr_of(c) for c in calls_r or []}
+        ic = {int(c["call"]): instr_of(c) for c in calls_c or []}
+        both = sorted(set(ir) & set(ic))
+        if any(ir[k] is None or ic[k] is None for k in both):
+            bad.append("ARM instructions: a calls.csv without its thumb and arm columns")
+        else:
+            idiff = [k for k in both if ir[k] != ic[k]]
+            instr = (len(both), len(idiff))
+            if idiff:
+                k = idiff[0]
+                bad.append(f"ARM instructions (thumb + arm): {len(idiff)} of {len(both)} calls differ, "
+                           f"the first call {k} (frame {hold_r[k][0]}: REF {ir[k]}, CAND {ic[k]})")
+        inp = inputs_of(a.cand)
+        if inp != "tb_daria":
+            what = ("CAND ran with " + ("the Pocket's paddle inputs" if inp == "pocket" else "no stated paddle inputs")
+                    + " (no run.log line \"FRAMES inputs: tb_daria's\": tb_frames +inputs_tbdaria, run_frames.sh "
+                    "INPUTS=tb_daria; bench parity, plan P13)")
+            if a.any_inputs:
+                notes.append(what + ": accepted (--any-inputs), for information")
+            else:
+                bad.append(what)
     if not a.no_status:
         st = status_of(a.cand)
         if st is None:
@@ -368,9 +455,25 @@ def gate(a):
     name = a.name or os.path.basename(os.path.normpath(a.cand))
     print(f"frame_gate {name}: {len(fr)} / {len(fc)} frames; calls {nr} / {nc}; late "
           f"{len(late_r) if late_r is not None else '-'} / {len(late_c) if late_c is not None else '-'}")
+    print(f"  rule {a.rule}: " + ("len_sys, video, riot and each call's ARM instructions gated; audio counted"
+                                  if v1 else "len_sys and video equal; riot and audio equal or release_shift"))
     print("  differing frames: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
-    print(f"  release_shift runs (frames): riot {shift_count['riot']} ({shift_frames['riot']}), "
-          f"audio {shift_count['audio']} ({shift_frames['audio']}); cap {cap} frames per column")
+    if v1:
+        if audio_v1 is None:
+            print("  audio (counted, not gated): 0 frames differ")
+        else:
+            nf, nruns, ns, nsf, other = audio_v1
+            print(f"  audio (counted, not gated): {nf} frames in {nruns} runs; release_shift class {ns} runs "
+                  f"({nsf} frames), other {nruns - ns} runs ({nf - nsf} frames)")
+            for x in other[:4]:
+                print("    counted: " + x)
+            if len(other) > 4:
+                print(f"    counted: {len(other) - 4} more runs not of the release_shift class")
+        if instr is not None:
+            print(f"  ARM instructions (thumb + arm) per call: {instr[0]} calls compared, {instr[1]} differ")
+    else:
+        print(f"  release_shift runs (frames): riot {shift_count['riot']} ({shift_frames['riot']}), "
+              f"audio {shift_count['audio']} ({shift_frames['audio']}); cap {cap} frames per column")
     print("  release differences (CAND - REF busy_sys: calls): " +
           (", ".join(f"{d:+d}: {n}" for d, n in sorted(rel_diff.items())) or "-"))
     for x in notes:
@@ -432,6 +535,11 @@ def main():
     p.add_argument("cand")
     p.add_argument("--frames", type=int, help="the run's +frames (fp.csv then holds frames 1..N-1)")
     p.add_argument("--strict", action="store_true")
+    p.add_argument("--rule", choices=RULES, default="v1",
+                   help="v1 (default): len_sys, video, riot and each call's ARM instructions gated, audio counted; "
+                        "shift: the strict rule, riot and audio equal or release_shift")
+    p.add_argument("--any-inputs", action="store_true",
+                   help="--rule v1: accept a CAND run without tb_daria's paddle inputs (for information)")
     p.add_argument("--auto", action="store_true",
                    help="--strict or the gate's rules by the scheme CAND's loader found (REF's must equal it)")
     p.add_argument("--shift-cap", type=int,

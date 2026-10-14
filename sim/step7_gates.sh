@@ -74,14 +74,18 @@
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
-#                (sim/run_frames.sh) against R1's tb_daria runs: for each name
+#                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
+#                as R1's bench presents them, bench parity) against R1's
+#                tb_daria runs: for each name
 #                in FRAMES_LIST (default Juno-First_demo_final_CGP_NTSC, the
 #                calibration image), GAMES/**/NAME.bin run for as many frames
 #                as R1_DIR/NAME/fp.csv holds plus one, and compared with
 #                frame_gate.py --auto: the scheme tb_frames' real loader
 #                found decides, and R1's detect2600 must have chosen the same
 #                (P27); a DPC+ or CDF image takes the gate's rules with
-#                --scheme (an R1 run without calls is then void, P27), any
+#                --scheme (an R1 run without calls is then void, P27): the V1
+#                rule by default, FRAMES_RULE=shift for the strict one (plan
+#                P13); any
 #                other --strict (every column equal, no call on either side)
 #                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
 #                as at VCO/19, pll_core.v's divider and tb_load's default).
@@ -98,7 +102,7 @@
 # they are never copied into the tree), R1_DIR=DIR (the reference runs),
 # S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), S4_JOBS, RUN_SIM_REF=LOG,
 # FP_REF=DIR, PP_ORACLE_BASE=REV, CARTRAM_ONLY=LIST, FRAMES_LIST,
-# FRAMES_GUARD (above).
+# FRAMES_GUARD, FRAMES_RULE (above).
 # Every log starts with the tree's HEAD and status and the Verilator path
 # and version (plan P23); the run scripts add the md5 of each binary they
 # build. Output in --out DIR (default sim/work/step7/gates): <gate>.log and
@@ -334,9 +338,15 @@ g_frames() {
 		[ -n "$img" ] || { echo "  FAIL: no $name.bin under GAMES"; rc=1; continue; }
 		[ -f "$ref/fp.csv" ] || { echo "  FAIL: no $ref/fp.csv"; rc=1; continue; }
 		n=$(( $(wc -l < "$ref/fp.csv") ))      # the header and frames 1..N-1: N lines
-		WORK="$d" NAME="$name" FRAMES="$n" slot bash "$HERE/run_frames.sh" "$img" || rc=1
+		# INPUTS=tb_daria: bench parity with R1 (plan P13). R1's tb_daria
+		# presents the TIA's paddle inputs as 4'b1010 (INPT1 and INPT3 high),
+		# so it ran Genesis-aware games in their Genesis mode, while the
+		# Pocket presents 0 there for a 2600 image with a joystick; with the
+		# Pocket's inputs such a game takes another path and its RIOT and
+		# video differ from R1's for a reason outside DARIA.
+		WORK="$d" NAME="$name" FRAMES="$n" INPUTS=tb_daria slot bash "$HERE/run_frames.sh" "$img" || rc=1
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-			--expect-guard "${FRAMES_GUARD:-unlocked}" || rc=1
+			--expect-guard "${FRAMES_GUARD:-unlocked}" --rule "${FRAMES_RULE:-v1}" || rc=1
 	done
 	return $rc
 }

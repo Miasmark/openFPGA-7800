@@ -63,7 +63,17 @@ pass or FAIL, and so is the exit status (0 or 1).
                    removed macro change it; --expect and --max-token fail;
                    an excluded daria_ file holding a directive that reaches
                    later files is refused); needs git and VERILATOR
-  always           frame_gate on synthetic R1/R2 run directories: identical;
+  always           frame_gate on synthetic R1/R2 run directories. The V1
+                   rule (the default): identical; audio differences counted,
+                   not gated (sparse, long, after Spiders' overrun); a RIOT
+                   difference (also one of the release_shift class), a
+                   video difference (frame 1's excused only after a frame-0
+                   call's hold differs, and only that frame and column), an
+                   ARM instruction count difference on one call (thumb + arm;
+                   a different split with an equal sum passes), a calls.csv
+                   without the instruction columns, a run without bench
+                   parity (the Pocket's inputs or none stated; --any-inputs),
+                   an unexpected guard lock. The strict rule (--rule shift):
                    a release_shift that is excused; one that lasts too long;
                    one that starts the frame after the shifted call's; one
                    that reaches the last frame (never equal again); holds
@@ -638,11 +648,14 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23):
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="unlocked", frames=False, cross=(), scheme=23,
+          inputs="tb_daria's"):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
-    hold reaches into the next frame."""
+    hold reaches into the next frame. The guard's status is unlocked, as at
+    VCO/19 (frame_gate.py's default --expect-guard); run.log says the paddle
+    inputs were tb_daria's (bench parity) unless inputs is None."""
     rnd = random.Random(1)
     d = os.path.join(w, name)
     shutil.rmtree(d, ignore_errors=True)
@@ -654,7 +667,7 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
         for j in range(calls_per):
             k += 1
             t_req = f * L + L - 1000 if (f in cross and j == 0) else f * L + 10000 + 100000 * j
-            calls.append([k, f, 10 + 100 * j, t_req, 3000 + 7 * (k % 5), 2999, "00000000"])
+            calls.append([k, f, 10 + 100 * j, t_req, 3000 + 7 * (k % 5), 2999, "00000000", 20000, 1000 + k % 7, 0])
             slack.append([k, 1, 500, -100 if f in late else 4000, "f000"])
     if frames:
         open(os.path.join(d, "frames.csv"), "w").write(
@@ -665,7 +678,7 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
     if mutate:
         mutate(fp, calls, slack, st)
     open(os.path.join(d, "fp.csv"), "w").write("frame,len_sys,riot,video,audio\n" + "".join(",".join(r) + "\n" for r in fp))
-    open(os.path.join(d, "calls.csv"), "w").write("call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl\n" +
+    open(os.path.join(d, "calls.csv"), "w").write("call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl,arm_cyc,thumb,arm\n" +
                                                   "".join(",".join(map(str, c)) + "\n" for c in calls))
     open(os.path.join(d, "slack.csv"), "w").write("call,kind,sys_end_to_poll,slack_sys,poll_pc\n" +
                                                   "".join(",".join(map(str, s)) + "\n" for s in slack))
@@ -674,7 +687,8 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
         f"OPTIONS RAM0 bytes non-zero after load: 0 of 2048; 2600 mapper {scheme} (override 0)\n"
         f"STATUS calls {st['calls']}, late {st['late']}, halts {st['halts']}, halt_code {st['halt_code']}, "
         f"psram_viol {st['psram_viol']}, guard {st['guard']}, unlocks {st['unlocks']}\n"
-        f"ran {n} frames, {len(calls)} calls\n")
+        f"ran {n} frames, {len(calls)} calls\n"
+        + (f"FRAMES inputs: {inputs} (synthetic)\n" if inputs else ""))
     return d
 
 
@@ -702,31 +716,87 @@ def gate_cases(w):
             for f in range(lo, hi + 1):
                 setcol(fp, f, c)
         return m
+    # G: the default rule (V1); S: the strict rule (--rule shift)
     G = lambda name, *extra, want: expect(name, [fg, ref, synth(w, name, mutate=extra[0] if extra else None), "--frames", "200"]
                                           + list(extra[1:]), want)
+    S = lambda name, *extra, want: expect("shift: " + name, [fg, ref, synth(w, "s_" + name, mutate=extra[0] if extra else None),
+                                                             "--frames", "200", "--rule", "shift"] + list(extra[1:]), want)
     expect("identical", [fg, ref, synth(w, "same"), "--frames", "200", "--scheme", "23"], True)
-    G("release_shift_riot_3_frames", m_shift(50, 52), want=True)
-    G("release_shift_audio_8_frames", m_shift(60, 67, "audio"), want=True)
-    G("release_shift_too_long_9_frames", m_shift(70, 78), want=False)
+    expect("shift: identical", [fg, ref, synth(w, "same_s"), "--frames", "200", "--scheme", "23", "--rule", "shift"], True)
+
+    # ---- the V1 rule (the default): len_sys, video, riot and each call's ARM
+    # instruction count gated; audio counted, not gated
+    def instr(k, dt, da=0):
+        def m(fp, calls, slack, st):
+            for c in calls:
+                if c[0] == k:
+                    c[8] += dt
+                    c[9] += da
+        return m
+
+    def boot(by):          # every call requested in frame 0 held `by` clocks longer
+        def m(calls):
+            for c in calls:
+                if c[1] == 0:
+                    c[4] += by
+        return m
+    G("v1_audio_on_every_other_frame_counted", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(2, 200, 2)],
+      want=True)
+    G("v1_audio_run_of_40_frames_counted", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(60, 100)], want=True)
+    G("v1_one_riot_byte", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
+    G("v1_riot_release_shift_3_frames", m_shift(50, 52), want=False)
+    G("v1_one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
+    G("v1_len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
+    G("v1_instructions_one_call", instr(77, 1), want=False)
+    G("v1_instructions_last_call_of_frame_0", instr(2, -1), want=False)
+    G("v1_instructions_split_differs_sum_equal", lambda fp, c, s, st: [instr(k, -1, 1)(fp, c, s, st) for k in range(1, 401)],
+      want=True)
+    G("v1_frame_1_video_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video")),
+      want=True)
+    G("v1_frame_1_video_with_equal_frame_0_holds", lambda fp, c, s, st: setcol(fp, 1, "video"), want=False)
+    G("v1_frame_2_video_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 2, "video")),
+      want=False)
+    G("v1_frame_1_riot_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "riot")),
+      want=False)
+    G("v1_frames_1_and_2_video_after_a_frame_0_hold_differs",
+      lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video"), setcol(fp, 2, "video")), want=False)
+    expect("v1_pocket_inputs (no bench parity)",
+           [fg, ref, synth(w, "v1_pocket", inputs="the Pocket's"), "--frames", "200"], False)
+    expect("v1_no_inputs_line", [fg, ref, synth(w, "v1_noinp", inputs=None), "--frames", "200"], False)
+    expect("v1_pocket_inputs_with_--any-inputs",
+           [fg, ref, synth(w, "v1_pocket_any", inputs="the Pocket's"), "--frames", "200", "--any-inputs"], True)
+    noi = synth(w, "v1_noinstr")
+    cp = os.path.join(noi, "calls.csv")
+    lines = open(cp).read().splitlines()
+    open(cp, "w").write("".join(",".join(l.split(",")[:7]) + "\n" for l in lines))
+    expect("v1_calls_without_thumb_and_arm", [fg, ref, noi, "--frames", "200"], False)
+    expect("v1_status_guard_locked_expected", [fg, synth(w, "ref_lk", status="locked"), synth(w, "v1_lk", status="locked"),
+                                               "--frames", "200", "--expect-guard", "locked"], True)
+
+    # ---- the strict rule (--rule shift): riot and audio equal or release_shift
+    S("release_shift_riot_3_frames", m_shift(50, 52), want=True)
+    S("release_shift_audio_8_frames", m_shift(60, 67, "audio"), want=True)
+    S("release_shift_too_long_9_frames", m_shift(70, 78), want=False)
+    S("audio_run_of_40_frames", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(60, 100)], want=False)
     # the difference must start where a call whose release differs is held:
     # the frame after it does not count, unless the hold reaches into it
-    G("riot_starts_one_frame_after_the_shifted_call", lambda fp, c, s, st: (shift_call(c, 80), setcol(fp, 81, "riot")),
+    S("riot_starts_one_frame_after_the_shifted_call", lambda fp, c, s, st: (shift_call(c, 80), setcol(fp, 81, "riot")),
       want=False)
     # the column must be equal again within the file
-    G("riot_from_a_shifted_frame_to_the_end_of_the_file", m_shift(195, 199), want=False)
+    S("riot_from_a_shifted_frame_to_the_end_of_the_file", m_shift(195, 199), want=False)
     xref = synth(w, "ref_cross", frames=True, cross=(60, 70))
-    expect("riot_in_the_frame_a_crossing_hold_is_released_in",
+    expect("shift: riot_in_the_frame_a_crossing_hold_is_released_in",
            [fg, xref, synth(w, "cross_ok", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 60), setcol(fp, 61, "riot"), setcol(fp, 62, "riot"))),
-            "--frames", "200"], True)
-    expect("riot_two_frames_after_a_crossing_hold",
+            "--frames", "200", "--rule", "shift"], True)
+    expect("shift: riot_two_frames_after_a_crossing_hold",
            [fg, xref, synth(w, "cross_late", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 70), setcol(fp, 72, "riot"))),
-            "--frames", "200"], False)
-    expect("riot_one_frame_after_a_hold_inside_its_frame (frames.csv)",
+            "--frames", "200", "--rule", "shift"], False)
+    expect("shift: riot_one_frame_after_a_hold_inside_its_frame (frames.csv)",
            [fg, xref, synth(w, "cross_inside", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 90), setcol(fp, 91, "riot"))),
-            "--frames", "200"], False)
+            "--frames", "200", "--rule", "shift"], False)
     # R2's regime: every call's release differs (each frame holds a shifted
     # release), so only the settle rule and the cap bound what passes
     def every_call(by):
@@ -742,9 +812,12 @@ def gate_cases(w):
                 if (f % every == 0) != keep:
                     setcol(fp, f, c)
         return m
-    G("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
-    G("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
-    G("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    S("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
+    S("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
+    S("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    G("v1_every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    G("v1_sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=True)
+    G("v1_sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
 
     def runs_at(spans, c="riot"):
         def m(fp, calls, slack, st):
@@ -753,30 +826,39 @@ def gate_cases(w):
                 for f in range(lo, hi + 1):
                     setcol(fp, f, c)
         return m
-    G("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
-    G("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
-    G("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
-    G("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
-    G("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
-    G("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
-    G("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
-    G("len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
-    G("video_on_a_shifted_release", lambda fp, c, s, st: (shift_call(c, 120), setcol(fp, 120, "video")), want=False)
-    G("truncated", lambda fp, c, s, st: fp.pop(), want=False)
-    G("one_frame_shift", lambda fp, c, s, st: fp.__setitem__(slice(None), [[str(i + 1)] + fp[i + 1][1:] for i in range(len(fp) - 1)] + [[str(len(fp))] + fp[0][1:]]), want=False)
-    G("call_missing", lambda fp, c, s, st: (c.pop(), st.__setitem__("calls", st["calls"] - 1)), want=False)
-    G("late_call_extra", lambda fp, c, s, st: (s[10].__setitem__(3, -5), st.__setitem__("late", 1)), want=False)
-    G("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
-    G("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
-    G("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
-    G("status_guard_unlocked", lambda fp, c, s, st: st.__setitem__("guard", "unlocked"), want=False)
+    S("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
+    S("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
+    S("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
+    S("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
+    S("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
+    S("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
+    S("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
+    S("frame_1_video_after_a_frame_0_hold_differs (no excuse)", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video")),
+      want=False)
+    S("instructions_one_call (not checked)", instr(77, 1), want=True)
+
+    # ---- both rules
+    for R in (G, S):
+        R("video_on_a_shifted_release", lambda fp, c, s, st: (shift_call(c, 120), setcol(fp, 120, "video")), want=False)
+        R("truncated", lambda fp, c, s, st: fp.pop(), want=False)
+        R("one_frame_shift", lambda fp, c, s, st: fp.__setitem__(slice(None), [[str(i + 1)] + fp[i + 1][1:] for i in range(len(fp) - 1)] + [[str(len(fp))] + fp[0][1:]]), want=False)
+        R("call_missing", lambda fp, c, s, st: (c.pop(), st.__setitem__("calls", st["calls"] - 1)), want=False)
+        R("late_call_extra", lambda fp, c, s, st: (s[10].__setitem__(3, -5), st.__setitem__("late", 1)), want=False)
+        R("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
+        R("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
+        R("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
+        R("status_guard_locked", lambda fp, c, s, st: st.__setitem__("guard", "locked"), want=False)
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
     # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found
-    A = lambda name, r, cand, want: expect(name, [fg, "--auto", r, cand, "--frames", "200"], want)
+    A = lambda name, r, cand, want, *x: expect(name, [fg, "--auto", r, cand, "--frames", "200"] + list(x), want)
     A("auto_arm_identical", ref, synth(w, "auto_same"), True)
     A("auto_arm_one_riot_byte", ref, synth(w, "auto_riot", mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_arm_audio_counted (V1)", ref, synth(w, "auto_audio", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")), True)
+    A("auto_arm_audio_with_--rule_shift", ref, synth(w, "auto_audio_s", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")),
+      False, "--rule", "shift")
+    A("auto_arm_instructions_one_call", ref, synth(w, "auto_instr", mutate=instr(301, 7)), False)
     A("auto_arm_reference_without_calls", synth(w, "auto_ref_void", calls_per=0),
       synth(w, "auto_cand_void", calls_per=0), False)
     A("auto_scheme_differs_from_the_loader's", ref, synth(w, "auto_dpcp", scheme=21), False)
@@ -793,7 +875,7 @@ def gate_cases(w):
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
-    def sp(extra_after=False, riot_run=None):
+    def sp(extra_after=False, riot_run=None, audio_after=False):
         def m(fp, c, s, st):
             for f in range(150, 166):
                 setcol(fp, f, "video")
@@ -802,25 +884,39 @@ def gate_cases(w):
                     setcol(fp, f, "riot")
             if extra_after:
                 setcol(fp, 170, "riot")
+            if audio_after:
+                for f in range(166, 175):
+                    setcol(fp, f, "audio")
             if riot_run:
                 shift_call(c, riot_run[0])
                 for f in range(riot_run[0], riot_run[1] + 1):
                     setcol(fp, f, "riot")
         return m
-    expect("spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
-                               "--excuse", "150-165"], True)
-    expect("spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames", "200",
-                                     "--excuse", "150-165"], False)
-    expect("spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
-                                           "--excuse", "150-165"], False)
+    for rule in ([], ["--rule", "shift"]):
+        tag = "" if not rule else "shift: "
+        expect(tag + "spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
+                                         "--excuse", "150-165"] + rule, True)
+        expect(tag + "spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames",
+                                               "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
+                                                     "--excuse", "150-165"] + rule, False)
+    expect("v1_spiders_audio_differs_after (counted)",
+           [fg, sref, synth(w, "spiders_aud", mutate=sp(audio_after=True), late=late), "--frames", "200",
+            "--excuse", "150-165"], True)
+    expect("shift: spiders_audio_differs_after",
+           [fg, sref, synth(w, "spiders_aud_s", mutate=sp(audio_after=True), late=late), "--frames", "200",
+            "--excuse", "150-165", "--rule", "shift"], False)
     # a release_shift run must settle on truly equal frames: the excused
     # overrun frames (riot differing there too) do not count
-    expect("spiders_release_shift_3_frames_before_the_overrun",
+    expect("shift: spiders_release_shift_3_frames_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
-            "--excuse", "150-165"], False)
-    expect("spiders_release_shift_well_before_the_overrun",
+            "--excuse", "150-165", "--rule", "shift"], False)
+    expect("shift: spiders_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165"], True)
+            "--excuse", "150-165", "--rule", "shift"], True)
+    expect("v1_spiders_riot_release_shift_well_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_far_v1", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
+            "--excuse", "150-165"], False)
 
 
 def main():
