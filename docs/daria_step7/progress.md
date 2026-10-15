@@ -347,6 +347,7 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - The owner's verdict: "the audio is a hair out of sync for the most part".
   - Video, RIOT and `len_sys` are equal in every frame, and so is every call's instruction count. The audio differs in timing, not in content: writes after a call land earlier on DARIA, and the CDF music tick runs at another phase. Neither build is random.
   - The owner declined the aligned run that would prove it on Gorf.
+  - Galagon was recorded the same way: 9.3% of samples differ, against Gorf's 33%. The most audible spot is a 17 ms buzz near 13.95 s, which DARIA plays fuller than the reference. The owner's verdict: "nothing to be too concerned with ... it does not sound like a different game or completely off key".
 - **The real cartridge, from its documents.** The owner supplied NXP's LPC2101/02/03 data sheet (rev. 04, 2009), the user manual UM10161 (rev. 01, 2006) and the Harmony BIOS 1.06. The BIOS is the public `hbios_ntsc.bin` of the HarmonyCart tool. None of them is in the repository.
   - **Clock.** The Harmony's crystal is 10 MHz. The BIOS runs the PLL at ×7 (70 MHz, the LPC2103's maximum) and passes 70,000 kHz to its flash routines.
   - **Start-up.** BIOS 1.06 never starts a game at its reset vector. It jumps to the entry in the image header, so a game's own PLL and MAM set-up runs only if that entry reaches it.
