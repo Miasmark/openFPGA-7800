@@ -340,3 +340,38 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - **Running:** `s4/check.sh`'s DARIA set (17 of 28 jobs passed), `extra_tests` with `AR_TAPE=1` on both builds, and the V1 frame gate on 16 images at 1,500 frames (2 passed, 1 running).
   - **Waiting:** the gate `selftest`, `s4/check.sh`'s non-DARIA set, and mode B with the wrapper (10 runs) and without it (9 runs).
 - **An incident.** A reviewer's test harness wrote through a symbolic link into one of the campaign's fit reports. The intact copy was restored and its md5 checked; the campaign's verdict for that fit had been written before the change.
+
+### Audio against a real Harmony (2026-10-15)
+
+- **Listening.** The owner asked to hear the audio the V1 rule counts but does not gate. Gorf's first 25 s were recorded from R1's bench and from the D candidate's `tb_frames`, both through a passive tap in scratch copies of the benches. Each tapped run's `fp.csv` is byte-identical to the untapped one (R1's, and c76's). Two independent checks passed.
+  - The owner's verdict: "the audio is a hair out of sync for the most part".
+  - Video, RIOT and `len_sys` are equal in every frame, and so is every call's instruction count. The audio differs in timing, not in content: writes after a call land earlier on DARIA, and the CDF music tick runs at another phase. Neither build is random.
+  - The owner declined the aligned run that would prove it on Gorf.
+- **The real cartridge, from its documents.** The owner supplied NXP's LPC2101/02/03 data sheet (rev. 04, 2009), the user manual UM10161 (rev. 01, 2006) and the Harmony BIOS 1.06. The BIOS is the public `hbios_ntsc.bin` of the HarmonyCart tool. None of them is in the repository.
+  - **Clock.** The Harmony's crystal is 10 MHz. The BIOS runs the PLL at ×7 (70 MHz, the LPC2103's maximum) and passes 70,000 kHz to its flash routines.
+  - **Start-up.** BIOS 1.06 never starts a game at its reset vector. It jumps to the entry in the image header, so a game's own PLL and MAM set-up runs only if that entry reaches it.
+  - **Clocks in force, by game:**
+
+    | Game | ARM clock | MAM mode | MAMTIM | Why |
+    |---|---|---|---|---|
+    | Gorf | 60 MHz | 2 (full) | 4 | its own start-up runs |
+    | Galagon, Lady Bug, Mappy, RobotWar, Wizard of Wor | 60 MHz | 2 | 3 | its own start-up runs |
+    | Qyx, Tutankham, Spiders, Super Cobra, Zoo Keeper, Scramble | 70 MHz | 2 | 4 | the entry skips it, so the BIOS settings stay |
+    | Elevator Agent, Turbo, Zaxxon | 60 MHz | — | — | larger than the LPC2103's 32 KB of flash, so they need an LPC213x board (Melody) |
+
+  - **No Harmony runs the last three.** A Harmony executes ARM code only from its chip's 32 KB, and these games have more ARM code than that (the owner, from the forums). DARIA runs code from its 64 KB window.
+  - **MAM changes during calls.** The drivers of Super Cobra and Zoo Keeper set the MAM to partial around each call. Scramble's game code does the same in one function.
+  - **Upstream assumes one clock for every game:** 70 MHz (its `clk_arm` 71.59 MHz). So does Stella for any image of 32 KB or less.
+- **A MAM model.** UM10161 chapter 4's rules were modelled in a scratch copy of R1's bench (`+mam`): one flash bank; prefetch, branch-trail and data buffers; aborts.
+  - Its Gorf run equals R1's on every pre-existing column.
+  - An independent Python model, written from the manual alone, agrees on every access's wait over Gorf's first 30 calls (403,217 accesses) and 18 directed traces.
+  - All of Gorf's calls use `$FF`, so no audio interrupt runs.
+  - **At Gorf's own settings** (60 MHz, mode 2, MAMTIM 4) a Harmony takes 77,638,287 cycles: 1.294 s over 2,999 calls. Mode 2's totals move by 1-2% under the other readings of the manual.
+
+    | | Gorf's calls | Against the Harmony | Median per call |
+    |---|---|---|---|
+    | DARIA | 1.221 s | 5.6% faster | 12.6 µs early |
+    | Upstream | 1.393 s | 7.6% slower | 41.6 µs late |
+
+  - **So on Gorf DARIA is the closer of the two.** A real cart's NOP/JMP hand-back adds a few 6507 cycles after each call that RDY does not.
+- **Recorded limit.** A Melody board's optional EEPROM (up to 4 MB) would be reached through the chip's serial peripherals, which DARIA reads as 0. No traced image uses them (`docs/IMPROVEMENTS.md`; `DARIA_CORE.md` open item 19 on s7/D).
