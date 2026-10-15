@@ -33,6 +33,12 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
 - **The C flag after a Thumb MUL** is marked unknown and halts with code 8 if read. Revisit if a game ever halts with code 8 (`docs/DARIA_CORE.md`, open item 4).
 - **Code or LDM above the 64 KB window** halts (codes 4 and 7). A fetch stall in front of `rom_q` would run it, if a larger CDFJ+ game needs it (`docs/DARIA_CORE.md`, open item 5).
+- **A cartridge EEPROM, and the ARM chip's other peripherals.**
+  - **The hardware:** a Melody board can carry an optional EEPROM of up to 4 MB, besides up to 128 KB of flash and 64 KB of RAM (the board's description, quoted by the owner on 2026-10-15). Its LPC213x chip has no external memory bus, so a game would reach the EEPROM through the chip's serial peripherals.
+  - **What DARIA does today:** it emulates only MAMCR and timer 1. Every other register in the peripheral window reads 0 and drops writes (`docs/DARIA_CORE.md`, M3 and open item 19).
+  - **The effect:** a game that used an EEPROM, for saves or for data beyond its ROM, would read zeros and lose what it writes, without halting. No traced image touches these peripherals.
+  - **Two smaller points:** DARIA maps images up to 512 KB, although the Pocket's cartridge slot takes files up to 4 MB. And CDFJ+ itself addresses at most 32 KB of cart RAM, all of which DARIA has.
+  - **Cost:** model the peripheral that a real game uses (SPI/SSP or I²C) in `daria_mmio`, and back the EEPROM with Pocket memory saved through the core's save files, as the SaveKey and the High Score Cart already are. Size it when such a game exists.
 - **Thumb hi-register forms with H1 = H2 = 0** halt. Running them is free if a game needs it (`docs/DARIA_CORE.md`, open item 14).
 - **Audio in the frame gate.**
   - The V1 rule counts audio differences instead of gating them, so it is no evidence that the audio path is right. A planted fault in the DPC+ mixer passes it (the D branch's plan, P13 and 7.4).
