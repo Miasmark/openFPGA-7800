@@ -12,7 +12,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 - **What it would fix.**
   - At ÷19 the front end's guard never locks. So a front-end read of cart RAM can land within a few nanoseconds of a DARIA store to the same word in the dual-clock M10K.
-  - In mode B at ÷19, about 45 s of play (2,700 frames) over six images gave three such pairs within 3 ns. Only Galagon's, at one VCO period, changed the word being read. All three were front-end audio reads during a call. A second reader's recount agrees on every count (`docs/daria_step7/progress.md`, "Halt"; the D branch's plan, risk row 5a). Longer play will also meet changing pairs at 0 and 2 periods.
+  - In mode B at ÷19, about 45 s of play (2,700 frames) over six images gave three such pairs within 3 ns. Only Galagon's, at one VCO period, changed the word being read. All three were front-end audio reads during a call. A second reader's recount agrees on every count (`docs/daria_step7/progress.md`, "Halt"; `docs/daria_step7/plan.md`, risk row 5a). Longer play will also meet changing pairs at 0 and 2 periods.
   - At worst such a read returns a wrong value on the bytes being written: a wrong audio sample, or, for a note or pointer read, a wrong value until its next refresh.
   - At ÷18 none can occur. The guard keeps front-end reads off the shared edge, and every other `clk_sys` edge is 8.73 ns from a `clk_arm` edge (`docs/DARIA_CORE.md`, open item 7; `docs/daria_fe/design.md` 8.1).
 - **Why today's guard cannot do it.**
@@ -41,7 +41,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - **Cost:** model the peripheral that a real game uses (SPI/SSP or I²C) in `daria_mmio`, and back the EEPROM with Pocket memory saved through the core's save files, as the SaveKey and the High Score Cart already are. Size it when such a game exists.
 - **Thumb hi-register forms with H1 = H2 = 0** halt. Running them is free if a game needs it (`docs/DARIA_CORE.md`, open item 14).
 - **Audio in the frame gate.**
-  - The V1 rule counts audio differences instead of gating them, so it is no evidence that the audio path is right. A planted fault in the DPC+ mixer passes it (the D branch's plan, P13 and 7.4).
+  - The V1 rule counts audio differences instead of gating them, so it is no evidence that the audio path is right. A planted fault in the DPC+ mixer passes it (`docs/daria_step7/plan.md`, P13 and 7.4).
   - An aligned run gates audio too: each call's release is held to the reference run's, and the music tick's phase is matched. It exists only as a scratch bench tap.
   - It is shown at ÷18 for Galagon (599 frames) and SF2fix's DPC+ music (29 frames), not yet at ÷19, for CDF music or for the other images (`docs/daria_step7/progress.md`, "Frame runs on D against R1").
   - Cost: two bench options and one more run per image.

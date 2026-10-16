@@ -516,7 +516,7 @@ Run these detached with `setsid` instead of as tool background commands.
 - There is no init, so start dockerd by hand after every VM restart (section 3.3), then check it with `docker info`.
   - Quartus runs from the local image are not affected.
 - If dockerd then fails with "containerd is still running", the restart left a stale `/var/run/docker/containerd/containerd.pid`: delete it and start dockerd again (3.3). This happened on 2026-10-13.
-- In October 2026 the VM restarted about every two hours (2026-10-13 23:01, 10-14 02:40 and 04:40 UTC), killing every process. Split long runs into pieces of an hour or less that write their own results and skip finished pieces when run again (`wire.py run` takes scenario names, `s4/check.sh` takes `ONLY=`, frame and mode-B runs go one image at a time).
+- The machine stops when the session ends, and every process stops with it. A session ends about five minutes after it goes idle, after about 13 hours of work, and sometimes earlier with no cause found ([AGENT_RUNS.md](AGENT_RUNS.md) section 2). Split long runs into pieces of an hour or less that write their own results and skip finished pieces when run again (`wire.py run` takes scenario names, `s4/check.sh` takes `ONLY=`, frame and mode-B runs go one image at a time).
 
 ### 8.5 The wrong Verilator
 
