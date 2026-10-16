@@ -90,6 +90,10 @@ the input-dependent groups below that did not run for want of their input
                    count and a late-call difference; the STATUS line's halts,
                    PSRAM violations, guard and unlocks; Spiders' excused
                    overrun frames, and the same frames when later ones differ;
+                   --auto by the loader's scheme, among them P27's ARM image
+                   whose REF run makes no call (strict: identical passes; a
+                   RIOT byte, an audio frame, calls in CAND, a halt in its
+                   STATUS line, another REF scheme and no calls.csv fail);
                    and wire.py's mutant verdict (plan 7.2, 7.3's wire gate) on
                    the records (WIRE_JSON) of wire.py run on a fake tb_wire:
                    CAUGHT when each scenario that catches the mutant fails on
@@ -1045,8 +1049,21 @@ def gate_cases(w):
     A("auto_arm_audio_with_--rule_shift", ref, synth(w, "auto_audio_s", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")),
       False, "--rule", "shift")
     A("auto_arm_instructions_one_call", ref, synth(w, "auto_instr", mutate=instr(301, 7)), False)
-    A("auto_arm_reference_without_calls", synth(w, "auto_ref_void", calls_per=0),
-      synth(w, "auto_cand_void", calls_per=0), False)
+    # P27: an ARM image whose R1 run makes no call is compared strictly, its load shown by detect2600's scheme
+    vref = synth(w, "auto_ref_void", calls_per=0)
+    A("auto_arm_reference_without_calls (P27: strict, identical)", vref, synth(w, "auto_cand_void", calls_per=0), True)
+    A("auto_arm_no_calls, one riot byte (strict)", vref,
+      synth(w, "auto_void_riot", calls_per=0, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_arm_no_calls, one audio frame (strict: audio gated too)", vref,
+      synth(w, "auto_void_audio", calls_per=0, mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")), False)
+    A("auto_arm_no_calls in REF, calls in CAND", vref, synth(w, "auto_void_calls", calls_per=1), False)
+    A("auto_arm_no_calls, CAND's STATUS halts 1", vref,
+      synth(w, "auto_void_halt", calls_per=0, mutate=lambda fp, c, s, st: st.update(halts=1)), False)
+    A("auto_arm_no_calls, REF's detect2600 another ARM scheme", synth(w, "auto_ref_void21", calls_per=0, scheme=21),
+      synth(w, "auto_cand_void23", calls_per=0), False)
+    nocalls = synth(w, "auto_ref_nofile", calls_per=0)
+    os.remove(os.path.join(nocalls, "calls.csv"))
+    A("auto_arm_reference_with_no_calls.csv (void)", nocalls, synth(w, "auto_cand_nofile", calls_per=0), False)
     A("auto_scheme_differs_from_the_loader's", ref, synth(w, "auto_dpcp", scheme=21), False)
     A("auto_with_the_mapper_line (control)", ref, synth(w, "auto_nomap"), True)
     nomap = os.path.join(w, "auto_nomap", "run.log")

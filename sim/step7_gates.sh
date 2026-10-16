@@ -131,9 +131,10 @@
 #                frame_gate.py --auto: the scheme tb_frames' real loader
 #                found decides, and R1's detect2600 must have chosen the same
 #                (P27); a DPC+ or CDF image takes the gate's rules with
-#                --scheme (an R1 run without calls is then void, P27): the V1
-#                rule by default, FRAMES_RULE=shift for the strict one (plan
-#                P13); any
+#                --scheme: the V1 rule by default, FRAMES_RULE=shift for the
+#                strict one (plan P13), and --strict when R1's run of it makes
+#                no call (P27: the load shown by detect2600's scheme alone;
+#                an R1 run with no calls.csv is void); any
 #                other --strict (every column equal, no call on either side)
 #                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
 #                as at VCO/19, pll_core.v's divider and tb_load's default).

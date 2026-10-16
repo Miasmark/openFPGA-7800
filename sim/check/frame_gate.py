@@ -93,7 +93,12 @@ mode follows the scheme the real loader found, CAND's run.log line "2600
 mapper S" (tb_load's), which REF's run.log ("detect2600: force_bs S", P27)
 must equal; an ARM scheme (21 DPC+, 23 CDF) takes the gate's rules with
 --scheme S, any other --strict (a non-ARM image: every column equal on every
-frame, and no call on either side).
+frame, and no call on either side). An ARM scheme whose REF run makes no
+call (its calls.csv holds only the header; Chaotic Grill, DPC+, 0 calls in
+600 frames) is P27's case: the load is shown by detect2600's scheme alone,
+equal to the loader's, and the comparison is --strict, with no call on
+either side and CAND's status line as below (halts, psram_viol, unlocks,
+the guard; calls and late calls 0). A REF with no calls.csv at all is void.
 --strict: the same columns in A and B, every one equal on every frame, the
 same frames, and at least one frame (for two builds of one bench, e.g.
 tb_load +fp between builds, 7.5 row 5; tb_load's and tb_system's t_sys,
@@ -510,21 +515,44 @@ def auto(a):
             print("  FAIL: " + x)
         print(f"FRAME_GATE FAIL {a.name or os.path.basename(os.path.normpath(a.cand))}")
         return 1
-    if sc in ARM_SCHEMES:
+    ref_calls = read_csv(path_in(a.ref, "calls.csv")) if os.path.isdir(a.ref) else None
+    if sc in ARM_SCHEMES and (ref_calls is None or ref_calls):
         print(f"  an ARM scheme ({ARM_SCHEMES[sc]}): the gate's rules, --scheme {sc}")
         a.scheme = sc
         return gate(a)
-    print("  not an ARM scheme: --strict, and no call on either side")
     calls_bad = []
+    if sc in ARM_SCHEMES:
+        # P27 (amended in phase 1b): an image whose R1 run makes no call; its load is shown by detect2600's
+        # scheme alone, which equals the loader's (above), and the frame comparison is strict
+        print(f"  an ARM scheme ({ARM_SCHEMES[sc]}) whose REF run makes no call (P27): the load shown by detect2600's "
+              f"force_bs {sr} alone; --strict, no call on either side, and CAND's status line")
+        st = None if a.no_status else status_of(a.cand)
+        if not a.no_status:
+            if st is None:
+                calls_bad.append("CAND: no STATUS line in run.log")
+            else:
+                calls, late, halts, hcode, viol, guard, unl = st
+                if int(halts) or int(hcode): calls_bad.append(f"STATUS halts {halts}, halt_code {hcode}")
+                if int(viol): calls_bad.append(f"STATUS psram_viol {viol}")
+                if int(unl): calls_bad.append(f"STATUS unlocks {unl}")
+                if a.expect_guard != "none" and guard != a.expect_guard:
+                    calls_bad.append(f"STATUS guard {guard}, expected {a.expect_guard}")
+                if int(calls) or int(late): calls_bad.append(f"STATUS calls {calls}, late {late}; REF has none")
+        if not os.path.isdir(a.cand) or path_in(a.cand, "calls.csv") is None:
+            calls_bad.append("CAND: no calls.csv")
+    else:
+        print("  not an ARM scheme: --strict, and no call on either side")
     for who, d in (("REF", a.ref), ("CAND", a.cand)):
         n = len(read_csv(path_in(d, "calls.csv")) or []) if os.path.isdir(d) else 0
         if n:
-            calls_bad.append(f"{who}: {n} calls in calls.csv, from an image whose scheme makes none")
+            calls_bad.append(f"{who}: {n} calls in calls.csv, " + ("where REF's run makes none" if sc in ARM_SCHEMES
+                                                                  else "from an image whose scheme makes none"))
     rc = strict(a.ref, a.cand, a.frames)
     for x in calls_bad:
         print("  FAIL: " + x)
     if calls_bad:
-        print("FRAME_GATE FAIL (calls in a run of a non-ARM image)")
+        print("FRAME_GATE FAIL (" + ("an ARM image whose REF run makes no call" if sc in ARM_SCHEMES
+                                     else "calls in a run of a non-ARM image") + ")")
         return 1
     return rc
 
