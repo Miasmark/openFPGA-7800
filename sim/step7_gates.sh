@@ -3,6 +3,8 @@
 # 3.6, 7.7: the fresh-clone run), each with its own log and one verdict; an
 # optional directory of game images for the gates that need one.
 #   sim/step7_gates.sh [--out DIR] [--only G,G...] [--skip G,G...] [--list]
+# --only and --skip take names from the list below; an unknown name is
+# refused (exit 2) before any gate runs.
 # Gates (in this order):
 #   hygiene      sim/check/hygiene.sh over BASE..HEAD (HYGIENE_NAMES, the
 #                name list kept outside the repository; HYGIENE_BASE)
@@ -61,7 +63,11 @@
 #                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
 #                and fingerprints (so it runs after them), the guards'
 #                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees, and
-#                wire.py's mutant verdict on a fake tb_wire
+#                wire.py's mutant verdict on a fake tb_wire. Without one of
+#                those logs (the gates that write them not run, or with --skip,
+#                no EXTRA_REF; the reset log only with Fix B in the tree) its
+#                planted faults cannot run: the gate is then PARTIAL and names
+#                the inputs that were missing
 #   fit_selftest the fit driver's self-test, no Quartus
 #                (sim/bupchip/quartus_probe/step7/selftest.sh, plan 5.4):
 #                step7_prep.py's DARIA lines and divider, step7_checks.py's
@@ -70,9 +76,10 @@
 #                the misread cross-check), its (k') rule, the two copies of plan
 #                2.7's table (step7_report.tcl's ff_table, f3_crossings.txt)
 #                against each other, and run_step7.sh's refusals with a
-#                stand-in docker; about a minute. It needs 2,100 MB free on /
-#                (run_step7.sh's refusals are tested above its 2 GB floor):
-#                with less it fails and says so
+#                stand-in docker and a stand-in df (run_step7.sh's 2,048 MB
+#                floor tested at 2,048 and 2,047 MB); about a minute. It
+#                writes about 15 MB; with less than 100 MB free on / it skips
+#                the tests that copy src/fpga and is PARTIAL
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
 #                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
@@ -115,8 +122,11 @@
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
 #                as R1's bench presents them, bench parity) against R1's
 #                tb_daria runs: for each name
-#                in FRAMES_LIST (default Juno-First_demo_final_CGP_NTSC, the
-#                calibration image), GAMES/**/NAME.bin run for as many frames
+#                in FRAMES_LIST (default plan 1.2 row 7's 16 images, the 15
+#                demos and Stratovox: FRAMES16 below; a list that leaves one
+#                of them out makes the gate PARTIAL, naming those not run, and
+#                Juno-First_demo_final_CGP_NTSC, the calibration image, is
+#                not one of them), GAMES/**/NAME.bin run for as many frames
 #                as R1_DIR/NAME/fp.csv holds plus one, and compared with
 #                frame_gate.py --auto: the scheme tb_frames' real loader
 #                found decides, and R1's detect2600 must have chosen the same
@@ -145,7 +155,9 @@
 # and version (plan P23); the run scripts add the md5 of each binary they
 # build. Output in --out DIR (default sim/work/step7/gates): <gate>.log and
 # summary.txt. Exit status 0 when every selected gate passed, 1 when one
-# failed, 3 when none failed but one was not available or partial.
+# failed, 3 when none failed but one was not available or partial, or when
+# no gate ran at all (every one not selected or not available), 2 on a
+# usage error.
 # SPDX-License-Identifier: MIT
 set -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -169,6 +181,17 @@ QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
 GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames)
+# --only and --skip name gates of GATES only: a misspelt name would select nothing
+for g in ${ONLY//,/ } ${SKIP//,/ }; do
+	[[ " ${GATES[*]} " == *" $g "* ]] || { echo "step7_gates.sh: unknown gate '$g' in --only or --skip (the gates: ${GATES[*]})" >&2; exit 2; }
+done
+[ "$ONLY" != ",," ] || { echo "step7_gates.sh: --only names no gate" >&2; exit 2; }
+# plan 1.2 row 7 (P13, 7.4): the 15 demos and Stratovox, 1,500 frames each (R1's fp.csv)
+FRAMES16="Elevator-Agent_demo_final_CG_NTSC Galagon_demo_final_CG_NTSC Gorf-Arcade_demo_final_CG_NTSC
+Lady-Bug-Arcade_demo_final_CG_NTSC Mappy_demo_final_CG_NTSC Qyx_demo_final_CG_NTSC RobotWar-2684_demo_final_CG_NTSC
+Scramble_demo_final_CG_NTSC Spiders-Arcade_demo_final__CG_NTSC Stratovox_demo_final_CGP_NTSC
+Super-Cobra-Arcade_demo_final_CG_NTSC Turbo-Arcade_demo_final_CG_NTSC Tutankham-Arcade_demo_final_CG_NTSC
+Wizard-of-Wor-Arcade_demo_final_CG_NTSC Zaxxon-Arcade_demo_v2_CG_NTSC Zoo-Keeper_demo_final_CG_NTSC"
 
 header() {   # the P23 header of every gate log
 	echo "HEAD $(git -C "$REPO" rev-parse HEAD)"
@@ -322,14 +345,31 @@ g_run_sim() {
 	return $rc
 }
 g_selftest() {
-	local args=(--work "$OUT/selftest" --tools)
-	[ -f "$OUT/run_sim.out" ] && args+=(--run-sim "$OUT/run_sim.out")
-	[ -f "$OUT/rs/fp/load_a26.csv" ] && args+=(--fp "$OUT/rs/fp/load_a26.csv")
-	[ -f "$OUT/cartram_work/cartram/logs/e7_b0.log" ] && args+=(--cartram "$OUT/cartram_work/cartram/logs/e7_b0.log")
-	[ -f "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log" ] && args+=(--reset "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log")
-	[ -f "$OUT/rs/cartram/logs/artape_b0.log" ] && args+=(--artape "$OUT/rs/cartram/logs/artape_b0.log")
-	[ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ] && args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
-	python3 "$HERE/check/selftest.py" "${args[@]}"
+	local args=(--work "$OUT/selftest" --tools) miss=()
+	# each log-based group of planted faults needs its input, which an earlier gate of this run writes
+	if [ -f "$OUT/run_sim.out" ]; then args+=(--run-sim "$OUT/run_sim.out")
+	else miss+=("--run-sim ($OUT/run_sim.out: the run_sim gate)"); fi
+	if [ -f "$OUT/rs/fp/load_a26.csv" ]; then args+=(--fp "$OUT/rs/fp/load_a26.csv")
+	else miss+=("--fp ($OUT/rs/fp/load_a26.csv: the run_sim gate)"); fi
+	if [ -f "$OUT/cartram_work/cartram/logs/e7_b0.log" ]; then args+=(--cartram "$OUT/cartram_work/cartram/logs/e7_b0.log")
+	else miss+=("--cartram ($OUT/cartram_work/cartram/logs/e7_b0.log: the cartram gate)"); fi
+	if [ -f "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log" ]; then
+		args+=(--reset "$OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log")
+	elif grep -qE '\bt_new\b' "$REPO/src/fpga/core/sram_ctrl.sv"; then
+		miss+=("--reset ($OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log: the cartram gate, with Fix B in the tree)")
+	fi
+	if [ -f "$OUT/rs/cartram/logs/artape_b0.log" ]; then args+=(--artape "$OUT/rs/cartram/logs/artape_b0.log")
+	else miss+=("--artape ($OUT/rs/cartram/logs/artape_b0.log: the run_sim gate)"); fi
+	if [ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ]; then
+		args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
+	else miss+=("--extra ($OUT/extra_tests.out and EXTRA_REF: the extra_tests gate)"); fi
+	python3 "$HERE/check/selftest.py" "${args[@]}" || return 1
+	if [ ${#miss[@]} -gt 0 ]; then
+		echo "PARTIAL: every planted fault that ran was caught; not run for want of their input: $(printf '%s; ' "${miss[@]%% (*}" | sed 's/; $//')"
+		printf '  missing: %s\n' "${miss[@]}"
+		return 3
+	fi
+	return 0
 }
 g_fit_selftest() { bash "$HERE/bupchip/quartus_probe/step7/selftest.sh"; }
 g_extra_tests() {
@@ -404,9 +444,9 @@ g_wire() {
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
 g_frames() {
-	local rc=0 name img ref n d="$OUT/frames"
+	local rc=0 name img ref n d="$OUT/frames" left=()
 	mkdir -p "$d"
-	for name in ${FRAMES_LIST:-Juno-First_demo_final_CGP_NTSC}; do
+	for name in ${FRAMES_LIST:-$FRAMES16}; do
 		img="$(find "$GAMES" -name "$name.bin" -print -quit)"
 		ref="$R1_DIR/$name"
 		echo "== $name"
@@ -423,6 +463,13 @@ g_frames() {
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
 			--expect-guard "${FRAMES_GUARD:-unlocked}" --rule "${FRAMES_RULE:-v1}" || rc=1
 	done
+	for name in $FRAMES16; do
+		[[ " $(echo ${FRAMES_LIST:-$FRAMES16}) " == *" $name "* ]] || left+=("$name")
+	done
+	if [ $rc = 0 ] && [ ${#left[@]} -gt 0 ]; then
+		echo "PARTIAL: ${#left[@]} of plan 1.2 row 7's 16 images not run (FRAMES_LIST), every image run passed: ${left[*]}"
+		return 3
+	fi
 	return $rc
 }
 
@@ -452,10 +499,12 @@ done
 	for g in "${GATES[@]}"; do printf '%-12s %s\n' "$g" "${RES[$g]}"; done
 } > "$OUT/summary.txt"
 cat "$OUT/summary.txt"
-fail=0; na=0
+fail=0; na=0; ran=0
 for g in "${GATES[@]}"; do
-	case "${RES[$g]}" in FAIL*) fail=1 ;; NOT\ AVAILABLE*|PARTIAL*) na=1 ;; esac
+	case "${RES[$g]}" in FAIL*) fail=1; ran=$((ran + 1)) ;; NOT\ AVAILABLE*) na=1 ;; PARTIAL*) na=1; ran=$((ran + 1)) ;;
+		PASS) ran=$((ran + 1)) ;; esac
 done
 [ $fail = 1 ] && { echo "STEP7_GATES FAIL"; exit 1; }
+[ $ran = 0 ] && { echo "STEP7_GATES incomplete: no gate ran (none selected, or none available): not a pass"; exit 3; }
 [ $na = 1 ] && { echo "STEP7_GATES incomplete: some gates are not available or partial (not a pass)"; exit 3; }
-echo "STEP7_GATES pass"
+echo "STEP7_GATES pass ($ran gates)"
