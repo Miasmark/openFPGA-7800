@@ -242,7 +242,8 @@ def header_of(p):
     return first.split(",") if first else []
 
 
-def strict(a, b, n):
+def strict(a, b, n, verdict=True):
+    """--strict; verdict=False leaves the verdict line to the caller (--auto, which may add findings)."""
     bad = []
     ra, rb = load_fp(a), load_fp(b)
     ha, hb = header_of(path_in(a, "fp.csv")), header_of(path_in(b, "fp.csv"))
@@ -271,7 +272,8 @@ def strict(a, b, n):
     print(f"frame_gate --strict: {len(fa)} / {len(fb)} frames, columns {','.join(cols)}")
     for x in bad:
         print("  FAIL: " + x)
-    print("FRAME_GATE " + ("pass (identical)" if not bad else "FAIL"))
+    if verdict:
+        print("FRAME_GATE " + ("pass (identical)" if not bad else "FAIL"))
     return 0 if not bad else 1
 
 
@@ -547,13 +549,15 @@ def auto(a):
         if n:
             calls_bad.append(f"{who}: {n} calls in calls.csv, " + ("where REF's run makes none" if sc in ARM_SCHEMES
                                                                   else "from an image whose scheme makes none"))
-    rc = strict(a.ref, a.cand, a.frames)
+    # one verdict line: strict()'s pass would not hold when the calls or the status line fail
+    rc = strict(a.ref, a.cand, a.frames, verdict=False)
     for x in calls_bad:
         print("  FAIL: " + x)
     if calls_bad:
         print("FRAME_GATE FAIL (" + ("an ARM image whose REF run makes no call" if sc in ARM_SCHEMES
                                      else "calls in a run of a non-ARM image") + ")")
         return 1
+    print("FRAME_GATE " + ("pass (identical)" if not rc else "FAIL"))
     return rc
 
 

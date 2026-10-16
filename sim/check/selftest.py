@@ -93,7 +93,9 @@ the input-dependent groups below that did not run for want of their input
                    --auto by the loader's scheme, among them P27's ARM image
                    whose REF run makes no call (strict: identical passes; a
                    RIOT byte, an audio frame, calls in CAND, a halt in its
-                   STATUS line, another REF scheme and no calls.csv fail);
+                   STATUS line, a RIOT byte with a halt, another REF scheme
+                   and no calls.csv fail), each --auto run with one verdict
+                   line, which agrees with its exit status;
                    and wire.py's mutant verdict (plan 7.2, 7.3's wire gate) on
                    the records (WIRE_JSON) of wire.py run on a fake tb_wire:
                    CAUGHT when each scenario that catches the mutant fails on
@@ -134,17 +136,19 @@ def run(cmd, py=True, env=None):
     return (2 if crashed else r.returncode), r.stdout + (r.stderr if r.returncode not in (0, 1) or crashed else "")
 
 
-def expect(name, cmd, want_pass, py=True, env=None):
+def expect(name, cmd, want_pass, py=True, env=None, check=None):
     # a checker that crashes (a Python traceback) gives no verdict: WRONG,
-    # whatever its exit status
+    # whatever its exit status; check(out, rc), when given, names what else
+    # is wrong with the output ("" when nothing is)
     rc, out = run(cmd, py, env)
-    ok = (rc == 0) == want_pass and rc in (0, 1)
+    bad = check(out, rc) if check and rc in (0, 1) else ""
+    ok = (rc == 0) == want_pass and rc in (0, 1) and not bad
     results.append(ok)
     last = out.strip().splitlines()[-1] if out.strip() else "(no output)"
     # the first finding, when the last line does not name it
     why = next((l.strip() for l in out.splitlines() if re.search(r"FAIL|REFUSED|MISMATCH", l) and l.strip() != last.strip()), "")
     print(f"  {'ok   ' if ok else 'WRONG'} {name}: expected {'pass' if want_pass else 'fail'}, got rc {rc} ({last})"
-          + (f" [{why[:150]}]" if rc == 1 and why else ""))
+          + (f" [{why[:150]}]" if rc == 1 and why else "") + (f" {{{bad}}}" if bad else ""))
     if not ok:
         print("\n".join("        " + l for l in out.splitlines()[-12:]))
 
@@ -1187,8 +1191,17 @@ def gate_cases(w):
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
-    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found
-    A = lambda name, r, cand, want, *x: expect(name, [fg, "--auto", r, cand, "--frames", "200"] + list(x), want)
+    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found. Each
+    # run prints one verdict line, which agrees with the exit status (a strict
+    # comparison that passes is not reported as a pass when the calls or the
+    # status line then fail)
+    def one_verdict(out, rc):
+        v = [l for l in out.splitlines() if l.startswith("FRAME_GATE ")]
+        if len(v) != 1:
+            return f"{len(v)} verdict lines: " + " | ".join(v)
+        return "" if v[0].startswith("FRAME_GATE pass") == (rc == 0) else "the verdict line disagrees with the exit status"
+    A = lambda name, r, cand, want, *x: expect(name, [fg, "--auto", r, cand, "--frames", "200"] + list(x), want,
+                                               check=one_verdict)
     A("auto_arm_identical", ref, synth(w, "auto_same"), True)
     A("auto_arm_one_riot_byte", ref, synth(w, "auto_riot", mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
     A("auto_arm_audio_counted (V1)", ref, synth(w, "auto_audio", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")), True)
@@ -1205,6 +1218,9 @@ def gate_cases(w):
     A("auto_arm_no_calls in REF, calls in CAND", vref, synth(w, "auto_void_calls", calls_per=1), False)
     A("auto_arm_no_calls, CAND's STATUS halts 1", vref,
       synth(w, "auto_void_halt", calls_per=0, mutate=lambda fp, c, s, st: st.update(halts=1)), False)
+    A("auto_arm_no_calls, one riot byte and CAND's STATUS halts 1", vref,
+      synth(w, "auto_void_riot_halt", calls_per=0, mutate=lambda fp, c, s, st: (setcol(fp, 90, "riot"), st.update(halts=1))),
+      False)
     A("auto_arm_no_calls, REF's detect2600 another ARM scheme", synth(w, "auto_ref_void21", calls_per=0, scheme=21),
       synth(w, "auto_cand_void23", calls_per=0), False)
     nocalls = synth(w, "auto_ref_nofile", calls_per=0)
