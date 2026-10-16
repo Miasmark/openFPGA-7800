@@ -104,7 +104,15 @@ the input-dependent groups below that did not run for want of their input
                    a scenario left no record, when none of the mutant's
                    scenarios ran; and wire.py mutant with an unknown mutant,
                    an unknown scenario or none of its scenarios named: ERROR
-                   before it copies or builds anything
+                   before it copies or builds anything; and step7_gates.sh
+                   itself on a scratch tree with stand-in run_frames.sh,
+                   frame_gate.py and selftest.py (nothing simulated): a
+                   misspelt --only or --skip name and an empty --only exit
+                   2 before any gate runs, a run with no gate run exits 3;
+                   the frames gate runs plan 1.2 row 7's 16 images by
+                   default and is PARTIAL, naming the images not run, for a
+                   list that leaves any out (FAIL when an image fails); the
+                   selftest gate is PARTIAL and names each missing input
 SPDX-License-Identifier: MIT
 """
 import argparse
@@ -882,6 +890,144 @@ def wire_cases(w):
     shutil.rmtree(d, ignore_errors=True)
 
 
+# stand-ins for the scripts step7_gates.sh's frames and selftest gates call (gates_sh_cases): nothing is simulated
+GATES_FAKE_FRAMES = r"""#!/bin/bash
+# stand-in run_frames.sh: the run directory tb_frames would write
+mkdir -p "$WORK/runs/$NAME" && echo "stand-in run_frames.sh $*" > "$WORK/runs/$NAME/run.log"
+"""
+GATES_FAKE_GATE = r"""#!/usr/bin/env python3
+# stand-in frame_gate.py: FAIL for the image named in FAKE_FAIL, pass for any other
+import os, sys
+n = sys.argv[sys.argv.index("--name") + 1]
+bad = n == os.environ.get("FAKE_FAIL")
+print("FRAME_GATE %s %s" % ("FAIL" if bad else "pass", n))
+sys.exit(1 if bad else 0)
+"""
+GATES_FAKE_SELFTEST = r"""#!/usr/bin/env python3
+# stand-in selftest.py: its arguments, and a pass
+import sys
+print("stand-in selftest.py " + " ".join(sys.argv[1:]))
+print("SELFTEST pass (1 of 1 cases as expected)")
+"""
+
+
+def gates_sh_cases(w):
+    """step7_gates.sh itself, copied into a scratch tree of its layout with
+    stand-ins (GATES_FAKE_*) for run_frames.sh, frame_gate.py and
+    selftest.py: --only or --skip with a name that is not a gate, and an
+    empty --only, exit 2 before any gate runs; a run in which no gate ran
+    exits 3; the frames gate runs plan 1.2 row 7's 16 images (its FRAMES16)
+    by default, is PARTIAL (exit 3) and names the images not run for a
+    FRAMES_LIST that leaves any out, and fails when an image fails; the
+    selftest gate is PARTIAL and names each log-based input that is missing
+    (--reset only with Fix B in the tree), and passes with all six."""
+    src = os.path.join(SIM, "step7_gates.sh")
+    text = open(src).read()
+    m16 = re.search(r'(?ms)^FRAMES16="(.*?)"', text)
+    mg = re.search(r"(?m)^GATES=\((.*?)\)", text)
+    print("step7_gates.sh on a scratch tree with stand-in gate scripts:")
+    if not m16 or not mg:
+        print("  WRONG step7_gates.sh has no FRAMES16 or GATES line")
+        results.append(False)
+        return
+    f16, gates = m16.group(1).split(), mg.group(1).split()
+    d = os.path.join(w, "gates_sh")
+    shutil.rmtree(d, ignore_errors=True)
+    for rel, body, mode in (("sim/run_frames.sh", GATES_FAKE_FRAMES, 0o755),
+                            ("sim/check/frame_gate.py", GATES_FAKE_GATE, 0o755),
+                            ("sim/check/selftest.py", GATES_FAKE_SELFTEST, 0o755),
+                            ("sim/tb_frames.sv", "// stand-in\n", 0o644),
+                            ("src/fpga/ap_core.qsf", "# stand-in\n", 0o644),
+                            ("src/fpga/core/sram_ctrl.sv", "// stand-in: t_new (Fix B in the tree)\n", 0o644)):
+        p = os.path.join(d, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write(body)
+        os.chmod(p, mode)
+    gs = os.path.join(d, "sim", "step7_gates.sh")
+    shutil.copy2(src, gs)
+    games, r1 = os.path.join(d, "games"), os.path.join(d, "r1")
+    juno = "Juno-First_demo_final_CGP_NTSC"
+    os.makedirs(games)
+    for n in f16 + [juno]:
+        open(os.path.join(games, n + ".bin"), "wb").write(b"\0")
+        os.makedirs(os.path.join(r1, n))
+        open(os.path.join(r1, n, "fp.csv"), "w").write("frame,len_sys\n1,100\n")
+    env0 = {k: v for k, v in os.environ.items() if k not in (
+        "SIM_LOCK", "FRAMES_LIST", "FRAMES_GUARD", "FRAMES_RULE", "EXTRA_REF", "FAKE_FAIL")}
+    env0.update(VERILATOR="true", GAMES=games, R1_DIR=r1)
+    k = [0]
+
+    def ran(out):
+        p = os.path.join(out, "frames.log")
+        return re.findall(r"(?m)^== (?!gate )(\S+)$", open(p).read()) if os.path.exists(p) else []
+
+    def case(label, args, want_rc, want=(), env=None, pre=None, check=None):
+        k[0] += 1
+        out = os.path.join(d, "out%d" % k[0])
+        os.makedirs(out)
+        if pre:
+            pre(out)
+        r = subprocess.run(["bash", gs, "--out", out] + args, env=dict(env0, **(env or {})),
+                           capture_output=True, text=True)
+        logs = "".join(open(os.path.join(out, f), errors="replace").read()
+                       for f in ("frames.log", "selftest.log") if os.path.exists(os.path.join(out, f)))
+        got = r.stdout + r.stderr + logs
+        miss = [x for x in want if x not in got]
+        why = check(out, got) if check else ""
+        ok = r.returncode == want_rc and not miss and not why
+        results.append(ok)
+        last = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["(no output)"])[-1]
+        print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected exit {want_rc}, got {r.returncode} ({last[:150]})")
+        if not ok:
+            print(f"        missing: {miss}; {why}")
+            print("\n".join("        " + l for l in got.splitlines()[-10:]))
+
+    nosum = lambda out, got: "summary.txt written: a gate ran" if os.path.exists(os.path.join(out, "summary.txt")) else ""
+    case("--only with two misspelt names (wrie, selftset)", ["--only", "wrie,selftset"], 2,
+         ["unknown gate 'wrie'"], check=nosum)
+    case("--skip with a name that is not a gate", ["--skip", "frames,no_such_gate"], 2,
+         ["unknown gate 'no_such_gate'"], check=nosum)
+    case("--only with no name", ["--only", ""], 2, ["--only names no gate"], check=nosum)
+    case(f"--skip all {len(gates)} gates: no gate ran", ["--skip", ",".join(gates)], 3, ["no gate ran"])
+    case("--only frames, FRAMES_LIST not set: plan 1.2 row 7's 16 images", ["--only", "frames"], 0,
+         ["frames       PASS", "STEP7_GATES pass (1 gates)"],
+         check=lambda out, got: "" if sorted(ran(out)) == sorted(f16) and len(f16) == 16
+         else f"ran {ran(out)}, not the 16 of FRAMES16 ({len(f16)})")
+    case("--only frames, FRAMES_LIST one of the 16 and the calibration image", ["--only", "frames"], 3,
+         ["PARTIAL: 15 of plan 1.2 row 7's 16 images not run", f16[-1]],
+         env={"FRAMES_LIST": f"{f16[0]} {juno}"})
+    case("--only frames, FRAMES_LIST the calibration image alone (the old default)", ["--only", "frames"], 3,
+         ["PARTIAL: 16 of plan 1.2 row 7's 16 images not run", "STEP7_GATES incomplete"], env={"FRAMES_LIST": juno})
+    case("--only frames, the 16 with one failing", ["--only", "frames"], 1, ["frames       FAIL", "STEP7_GATES FAIL"],
+         env={"FAKE_FAIL": f16[3]})
+    case("--only frames, FRAMES_LIST one image, which fails: FAIL, not PARTIAL", ["--only", "frames"], 1,
+         ["frames       FAIL"], env={"FRAMES_LIST": f16[0], "FAKE_FAIL": f16[0]})
+    inputs = {"--run-sim": "run_sim.out", "--fp": "rs/fp/load_a26.csv", "--cartram": "cartram_work/cartram/logs/e7_b0.log",
+              "--reset": "cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log", "--artape": "rs/cartram/logs/artape_b0.log",
+              "--extra": "extra_tests.out"}
+
+    def put(names):
+        def f(out):
+            for o in names:
+                p = os.path.join(out, inputs[o])
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                open(p, "w").write("stand-in\n")
+        return f
+    eref = os.path.join(d, "extra_ref.log")
+    open(eref, "w").write("stand-in\n")
+    case("--only selftest on an empty OUT: PARTIAL, the six inputs named", ["--only", "selftest"], 3,
+         ["PARTIAL: every planted fault that ran was caught"] + [f"missing: {o} (" for o in inputs])
+    case("--only selftest with all six inputs and EXTRA_REF", ["--only", "selftest"], 0,
+         ["selftest     PASS"] + [f" {o} " for o in inputs], env={"EXTRA_REF": eref}, pre=put(inputs))
+    case("--only selftest without the artape log", ["--only", "selftest"], 3,
+         ["missing: --artape ("], env={"EXTRA_REF": eref}, pre=put([o for o in inputs if o != "--artape"]),
+         check=lambda out, got: "" if got.count("  missing: ") == 1 else "more than --artape named")
+    case("--only selftest with every log but no EXTRA_REF", ["--only", "selftest"], 3,
+         ["missing: --extra ("], pre=put(inputs),
+         check=lambda out, got: "" if got.count("  missing: ") == 1 else "more than --extra named")
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def gate_cases(w):
     fg = os.path.join(HERE, "frame_gate.py")
     print("frame_gate.py on synthetic runs:")
@@ -1157,6 +1303,7 @@ def main():
     div_cases(w)
     gate_cases(w)
     wire_cases(w)
+    gates_sh_cases(w)
     skipped = [o for o, v in (("--run-sim", a.run_sim), ("--extra", a.extra), ("--fp", a.fp), ("--cartram", a.cartram),
                               ("--reset", a.reset), ("--artape", a.artape), ("--tools", a.tools)) if not v]
     print("groups not run (no input given): " + (", ".join(skipped) if skipped else "none"))

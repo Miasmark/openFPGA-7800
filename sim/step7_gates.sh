@@ -62,8 +62,10 @@
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
 #                and fingerprints (so it runs after them), the guards'
-#                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees, and
-#                wire.py's mutant verdict on a fake tb_wire. Without one of
+#                (pp_guards.py, hygiene.sh, pp_equiv.py) on scratch trees,
+#                wire.py's mutant verdict on a fake tb_wire, and this
+#                script's gate names, frames list and PARTIAL verdicts on a
+#                scratch copy with stand-in gate scripts. Without one of
 #                those logs (the gates that write them not run, or with --skip,
 #                no EXTRA_REF; the reset log only with Fix B in the tree) its
 #                planted faults cannot run: the gate is then PARTIAL and names
