@@ -2,7 +2,7 @@
 
 **DARIA** (Dual-use Atari RISC Interface Accelerator) is ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`), extended to run the 2600's ARM cartridge schemes: DPC+, CDF, CDFJ and CDFJ+ (Harmony and Melody cartridges). Upstream MiSTer runs them on its ARM7TDMI core, which the Pocket build leaves out (`NO_ARM_MAPPER`). The first release with DARIA will be 2.2.1.
 
-**Steps 0 (scope), 1 (design), 2 (Thumb in simulation), 3 (the probe build), 5 (the memory system) and 6 (the front end, in simulation) are done; step 4 (S3) is not built, and step 7 (integration and Fix B) is next.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
+**Steps 0 (scope), 1 (design), 2 (Thumb in simulation), 3 (the probe build), 5 (the memory system) and 6 (the front end, in simulation) are done; step 4 (S3) is not built. Step 7 (integration and Fix B) has its results on the tree that ships in 2.2.1 ("Step 7 work"): every item of its done-when holds, and plan 7.7's fresh-clone run is still owed. Step 8, the hardware test builds, is next.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
 
 Tags, as in `BUPCHIP_CORE.md`:
 
@@ -295,7 +295,7 @@ Against the core as it is (`BASE=1`, ARIA at ÷24), at slow 85 °C:
 
 - **Hold: keep −20.** With `set_min_delay` 0 the crossings were checked for hold too. On seed 3 the $8007 command byte (`cmd_byte` → `cmd_data_arm`) missed by 0.033 ns at fast 0 °C. That bus is held for two `clk_arm` clocks before the toggle lets it be used, so the check means nothing there, and 7.3's −20 removes it.
 - **Hold inside `clk_arm`** has positive slack at every corner on every build. On seeds 1 and 2 even the worst hold slack of any path into `clk_arm`, crossings included, is +0.128 ns and +0.023 ns, against +0.121 ns for ARIA.
-- **This is step 7's form.** The same lines go into `core_constraints.sdc`, and its comment that `clk_arm` is 2 × `clk_sys` goes.
+- **This is step 7's form.** The same lines go into `core_constraints.sdc`, and its comment that `clk_arm` is 2 × `clk_sys` goes. (As built in step 7: the lines are in `core/daria_constraints.sdc`, which only the DARIA build reads, so `core_constraints.sdc` stays the same in both builds; its header comment names both clocks.)
 
 **Two more levers: S1 at 40.43 MHz [probe].** All ten of the worst paths in the 40.43 MHz full build ran:
 
@@ -624,6 +624,310 @@ Not met, or not run:
 - **The full fit**, with the device at 84% as a guide (decision 9).
 - **The STA checks of design 8.2:** `report_timing` from `pd_tog` to `pd_rx` lists exactly one path for setup and one for hold, meeting 6 and 1 ns; `pd_rx` is neither duplicated nor retimed; the clock skew on that path is read off the report. The block probe cannot show them: it cuts `clk_sys` and `clk_arm` as asynchronous groups (`lanes/D_arb_guard.md`, O-4).
 - **The guard's real-clock check.** `tb_daria` is zero-delay, at a fixed phase per run. Phase moves, a PLL relock and path delays of 1–6 ns are tried only on the guard's unit bench (`tb_fe_guard`), so the lock and the phase-B edge are still to be seen on the fitted core's clocks.
+
+## Step 7 work: integration and Fix B (2026-10-09 to 10-16)
+
+`docs/daria_step7/plan.md` is the plan, with every amendment marked in place, and `docs/daria_step7/progress.md` records the runs as they landed. This section records the result. **The tree that ships in 2.2.1 is `317eaa8`'s `src/`.** `src/` has not changed since: at the final review's head it is byte-identical, and the owner froze it as verified (2026-10-16). The verification campaign on that tree, c76, ran from 2026-10-14 09:13 to 2026-10-16 00:58 UTC. Every piece exits 0, and every gate passes under the amended rules.
+
+### What was built
+
+- **The integration** (`POCKET_DARIA`, which `ap_core.qsf` now sets):
+  - `daria_fe` sits in `atari7800_pocket.sv` beside the BupChip wrapper.
+  - The hooks in the vendored `top.sv` and `cart2600.sv`: for DPC+ and the CDF family, `cart2600` takes the front end's byte (`fe_do`), its output enable (`fe_oe`) and its two busys (`fe_call_busy`, `fe_dma_busy`). `is_bad_game` keeps only `BANKELF` and `BANKBUS`. `mapper_init_busy` stays 0: `daria_fe`'s `init_busy` goes straight into the wrapper's reset (`daria_hold`).
+  - `daria_smp`, the sample requester beside the asset cache.
+  - `bup_dbg_snap`, the `BUP_DEBUG` status word's snapshot (open item 11).
+  - The DARIA-only build files: `core/daria_constraints.sdc` (the ±20 ns crossing bounds and the guard pair's 6 / 1 ns) and `core/daria.qip`, which sources `core/daria_sync.tcl` (the synchroniser marks, and `ROUTER_REGISTER_DUPLICATION OFF`).
+- **Fix B** (commit F, `20c7c2a`): the 2600 cartridge-RAM request goes to `sram_ctrl` on its own `clk_sys` registers (`t_*_q`), off the SRAM's `clk_sdram` request path ("Fix B", below).
+- **Commit P** (`b1e57ef`), in both builds: the shipped core's PAL 2600 loop on Auto region is fixed. `is_pal_o` is now `region_pll`, which is held while a 2600 image's region is not known. Before the fix, a PAL 2600 game made 41,293 retunes in 1.3 simulated seconds and ended in NTSC; after it, one retune, to PAL, at 955 ms.
+- **The clock:** ÷19, 36.17 MHz (decision 7; `b177e64`). `daria_sync.tcl` turns the router's register duplication off (`3201313`). `daria_constraints.sdc`'s fitter-only block asks for 5.5 ns on the guard pair (`618b5c3`).
+- **The retune-inside-F6 race, fixed** (`f2c305e`). The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune, and a retune is pending while `region_pll` differs from it. `region_pll` is frozen while a retune is pending or under way, and while an ARM image's console is in reset. During a 2600 download it is set back to `daria_rgn`. While a retune is pending, F6 cannot start, so F6 runs once, after the retune. DARIA's timer prescale takes `daria_rgn` (`c5fb23f`).
+- **The shipped seed:** `SEED` 2, `ap_core.qsf`'s already. It is the only seed that passed every check as first written. The seed comment above it still gives 2.1.1's margins (open: "After 2.2.1", below).
+
+### Decisions taken in step 7
+
+- **÷19 for the first release** (owner, 2026-10-12, "V1 even if not exact"; plan 5.2). At ÷18, Q2 on D met `clk_arm` on two seeds of three (+0.548 / +0.115 / −1.736 ns). Fitter padding did not fix it: over nine ÷18 fits `clk_arm` averaged +0.04 ns over a range of 2.7 ns, and 3 of 9 missed. ÷19 met it on every seed with no padding (+1.477 / +1.638 / +1.614 ns). Its cost: the guard is inert, so cart RAM coincidences are a counted race again (open item 7), and Qyx's heaviest call takes 97% of its budget.
+- **"Same frames": wanted, not required for V1** (owner, 2026-10-12). Plan P13 and 7.4 became the V1 rule. It gates frame length, video, RIOT RAM and each call's ARM instruction count on every frame. Audio is counted and documented, not gated. R2 runs with bench parity: `tb_frames` presents the TIA's paddle inputs as R1's bench did.
+- **The retune-inside-F6 race is fixed,** not left to step 8 (owner, 2026-10-12): `f2c305e`, above.
+- **Q2 at ÷19: two checks amended, no lever** (the lead, 2026-10-14; plan 5.4).
+  - At ÷19 the guard cannot lock whatever the delay of its `pd_tog` → `pd_rx` path, so that path's 6 ns window guards no function. Check (a) still requires the constraint applied and the pair single, and reports the pair's setup slack without gating on it. Check (l) leaves out that one path when it is the only failing `clk_sys` endpoint.
+  - Check (h)'s `t_*_q` → `clk_sdram` threshold drops from +4.5 to +3.0 ns, still 1.5 ns clear of the +1.5 ns release gate.
+  - A lever (a fitter target, or other bounds on the pair) would have voided Q2, Q-mut and Q5, about a day of fits, with no sign that it would close.
+- **At the final review** (owner, 2026-10-16): `src/` is frozen as verified for 2.2.1. The review's `src/`-only findings move to after 2.2.1 ("After 2.2.1", below). RTL-1 is accepted for 2.2.1 as a known minor issue (open item 20).
+
+### Fix B (Build A)
+
+Fix B was fitted alone first (Q1, seeds 1 / 2 / 3, `clk_sdram` worst setup at the worse slow corner). It meets the +1.5 ns gate on all three seeds: +2.390 / +1.873 / +2.714 ns, against +1.822 / +1.850 / +1.735 ns on `aeee6d2` (Q0). Its smallest margin is +0.37 ns above the gate.
+- Check (g) passes: no path from `cart2600` or `read_DB` reaches `sram_ctrl`'s registers or the SRAM pads except through `t_*_q`. The same query finds 18,734 such paths on `aeee6d2`.
+- Fix B saves 107-136 ALMs.
+- Q1r, seed 2 again, gave a byte-identical `.rbf`, so Quartus is reproducible here. That makes Q4's identity proof possible (below).
+
+### The verification campaign c76 on the shipping tree (2026-10-14 to 10-16)
+
+Plan 7.6's reruns, on `317eaa8`'s `src/`.
+- **How it ran.** Every simulation ran on a detached worktree at `317eaa8` with a clean status, Verilator 5.040, and the benches at VCO/19. The fits ran under the Quartus lock on the same tree. Q5 added only the `BUP_DEBUG` line to the qsf, and Q-mut only its two mutants. The campaign went through several session restarts, and each piece was resumed or restarted from its beginning.
+- **The logs** are in the D worktree's gitignored `sim/work/step7/fix/fix/c76/`.
+- **The second reader** judged every piece and fit against plan 5.x and 7.6, under the amendments of 2026-10-14.
+
+**Benches and checkers changed after `317eaa8`; the RTL did not.** The changed files are `tb_wire.sv`, `wire.py`, `selftest.py`, `step7_checks.py`, the table in `step7_report.tcl`, `f3_crossings.txt` and `step7_gates.sh`. Where a c76 piece ran an older tool, the run that covers the current tool is named.
+
+#### Static gates
+
+- **Hygiene** over `70a63ca..317eaa8`: 43 files, 1,854 added lines.
+- **`pp_equiv`:** the non-DARIA stream is `9b9e7e5e…`, P's, with 0 `daria` tokens. `top.sv` and `cart2600.sv` equal `aeee6d2`'s under both `tb_daria` macro sets.
+- **`pp_guards`:** 4 guards, 0 findings.
+- **`divider`:** 11 bench and gate defaults, all at VCO/19.
+- **Lint:** no warning added in any of the three macro sets.
+
+#### `run_sim`, the cartram matrix and `extra_tests`, on both builds
+
+- **`run_sim.sh`:** passes on both builds.
+  - `BIOS_BOOT`, `BUPCHIP_E2E` and `PLL_REGION` pass, and the BupChip's PCM is identical to the reference.
+  - The DARIA section's three synthetic images run 391, 1 and 112 calls. Every call returns, with 0 halts and 0 PSRAM violations; the guard stays unlocked with 0 unlocks.
+  - All 21 fingerprint cases are identical between the DARIA and plain builds on every column, the CPU column included (plan 7.5 row 5).
+- **The cartram matrix:** passes.
+  - The matrix covers 8 mappers with Flicker Blend off and on, the Supercharger, a 7800 RAM cart and an ARM image.
+  - The directed s19 run passes: the latest hand-over is at s19, never above.
+  - The 14 console-reset cases, `midswap` and `forcecoinc` pass.
+  - Both mutants are caught: `nohold` by the reset sweep and by `forcecoinc`, `nocmp` by `midswap`.
+  - All 20 fingerprints are identical between the builds.
+- **`extra_tests.sh` with `AR_TAPE=1`:** passes. It ran as the gate's two halves, each with its own `obj_load`.
+  - Each half exits 0, and `extra_tests_check.py --ar-tape` passes on each against the reference build's log: the POKEY and DLI statistics, `ARCHECK`, multisprite row for row, the tape's full load, and the multiload's 0-then-1 order.
+  - All 37 fingerprints (16 `extra_*`, 21 `cartram_*`) are identical between the builds.
+  - The tape multiload ends white (`$0e`), not the header's red and green, on both builds and in the reference. The checker notes this and does not fail it.
+
+#### `s4/check.sh` on both sets
+
+- **Both sets pass 28 of 28.**
+  - The DARIA set ran with `ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=1`.
+  - Each job ran alone (`ONLY=`, `JOBS=1`) and every `.rc` is 0. Each call therefore labels itself "a subset, not the gate"; the 28 results together are the set.
+- **The DARIA set:**
+  - All 19 `tb_s4` runs print "snap: ok", with 0 PSRAM model violations.
+  - Clocks: 36.172 MHz; 35.842 MHz in the PAL retune job; 21.281 MHz in the two `arm15pal` jobs, which set their own clock.
+  - `synth_reloads` meets its placement requirement at ÷19 (`+holdstep=7`): one hold falls mid-access and one on the arriving halfword.
+- **The non-DARIA set:** 19 runs at 28.636 MHz, "snap: na", 0 violations.
+- **PCM:** every job with a reference is PCM-identical to it, in both sets.
+
+#### Unit benches and the gate checkers
+
+- **`tb_daria_smp`:** 18 clean runs and 8 of 8 mutants caught.
+- **`tb_dbg_snap`:** 32 runs pass, one of them at ÷19 with a random phase, and 7 of 7 mutations are caught.
+- **The checkers' selftest:** 232 of 232 on `317eaa8`'s `selftest.py`. The 14 `wire.py` cases added in `2ed7e15` passed in round 4's gate run at `dfccd7f` (179 of 179).
+- **`fit_selftest`:** 88 of 88 at `0412aac`, outside c76.
+
+#### `tb_wire`'s full set and its mutants
+
+- **c76:** 96 of 96 scenarios pass on `317eaa8`'s bench (`DIRECTED=1`, `GAMES`, `BIOS`, and the four Souper runs).
+  - In all 15 `+wire_pll` scenarios, `f6_pend` and `rgn_bad` are 0.
+  - Turbo: 138 calls, 138 returns, 20 cache misses, 0 PSRAM violations.
+- **The newer bench** (`rgn_bad` also reads `daria_mmio`'s `pal`; a mutant counts as CAUGHT only on its named keys) is covered by two rounds:
+  - **Round 3** ran the 15 `+wire_pll` scenarios on a binary identical to the committed bench's (md5 `dbf97f17…`). All pass.
+  - **Round 4** (at `0b2f9e1`, whose `sim/` equals `356cea9`'s) ran the seven mutants of plan 7.2 on real simulations. Every one is CAUGHT on the keys 7.2 names:
+    - `nomask` by `f6_live`, `f6_busy` and `wr_busy` in three scenarios;
+    - `nowd` by `rt_f6_early` and `f6`;
+    - `nohold` by `releases` and `rs_f6_rst_low`;
+    - `nofrzarm` by `f6_busy` and `f6`;
+    - `nofrzpend` by `f6` and `b2b`;
+    - `palpll` by `rgn_bad` in 5 scenarios;
+    - `palsel` by `rgn_bad` in 7.
+  - Round 4's logs are in the gitignored `sim/work/step7/fix/fix/r4/mut/`. The D fix round's record (`progress.md`, on DARIA-dev) says this run "waits for a slot"; it ran on 2026-10-15.
+
+#### The fits
+
+Figures are in ns. Setup is at the worse slow corner, and the guard pair's slack at slow 85 °C. (h) is the `t_*_q` → `clk_sdram` setup. Verdicts are from `step7_checks.py` at `356cea9`, run on copies of each fit's report files without a refit.
+
+| Fit | `clk_arm` | `clk_sdram` | Worst hold | Guard pair | (h) | ALMs needed | Verdict as amended (as first written) |
+|---|---|---|---|---|---|---|---|
+| Q2 seed 1 | +1.241 | +2.462 | +0.120 | +0.217 | +4.298 | 15,602 | PASS (FAIL (h)) |
+| **Q2 seed 2, shipped** | +1.077 | +2.683 | +0.098 | +0.397 | +6.697 | 15,625 | PASS (PASS) |
+| Q2 seed 3 | +1.765 | +2.919 | +0.119 | −0.046 | +6.338 | 15,600 | PASS (FAIL (a), (l)) |
+| Q2 seed 3, `KEEP_DB=1` | the same figures as seed 3 | | | | | | PASS |
+| Q4 (no DARIA, `PIN_ID=1`) | — | +2.380 | +0.100 | — | +6.423 | 12,990 | PASS; `.rbf` md5 `8569ab1e…`, equal to Q1''s |
+| Q-mut, seed 1 | +1.539 | +2.788 | +0.090 | +0.380 | +4.925 | 15,521 | FAIL (f), (k') only, as required |
+| Q5 seed 1 | +0.151 | +2.618 | +0.107 | +0.603 | +5.212 | 15,799 | PASS once (c.cells) is judged by the corrected table (below) |
+| Q5 seed 2 | +0.636 | +2.265 | +0.121 | +0.131 | +5.634 | 15,802 | the same |
+| Q5 seed 3 | +1.929 | +2.665 | +0.095 | −0.060 | +5.981 | 15,818 | the same ((a), (l) as first written fail) |
+
+- **Q2 meets plan 5.2 and 5.3 on every seed.**
+  - `clk_arm` ≥ 0, `clk_sdram` ≥ +1.5 ns, and hold > 0 at every corner.
+  - Area: 84.4-84.6% of the device. LABs are 1,767-1,770 of 1,848, M10K 195 of 308, and peak interconnect 60.4-60.8%. That is 77-102 ALMs over the 84% guide, which by plan 5.1 triggers nothing.
+- **Q2 under the amended checks:**
+  - Seed 1's (h), +4.298 ns, clears +3.0 ns.
+  - On seed 3, (a) finds exactly one setup path at every corner with the 6.000 ns relationship: −0.046 ns at slow 85 °C, +0.049 at slow 0 °C. (l) leaves it out: the Slow 85 °C Setup Summary gives `clk_sys` a slack and End Point TNS of −0.046 ns both, so no other `clk_sys` endpoint fails, and `pd_rx`'s only fan-in is `pd_tog`.
+  - Every other check passes on all three seeds, (c) included: neither the guard pair nor any first flop is duplicated or retimed.
+- **Q4** passes every gating check, and its `.rbf` equals Q1''s: the build without DARIA is the same bitstream as commit P's.
+- **Q-mut:** (f) names `run_s[0]`, and (k') names `ready_s[0]`. Nothing else fails.
+- **The I3 STA mutants,** run `REPORT_ONLY` on copies of the `KEEP_DB` refit, fail as plan 7.2 requires:
+  - the guard pair removed fails (a), (b), (k) and (e), because the path is timed at 20 ns instead of 6 / 1;
+  - a clock-group cut added after the ±20 ns lines fails (a), (b), (k), (e) and (k');
+  - the cut in place of those lines fails the same five.
+- **Q5:**
+  - Each fit's own verdict failed (c.cells), because `317eaa8`'s report table expected `cap_err_a[0]`, a flop no build has (plan 2.7).
+  - Re-judged by the corrected table, 22 of 22 rows match on all three seeds, and every check passes: P29 holds on all three.
+  - The second reader made that re-judgement by hand. Since `6477f78` (the final review) `step7_checks.py` makes it from each fit's `firstflops.tsv`: on copies of the c76 fits, Q5 seeds 1-3 give `verdict: PASS` with the tracked tools.
+  - Area: 15,799-15,818 ALMs.
+- **Open item 12's margins** (Q2 seeds 1 / 2 / 3):
+  - `t_*_q` → `clk_sdram`: setup +4.298 / +6.697 / +6.338 ns, hold +0.263 / +0.337 / +0.266 ns.
+  - The `c_rdata` multicycle into `clk_sys`: setup +70.904 / +68.276 / +68.613 ns against an 87.306 ns relationship; hold +0.795 / +0.784 / +1.000 ns.
+  - Flicker Blend's half-period paths: into `fbn_*` +2.462 / +2.683 / +2.969 ns, and `fbn_*` → the pad registers +3.316 / +3.792 / +3.403 ns, both against 8.730 ns; hold at least +8.67 ns.
+  - On seeds 1 and 2, the path into `fbn_*` is `clk_sdram`'s worst path.
+
+#### The frame gate, V1 rule (16 images, 1,500 frames)
+
+`tb_frames` ran on the DARIA build with `INPUTS=tb_daria`, at VCO/19, phase 0, against R1. `frame_gate.py --rule v1 --expect-guard unlocked` judged each run.
+
+**All 16 images pass.**
+- Each run holds 1,499 of 1,499 frames. `len_sys`, video and RIOT RAM are equal on every frame.
+- Every call's ARM instruction count equals R1's.
+- Every status line shows 0 halts, 0 PSRAM violations, the guard unlocked and 0 unlocks.
+- Call counts and late calls equal R1's: 16 late on Spiders, at the overrun frames 557-572, and 0 elsewhere.
+- Frame 1's video was excused on Wizard of Wor, Zaxxon and Zoo Keeper, each by the rule's frame-0 call.
+
+Audio is counted, not gated (plan 7.4 asks for the numbers per image):
+
+| Image | Calls | Frames with audio differing | `release_shift` runs (frames) | Other runs (frames) |
+|---|---|---|---|---|
+| Elevator Agent | 2,999 | 0 | — | — |
+| Galagon | 2,999 | 277 | 30 (75) | 49 (202) |
+| Gorf | 2,999 | 697 | 11 (31) | 26 (666) |
+| Lady Bug | 2,999 | 56 | 13 (31) | 8 (25) |
+| Mappy | 2,999 | 492 | 4 (12) | 64 (480) |
+| Qyx | 2,999 | 713 | 11 (27) | 85 (686) |
+| RobotWar 2684 | 2,999 | 860 | 5 (9) | 70 (851) |
+| Scramble | 2,086 | 883 | 0 | 28 (883) |
+| Spiders | 2,999, 16 late | 544, and 1 in the excused overrun frames | 12 (40) | 94 (504) |
+| Stratovox | 1,094 | 11 | 0 | 1 (11) |
+| Super Cobra | 2,999 | 946 | 4 (17) | 81 (929) |
+| Turbo | 2,999 | 635 | 7 (26) | 86 (609) |
+| Tutankham | 2,999 | 688 | 17 (34) | 42 (654) |
+| Wizard of Wor | 3,003 | 794 | 13 (31) | 118 (763) |
+| Zaxxon | 2,999 | 1,025 | 4 (9) | 6 (1,016) |
+| Zoo Keeper | 2,999 | 307 | 21 (48) | 42 (259) |
+| **All 16** | | **8,928 of 23,984 (37.2%)** | **152 (390)** | **800 (8,538)** |
+
+- **The differences are timing, not content.** On Gorf the owner listened to 25 s of both and judged the audio "a hair out of sync for the most part". Writes after a call land earlier on DARIA, and the CDF music tick runs at another phase (`progress.md` on DARIA-dev, "Audio against a real Harmony").
+- **Against a real Harmony** (a model of the LPC2103's MAM): on Gorf's own settings DARIA's calls run 5.6% faster than the real cartridge and upstream's 7.6% slower.
+- **What V1 does not prove:** under V1 the frame gate is no evidence of audio-path correctness. `daria_fe`'s audio is checked access by access against upstream in mode A and mode B (step 6, and mode B below).
+
+#### Mode B at VCO/19
+
+All 19 runs pass at `+d_div=19`.
+- **The runs:** 10 with the wrapper (the six images of the halt's record, plus Galagon and Spiders at the two other lattice phases) and the nine of `G_modeB.md` without it.
+- **The calls:** every call equals upstream's (0 differ, 0 skipped), with 0 front-end failures, and every audio read is checked against the RAM at the read.
+- **The guard** never locked, as expected at ÷19.
+- **Spiders** has its 16 late calls at every phase.
+
+**Shared-edge pairs** are a DARIA store and a front-end read of the same cart RAM word less than 69.84 ns apart. Every one is a front-end audio read during a DARIA call; there are no write-load or write-write pairs.
+
+| Run (frames) | Pairs | At 0 / 1 / 2 VCO periods (under 3 ns) | At 3-6 | Over 6 | Stores that changed the word |
+|---|---|---|---|---|---|
+| Galagon, phase 0 (600) | 8 | 0 / 1 / 0 | 2 | 5 | 3: the 1-period pair and 2 over 6 |
+| Galagon, 8,730 ps (600) | 6 | 0 / 0 / 1 | 0 | 5 | 3: the 2-period pair and 2 over 6 |
+| Galagon, 17,460 ps (600) | 8 | 0 / 0 / 0 | 2 | 6 | 3: both at 3-6 and 1 over 6 |
+| Mappy (600) | 22 | 1 / 0 / 1 | 3 | 17 | 2, both over 6 |
+| draconian RC8 (300) | 2 | 0 / 0 / 0 | 0 | 2 | 0 |
+| SF2fix, Turbo (300); Spiders at three phases (600) | 0 | — | — | — | — |
+| Without the wrapper: Galagon at three phases (300 each); draconian (300) | 1 each; 2 | none under 3 ns | 0 | all | 0 |
+| Without the wrapper: SF2fix at three phases, Dino Eggs, Elevator Agent (300) | 0 | — | — | — | — |
+
+- **The phase-0 wrapper runs repeat the halt's record bin for bin:** Galagon 8, Mappy 22, draconian 2, none elsewhere. The near pairs are the same three:
+  - Galagon's at 1 period (1.46 ns), whose store changed the word;
+  - Mappy's at 0 and 2 periods, each a store of 0 over 0.
+- **The phase runs add one near pair:** Galagon at 8,730 ps, at 2 periods (2.91 ns), whose store also changed the word.
+- **Over all 19 runs** (7,800 frames, about 130 s of play) there are 4 near pairs. 2 of them changed the word, both on Galagon. On hardware each is open item 7's counted race, accepted for V1.
+
+#### What c76 does not cover
+
+- **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above.
+- **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames.
+- **No single gate run at the head** covers `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together.
+- **Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed.**
+
+### After c76: the final review (2026-10-16)
+
+A whole-branch review of `356cea9` found 34 findings, and a second reader checked each one. The tools findings are fixed in `sim/`, with no change to `src/`:
+- **`step7_checks.py`** judges (c.cells) again from `firstflops.tsv` (`6477f78`). (c) and (h.retime) fail on a fit report without its Fitter Netlist Optimizations table.
+- **The fit driver's self-test** needs 100 MB free, not 2,100 MB.
+- **`step7_gates.sh`** (`95c3352`):
+  - the frames gate's default is the 16 images above, and a shorter list is PARTIAL;
+  - the selftest gate names the inputs it lacked and is PARTIAL without them;
+  - an unknown gate name exits 2.
+- **`hygiene.sh`** fails a name list that holds no name (`5e1badb`).
+- **`run_dbgsnap.sh`** counts a mutation run that ends without its verdict as an ERROR, not a catch (`ce14cc0`).
+- **`frame_gate.py --auto`** compares an ARM image whose R1 run makes no call strictly (`3344b92`).
+- **`selftest.py`** runs `step7_gates.sh` itself against stand-ins (`f3a9b49`).
+
+The re-runs after those fixes:
+- `selftest.py` with c76's inputs: 267 of 267 cases as expected.
+- `fit_selftest`: 117 of 117.
+- `frame_gate.py --rule v1` on c76's 16 runs: 16 of 16 pass, each report byte-identical to c76's.
+- `run_dbgsnap.sh`: 7 of 7 mutations caught as in c76. A planted `%Fatal` is reported as an ERROR and fails the run.
+- `step7_checks.py` on every c76 fit: the verdicts in the table above.
+
+**RTL-1** is the one behavioural finding. It is accepted for 2.2.1 (open item 20). `tb_wire`'s scenario `pal2600_a78` pins it on both builds (`82d05f1`, run at `f3a9b49`, DARIA binary md5 `dbf97f17…` as in round 3):
+- **DARIA build:** retunes to PAL at 955.036 ms, to NTSC at 1,005.606 ms and to PAL again at 1,005.636 ms, then releases the A78's console at 1,005.667 ms. It ends with `is_pal` 1, `b2b` 0, `rgn_bad` 0 and `f6_pend` 0.
+- **Plain build:** one retune, to PAL at 955.036 ms. It releases the A78 at 1,005.605 ms and ends with `is_pal` 1.
+
+The other `src/` findings are listed under "After 2.2.1" below.
+
+Two documentation findings belong to the merge into DARIA-dev, not to this branch:
+- linking `docs/IMPROVEMENTS.md` from `DEVELOPING.md`;
+- reconciling `ENVIRONMENT.md` 8.4's VM restarts with DARIA-dev's later explanation.
+
+### Step 7's done-when, item by item (as amended for V1)
+
+1. **`run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass:** yes, on both builds, `AR_TAPE=1` included (c76).
+2. **The RAM mappers pass with Fix B's added latency:** yes. The cartram matrix passes on 8 mappers × Flicker Blend, and the directed s19 run passes at s19, never above.
+3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16. Audio is documented per image above.
+4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
+
+Step 7 is not marked done here. Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed, and the plan items under "What c76 does not cover" are for the lead to run or accept.
+
+### Hand-over to step 8
+
+Plan section 9, corrected for ÷19 at the final review.
+
+- **Fix B on hardware:**
+  - Fix A's list, plus a Superchip game, an E7, a 3E and a CV title;
+  - a Supercharger multiload end to end, and the tape path (`AR_TAPE`).
+- **PSRAM at 36.17 MHz with `CLOCK_SPEED` 50.0** (open item 10):
+  - the BupChip's ARSC readback;
+  - Turbo, which reads beyond the 64 KB window through the cache;
+  - plan 5.4 (o)'s I/O figures for reference.
+- **The shipped `SEED` 2** and its Q2 reports. Test builds with `BUP_DEBUG` use Q5's seeds (all three pass).
+- **The guard on real clocks:** the overlay shows `dbg_locked` and an unlock count (P22).
+  - Expected at ÷19: `dbg_locked` 0 and 0 unlocks at all times, after power-up and after every retune. That confirms the guard is inert, as in every mode-B run at ÷19.
+  - Any lock is a finding to investigate.
+  - The plan's ÷18 expectation ("locked after power-up and after every retune") no longer applies. At ÷19 the guard cannot confirm that C0 and C3 rise together on silicon; that stays an STA assumption.
+- **A PAL 2600 ARM image on Auto region** (Stay Frosty 2's PAL build, for one): one retune soon after the start, one F6 after it, and the game restarting in PAL. No retune residual is left to look for: a manual region change within 0.6 ms of a load is closed by `f2c305e`.
+- **A PAL A78 after a PAL 2600 image on Auto region** (open item 20): two more retunes than the plain build, ending in PAL.
+- **The counted classes expected on hardware:**
+  - the per-image audio differences above;
+  - `merge_race`, and design 9.5's classes;
+  - Spiders' 16 late calls in its overrun frames;
+  - the rare audio-read coincidences of open item 7.
+- **`daria_smp`'s upset exposure:** `pend` and `fl` are never reset, so an upset that leaves `fl` at 1 with no read in flight would hold the asset read port until power-down. This is recorded, not hardened.
+- **The late-call source** (plan 6.2 question 5) and the call counter from `call_tog`, both under `BUP_DEBUG` only. A change seen only under `BUP_DEBUG` re-runs only Q5 and `s4/check.sh` (plan 7.6).
+
+### After 2.2.1: `src/` clean-ups
+
+The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md` on DARIA-dev mirrors this list after the merge.
+
+1. **RTL-1** (open item 20): the freeze of `region_pll` in `atari7800_pocket.sv:1037`. The fix is sketched there; `pal2600_a78`'s expected DARIA count then drops to 0.
+2. **RTL-2:** in the withdrawal branch (`atari7800_pocket.sv:1032-1036`), `region_pll <= daria_rgn` uses `daria_rgn`'s old value on the clock where `daria_rgn` updates. `region_pll` then holds the previous region for one `clk_sys`.
+   - A unit bench started a retune just before a 70-byte 2600 download. With allcomplete 760-792 `clk_74a` after the request, the DARIA build made 3 retunes instead of 1; the plain build made 1 at every distance. No real image is that short: a 2600 image is at least 2 KB, an ARM image at least 24 KB.
+   - The fix: `region_pll <= (daria_rt_cnt == 4'd15) ? region_pll : daria_rgn;`, or compute `daria_rgn`'s next value once. The comments at `:1004-1006` and `:1016-1018` say this cannot happen.
+3. **RTL-3, C3 and DOC-11** (one line): `core_constraints.sdc:15-17` says that with DARIA `clk_arm`'s edges meet `clk_sys`'s "only every 3 `clk_sys`". That is VCO/18's lattice. At VCO/19 they meet every 19 `clk_sys` (48 `clk_arm`), as `daria_constraints.sdc`, `pll_core.v` and `DEVELOPING.md` say.
+4. **C1:** `ap_core.qsf:760-766`, the seed comment, still gives 2.1.1's figures: "79% full", and seeds 1-3 at +0.26, +0.44 and +0.28 ns. It also says a structural fix belongs in `sram_ctrl`; that fix is Fix B, now in. The comment should give:
+   - Q2's seeds on the shipping tree: `clk_sdram` +2.462 / +2.683 / +2.919 ns, 15,600-15,625 ALMs (about 85%);
+   - the +1.5 ns release gate;
+   - why `SEED` 2: the only seed that passed every check as first written.
+5. **C2:** `daria_sync.tcl:49`, the FORCED mark on `cap_err_a[0]`, matches no build, and Quartus lists it as ignored. Its comment at `:31-34` says the BUP_DEBUG build has the chain; Q5 does not. The fix deletes `:49` and corrects `:31-34`. As a non-comment change to an assignment file, it needs a new Q2 and the smoke test.
+6. **`core_top.v:1040`:** the audio comment says the mix is "box filtered down to ~48 kHz (298 clk_sys samples per output)". `core/audio_filter.sv` averages 256 samples, about 55.9 kHz.
+7. **`pll_core.v:39-41`:** the comment says the C3 = 19 display strings are "one digit lower". Only C0 and C2's differ by one in the last digit; C1's differs by 2 and the VCO's by 43 (DOC-15).
+8. **`src/fpga/mister/POCKET_CHANGES.md`** (DOC-13):
+   - Its summary (`:21-24`) counts eight modified upstream files. There are eleven: it leaves out `TIA.sv`, `bram.v` and `Pokey/pokey_adapter.sv`, which its own sections describe.
+   - It says the POKEY is "swapped for an older one". Since 2.0.21 the build uses upstream's `rtl/Pokey/` with a changed adapter.
+   - Its "Updating" list (`:281-286`) re-applies only six files. `DEVELOPING.md`'s "Update the MiSTer core" gives all eleven until this is fixed.
 
 ## Comparisons: upstream and lroby74's fork (2026-10-07)
 
@@ -1107,7 +1411,7 @@ The budget fits with 113 M10K spare (49 with the 128 KB window), which decision 
 - **The front ends' copy engine on `clk_sys`** does it, from the front-end ROM (port B) into cart RAM port B.
 - It starts when `bup_capture`'s cartridge window closes, 64 `clk_sys` after `load_end`, so trailing bytes are in. Upstream starts at `load_end` delayed (`cart2600.sv:710-716`).
 - It runs again on every mapper reset.
-- **The console is held** through `mapper_init_busy`, which `atari7800_pocket.sv:169-171` already adds to the core reset. With `POCKET_DARIA`, `cart2600.sv:592` takes it from the front end instead of 0.
+- **The console is held** through `mapper_init_busy`, which `atari7800_pocket.sv:169-171` already adds to the core reset. With `POCKET_DARIA`, `cart2600.sv:592` takes it from the front end instead of 0. (As built in step 7: `mapper_init_busy` stays 0, `cart2600.sv:621`. The front end's `init_busy` goes straight into the wrapper's reset as `daria_hold`, for an ARM image only, and into the PLL's `.loading`: `atari7800_pocket.sv:169-215, 1111`.)
 - **DPC+** zeroes $0000–$0BFF and copies $6C00–$7FFF to RAM $0C00–$1FFF. **CDF** copies $0000–$07FF and zeroes the rest of `mapper_ram_size`.
 - The CPU plays no part. The window is not needed, and a call cannot come before the 6507 runs.
 
@@ -1249,7 +1553,7 @@ The front ends keep a call block of 14 words in their state RAM: entry, stack, s
   - Return: 7 + 3 `clk_arm` + 3 `clk_sys` + the merge, about 1.7 µs.
   - That is about 2 µs more per call than upstream's controller. With two calls a frame and budgets of 0.5–2.2 ms, it costs 0.1–0.5% of a budget.
 - **Ticks run on during the call.** They update counter_v only, never the seed, frequency or return words. NOTE writes come from the stalled 6507, so the frequencies cannot change under the launch.
-- **Stall interface.** `top.sv:306-329` stays as it is (`arm_call_stall`, `mapper_phi2`). With `POCKET_DARIA`, `cart2600.sv:535, 542, 592` take `arm_dma_busy`, `arm_call_busy` and `mapper_init_busy` from the front ends instead of 0.
+- **Stall interface.** `top.sv:306-329` stays as it is (`arm_call_stall`, `mapper_phi2`). With `POCKET_DARIA`, `cart2600.sv:535, 542, 592` take `arm_dma_busy`, `arm_call_busy` and `mapper_init_busy` from the front ends instead of 0. (As built in step 7: only the two busys come from the front end, as `fe_dma_busy` and `fe_call_busy`, `cart2600.sv:555-570`; `mapper_init_busy` stays 0, as above.)
 - **Reset.**
   - A mapper reset (cart2600's `reset`, the console reset) clears `call_busy` on `clk_sys` at once.
   - It also reaches `clk_arm` as a level through 2 flops, puts the CPU in `rst`, and sets both sides' "seen" registers to their synchronised toggles, as upstream does (`arm_mapper_controller.sv:144-147, 271-276`). A return from an abandoned call is then ignored.
@@ -1285,7 +1589,7 @@ The front ends keep a call block of 14 words in their state RAM: entry, stack, s
 | 6 | 48 kHz tick, `clk_74a` | `bup_tick48k.sv:159-173` | toggle through 3 flops | already asynchronous |
 | 7 | audio frame `clk_arm` → `clk_sys` | `bupchip_pocket.sv:308-323` → `:326-338` | toggle through 3 flops; frame held 20.8 µs | OK |
 | 8 | `BUP_DEBUG` capture error → `clk_arm` | `:376-380` | 2 flops | OK |
-| 9 | `BUP_DEBUG` status to the overlay (`dbg_status`, `dbg_halt_pc`, `dbg_load`'s `clk_arm` bits) | `:383-386, 427-430`; `bup_status_osd.sv:43-44, 72-90` | **none: sampled raw on `clk_sys`**, timed only because `clk_arm` = 2 × `clk_sys` | Needs a fix: a snapshot with a toggle once per frame (about 180 FF), or a false path on these display-only bits |
+| 9 | `BUP_DEBUG` status to the overlay (`dbg_status`, `dbg_halt_pc`, `dbg_load`'s `clk_arm` bits) | `:383-386, 427-430`; `bup_status_osd.sv:43-44, 72-90` | **none: sampled raw on `clk_sys`**, timed only because `clk_arm` = 2 × `clk_sys` | Needs a fix: a snapshot with a toggle once per frame (about 180 FF), or a false path on these display-only bits. **Fixed in step 7:** `bup_dbg_snap.sv`, a toggle snapshot every 1,024 `clk_sys` (`bupchip_pocket.sv:657-668` on the shipping tree, under `POCKET_DARIA`; open item 11) |
 
 Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 MHz ("Clock"); they are re-run at the new rates.
 
@@ -1302,7 +1606,7 @@ Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 
 | TCR[0]; TC write; TC snapshot | both ways | 2 flops; held write plus toggle; held snapshot plus toggle |
 | cart RAM, state RAM | — | dual-clock M10K, ordered by the toggles above |
 
-##### 7.3 SDC (`core_constraints.sdc`)
+##### 7.3 SDC (`core_constraints.sdc`; as built in step 7, `core/daria_constraints.sdc`)
 
 - **Groups.** Today the four counters form one synchronous group (`:12-22`). `counter[0..2]` stay in it.
 - **`clk_arm` (counter[3])** stays related. All `clk_sys` ↔ `clk_arm` paths get exceptions [E]:
@@ -1310,7 +1614,7 @@ Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 
   - 20 ns is under one `clk_arm` period at 40.43 MHz. That bounds the held buses (#4, #5, the call block's toggles, the sample request, the TC mailbox), which are sampled at least 2 destination clocks after their toggle.
 - **Not asynchronous groups.** In TimeQuest a clock-group cut outranks `set_max_delay`, so asynchronous groups would leave those buses unconstrained.
 - **`clk_arm` ↔ `clk_sdram` and ↔ `clk_sys_90`** keep their real 4.37 ns or 1.46 ns relationship as a tripwire. Any path there is a design error, and it then fails timing visibly.
-- **Synchronisers.** Mark the first flop of every chain `SYNCHRONIZER_IDENTIFICATION FORCED` in `ap_core.qsf`, so the fitter packs the chains and reports their MTBF.
+- **Synchronisers.** Mark the first flop of every chain `SYNCHRONIZER_IDENTIFICATION FORCED` in `ap_core.qsf`, so the fitter packs the chains and reports their MTBF. (As built in step 7: exact-bit instance assignments in `core/daria_sync.tcl`, which `core/daria.qip` sources, because Quartus refuses that assignment in a `.qip` itself; DARIA's new files mark theirs with scalar RTL attributes. `docs/daria_step7/plan.md` P8 and 2.7.)
 - **Fitter over-constraint.** The fitter-only block (`:55-59`) still covers `core_clks` → `clk_sdram`.
 - Step 3's probe confirms the form with `report_timing` on the crossings. **Confirmed** (open item 9): the exceptions apply. −20 stays: with 0, a held bus fails a hold check that means nothing for it.
 
@@ -1324,12 +1628,12 @@ Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 
   - From `oe_n`: 1 clock, so 30.6 ns or 24.7 ns, against the part's output-enable access of about 20 ns plus about 7 ns of pad delays [E].
 - **32.73 MHz:** keep 28.636364. It behaves as today, at 5 clocks (153 ns) per halfword.
 - **40.43 MHz:** use 50.0 [sim]. Reads become 20, 21, 22, 24 (two clocks from `oe_n`) and writes 1, 2, 3, 5: 6 clocks (148 ns) per halfword.
-- In both cases update the comment at `atari7800_pocket.sv:1195-1198` and check on hardware with the ARSC readback.
+- In both cases update the comment at `atari7800_pocket.sv:1195-1198` and check on hardware with the ARSC readback. (Step 7: `CLOCK_SPEED` is 50.0 at ÷19 too; the comment is at `atari7800_pocket.sv:1544-1553` on the shipping tree.)
 
 ##### 7.5 Everything else that assumed 2 × `clk_sys`
 
 - **Comments:**
-  - `pll/pll_core.v:14`, and the setting at `:70` (`output_clock_frequency3`; regenerate with C3 = 21 or 17, `DEVELOPING.md:245-271`);
+  - `pll/pll_core.v:14`, and the setting at `:70` (`output_clock_frequency3`; regenerate with C3 = 21 or 17, `DEVELOPING.md:245-271`; as built in step 7, C3 = 19, generated as `DEVELOPING.md`'s "Regenerate the PLL" says);
   - `core_top.v:312`;
   - `atari7800_pocket.sv:13, 27`;
   - `bupchip_pocket.sv:7-9`;
@@ -1380,7 +1684,7 @@ Every one but #9 was built for asynchronous clocks and stress-tested at 16–29 
 - `core.qip`, `sim/run_sim.sh`, `sim/tb_system.sv`, `sim/tb_load.sv`.
 
 **Vendored** (`ifdef POCKET_DARIA` blocks only; identical to upstream without the macro, `POCKET_CHANGES.md:91-93`):
-- `mister/rtl/cart2600.sv`: `arm_call_busy`, `arm_dma_busy` and `mapper_init_busy` from ports (`:535, 542, 592`); the front ends' hook-up and `is_bad_game` (`:158-167`) are the front-end section's.
+- `mister/rtl/cart2600.sv`: `arm_call_busy`, `arm_dma_busy` and `mapper_init_busy` from ports (`:535, 542, 592`); the front ends' hook-up and `is_bad_game` (`:158-167`) are the front-end section's. (As built in step 7: only the two busys, from the ports `fe_call_busy` and `fe_dma_busy`; `mapper_init_busy` stays 0, `cart2600.sv:621`.)
 - `mister/rtl/top.sv`: a port group beside `POCKET_BUPCHIP`'s, for the front ends.
 - `cache_ram.v` stays unchanged: the new RAMs use Pocket wrappers.
 - Add a `POCKET_DARIA` row to `POCKET_CHANGES.md`.
@@ -1391,7 +1695,7 @@ One Pocket-owned module serves DPC+ and the CDF family (CDF0, CDF1, CDFJ, CDFJ+)
 
 **Where it sits.** `daria_fe` lives beside the CPU's memories in the Pocket wrapper, not inside `cart2600`, because it reads its own image ROM and cart RAM directly. The vendored files change only through `POCKET_DARIA` blocks (`mister/POCKET_CHANGES.md`):
 
-- `cart2600.sv`, inside the existing `NO_ARM_MAPPER` block: the `BANKDPCP` and `BANKCDF` outputs (`direct_do`, `flags_out`, `out_en`, `rom_addr`, `ram_*`) come from new input ports instead of the idle constants, and `is_bad_game` drops `BANKDPCP` and `BANKCDF` (it keeps `BANKELF` and `BANKBUS`).
+- `cart2600.sv`, inside the existing `NO_ARM_MAPPER` block: the `BANKDPCP` and `BANKCDF` outputs (`direct_do`, `flags_out`, `out_en`, `rom_addr`, `ram_*`) come from new input ports instead of the idle constants, and `is_bad_game` drops `BANKDPCP` and `BANKCDF` (it keeps `BANKELF` and `BANKBUS`). (As built in step 7: only `fe_do` and `fe_oe` are new data inputs, `cart2600.sv:138-141`. `direct_do` is `fe_do`, `out_en` is `{8{fe_oe}}` and `flags_out` is 1; `ram_*` and `rom_addr` keep their idle values, since the front end keeps the image and its RAM in its own memories, `cart2600.sv:659-674`.)
 - `top.sv`: a `POCKET_DARIA` port group, beside the `POCKET_SRAM` one, carries the 6507 side out and the answers back in. `arm_call_busy` and `arm_dma_busy`, which already feed `arm_call_stall` (`top.sv:306-307`), come from the Pocket side under the macro.
 
 | Signal | Direction | What it is |
@@ -1499,7 +1803,7 @@ wire [16:0] cq_word = m_new ? c_word : (t_new ? {1'b0, t_addr_q[16:1]} : cp_word
 
 ##### `atari7800_pocket.sv`
 
-Three new wires go from the `main` instance's `POCKET_SRAM` block (`:960-981`) to `t_*`. `.clk_sys` goes to `sram` (`:1082`). `c_rd = cartram_rd | bios_rd` and the `c_addr` BIOS mux (`:1090-1093`) stay.
+Three new wires go from the `main` instance's `POCKET_SRAM` block (`:960-981`) to `t_*`. `.clk_sys` goes to `sram` (`:1082`). `c_rd = cartram_rd | bios_rd` and the `c_addr` BIOS mux (`:1090-1093`) stay. (On the shipping tree: the four `cartram_*26_out` ports at `atari7800_pocket.sv:1180-1183`, `.clk_sys` at `:1316`, and `c_rd` and the `c_addr` mux at `:1322-1325`.)
 
 ##### What leaves the `clk_sdram` cone
 
@@ -1637,7 +1941,7 @@ done
 
 **Structural checks** (they must hold whatever the slack):
 
-1. `report_timing -setup -to_clock <clk_sdram> -through [get_cells -hierarchical *cart2600*]` finds no paths. This is the check for unregistered data or address.
+1. `report_timing -setup -to_clock <clk_sdram> -through [get_cells -hierarchical *cart2600*]` finds no paths. This is the check for unregistered data or address. (Step 7 replaced this form with `docs/daria_step7/plan.md` 5.4 (g): `rom_a` and `d_out` reach `clk_sdram` through `sdram`'s `ch0` legs whatever Fix B does, so (g) asks that no path from `cart2600` reach `sram_ctrl` or the SRAM pads except through `t_*_q`, and reports the `ch0` legs apart.)
 2. From `sram|t_*_q` into `clk_sdram`: setup ≥ +8 ns (≤ 5 levels) and hold ≥ 0 [E]. Flicker Blend's same-edge capture once failed hold by 0.13 ns (`sram_ctrl.sv:237-239`). If this one does, use a fitter-only `-add -hold` uncertainty into `clk_sdram`, like the one into `clk_sys` (`core_constraints.sdc:58`). That is padding, not an exception.
 3. Into `sram|t_*_q` (`clk_sys`, 69.8 ns): ≥ +40 ns [E].
 4. The fit report's retiming list (retiming is on, `ap_core.qsf:313`) doesn't move `t_*_q` into `cart2600`.
@@ -1761,7 +2065,7 @@ So the single bitstream lands at about 14,600–15,700 ALMs, 79–85% of the dev
 | Capture | 2600 images through the loader into the window, the front-end ROM and the PSRAM, each compared with the file; A78 files as today | 5 |
 | Front end | A cycle-by-cycle shadow of upstream's front ends in `tb_daria`, directed tests per scheme, the random differential bench | 6 |
 | Fix B | `cartram2600_test.py` and the `+cartram` monitor in `extra_tests.sh`; the structural check that no `clk_sdram` path runs through `cart2600` | 7 |
-| Integration | `run_sim.sh`, `extra_tests.sh`, `s4/check.sh`; the demos' frames against upstream in whole-core simulation | 7 |
+| Integration | `run_sim.sh`, `extra_tests.sh`, `s4/check.sh`; the demos' frames against upstream in whole-core simulation, by the V1 rule since 2026-10-12 ("Steps", 7) | 7 |
 | Timing | Step 3's probe with the RAMs at full size, at 32.73 and 40.43 MHz; the release gate, `clk_sdram` ≥ +1.5 ns on three seeds | 3, 7 |
 | Hardware | A status overlay; the 15 demos, the six added images (Draconian uses the timer), RAM-mapper games, the Supercharger, 7800 games and the BupChip | 8 |
 
@@ -1776,7 +2080,7 @@ Each step has a done-when, as ARIA's had.
 4. **S3** (ARIA's steps 6–7). *Not built* (step 3): S1 with Thumb at 38.18 MHz matches upstream's call timing, so S3 is left for a later revision (open item 3). *Its done-when, if it is ever built:* CPI within ±2% of the model on the demos' traces and the BupChip.
 5. **2600 memory system.** *Done* (2026-10-07): "Step 5 work". All 21 images match upstream call by call, late only on Spiders' 16 calls as upstream is; the cache serves Turbo, Zaxxon and Elevator Agent through 32–64 KB windows; the window is 64 KB (decision 8). The step covers image capture into the window, the front-end ROM and the PSRAM; the asset cache for the image beyond the window; 32 KB of cart RAM; MMIO and timer; the return sentinel; the call port. *Done when* `tb_daria` runs every demo and added image on DARIA and matches upstream's ARM call by call (registers at return, every RAM write, the audio values), with no lateness beyond the model's; and again with a small window, so the cache serves Turbo, Zaxxon and Elevator Agent.
 6. **Front ends:** the lean front end for DPC+ and CDF/CDFJ/CDFJ+. *Done* (2026-10-09, in simulation): "Step 6 work". `daria_fe` matches upstream's front ends cycle by cycle on all 30 ARM images, 1,500 frames each, with nothing outside design 9.5's counted classes; the random bench (105 M 6507 cycles) and the 51 directed tests pass; console resets pass once per scheme; and with DARIA's own CPU (mode B) the shared-edge guard passes its checks. Wrapper wiring, the SDC, the full fit, the STA checks of `docs/daria_fe/design.md` 8.2 and the guard's real-clock check move to step 7. The probe gate of 1,300 ALMs is not met (1,389–1,490 placed); by decision 9 step 7's fit decides. *Done when* it matches upstream's front ends as a cycle-by-cycle shadow in `tb_daria` on every demo and added image, and passes directed tests per scheme and the random differential bench.
-7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos render the same frames as upstream in whole-core simulation, and `clk_sdram` has at least +1.5 ns on three seeds.
+7. **Integration** (`POCKET_DARIA`) **and Fix B**. *Done when* `run_sim.sh`, `extra_tests.sh` and `s4/check.sh` pass, the RAM mappers pass with Fix B's added latency, the 15 demos and Stratovox pass the frame gate's V1 rule against upstream in whole-core simulation (frame length, video, RIOT RAM and every call's ARM instruction count equal on every frame; audio counted and documented per image), and `clk_sdram` has at least +1.5 ns on three seeds. **Amended for V1** (owner, 2026-10-12: the same frames are wanted, not required, for the first release; `docs/daria_step7/plan.md` P13 and 1.2 row 7, amended 2026-10-14). It read "the 15 demos render the same frames as upstream". On the tree that ships, every item holds ("Step 7 work", c76); plan 7.7's fresh-clone run is still owed.
 8. **Hardware test builds** with a DARIA status overlay (calls, late calls, halts, fault code). *Done when* all 15 demos and the six added images play, Spiders aside if it overruns as on upstream, and 7800 games, 2600 RAM-mapper games, the Supercharger and the BupChip are unaffected.
 9. **2.2.1.**
 
@@ -1792,12 +2096,12 @@ What step 1 leaves open, each with the step that settles it:
 | 4 | **Masking C in lockstep** while the core reports it unknown after a Thumb MUL: a narrow exception to "nothing is masked", bounded by halt code 8. The alternative, a model of the reference's multiplier carry, is not recommended. | **Accepted by the owner (2026-10-05):** no traced image reads C after a MUL, so DARIA leaves the carry out; revisit in a later revision if a game ever halts with code 8 |
 | 5 | **Code or LDM above the window** (64 KB, decision 8) halts (codes 4 and 7). Revisit if a large CDFJ+ game needs it: a fetch stall in front of `rom_q`. | When such a game appears |
 | 6 | **The cache's size, line and replacement** (4 KB, 16 B, FIFO) on traffic beyond the window. | **Settled (step 5):** 4 KB in two ways of 2 KB, 16 B lines, FIFO. Through the whole wrapper with 32, 48 and 64 KB windows, every call of Elevator Agent, Turbo and Zaxxon matches upstream and none is late. Turbo, the one image larger than 64 KB, has 150 demand misses in 1,500 frames at 64 KB. With `WAYS` 2 the BupChip's song 13 has 1,269 demand misses, against 8,297 with one way ("Step 5 work") |
-| 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | **Counted (step 5); guarded (step 6):** within one `clk_sys` of a write to the same word, upstream's ARM gives 167 and DARIA 163 in 402 M console-side reads over the 21 images; ten images have none. Intel's handbook (CV-52002, 2023.10.18, pp. 2-3, 2-5, 2-13) leaves a read on one clock of a word written on the other clock at the same time unknown, and two writes to one word unknown. The owner asked for a guard if it is cheap and keeps the core in step. **It is in the front end, and the CPU is unchanged:** a phase detector on `clk_sys` finds the shared edge, and while DARIA's CPU may touch cart RAM the front end writes none, and issues every read it uses on the edge 17.46 ns after the last `clk_arm` edge (`docs/daria_fe/design.md`, 3.5 and 8). **Verified in simulation (step 6, mode B):** at all three phases of the PLL's lattice the guard locks at the predicted edge and never unlocks, and no `daria_fe` write or consumed read lands on a shared edge while the guard is on or while DARIA runs a call. DARIA's stores are unguarded, and 11.4–16.1% of them land on a shared edge, but none meets a front-end access there (`docs/daria_fe/lanes/G_modeB.md`). Step 7 times the detector's path (design 8.2) and sees the guard on the fitted core's clocks. **At ÷19 (step 7, decision 7) the guard is inert:** on the 48:19 lattice a `clk_arm` rising edge meets a `clk_sys` one only every 19 `clk_sys`, any 13-sample window holds 6 or 7 matching samples where the lock needs exactly 5, and it never locked in mode B at ÷19 (`docs/daria_fe/design.md` 8.3). The collisions return to a counted race, accepted by the owner for the first release (2026-10-12). **Counted at ÷19 (mode B, step 7; not yet checked by a second reader):** pairs of a DARIA store and a front-end read of one cart RAM word within 69.84 ns: Galagon 8 in 600 frames (one at 1 VCO period, 1.455 ns, whose value changed), Mappy 22 in 600 (one at 0 periods, a store of 0 over 0, and one at 2, unchanged), draconian RC8 2 in 300, and none on SF2fix and Turbo (300 frames) or Spiders (600). Every pair is a front-end audio read during a DARIA call; there are no write-write or write-load pairs. These figures stand until a second reader has recounted them (`docs/daria_step7/progress.md`) |
+| 7 | **Cart RAM collisions** across the two clocks during calls (audio reads against CPU writes): count them. | **Counted (step 5); guarded (step 6):** within one `clk_sys` of a write to the same word, upstream's ARM gives 167 and DARIA 163 in 402 M console-side reads over the 21 images; ten images have none. Intel's handbook (CV-52002, 2023.10.18, pp. 2-3, 2-5, 2-13) leaves a read on one clock of a word written on the other clock at the same time unknown, and two writes to one word unknown. The owner asked for a guard if it is cheap and keeps the core in step. **It is in the front end, and the CPU is unchanged:** a phase detector on `clk_sys` finds the shared edge, and while DARIA's CPU may touch cart RAM the front end writes none, and issues every read it uses on the edge 17.46 ns after the last `clk_arm` edge (`docs/daria_fe/design.md`, 3.5 and 8). **Verified in simulation (step 6, mode B):** at all three phases of the PLL's lattice the guard locks at the predicted edge and never unlocks, and no `daria_fe` write or consumed read lands on a shared edge while the guard is on or while DARIA runs a call. DARIA's stores are unguarded, and 11.4–16.1% of them land on a shared edge, but none meets a front-end access there (`docs/daria_fe/lanes/G_modeB.md`). Step 7 times the detector's path (design 8.2) and sees the guard on the fitted core's clocks. **At ÷19 (step 7, decision 7) the guard is inert:** on the 48:19 lattice a `clk_arm` rising edge meets a `clk_sys` one only every 19 `clk_sys`, any 13-sample window holds 6 or 7 matching samples where the lock needs exactly 5, and it never locked in mode B at ÷19 (`docs/daria_fe/design.md` 8.3). The collisions return to a counted race, accepted by the owner for the first release (2026-10-12). **Counted at ÷19 (mode B, step 7; recounted by a second reader, the review of `317eaa8`, with the same counts: `docs/daria_step7/plan.md` 5.2):** pairs of a DARIA store and a front-end read of one cart RAM word within 69.84 ns: Galagon 8 in 600 frames (one at 1 VCO period, 1.455 ns, whose value changed), Mappy 22 in 600 (one at 0 periods, a store of 0 over 0, and one at 2, unchanged), draconian RC8 2 in 300, and none on SF2fix and Turbo (300 frames) or Spiders (600). Every pair is a front-end audio read during a DARIA call; there are no write-write or write-load pairs. **On the shipping tree** (c76: 19 mode-B runs, 7,800 frames, about 130 s of play): the six phase-0 runs repeat these counts bin for bin, and the phase runs add one near pair, Galagon at 2 periods (2.91 ns), whose store changed the word. Over the 19 runs, 4 pairs are under 3 ns, and 2 of them changed the word, both on Galagon ("Step 7 work") |
 | 8 | **CoreTone after a 2600 ARM game:** the cart RAM is zeroed on every load; check that a Souper game then starts as from power-up. | **Settled (step 5):** with all 32 KB of cart RAM filled with random words before the downloads (`tb_s4 +ramjunk`), song 13 is PCM-identical and its busy clocks equal the clean run's. CoreTone does not depend on what the RAM holds at boot |
 | 9 | **The SDC form** for the held buses that cross (`set_max_delay` on related clocks) in Quartus Lite 21.1. | **Settled (step 3):** 7.3's form works. Quartus Lite 21.1 applies `set_max_delay` / `set_min_delay` between clocks of one synchronous group (complete, not overridden), and every crossing path is timed against 20 ns, with at worst +15.1 ns of setup slack. Keep 7.3's `set_min_delay` −20. The first builds used 0, and with it the $8007 byte's held bus missed hold by 0.033 ns at fast 0 °C on one seed. A hold check means nothing on a bus that is held for two clocks before use. Step 7 copies the probe's lines |
-| 10 | **PSRAM at 40.43 MHz** with `CLOCK_SPEED` 50.0. Since step 3: `psram.sv` at 38.18 MHz, between the 32.73 MHz where 28.636364 is known to work and the 40.43 MHz that needs 50.0 (7.4). It serves the BupChip's assets and the cache beyond the window. Since step 7: 36.17 MHz (÷19, decision 7). | **Settled in simulation (step 5):** `psram.sv` with `CLOCK_SPEED` 50.0 at 38.18 MHz meets the PSRAM model's timing (0 violations) for the BupChip's song 13 through the DARIA wrapper and for the cache beyond the window in every small-window run. **At 36.17 MHz (step 7):** `CLOCK_SPEED` stays 50.0, which gives the same clock counts as at 38.18 MHz, so each access is a little longer in time; `tb_s4` at ÷19 (`s4/check.sh` with `DARIA=1 ARM19=1 PSRAM_CS=50.0`) has 0 PSRAM model violations in every job that ran. Step 8 checks hardware |
-| 11 | **The `BUP_DEBUG` overlay** samples `clk_arm` bits raw; it needs a snapshot with a toggle once the clocks are no longer 2:1. | Step 7 |
-| 12 | **Fix B's margins:** no spare against the `c_rdata` multicycle in the worst case (E0+19), hold at the coincident `clk_sys`/`clk_sdram` edge, and Flicker Blend's half-period paths as the possible next limit ("Fix B", 7). | Step 7 |
+| 10 | **PSRAM at 40.43 MHz** with `CLOCK_SPEED` 50.0. Since step 3: `psram.sv` at 38.18 MHz, between the 32.73 MHz where 28.636364 is known to work and the 40.43 MHz that needs 50.0 (7.4). It serves the BupChip's assets and the cache beyond the window. Since step 7: 36.17 MHz (÷19, decision 7). | **Settled in simulation (step 5):** `psram.sv` with `CLOCK_SPEED` 50.0 at 38.18 MHz meets the PSRAM model's timing (0 violations) for the BupChip's song 13 through the DARIA wrapper and for the cache beyond the window in every small-window run. **At 36.17 MHz (step 7):** `CLOCK_SPEED` stays 50.0, which gives the same clock counts as at 38.18 MHz, so each access is a little longer in time; `tb_s4` at ÷19 (`s4/check.sh` with `DARIA=1 ARM19=1 PSRAM_CS=50.0`) passes 28 of 28 on the shipping tree, its 19 `tb_s4` runs with 0 PSRAM model violations (c76, "Step 7 work"). Step 8 checks hardware |
+| 11 | **The `BUP_DEBUG` overlay** samples `clk_arm` bits raw; it needs a snapshot with a toggle once the clocks are no longer 2:1. | **Done (step 7):** `bup_dbg_snap.sv` carries the status word, the halt PC and `dbg_load`'s `clk_arm` bits to `clk_sys` through a toggle snapshot every 1,024 `clk_sys`, two flops each way, the first FORCED. `tb_dbg_snap`: 32 runs pass (the ÷18 lattice's three phases, random phases, one at ÷19, random power-up values) and 7 of 7 mutations are caught, raw sampling among them. `tb_s4` checks the snapshot in all 19 DARIA-set runs ("snap: ok"), and Q5, the `BUP_DEBUG` fit, passes on seeds 1-3 ("Step 7 work") |
+| 12 | **Fix B's margins:** no spare against the `c_rdata` multicycle in the worst case (E0+19), hold at the coincident `clk_sys`/`clk_sdram` edge, and Flicker Blend's half-period paths as the possible next limit ("Fix B", 7). | **Measured (step 7; Q2 on the shipping tree, seeds 1 / 2 / 3):** the directed s19 run reaches s19, never above. `t_*_q` → `clk_sdram` setup +4.298 / +6.697 / +6.338 ns, hold +0.263 / +0.337 / +0.266 ns. The `c_rdata` multicycle into `clk_sys`: setup +70.904 / +68.276 / +68.613 ns against 87.306 ns, hold +0.795 / +0.784 / +1.000 ns. Flicker Blend's `fbn_*` paths, against 8.730 ns: +2.462 / +2.683 / +2.969 ns in, +3.316 / +3.792 / +3.403 ns to the pads. On seeds 1 and 2 the path into `fbn_*` is `clk_sdram`'s worst ("Step 7 work") |
 | 13 | **Banked registers after a mapper reset:** DARIA clears them, upstream keeps them. No driver reads them first. | Accepted |
 | 14 | **Thumb hi-register forms with H1 = H2 = 0** halt; running them is free if a game needs it. | When needed |
 | 15 | **AMPLITUDE may lag a tick, and `open_bus` keeps the committed byte** where upstream's changes after the latch: counted, not hidden. | **Settled (step 6).** **AMPLITUDE is exact:** decision 9 took the exact audio engine, so AMPLITUDE and NOTE match upstream on the same `clk_sys` edges, and the lag class `amp_lag` is must-be-0 (design 9.6): 0 in the random bench's campaign, in mode B and in all 30 mode-A runs. What may still differ in AMPLITUDE is counted by design 9.5's classes, each with a condition the bench checks: `merge_amp` (a CDF call in mode A without the hook), `dig_rom_lag`, `svc_audio_race`, `size_over32k`, `short_phase1` (a grant delayed by `grant_steal`), `pause_lane` (never on the Pocket, decision 10) and `pre_lock` (the BIOS path, which a 2600 image no longer takes on the Pocket, decision 11). With DARIA's own CPU, a refresh while a call is in flight can also read a word the two CPUs write at different times; mode B masks those refreshes (`call_amp`) and compares each by value (`docs/daria_fe/lanes/G_modeB.md`, 5.2). **The open bus:** `fe_do` keeps the committed byte where upstream's `d_out` moves after the latch (`drift_up`, information). One read is accepted where this shows: the TIA read at $0000 right after a CDF fast JMP's low operand at $1FFF, counted as `obus_ffe` (`docs/daria_fe/lanes/F1_fixes.md`, 3); no game makes that read. On hardware the undriven lines most likely keep the cartridge's last driven byte, which is `daria_fe`'s. Any other exposure (`obus_exposed`) is must-be-0, and it is 0 in every game run. A fast `LDA #` at $1FFE (DPC+ or CDF; on CDFJ+ also `LDX #`/`LDY #`) would expose two reads, at $0000 and $0001: that is not in the class and fails the bench, and the 6507 would then run TIA space as code (`docs/daria_fe/lanes/E2_directed.md`, 6.1) |
@@ -1805,3 +2109,4 @@ What step 1 leaves open, each with the step that settles it:
 | 17 | **Timer readings in step 5's comparison.** Draconian's T1TC reading cannot match upstream's to the count, because the clocks differ ("Precision" in the memory system, 6). Step 5 compares it within a bound (about 200 counts), and then compares what the game does with it. | **Settled (step 5):** Draconian is the only image that reads T1TC: once, at power-on, in both builds. DARIA's reading is 37 counts above upstream's, inside the 200 bound and about 1% of the game's 3,872-count margin. Every call after it matches upstream's. **Champ Games Presents (2026-10-08):** GridLock reads T1TC once, 20 calls after zeroing it. DARIA reads 591 counts more than upstream, because each CPU reaches the write and the read at a different point in its call. With a 1,000-count bound that call matches in full, and every call after it matches ("The Champ Games Presents batch"). The bench's default stays 200, and `+mmio_tol` widens it |
 | 18 | **The code space per profile.** With `CODE_AW` 15, the BupChip profile's code space must still end at 16 KB, as ARIA's does. FETCH applies past 0x3FFC and to jumps above it, and DATA to ROM reads above 16 KB. Step 3's probe left it at 128 KB in both profiles. Step 5 adds the profile to those checks. They run a clock late or in W, off the critical path. | **Done (step 5):** the call suite's BupChip-profile tests on the `CODE_AW` 15 core halt a jump to 0x4000, the fall-through past 0x3FFC and a ROM read at 0x4000, and the return sentinel stays a fetch fault there (`call/run_call.py`, `bup_*`) |
 | 19 | **Peripherals beyond MAMCR and timer 1** (M3), such as a Melody board's optional EEPROM of up to 4 MB (the board's description, quoted by the owner, 2026-10-15). The LPC213x has no external memory bus, so a game would reach it through the chip's serial peripherals. In DARIA those registers read 0 and drop writes, so such a game would read zeros and lose its writes, without halting. No traced image touches them. | When a game needs it (`docs/IMPROVEMENTS.md`, "Smaller items") |
+| 20 | **A PAL A78 after a PAL 2600 image, Region on Auto** (the final review's RTL-1, 2026-10-16). In the DARIA build the A78 costs two extra retunes, to NTSC and back to PAL. Main and the build without DARIA make none. How: after a PAL 2600 image, `cart_region` is cleared to 0 (`atari7800_pocket.sv:316`) while the PLL runs PAL (`daria_rgn` 1). During the A78's download, once its header makes `cart_is_7800` 1, Auto's `region_select` is `cart_region[0]`, still 0. `region_pll` moves to NTSC, a retune becomes pending, and the freeze (`:1037`, `!daria_rt_pend`) holds `region_pll` there, so it cannot follow when header byte 57 sets `cart_region` to 1. `pll_region` retunes to NTSC when the load sequence ends, and back to PAL after it. Without the freeze, `region_pll` goes 1 → 0 → 1 inside the download, where `pll_region` starts nothing. **The effect:** the final region is right, and the A78's console is released after the second retune, 62 µs later than in the build without DARIA. Between the two retunes the console is released once at NTSC for a few `clk_sys` (4 in the review's unit bench). It contradicts plan P6's "every non-ARM load releases on the same edge as in a build without DARIA". **Accepted for 2.2.1** as a known minor issue (owner, 2026-10-16). **Pinned** by `tb_wire`'s scenario `pal2600_a78` (`82d05f1`): `pal_test.a26`, then `load_test_pal.a78` at 1,000 ms (`+image2`), with `pll_region` in the loop, on both builds. The DARIA build retunes to PAL at 955.036 ms, to NTSC at 1,005.606 ms and to PAL at 1,005.636 ms, and releases the A78 at 1,005.667 ms (4 releases). The build without DARIA retunes once, to PAL at 955.036 ms, and releases the A78 at 1,005.605 ms (3 releases). Both end with `is_pal` 1. **The fix, sketched in the finding:** while `(cart_download | old_cart_download) & cart_is_7800`, let `region_pll` follow `region_select` even with a retune pending. `pll_region` cannot start a retune while `is_downloading` is high, and an A78's header is parsed long before the download ends. Before adopting it, check the last 4 or so `clk_sys` of a download, where `cart_download` outlives `is_downloading`, against `daria_rgn`'s exactness with the `seq_*` scenarios and the mutants. `pal2600_a78`'s expected DARIA count then drops to 0. **A related nit (RTL-2):** in the same block the withdrawal (`:1036`) takes `daria_rgn`'s old value on the clock `daria_rgn` updates (`:1033`), so `region_pll` holds the previous region for one `clk_sys`. A third retune follows only for a load sequence shorter than one retune, which no real image is ("Step 7 work", "After 2.2.1", item 2) | The next revision, after 2.2.1 |
