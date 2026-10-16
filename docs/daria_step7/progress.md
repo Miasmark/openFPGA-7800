@@ -320,7 +320,7 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - `frame_gate.py`'s default is the V1 rule, with the strict rule as an option.
   - `synth_reloads` places its holds correctly at ÷19.
   - Three new gates: `divider` checks every bench's default divider against `pll_core.v`'s, `wire` runs `tb_wire`'s full set and its mutants, and `fit_selftest` runs the fit driver's selftest.
-  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error. This stricter verdict has so far been checked only by re-judging earlier logs (all 7 caught) and by selftest cases; its run on real simulations waits for a slot.
+  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error. This stricter verdict had then been checked only by re-judging earlier logs (all 7 caught) and by selftest cases. (Later: its run on real simulations, round 4 at `0b2f9e1`, ran on 2026-10-15 and caught 7 of 7 on their named keys; the logs are named in `DARIA_CORE.md`, "Step 7 work".)
   - The plan and the docs are amended for the owner's and the lead's decisions.
 - **The amended checks** of 5.4 (the lead's decision above) are in `step7_checks.py`, by divider. Judged again from the fits' report files, without refitting:
   - Q2 seeds 1-3, and seed 3's `KEEP_DB` refit, pass as amended.
@@ -328,14 +328,14 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - The I3 STA mutants and Q-mut still fail as required.
 - **Q5** (`BUP_DEBUG` + DARIA, seeds 1-3):
   - Each fit's own verdict failed (c.cells), (f) and (k') on a table error: the table expected `cap_err_a[0]`, a flop with no load in any build. Seed 3 also failed (a) and (l) as first written, on the guard pair.
-  - Judged again from the fits' report files, with the corrected table and the amended (a), (l) and (h), all three seeds pass. That re-judge of (c.cells) relies on a helper outside the repository; the tracked checker on the fits as fitted still reports the old table's failure.
+  - Judged again from the fits' report files, with the corrected table and the amended (a), (l) and (h), all three seeds pass. That re-judge of (c.cells) relies on a helper outside the repository; the tracked checker on the fits as fitted still reports the old table's failure. (Later: since `6477f78` the tracked checker makes it, and Q5 passes with it; `DARIA_CORE.md`, "Step 7 work".)
   - The guard pair's setup slack at slow 85 °C is +0.603 / +0.131 / −0.060 ns; (a) gates on it only at ÷18.
   - `daria_sync.tcl`'s line for `cap_err_a` now matches no build. It goes with the next `src/` change.
-- **Review:** five rounds. The last signed off the fix round's changes at `0b2f9e1`; it does not cover the campaign's open results, which the release still needs. Three minor findings are open:
-  - Q5's re-judge relies on the untracked helper above, and plan 7.6's rule overstates what the tracked tools can re-judge.
-  - `fit_selftest` fails below 2,100 MB free, so a fresh-clone run (7.7) on this machine may fail for disk alone. Two branches of the amended checks, (h)'s hold test and (a)'s every-corner requirement, are not covered by it.
-  - The plan header's list of amendments is incomplete, and the 2.7 correction is undated.
-- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`), at 19:24 UTC on 2026-10-14:
+- **Review:** five rounds. The last signed off the fix round's changes at `0b2f9e1`; it does not cover the campaign's open results, which the release still needs. Three minor findings were open. The final review of 2026-10-16 confirmed them as VG-1 to VG-3, and all three are now fixed (`DARIA_CORE.md`, "Step 7 work"):
+  - Q5's re-judge relies on the untracked helper above, and plan 7.6's rule overstates what the tracked tools can re-judge. *Fixed:* `step7_checks.py` judges (c.cells) from each fit's `firstflops.tsv` (`6477f78`), and plan 5.4 and 7.6 say which checks a fit's own report files judge again (`baca4cd`).
+  - `fit_selftest` fails below 2,100 MB free, so a fresh-clone run (7.7) on this machine may fail for disk alone. Two branches of the amended checks, (h)'s hold test and (a)'s every-corner requirement, are not covered by it. *Fixed* (`6477f78`): it needs 100 MB, is PARTIAL below that, and has planted cases for both branches.
+  - The plan header's list of amendments is incomplete, and the 2.7 correction is undated. *Fixed* (`42ff9db`): the header lists them, and the 2.7 row is dated 2026-10-14.
+- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`) finished on 2026-10-16 at 00:58 UTC, with 48 of 48 pieces passing. Its record is in `DARIA_CORE.md`, "Step 7 work". At 19:24 UTC on 2026-10-14 it stood as follows:
   - **Done:** the static gates, `run_sim`, the cartram matrix, the unit benches, `tb_wire`'s full set, Q2 seeds 1-3, Q4 (equal to Q1''), Q-mut, Q5 seeds 1-3, and the three I3 STA mutants.
   - **Running:** `s4/check.sh`'s DARIA set (17 of 28 jobs passed), `extra_tests` with `AR_TAPE=1` on both builds, and the V1 frame gate on 16 images at 1,500 frames (2 passed, 1 running).
   - **Waiting:** the gate `selftest`, `s4/check.sh`'s non-DARIA set, and mode B with the wrapper (10 runs) and without it (9 runs).
@@ -375,4 +375,4 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
     | Upstream | 1.393 s | 7.6% slower | 41.6 µs late |
 
   - **So on Gorf DARIA is the closer of the two.** A real cart's NOP/JMP hand-back adds a few 6507 cycles after each call that RDY does not.
-- **Recorded limit.** A Melody board's optional EEPROM (up to 4 MB) would be reached through the chip's serial peripherals, which DARIA reads as 0. No traced image uses them (`docs/IMPROVEMENTS.md`; `DARIA_CORE.md` open item 19 on s7/D).
+- **Recorded limit.** A Melody board's optional EEPROM (up to 4 MB) would be reached through the chip's serial peripherals, which DARIA reads as 0. No traced image uses them (`docs/IMPROVEMENTS.md`; `DARIA_CORE.md` open item 19).
