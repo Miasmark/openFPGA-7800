@@ -39,7 +39,7 @@ A call that follows a gap of 5 minutes or more and has a large cache write is a 
 
 **How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. On 2026-10-13 and 14 the machine came up fresh at 23:01, 02:40, 04:40, 20:39 and 23:48 UTC.
 
-**Why the machine stops.** Found on 2026-10-14 from the times of the campaign's last file writes:
+**Why the machine stops.** Found on 2026-10-14 from the times of the campaign's last file writes, and added to since:
 - The machine runs only while the session runs. A session ends about five minutes after it goes idle: no turn running, no tool call in progress, no agent working. Detached processes and background shell jobs do not count. On 10-14 the campaign's last writes were at 19:35:21 and 20:51:27 UTC, the moments the session ended, the second time four minutes after its last turn. Nothing ran again until the next session start (20:39 and 23:48, each a scheduled check-in). The "reboot" at 23:01 on 10-13 was the same: the session had been idle since 13:49.
 - A session that is working also ends after about 13 hours (seen six times from 10-10 to 10-14). Each time the next one started within seconds; at 17:36 on 10-14 the machine stayed up through it.
 - Five working sessions ended early, with an agent working: at 02:40 (after 3.7 hours) and 04:40 (after 2.0 hours) on 10-14, 18:50 and 22:39 on 10-15, and 02:40 on 10-16 (UTC), each 2-6 hours after the session started. The machine restarted with them. No cause was found.
