@@ -18,9 +18,17 @@
 #    raw_every_clock, hold_every_clock (the held bus changes under clk_sys),
 #    ack_one_flop and req_one_flop (one synchroniser flop), no_wait (q_sys
 #    takes hold without waiting for the ack), half_rate (a request every
-#    second PERIOD: the bench's rate check).
+#    second PERIOD: the bench's rate check). A mutation is caught only by
+#    runs that end with their result line and errors > 0. A run that ends
+#    without it (a crash, a %Fatal, a timeout after 600 s), exits non-zero,
+#    or reports errors=0 with fewer words than asked is an ERROR: the
+#    mutation is not counted as caught and the run fails, as wire.py's
+#    mutant verdict does.
 # Environment: SNAPS (words per control run, 300), WORK (default
-# sim/work/bupchip/dbgsnap), MUTATIONS (1; 0 skips them), VERILATOR.
+# sim/work/bupchip/dbgsnap), MUTATIONS (1; 0 skips them), DBGSNAP_MUTS (the
+# mutations to run, default all seven; "fatal", which is not among them, is
+# a planted infrastructure failure: a %Fatal at 1 ns, which must give ERROR),
+# VERILATOR.
 # The log starts with the tree's HEAD and status, the tool and the md5 of
 # every binary run (plan P23).
 set -e
@@ -98,7 +106,7 @@ if [ "${MUTATIONS:-1}" = 1 ]; then
 	echo "-- 3. mutations (each must fail in at least one run)"
 	MW="$WORK/mut"
 	mkdir -p "$MW"
-	MUTS="raw raw_every_clock hold_every_clock ack_one_flop req_one_flop no_wait half_rate"
+	MUTS="${DBGSNAP_MUTS:-raw raw_every_clock hold_every_clock ack_one_flop req_one_flop no_wait half_rate}"
 	caught=0
 	total=0
 	for m in $MUTS; do
@@ -125,6 +133,9 @@ M = {
 	"half_rate": [("\tlogic          seen = 1'b0;", "\tlogic          half = 1'b0;\n\tlogic          seen = 1'b0;"),
 	              ("\t\tif (!waiting && cnt == CW'(PERIOD - 1))\n\t\t\treq <= ~req;\n",
 	               "\t\tif (cnt == CW'(PERIOD - 1)) half <= ~half;\n\t\tif (!waiting && cnt == CW'(PERIOD - 1) && half)\n\t\t\treq <= ~req;\n")],
+	# Not a mutation of the design: a planted infrastructure failure (a %Fatal at 1 ns, no result line),
+	# which the verdict must report as an ERROR, never as caught (DBGSNAP_MUTS=fatal).
+	"fatal": [("\nendmodule", "\n\tinitial #1000 $fatal(1, \"planted: run_dbgsnap.sh's fatal\");\nendmodule")],
 }
 for a, b in M[m]:
 	assert s.count(a) == 1, (m, a)
@@ -137,13 +148,26 @@ PY
 			continue
 		fi
 		why=""
+		err=""
 		for p in $PHASES -1; do
-			nice -n 10 "$MW/obj_$m/vtb" +snaps=60 +phase="$p" +seed=1 > "$MW/${m}_p$p.log" 2>&1 || true
-			res="$(grep "^result:" "$MW/${m}_p$p.log" || echo "result: none")"
+			rc=0
+			timeout 600 nice -n 10 "$MW/obj_$m/vtb" +snaps=60 +phase="$p" +seed=1 > "$MW/${m}_p$p.log" 2>&1 || rc=$?
+			res="$(grep "^result:" "$MW/${m}_p$p.log" || true)"
 			e="$(field errors "$res")"
-			[ "$e" = 0 ] && [ "$(field snaps "$res")" = 60 ] || why="$why p$p:errors=${e:-none}"
+			if [ -z "$res" ] || [ -z "$e" ]; then
+				err="$err p$p: no result line (exit $rc)"
+			elif [ "$rc" != 0 ] || grep -q '%Fatal\|%Error' "$MW/${m}_p$p.log"; then
+				err="$err p$p: exit $rc$(grep -m1 -o '%Fatal.*\|%Error.*' "$MW/${m}_p$p.log" | cut -c1-60 | sed 's/^/, /')"
+			elif [ "$e" != 0 ]; then
+				why="$why p$p:errors=$e"
+			elif [ "$(field snaps "$res")" != 60 ]; then
+				err="$err p$p: errors=0 with snaps=$(field snaps "$res") (60 asked)"
+			fi
 		done
-		if [ -n "$why" ]; then
+		if [ -n "$err" ]; then
+			echo "FAIL mutation $m: ERROR, not counted as caught:$err ($MW/${m}_p*.log)"
+			ok=0
+		elif [ -n "$why" ]; then
 			echo "PASS mutation $m caught:$why; first: $(grep -h -m1 '^ERROR' "$MW/${m}"_p*.log | head -1 | cut -c1-110)"
 			caught=$((caught + 1))
 		else
