@@ -161,8 +161,8 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
 1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
-the whole core uses 79% of the FPGA. From 2.2.1 the same CPU, extended with
-Thumb as **DARIA**, also runs the 2600 ARM cartridges, at 36.17 MHz. In simulation its output matches
+the whole core used 79% of the FPGA in 2.1.1 (85% in 2.2.1, with DARIA).
+From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges, at 36.17 MHz. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
 [docs/BUPCHIP.md](docs/BUPCHIP.md) has the details it started from:
@@ -206,7 +206,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 | BupChip, end to end (2.1.1) | The firmware slot after the cartridge, as the Pocket loads them, then a game-free Souper cartridge with a synthetic music block: the ROM equals the firmware file, the block's 5,192 bytes are in the PSRAM model with no timing violation, and the song's PCM equals the Python model's frame for frame, as pushed and as returned to the core clock. Without the firmware the same cartridge leaves the BupChip held and silent. `sim/bupchip/` checks the CPU in lockstep with MiSTer's ARM7TDMI and the wrapper with Rikki & Vikki's songs (`s1/check.sh`, `s4/check.sh`) |
-| 2600 ARM cartridges, whole core (2.2.1) | The 15 Champ Games demos and Stratovox, 1,500 frames each, against MiSTer's core with its ARM7TDMI: frame length, picture and RIOT RAM equal on every frame (the first frame's picture excused on 3 games, whose first call holds the console for a different time), and every ARM call runs the same number of instructions. Spiders is late on the same 16 calls as on MiSTer. The sound is the same writes at slightly other times: 8,928 of the 23,984 frames (37.2%) carry an audio difference, 0 on Elevator Agent and 1,025 on Zaxxon. No CPU halt, no PSRAM timing violation |
+| 2600 ARM cartridges, whole core (2.2.1) | The 15 Champ Games demos and Stratovox, 1,500 frames each (frames 1-1,499 compared, 23,984 in all), against MiSTer's core with its ARM7TDMI: frame length, picture and RIOT RAM equal on every frame (the first frame's picture excused on 3 games, whose first call holds the console for a different time), and every ARM call runs the same number of instructions. Spiders is late on the same 16 calls as on MiSTer. The sound is the same writes at slightly other times: 8,928 of the 23,984 frames (37.2%) carry an audio difference, 0 on Elevator Agent and 1,025 on Zaxxon. No CPU halt, no PSRAM timing violation |
 | DARIA's CPU and front end against MiSTer's | Every call of 21 images compared with MiSTer's ARM: registers at return, every RAM write, the audio values. The front end clock by clock beside MiSTer's on 30 images, 1,500 frames each. With DARIA's own CPU at its real clock ratio, 19 runs: every call equal to MiSTer's |
 | Everything else unchanged by DARIA (2.2.1) | `run_sim.sh`, `extra_tests.sh` and the 2600 cartridge-RAM matrix give the same frame-by-frame fingerprints with and without DARIA; the BupChip's songs are identical by PCM |
 | PAL 2600 game, Region on Auto (2.2.1) | One retune, to PAL, at 955 ms, then the game runs in PAL. With the region logic of 2.1.3 and earlier, the same simulation retuned 41,293 times in 1.3 s and ended in NTSC |
@@ -215,8 +215,9 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build (2.2.1, fitter seed 2) meets timing on all four corners.
-Worst setup slack: +2.683 ns on clk_sdram (the SRAM request path, against
-a release gate of +1.5 ns), +1.077 ns on DARIA's CPU clock, and +0.397 ns
+Worst setup slack: +2.683 ns on clk_sdram (Flicker Blend's half-period
+capture of the TIA's colour into the SRAM controller, against a release
+gate of +1.5 ns), +1.077 ns on DARIA's CPU clock, and +0.397 ns
 on the one 6 ns path of DARIA's front end (its phase detector). Worst hold
 slack +0.098 ns. It uses 15,625 of 18,480 ALMs (85%), 195 of 308 M10K
 blocks and 12 DSP blocks. Seeds 1 and 3 give clk_sdram +2.462 and +2.919

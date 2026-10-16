@@ -200,7 +200,9 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
 - `step7_checks.py` judges a fit again from its own report files without a
   refit: (a), (l) and (h) by the build's divider (amended for VCO/19,
   2026-10-14), and (c.cells) from `firstflops.tsv` by the tree's table. It
-  prints the verdict as amended and the rules as first written.
+  prints the verdict as amended and the rules as first written. A change
+  to any other check that `step7_report.tcl` makes, or to what it writes,
+  needs the fit's kept database (`REPORT_ONLY=1`) or a refit (plan 5.4).
 - `step7/selftest.sh` tests the driver's refusals, `step7_prep.py` and
   `step7_checks.py` on made-up report files, without Quartus: 117 cases
   at `f3a9b49`. It needs 100 MB free on `/`; with less it skips the cases

@@ -533,10 +533,12 @@ not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 
 Current use (2.2.1, with DARIA, fitter seed 2) is 15,625 of 18,480 ALMs
 (85%), 195 of 308 M10K blocks and 1,767-1,770 of 1,848 LABs over seeds
-1-3, with a peak interconnect use of 60.4-60.8%: the 84% that DARIA's
-design took as a guide, by 77-102 ALMs, which triggers nothing
+1-3, with a peak interconnect use of 60.4-60.8%: over the 84% that
+DARIA's design took as a guide by 77-102 ALMs, which triggers nothing
 ([DARIA_CORE.md](DARIA_CORE.md), "Step 7 work"). DARIA's 64 KB image
-window, its 32 KB of cart RAM and its firmware ROM take most of the M10K.
+window (64 M10K), its 32 KB of cart RAM (32) and the front ends' 32 KB
+copy of the image's start (32) take most of the M10K. The firmware ROM
+(16) is ARIA's, already in 2.1.3's 78 M10K.
 The cartridge RAM, Flicker Blend frame, SaveKey and BIOS live in the SRAM
 (`core/sram_ctrl.sv`, whose header has the memory map); 2.0.21, without
 the BupChip, used 69% ALMs and 46 M10K, and 2.1.3, with the BupChip,
