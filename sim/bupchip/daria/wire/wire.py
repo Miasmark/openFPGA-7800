@@ -685,6 +685,51 @@ def scenarios(img):
                     "has scored 48 frames (about 1 s), and the game restarts in PAL (the plain build's count is "
                     "reported)", True)
 
+    # The final review's RTL-1, accepted for 2.2.1 as a known minor issue: after a PAL 2600 image the cartridge
+    # region is cleared to 0 while the PLL is PAL. During a PAL A78's download, once its header makes it a 7800
+    # cartridge, Auto asks for NTSC (cart_region 0) before byte 57 sets the region to PAL; in the DARIA build
+    # region_pll takes NTSC, the retune becomes pending, and the freeze while one is pending
+    # (atari7800_pocket.sv's daria_rt_pend) keeps region_pll there. pll_region then retunes to NTSC at the load's
+    # end and back to PAL after it: two retunes more than the plain build, which makes none. The final region is
+    # PAL in both. This scenario pins those counts: EXTRA_RETUNES (DARIA 2, plain 0). When the next revision fixes
+    # RTL-1, the DARIA build's count drops to 0, and its expected value here changes with it.
+    AT2 = 1000          # ms: the A78's load starts after the 2600's retune to PAL (955 ms on the D fix round's tree)
+    EXTRA_RETUNES = {"daria": ["NTSC", "PAL"], "plain": []}
+
+    def pal2600_a78():
+        args = ["+image=" + I("pal_test.a26"), "+wav=1100", "+image2=" + I("load_test_pal.a78"),
+                "+image2at=%d" % AT2, "+wire_pll"]
+        s = run("daria", "pal2600_a78", args)
+        p = run("plain", "pal2600_a78", args)
+        j = Judge("pal2600_a78"); no_daria(j, s); common(j, p)
+        j.eq(s, "rgn_bad", 0); j.eq(s, "f6_pend", 0); j.eq(s, "wr_after_load2", 0)
+        notes = []
+        for kind, r in (("daria", s), ("plain", p)):
+            rt = [(m.group(1), float(m.group(2))) for m in re.finditer(
+                r"^WIRE pll_region retune \d+ to (PAL|NTSC) at clk_sys \d+ \(([\d.]+) ms\)", r["text"], re.M)]
+            j.ok(r["sum"].get("retunes") == len(rt), "%s: retunes=%s, %d retune lines" % (kind, r["sum"].get("retunes"), len(rt)),
+                 key="retunes", infra=r["sum"].get("retunes") is None)
+            # the 2600's retune to PAL comes first, before the A78's load
+            j.ok(bool(rt) and rt[0][0] == "PAL" and rt[0][1] < AT2,
+                 "%s: the first retune %s, not the 2600's to PAL before %d ms (the test is void)" % (
+                     kind, rt[0] if rt else None, AT2))
+            extra = [t for t, _ in rt[1:]]
+            j.ok(extra == EXTRA_RETUNES[kind], "%s: retunes after the PAL 2600's: %s (pinned: %s; RTL-1)" % (
+                kind, extra or "none", EXTRA_RETUNES[kind] or "none"), key="retunes")
+            j.ok(r["sum"].get("is_pal") == 1, "%s: is_pal=%s at the end (want 1: the A78 is PAL)" % (
+                kind, r["sum"].get("is_pal")), key="is_pal")
+            j.ok(r["sum"].get("b2b") == 0, "%s: b2b=%s (want 0)" % (kind, r["sum"].get("b2b")), key="b2b")
+            j.ok(re.search(r"^IMAGE2 .* loaded at", r["text"], re.M) is not None, "%s: no IMAGE2 line: the A78 was not "
+                 "loaded (the test is void)" % kind)
+            notes.append("%s: retunes %s, releases %s" % (kind, " ".join("%s@%.3fms" % x for x in rt) or "none",
+                                                          r["sum"].get("releases")))
+        s["note"] = "; ".join(notes)
+        return j, s
+    S["pal2600_a78"] = (pal2600_a78, "RTL-1 (accepted for 2.2.1): a PAL 2600 image, then a PAL A78 on Auto, pll_region "
+                        "in the loop: after the 2600's retune to PAL, the DARIA build retunes twice more (to NTSC, then "
+                        "PAL), the plain build not at all; both end in PAL. The pinned count drops to 0 when the next "
+                        "revision fixes RTL-1", True)
+
     def pal_arm():
         s = run("daria", "pal_dpc", ["+image=" + I("pal_dpc.bin"), "+daria=1300", "+wire_pll"])
         j = Judge("pal_dpc"); daria_health(j, s, resets=1)
