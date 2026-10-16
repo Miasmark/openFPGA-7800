@@ -388,11 +388,11 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - **Tools:** `6477f78` (`step7_checks.py` judges (c.cells) from `firstflops.tsv`, and the fit driver's self-test needs 100 MB: VG-1, VG-2, VG-9), `82d05f1` (`tb_wire`'s `pal2600_a78` pins RTL-1 on both builds), `95c3352` (`step7_gates.sh`: VG-4, VG-5, VG-6), `5e1badb` (`hygiene.sh`: VG-7), `ce14cc0` (`run_dbgsnap.sh`: VG-8), `3344b92` (`frame_gate.py`: VG-10) and `f3a9b49` (`selftest.py` runs `step7_gates.sh` on stand-ins).
   - **Re-runs after the tools commits:** `selftest.py` with c76's inputs, 267 of 267; `fit_selftest`, 117 of 117; `frame_gate.py` on c76's 16 frame runs, 16 of 16, each report byte-identical to c76's; and `step7_checks.py` on copies of every c76 fit, with the verdicts in `DARIA_CORE.md`.
   - **Docs:** `42ff9db` (the plan and this file), `bf3d61a` (`DARIA_CORE.md`'s step-7 record, the V1 done-when, open items 7, 10, 11, 12 and 20, and the after-2.2.1 list), `7ff3276` (the README for 2.2.1) and `51b2927` (`DEVELOPING.md`, `design.md`, `ENVIRONMENT.md` and the sim READMEs).
-- **Two re-reviews of `51b2927`,** one of the tools and one of the docs, passed every finding. The tools re-review built `tb_wire` again and re-ran `pal2600_a78`: the same binaries (md5) and the same timings. Between them they found one new minor item, N1 (below), and 14 smaller ones (NEW-1 to NEW-3 and N2 to N12; NEW-1 and N2 are the same).
-- **The nits round** fixed the 14: `5676558` (`frame_gate.py --auto` prints one verdict line, NEW-3) and `baca4cd` (the docs). After it `selftest.py` with c76's inputs passes 268 of 268, and `frame_gate.py` on c76's 16 frame runs gives each report byte for byte. `src/` is still `317eaa8`'s.
+- **Two re-reviews of `51b2927`,** one of the tools and one of the docs, passed every finding. The tools re-review built `tb_wire` again and re-ran `pal2600_a78`: the same binaries (md5) and the same timings. Between them they found one new minor item, N1 (below), and 13 smaller ones (NEW-1 to NEW-3 and N2 to N12, where NEW-1 and N2 are one item).
+- **The nits round** fixed all 13: `5676558` (`frame_gate.py --auto` prints one verdict line, NEW-3) and `baca4cd` (the docs). After it `selftest.py` with c76's inputs passes 268 of 268, and `frame_gate.py` on c76's 16 frame runs gives each report byte for byte. `src/` is still `317eaa8`'s.
 - **The merge.** `s7/D` at `baca4cd` is merged into DARIA-dev (`0bfd157`) with no conflict; `src/` and `sim/` equal `s7/D`'s. The merge items were the D fix round's text above, brought up to date; `docs/IMPROVEMENTS.md`, linked from `DEVELOPING.md` (DOC-7) and given the after-2.2.1 list (N1); `ENVIRONMENT.md` 8.4, reworded to agree with 8.1 and `AGENT_RUNS.md` section 2 (DOC-8); and this record.
 
-**c77: the runs c76 did not cover.** The final review found three items of plans 7.3 and 7.4 that c76 did not run (`DARIA_CORE.md`, "What c76 does not cover"). c77 ran them from 02:04 to 06:52 UTC, as seven pieces:
+**c77: the runs c76 did not cover.** The final review found two items of plans 7.3 and 7.4 that c76 did not run, and no single `wire` gate run at the head (`DARIA_CORE.md`, "What c76 does not cover"). c77 ran the two items and one `wire` gate run at the head, from 02:04 to 06:52 UTC, as seven pieces:
 - **Plan 7.3's last item:** SF2fix and draconian RC8 in `tb_frames`.
 - **Plan 7.4's R2 phase runs:** Galagon and Spiders in `tb_frames` at 8,730 and 17,460 ps.
 - **One `wire` gate run at `s7/D`'s head of that time, `356cea9`.**
@@ -403,7 +403,7 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
 - Verilator 5.040, benches at VCO/19.
 
 **How it ran.** The wire gate ran three times.
-- Its first attempt, at 02:04-02:05, was stopped because its builds took the free space on `/` to 2,184 MB, under the 2,200 MB floor. The later attempts kept the builds off `/`.
+- Its first attempt, at 02:04-02:05, was stopped because its builds took the free space on `/` to 2,184 MB, under the 2,200 MB that this campaign kept free (a margin above the 2 GB of `docs/AGENT_RUNS.md` section 4). The later attempts kept the builds off `/`.
 - At about 02:40 the machine stopped: the working session ended early (`docs/AGENT_RUNS.md` section 2). That stopped the three pieces then running, the wire gate's second attempt (from 02:06) and SF2fix and draconian (from 02:04). Each restarted from its beginning at 02:41.
 - In the run that counts, free space on `/` stayed at 2,307 MB or more.
 - Every simulation ran through the simulation slots. The logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c77/`.
