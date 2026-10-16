@@ -8,8 +8,14 @@
 # own (never the machine's Quartus lock). Every directory it makes is under
 # one mktemp -d, removed at the end; nothing in the tree is written.
 #   sim/bupchip/quartus_probe/step7/selftest.sh
-# Needs 2 GB free on / (run_step7.sh's own check). Exit 0 when every test
-# passes. The quartus side (step7_report.tcl, daria.qip) is smoke/run_smoke.sh.
+# run_step7.sh's own check of the free space (2,048 MB on /) reads a
+# stand-in df here, which reports 2,048 MB (passes) or 2,047 MB (refused, a
+# test of its own), so the machine's free space does not decide the result.
+# What the tests really write is about 15 MB (three copies of src/fpga, of
+# 3.3 MB, and the made-up report files): with less than 100 MB free the
+# driver tests that copy src/fpga are skipped, named, and the run exits 3
+# (PARTIAL, not a pass). Exit 0 when every test passes, 1 when one fails.
+# The quartus side (step7_report.tcl, daria.qip) is smoke/run_smoke.sh.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
@@ -19,8 +25,10 @@ cleanup() { [ -z "$SLEEPER" ] || kill "$SLEEPER" 2>/dev/null; rm -rf -- "$T"; }
 trap cleanup EXIT
 npass=0
 nfail=0
+nskip=0
 ok() { echo "PASS $*"; npass=$((npass + 1)); }
 bad() { echo "FAIL $*"; nfail=$((nfail + 1)); }
+skip() { echo "SKIPPED $*"; nskip=$((nskip + 1)); }
 
 echo "== selftest.sh $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "HEAD $(git -C "$ROOT" rev-parse HEAD); status $(git -C "$ROOT" status --porcelain | wc -l) lines"
@@ -144,8 +152,9 @@ W = lambda p, s: open(p, "w").write(s)
 # guard pair's setup slack at the slow 85C corner), t:sys (the worst other clk_sys setup there), t:syshold
 # (clk_sys hold there), t:gpaths (setup paths pd_tog -> pd_rx there), t:grel (its relationship), t:h (t_*_q ->
 # clk_sdram setup), t:nosta (no Timing Analyzer summary), t:stas (its clk_sys Slack at the slow 85C corner, as
-# if from another analysis), t:tcl_a/l/h (the report script's verdict, forced)
-tv = dict(div="18", gs="0.217", sys="1.000", syshold="0.291", gpaths="1", grel="6.000", h="6.697")
+# if from another analysis), t:tcl_a/l/h/cells (the report script's verdict, forced), t:hhold (t_*_q ->
+# clk_sdram's worst hold over the corners), t:anocorner=N (no setup line for pd_tog -> pd_rx at corner N)
+tv = dict(div="18", gs="0.217", sys="1.000", syshold="0.291", gpaths="1", grel="6.000", h="6.697", hhold="0.300")
 for c in changes:
     m = re.match(r"t:(\w+)(?:=(.*))?$", c)
     if m:
@@ -159,10 +168,12 @@ osys = {c: float(tv["sys"]) if n == 0 else 1.0 + n for n, (c, _) in enumerate(CO
 fig = [f"# corners: {' '.join(c for c, _ in CORNERS)}", "## (a) (b) (d) the guard pair pd_tog -> pd_rx (made up)"]
 for n, (c, _) in enumerate(CORNERS):
     k = int(tv["gpaths"]) if n == 0 else 1
-    fig.append(f"  {c} setup: {k} path(s);" + f" rel {float(tv['grel']):.3f} slack {gs[c]:.3f} skew -1.000 data 4.000;" * k)
+    if str(n) != tv.get("anocorner"):
+        fig.append(f"  {c} setup: {k} path(s);" + f" rel {float(tv['grel']):.3f} slack {gs[c]:.3f} skew -1.000 data 4.000;" * k)
     fig.append(f"  {c} hold: 1 path(s); rel 1.000 slack 2.000 skew 0.000 data 3.000;")
 fig += ["## (h) Fix B checks 2-4: t_*_q (made up)",
-        f"  t_*_q -> clk_sdram: worst setup {float(tv['h']):.3f} ns (6 levels, >= +4.5), worst hold over corners 0.300 ns (>= 0)",
+        f"  t_*_q -> clk_sdram: worst setup {float(tv['h']):.3f} ns (6 levels, >= +4.5), worst hold over corners "
+        f"{float(tv['hhold']):.3f} ns (>= 0)",
         "  into t_*_q: worst setup 54.000 ns (>= +40)", "## the checks (made up)"]
 tim, summ = [], []
 for n, (c, name_) in enumerate(CORNERS):
@@ -184,8 +195,37 @@ if "nosta" not in tv:
 first = dict(a=int(tv["gpaths"]) == 1 and abs(float(tv["grel"]) - 6.0) < 0.0005 and min(gs.values()) >= 0,
              l=all(not (l.split()[2] != "-" and float(l.split()[2]) < 0) and not (l.split()[4] != "-" and float(l.split()[4]) < 0)
                    for l in tim if not l.startswith("==")),
-             h=float(tv["h"]) >= 4.5)
+             h=float(tv["h"]) >= 4.5 and float(tv["hhold"]) >= 0)
+# firstflops.tsv: the report script's counts for step7_report.tcl's ff_table (beside f3_crossings.txt), each row
+# as its column for this kind says (Q5's for q5, Build B's for any other); without DARIA none of them is there.
+# ff:NAME=N sets a row's count, ffwant:NAME flips the row's own table column (a fit made with another table),
+# ffdrop:NAME drops the row, noff writes no file; the report script's (c.cells) is its verdict on the file.
+tcl = open(os.path.join(os.path.dirname(f3), "step7_report.tcl")).read()
+ffm = re.search(r"(?ms)^set ff_table \{\n(.*?)^\}", tcl)
+ff = []
+for line in ffm.group(1).splitlines():
+    r = re.match(r"\s*\{([^}]+)\}\s+([01])\s+([01])\s*$", line)
+    if r:
+        want = int(r.group(3) if kind == "q5" else r.group(2))
+        n = want if kind in ("daria", "q5") else 0
+        ff.append([r.group(1), want, n, n])
+def ffrow(short):
+    return [x for x in ff if x[0].endswith("|" + short)][0]
+for c in changes:
+    m = re.match(r"(ff|ffwant|ffdrop):([^=]+)(?:=(\d+))?$", c)
+    if m:
+        x = ffrow(m.group(2))
+        if m.group(1) == "ff":
+            x[2] = x[3] = int(m.group(3))
+        elif m.group(1) == "ffwant":
+            x[1] = 1 - x[1]
+        else:
+            ff.remove(x)
+if "noff" not in changes:
+    W(os.path.join(fpga, "firstflops.tsv"), "".join(f"{p}\t{w}\t{n}\t{a}\n" for p, w, n, a in ff))
+first["cells"] = all((n == 1) if w else (n == 0) for _, w, n, _ in ff)
 first = {k: tv.get("tcl_" + k, "PASS" if v else "FAIL") for k, v in first.items()}
+first["c.cells"] = first.pop("cells")
 ids = ["l.clocks", "l", "gate.clk_sdram", "gate.clk_arm", "gate.hold", "a", "b", "d", "c.cells", "e.files", "f.files",
        "g", "g.legs", "h", "i", "j", "k", "k'.files", "k'.fanin", "sdram.files", "p", "o.files"]
 info = {"d", "e.files", "f.files", "i", "k'.files", "k'.fanin", "sdram.files", "p", "o.files"}
@@ -203,9 +243,11 @@ W(os.path.join(fpga, "checks.txt"), "# step7_report.tcl: kind made up\n" + "\n".
   + ("# step7_report.tcl: end\n" if end else ""))
 W(os.path.join(fpga, "report_rc.txt"), "1\n" if "rc1" in changes else "0\n")
 if "nofit" not in changes:
-    W(os.path.join(out, "ap_core.fit.rpt"), "; Fitter Netlist Optimizations ;\n; Node ; Action ; Operation ;\n"
-      "; core_top:ic|other|r[0] ; Duplicated ; Router Logic Cell Insertion ;\n\n\n"
-      "; ALMs needed [=A-B+C] ; 13,000 / 18,480 ( 70 % ) ;\n; Peak interconnect usage (total/H/V) ; 40% / 42% / 38% ;\n")
+    # notable: a fit report without its Fitter Netlist Optimizations table
+    W(os.path.join(out, "ap_core.fit.rpt"), ("" if "notable" in changes else
+      "; Fitter Netlist Optimizations ;\n; Node ; Action ; Operation ;\n"
+      "; core_top:ic|other|r[0] ; Duplicated ; Router Logic Cell Insertion ;\n\n\n")
+      + "; ALMs needed [=A-B+C] ; 13,000 / 18,480 ( 70 % ) ;\n; Peak interconnect usage (total/H/V) ; 40% / 42% / 38% ;\n")
 W(os.path.join(out, "ap_core.fit.summary"), "Logic utilization (in ALMs) : 13,000 / 18,480 ( 70 % )\n")
 cs = "50.0" if kind in ("daria", "q5") else "28.636364"
 W(os.path.join(out, "ap_core.map.rpt"), "; Parameter Settings for User Entity Instance: core_top:ic|atari7800_pocket:atari|psram:bup_psram ;\n"
@@ -308,6 +350,12 @@ checker "FAIL: report" daria "Build B, step7_report.tcl stopped before its end" 
 checker "FAIL: report" daria "Build B, quartus_sta exit 1" rc1
 checker "FAIL: k'" daria "Build B with no fanin.tsv" nofanin
 checker "FAIL: c h.retime" daria "Build B with no fit report" nofit
+checker "FAIL: c h.retime" daria "Build B whose fit report has no Fitter Netlist Optimizations table" notable
+checker "FAIL: c h.retime" q5 "Q5 whose fit report has no Fitter Netlist Optimizations table" notable
+checker "FAIL: h.retime" builda "Build A (Fix B, no DARIA) whose fit report has no such table: (h.retime) fails ((c) gates no Build A)" \
+	notable
+grep -q "^  (h.retime) FAIL .*no Fitter Netlist Optimizations table" "$T/c/$case_n.out" \
+	&& ok "     (h.retime) names the missing table" || bad "     (h.retime) does not name the missing table: $T/c/$case_n.out"
 echo "   (k'): the first flops' fan-in"
 checker PASS daria "hold_a[0] behind a NOT (an inverted register: 1 level), cmd_s[0] from a fitter duplicate through a routing cell" \
 	"hold_a[0]=levels:1" "cmd_s[0]=levels:1" "cmd_s[0]=dup"
@@ -363,9 +411,35 @@ checker "FAIL: a" daria "VCO/19, the pair at 20.000 ns (the 6 ns constraint not 
 has a "the constraint applied (NO)"
 checker "FAIL: h" daria "VCO/19, t_*_q -> clk_sdram at +2.900" t:div=19 t:h=2.900
 checker "FAIL: h" builda "Build A (no DARIA, divider 24) with t_*_q at +4.298: +4.5 holds" t:div=24 t:h=4.298
+checker "FAIL: h" daria "VCO/19, t_*_q -> clk_sdram setup +6.697 and its worst hold -0.010" t:div=19 t:hhold=-0.010
+has h "hold -0.010 (>= 0)"
+checker "FAIL: h" daria "VCO/18, the same hold" t:div=18 t:hhold=-0.010
+checker "FAIL: a" daria "VCO/19, no pd_tog -> pd_rx setup line for the slow 0C corner" t:div=19 t:anocorner=1
+has a "no setup figures for pd_tog -> pd_rx at ['8_slow_1100mv_0c']"
+checker "FAIL: a" daria "VCO/19, no setup line for the fast 0C corner (the last)" t:div=19 t:anocorner=3
+has a "MIN_fast_1100mv_0c"
+checker "FAIL: a" daria "VCO/18, no setup line for the slow 0C corner" t:div=18 t:anocorner=1
 checker "FAIL: l" daria "VCO/19, the report script said (l) PASS on figures with a failing clock (a misread)" \
 	t:div=19 t:sys=-0.080 t:tcl_l=PASS
 grep -q "misread" "$T/c/$case_n.out" && ok "     the misread is named" || bad "     the misread is not named: $T/c/$case_n.out"
+echo "   (c.cells) judged again from firstflops.tsv by the tree's ff_table"
+checker PASS q5 "Q5 fitted with plan 2.7's old table (cap_err_a[0] present in Q5, found 0): the report script failed (c.cells)" \
+	t:div=19 "ffwant:cap_err_a[0]"
+has c.cells "rows the tree's table changed since the fit: ['cap_err_a[0] present -> absent']"
+has c.cells "the report script, by the table it ran with: FAIL"
+fline PASS
+checker "FAIL: c.cells" q5 "Q5 with cap_err_a[0] found once (absent by the table)" t:div=19 "ff:cap_err_a[0]=1"
+has c.cells "cap_err_a[0] PRESENT (expected absent, found 1)"
+checker "FAIL: c.cells" daria "Build B with ftog_s[0] not found" "ff:ftog_s[0]=0"
+has c.cells "ftog_s[0] MISSING (expected present, found 0)"
+checker "FAIL: c.cells" daria "Build B with ftog_s[0] found twice" "ff:ftog_s[0]=2"
+checker "FAIL: c.cells" daria "the report script said (c.cells) PASS on counts that fail by its own table (a misread)" \
+	"ff:ftog_s[0]=0" t:tcl_cells=PASS
+has c.cells "misread"
+checker "FAIL: c.cells" daria "Build B with no firstflops.tsv" noff
+has c.cells "firstflops.tsv missing"
+checker "FAIL: c.cells" daria "firstflops.tsv without ready_s[0]'s row" "ffdrop:ready_s[0]"
+has c.cells "in the tree's table but not counted"
 
 # ---- 2b. the two copies of plan 2.7's table -------------------------------------------------------------------
 echo "-- 2b. step7_report.tcl's ff_table and f3_crossings.txt: the same first flops, present in the same kinds"
@@ -418,13 +492,20 @@ else grep -q "ftog_s\[0\] only in ff_table" "$T/tables.out" && ok "tables: f3_cr
 # ---- 3. run_step7.sh's refusals ------------------------------------------------------------------------------
 echo "-- 3. run_step7.sh: protected directories, existing run directories, the lock (a stand-in docker)"
 DRV="$HERE/run_step7.sh"
+# run_step7.sh's free-space check reads a stand-in df (the figure in $T/df_mb), so that its 2,048 MB floor is
+# tested as such and the machine's free space does not decide the result. What the tests that pass that check
+# really write is a copy of src/fpga (3.3 MB) each, three of them: they need 100 MB free, or are skipped.
 avail=$(df -BM --output=avail / | tail -1 | tr -dc 0-9)
-if [ "$avail" -lt 2100 ]; then
-	bad "only $avail MB free: run_step7.sh refuses to start below 2 GB, so its tests cannot run"
-else
+roomy=1
+[ "$avail" -ge 100 ] || roomy=0
+{
 	mkdir -p "$T/bin" "$T/c/sim/work/step7/ref/runs" "$T/c/sim/work/bupchip/fullprobe/base_s2" "$T/w"
 	printf '#!/bin/sh\necho "stand-in docker: $*" >&2\nexit 1\n' > "$T/bin/docker"
 	chmod +x "$T/bin/docker"
+	printf '#!/bin/sh\n# stand-in df: run_step7.sh asks "df -BM --output=avail /"\necho Avail\necho "$(cat %s)M"\n' "$T/df_mb" > "$T/bin/df"
+	chmod +x "$T/bin/df"
+	echo 2048 > "$T/df_mb"
+	echo "   (free on /: $avail MB; run_step7.sh reads a stand-in df: 2048 MB, its floor)"
 	echo canary > "$T/c/sim/work/step7/ref/runs/canary"
 	echo canary > "$T/c/sim/work/bupchip/fullprobe/base_s2/canary"
 	LOCKF="$T/lock"
@@ -446,13 +527,22 @@ else
 	drv 2 "WORK inside step7/ref" WORK="$T/c/sim/work/step7/ref/runs"
 	ln -s "$T/c/sim/work/step7/ref" "$T/w/link"
 	drv 2 "TAG a symbolic link to step7/ref, FORCE=1" WORK="$T/w" TAG=link FORCE=1
-	drv 1 "a new run directory (the stand-in compile fails)" WORK="$T/w" TAG=fresh
-	[ -f "$T/w/fresh/.step7_run" ] && ok "driver: the new run directory is marked .step7_run" || bad "driver: no .step7_run in a new run directory"
-	echo keep > "$T/w/fresh/keep.rbf"
-	drv 2 "the same TAG again, without FORCE" WORK="$T/w" TAG=fresh
-	[ -f "$T/w/fresh/keep.rbf" ] && ok "driver: its files kept" || bad "driver: its files lost without FORCE"
-	drv 1 "the same TAG with FORCE=1 (made by run_step7.sh)" WORK="$T/w" TAG=fresh FORCE=1
-	[ ! -f "$T/w/fresh/keep.rbf" ] && [ -f "$T/w/fresh/.step7_run" ] && ok "driver: replaced with FORCE=1" || bad "driver: not replaced with FORCE=1"
+	echo 2047 > "$T/df_mb"
+	drv 2 "2,047 MB free (the stand-in df), one under the floor" WORK="$T/w" TAG=floor
+	grep -q "only 2047 MB free on /" "$T/drv.out" && [ ! -e "$T/w/floor" ] && ok "driver: refused on the free space, no run directory made" \
+		|| bad "driver: 2,047 MB not refused on the free space, or a run directory made: $(tail -1 "$T/drv.out")"
+	echo 2048 > "$T/df_mb"
+	if [ "$roomy" = 1 ]; then
+		drv 1 "a new run directory (the stand-in compile fails)" WORK="$T/w" TAG=fresh
+		[ -f "$T/w/fresh/.step7_run" ] && ok "driver: the new run directory is marked .step7_run" || bad "driver: no .step7_run in a new run directory"
+		echo keep > "$T/w/fresh/keep.rbf"
+		drv 2 "the same TAG again, without FORCE" WORK="$T/w" TAG=fresh
+		[ -f "$T/w/fresh/keep.rbf" ] && ok "driver: its files kept" || bad "driver: its files lost without FORCE"
+		drv 1 "the same TAG with FORCE=1 (made by run_step7.sh)" WORK="$T/w" TAG=fresh FORCE=1
+		[ ! -f "$T/w/fresh/keep.rbf" ] && [ -f "$T/w/fresh/.step7_run" ] && ok "driver: replaced with FORCE=1" || bad "driver: not replaced with FORCE=1"
+	else
+		skip "driver: a new run directory, the same TAG without and with FORCE=1 (each copies src/fpga): only $avail MB free, 100 needed"
+	fi
 	mkdir -p "$T/w/odd/sim/work/step7/ref"
 	echo canary > "$T/w/odd/sim/work/step7/ref/canary"
 	echo "run_step7.sh run directory" > "$T/w/odd/.step7_run"
@@ -476,13 +566,18 @@ else
 	kill "$SLEEPER" 2>/dev/null
 	wait "$SLEEPER" 2>/dev/null
 	SLEEPER=""
-	PATH="$T/bin:$PATH" QUARTUS_LOCK="$LOCKF" TREE="$ROOT" WORK="$T/w" TAG=viafd DRV="$DRV" LOCKF="$LOCKF" \
-		bash -c 'exec 9>"$LOCKF"; flock 9; "$DRV"' > "$T/drv.out" 2>&1
-	rc=$?
-	[ "$rc" = 1 ] && [ -f "$T/w/viafd/.step7_run" ] && ok "driver: the lock taken on an inherited descriptor (exec 9>lock; flock 9) -> accepted" \
-		|| bad "driver: exec 9>lock; flock 9 -> exit $rc: $(tail -1 "$T/drv.out")"
-fi
+	if [ "$roomy" = 1 ]; then
+		PATH="$T/bin:$PATH" QUARTUS_LOCK="$LOCKF" TREE="$ROOT" WORK="$T/w" TAG=viafd DRV="$DRV" LOCKF="$LOCKF" \
+			bash -c 'exec 9>"$LOCKF"; flock 9; "$DRV"' > "$T/drv.out" 2>&1
+		rc=$?
+		[ "$rc" = 1 ] && [ -f "$T/w/viafd/.step7_run" ] && ok "driver: the lock taken on an inherited descriptor (exec 9>lock; flock 9) -> accepted" \
+			|| bad "driver: exec 9>lock; flock 9 -> exit $rc: $(tail -1 "$T/drv.out")"
+	else
+		skip "driver: the lock taken on an inherited descriptor (copies src/fpga): only $avail MB free, 100 needed"
+	fi
+}
 
-echo "selftest.sh: $npass passed, $nfail failed"
-[ "$nfail" = 0 ] && echo "selftest.sh: PASS" || echo "selftest.sh: FAIL"
-[ "$nfail" = 0 ]
+echo "selftest.sh: $npass passed, $nfail failed, $nskip skipped"
+if [ "$nfail" != 0 ]; then echo "selftest.sh: FAIL"; exit 1; fi
+if [ "$nskip" != 0 ]; then echo "PARTIAL: $nskip test(s) skipped for want of free space (the SKIPPED lines): not a pass"; exit 3; fi
+echo "selftest.sh: PASS"

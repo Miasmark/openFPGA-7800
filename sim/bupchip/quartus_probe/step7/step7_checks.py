@@ -10,7 +10,11 @@ Usage: step7_checks.py DIR
 Reads checks.txt (step7_report.tcl's STA checks) and adds:
   (c) netlist optimizations: no first flop of plan 2.7 present in this build,
       and neither pd_tog nor pd_rx, is duplicated or retimed by the fitter;
-      nor is sram|t_*_q retimed (Fix B check 4, part of (h))
+      nor is sram|t_*_q retimed (Fix B check 4, part of (h)). A fit report
+      without the Fitter Netlist Optimizations table fails both
+  (c.cells) judged again from step7_report.tcl's counts (firstflops.tsv) by
+      the tree's plan 2.7 table (step7_report.tcl's ff_table), so that a
+      corrected table re-judges a fit with no refit; a misread as for (a)
   (e) daria_constraints.sdc read without a warning, and the status of its
       four +-20 ns lines and its 6 / 1 ns pair in report_exceptions
   (f) report_metastability: every first flop present in this build heads a
@@ -54,7 +58,12 @@ checks with Fix B; on aeee6d2, kind base, (g) is the negative control and must
 FAIL). Every gating check must be present: one that never ran (quartus_sta
 stopped, a report file missing) fails as "not reported". Exit status 0 when
 every gating check passes. The line after it, "rules as first written: ...",
-gives the verdict with (a), (l) and (h) as step7_report.tcl judged them.
+gives the verdict with (a), (l) and (h) as step7_report.tcl judged them
+((c.cells) as re-judged by the tree's table in both lines).
+A change to a check made in step7_report.tcl reaches an old fit only through
+the files it wrote; this script re-judges (a), (l), (h) and (c.cells) from
+them, and any other such check needs the fit's kept database (REPORT_ONLY=1
+in run_step7.sh) or a refit.
 """
 import os
 import re
@@ -161,20 +170,27 @@ else:
                 bad.append(f"{cols[0]} {cols[1].lower()} as {made} ({cols[2]}; {cols[3] if len(cols) > 3 else '-'})")
     tbad = [f"{c[0]}: {c[1]} / {c[2]}" for c in rows
             if re.search(r"\|sram_ctrl:sram\|t_\w+_q", c[0]) and re.search(r"Retim", " ".join(c[1:3]), re.I)]
-    if i < 0:
-        check("c", "INFO", "the fit report has no Fitter Netlist Optimizations table (nothing optimized)")
-    elif daria:
+    # No table: what the fitter duplicated or retimed is not known, so (c) and
+    # (h.retime) fail (an absent figure is no pass, 5.4). Every DARIA and Fix B
+    # fit so far has had the table (c76: 4,902 to 5,037 optimized nodes); a
+    # report without it was cut short or is in another format.
+    notab = "the fit report has no Fitter Netlist Optimizations table: what the fitter duplicated or retimed is not known"
+    if not daria:
+        check("c", "FAIL", "no DARIA in this build: the first flops of plan 2.7 are not there (no such cell)")
+    elif i < 0:
+        check("c", "FAIL", notab)
+    else:
         check("c", "FAIL" if bad else "PASS",
               f"{len(rows)} optimized nodes; pd_tog, pd_rx and the {len([t for t in firsts_here if t['cls'] != 'guard'])} "
               "first flops of this build: "
               + (f"{len(bad)} duplicated or retimed: " + "; ".join(bad) if bad else "none duplicated or retimed"))
+    if prep.get("fixb") != "1":
+        check("h.retime", "FAIL", "no Fix B in this build: no sram|t_*_q (no such cell)")
+    elif i < 0:
+        check("h.retime", "FAIL", notab + " (sram|t_*_q)")
     else:
-        check("c", "FAIL", "no DARIA in this build: the first flops of plan 2.7 are not there (no such cell)")
-    if prep.get("fixb") == "1":
         check("h.retime", "FAIL" if tbad else "PASS",
               "sram|t_*_q " + ("retimed: " + "; ".join(tbad) if tbad else "not retimed by the fitter"))
-    else:
-        check("h.retime", "FAIL", "no Fix B in this build: no sram|t_*_q (no such cell)")
 
 # ---- (e): the SDC file and its exceptions -------------------------------------------------------------
 log = (rd(os.path.join(d, "quartus.log")) or "") + (rd(os.path.join(d, "report.log")) or "")
@@ -531,6 +547,87 @@ for cid, judge in (("a", judge_a), ("l", judge_l), ("h", judge_h)):
                                    f"written, the report script said {tv}; {text}")
     else:
         results[i] = (cid, av, f"{text}; as first written (the report script): {tv}")
+
+# ---- (c.cells) judged again by the tree's table (plan 2.7) ---------------------------------------------------------
+# step7_report.tcl counts the registers of each first flop of its ff_table and writes the counts to firstflops.tsv
+# (pattern, present by the table it ran with, found without duplicates, found with suffixes), then judges them by
+# that table. A later correction of the table (2.7: cap_err_a[0] absent from Q5 too, the D fix round) changes no
+# count, so (c.cells) is judged again here from the counts by the tree's ff_table (the step7_report.tcl beside this
+# script), with no refit: a row present must be found once, a row absent not at all, as step7_report.tcl judges.
+# This script's reading of the counts by the fit's own table (the file's second column) must give the report
+# script's verdict, or the check fails as a misread; a row of either table missing from the other fails. The
+# correction is of the table, not of a rule, so "rules as first written" takes this verdict too; the report
+# script's own verdict is in the check's text.
+
+
+def ff_table():
+    """the tree's plan 2.7 table: pattern -> (present in Build B, present in Q5)"""
+    m = re.search(r"(?ms)^set ff_table \{\n(.*?)^\}", rd(os.path.join(here, "step7_report.tcl")) or "")
+    tab = {}
+    for line in (m.group(1) if m else "").splitlines():
+        r = re.match(r"\s*\{([^}]+)\}\s+([01])\s+([01])\s*$", line)
+        if r:
+            tab[r.group(1)] = (int(r.group(2)), int(r.group(3)))
+    return tab
+
+
+def judge_cells():
+    """(by the fit's own table, by the tree's, text); the first is None when the counts are not there"""
+    tab = ff_table()
+    if not tab:
+        return None, "FAIL", "no ff_table in " + os.path.join(here, "step7_report.tcl")
+    tsv = rd(os.path.join(fpga, "firstflops.tsv"))
+    if tsv is None:
+        return None, "FAIL", "firstflops.tsv missing: the report script's counts are not known"
+    rows = []
+    for line in tsv.splitlines():
+        if not line.strip():
+            continue
+        c = line.split("\t")
+        if len(c) != 4 or c[1] not in ("0", "1") or not c[2].isdigit() or not c[3].isdigit():
+            return None, "FAIL", f"firstflops.tsv: a row not in its format: {line[:120]}"
+        rows.append((c[0], int(c[1]), int(c[2]), int(c[3])))
+    if not rows:
+        return None, "FAIL", "firstflops.tsv holds no row"
+    col = 1 if kind == "q5" else 0      # as step7_report.tcl: Q5's column for kind q5, Build B's for any other
+
+    def wrong(want, n):
+        return "MISSING" if want and n != 1 else ("PRESENT" if not want and n != 0 else None)
+    f = "FAIL" if any(wrong(w, n) for _, w, n, _ in rows) else "PASS"
+    counted = [p for p, _, _, _ in rows]
+    extra = [p for p in counted if p not in tab]
+    uncounted = [p for p in tab if p not in counted]
+    bad, changed = [], []
+    for p, w, n, _ in rows:
+        if p not in tab:
+            continue
+        want = tab[p][col]
+        if want != w:
+            changed.append(f"{p.split('|')[-1]} {'present' if w else 'absent'} -> {'present' if want else 'absent'}")
+        st = wrong(want, n)
+        if st:
+            bad.append(f"{p} {st} (expected {'present' if want else 'absent'}, found {n})")
+    a = "FAIL" if bad or extra or uncounted else "PASS"
+    return f, a, (f"each first flop of plan 2.7 present or absent as the tree's table (step7_report.tcl's ff_table) "
+                  f"says for kind {kind}, from the report script's counts (firstflops.tsv, {len(rows)} rows): "
+                  + ("; ".join(bad) if bad else "every row as the table says")
+                  + (f"; counted but not in the tree's table: {extra}" if extra else "")
+                  + (f"; in the tree's table but not counted: {uncounted}" if uncounted else "")
+                  + f"; rows the tree's table changed since the fit: {changed or 'none'}")
+
+
+idx = [i for i, r in enumerate(results) if r[0] == "c.cells"]
+if len(idx) == 1 and results[idx[0]][1] in ("PASS", "FAIL") and "Tcl error" not in results[idx[0]][2]:
+    i = idx[0]
+    tv = results[i][1]
+    fv, av, text = judge_cells()
+    if fv is None:
+        results[i] = ("c.cells", "FAIL", f"{text}; the report script said {tv}")
+    elif fv != tv:
+        results[i] = ("c.cells", "FAIL", f"misread: this script reads the report script's counts by the fit's own table "
+                                         f"as {fv}, the report script said {tv}; {text}")
+    else:
+        results[i] = ("c.cells", av, f"{text}; the report script, by the table it ran with: {tv}")
 
 # ---- verdict -----------------------------------------------------------------------------------------------------
 DARIA_CHECKS = {"a", "b", "c", "c.cells", "e", "f", "k", "k'", "j", "gate.clk_arm"}
