@@ -886,7 +886,7 @@ Two documentation findings were left to the merge into DARIA-dev, and were done 
 3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16. Audio is documented per image above.
 4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
 
-Step 7 is not marked done here. Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed. c77 ran the plan items under "What c76 does not cover" on 2026-10-16, and all pass (`progress.md`, "The final review and c77 (2026-10-16)").
+Step 7 is not marked done here. Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed. On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)").
 
 ### Hand-over to step 8
 
