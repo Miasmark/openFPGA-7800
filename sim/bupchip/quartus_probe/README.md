@@ -181,3 +181,40 @@ At slow 85 °C (the hold column is the worst corner, which is fast 0 °C; the fi
 ## DARIA's front end: `daria_fe_map.sh`
 
 `daria_fe_map.sh [TOP] [--synth | --fit]` compiles `daria_fe` (`src/fpga/core/bupchip/daria_fe*.sv`), or one of its blocks alone (`daria_fe_seq`, `_dec`, `_core`, `_audio`, `_call`, `_copy`, `_arb`, `_guard`), on the 5CEBA4F23C8 with `ap_core.qsf`'s settings and every port but `clk_sys`/`clk_arm` a virtual pin, in `sim/work/bupchip/qfe/<TOP>-<mode>/`. The default is Analysis & Elaboration; `--synth` adds the resource counts of Analysis & Synthesis; `--fit` runs the Fitter and Timing Analyzer as `docs/daria_fe/design.md` 10.3's probes do, and prints ALMs placed less those recoverable by dense packing. `docs/daria_fe/interfaces.md`, section 8, has the options and the results on the step-0 stubs.
+
+## DARIA step 7: the fit driver (`step7/`)
+
+`step7/run_step7.sh` compiles a whole tree's `src/fpga` as CI does
+(`quartus_sh --flow compile ap_core` in `raetro/quartus:21.1`), then runs
+`step7_report.tcl` (`quartus_sta`) and `step7_checks.py`: timing per clock
+and corner, and the checks (a)-(o) of `docs/daria_step7/plan.md` 5.4, with
+a verdict for the kind of build. Its header lists the options (`TREE`,
+`SEED`, `TAG`, `NODARIA=1`, `PIN_ID=1`, `DIV`, `KEEP_DB=1`, `REPORT_ONLY=1`,
+`DRYRUN=1`, `FORCE=1`). A fit takes 12-25 minutes. It writes only its run
+directory, `sim/work/step7/fit/<TAG>` by default, and refuses
+`full/run_full.sh`'s baselines and the R1 references. Run it under the
+machine's Quartus lock, with `QUARTUS_LOCK` naming the lock file
+(`docs/ENVIRONMENT.md` 3.5); it refuses to start otherwise. Exit 0 is a
+PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
+
+- `step7_checks.py` judges a fit again from its own report files without a
+  refit: (a), (l) and (h) by the build's divider (amended for VCO/19,
+  2026-10-14), and (c.cells) from `firstflops.tsv` by the tree's table. It
+  prints the verdict as amended and the rules as first written. A change
+  to any other check that `step7_report.tcl` makes, or to what it writes,
+  needs the fit's kept database (`REPORT_ONLY=1`) or a refit (plan 5.4).
+- `step7/selftest.sh` tests the driver's refusals, `step7_prep.py` and
+  `step7_checks.py` on made-up report files, without Quartus: 117 cases
+  at `f3a9b49`. It needs 100 MB free on `/`; with less it skips the cases
+  that copy `src/fpga` and exits 3 (PARTIAL). `sim/step7_gates.sh`'s
+  `fit_selftest` gate runs it.
+- `step7/smoke/run_smoke.sh` fits a small design whose register names are
+  the core's (`smoke.sv`, four projects of about 3 minutes each) to test
+  `core/daria.qip`'s synchroniser marks, `step7_report.tcl` and
+  `step7_checks.py` against real Quartus output. It needs the lock too.
+- `step7/f3_crossings.txt` and the table in `step7_report.tcl` are the two
+  copies of plan 2.7's synchroniser table; the self-test checks that they
+  agree.
+
+The step-7 fits and their results are in `docs/DARIA_CORE.md`, "Step 7
+work", and `docs/daria_step7/plan.md` 5.2-5.4.

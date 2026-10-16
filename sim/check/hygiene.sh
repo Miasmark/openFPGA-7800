@@ -23,7 +23,9 @@
 #     as --names FILE or HYGIENE_NAMES=FILE, one name per line, matched
 #     case-insensitively, a name of 5 or more characters anywhere (inside an
 #     identifier too: camelCase, snake_case), a shorter one as a word.
-#     Without the list the run fails: the check did not happen.
+#     Without the list, or with a list that holds no name (empty, or only
+#     comment lines, which start with #), the run fails: the check did not
+#     happen.
 # Commit messages are not files and are not checked here.
 #   sim/check/hygiene.sh [--base REV] [--names FILE] [--allow PATH]... [--limit BYTES]
 #                        [--repo DIR]
@@ -136,7 +138,10 @@ else:
     elif not os.path.exists(rp):
         bad.append(f"the name list {names} does not exist")
     else:
-        words = [w.strip() for w in open(rp, errors="replace") if w.strip() and not w.startswith("#")]
+        words = [w.strip() for w in open(rp, errors="replace") if w.strip() and not w.strip().startswith("#")]
+        if not words:
+            # an empty or truncated list checks nothing: that is no pass
+            bad.append(f"the name list {names} holds no names (empty, or comment lines only): not checked")
         pats = [re.compile(re.escape(w), re.I) if len(w) >= 5 else
                 re.compile(r"(?<![A-Za-z0-9])" + re.escape(w) + r"(?![A-Za-z0-9])", re.I) for w in words]
         hits = 0

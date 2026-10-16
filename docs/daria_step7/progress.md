@@ -196,7 +196,7 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
   - **Not run:** `AR_TAPE=1` (plan 1.2 row 4).
 - **The ÷19 branch** (`s7/G`, local, not merged; the owner decides the divider):
   - **Commits:**
-    - `b177e64`: `pll_core.v`'s counter 3 at 19 under `POCKET_DARIA`. It also selects four PLL display strings (`output_clock_frequency0-2` and `pll_output_clk_frequency`), which the generator prints one digit lower at C3 = 19. The bench and gate defaults move to 19.
+    - `b177e64`: `pll_core.v`'s counter 3 at 19 under `POCKET_DARIA`. It also selects four PLL display strings (`output_clock_frequency0-2` and `pll_output_clk_frequency`), which the generator prints slightly lower at C3 = 19 (14.318180 against 14.318181 MHz for C0 and C2, 57.272722 against 57.272724 MHz for C1, the VCO 687.272644 against 687.272687 MHz; this line said "one digit lower" until the final review of 2026-10-16). The bench and gate defaults move to 19.
     - `3201313`: `ROUTER_REGISTER_DUPLICATION OFF`, set from `daria_sync.tcl`, so it applies to DARIA builds only. Quartus 21.1 accepts the router's duplication settings only globally: per-instance forms stop the compile, and `ADV_NETLIST_OPT_ALLOWED` on the two registers is ignored by the router.
     - `0bc63d4`: `s4/check.sh`'s ÷19 text made identical to `s7/C19`'s, so the two branches merge cleanly.
     - `618b5c3`: the guard pair is asked of the fitter at 5.5 ns. The Timing Analyzer still checks 6 / 1 ns.
@@ -245,7 +245,7 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 
 **The owner halted all work.** Every agent and simulation was stopped; no Quartus job was running. Nothing is merged beyond DARIA-dev; the local branches `s7/D`, `s7/G` and `s7/C19` keep their commits.
 
-**Mode B at ÷19: the cart RAM coincidences.** These were counted by the lane but **not yet checked by a second reader**. Each pair is a DARIA store and a front-end read of the same cart RAM word within 69.84 ns. The distance is between their clock edges, in VCO periods of 1.455 ns:
+**Mode B at ÷19: the cart RAM coincidences.** These were counted by the lane but **not yet checked by a second reader**. (Later: the review of `317eaa8` recounted them from the runs' pair logs and found the same counts, every pair a front-end audio read during a call, plan 5.2; on the shipping tree, c76's six phase-0 wrapper runs gave the same counts bin for bin, `DARIA_CORE.md`, "Step 7 work".) Each pair is a DARIA store and a front-end read of the same cart RAM word within 69.84 ns. The distance is between their clock edges, in VCO periods of 1.455 ns:
 
 | Image (frames) | Pairs | At 0 / 1 / 2 periods | At 3-6 periods | Over 6 | Pairs where the value changed | Per minute, all pairs |
 |---|---|---|---|---|---|---|
@@ -263,7 +263,7 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 - **The runs are short** (5-10 seconds of play each), so the counts of near pairs are rough.
 - **What a race gives:** in the Quartus image's own `altsyncram` model, a dual-clock read of a word being written in the same step gives X on the written byte lanes and the stored value on the others. The Cyclone V handbook was not in the image, so this was not checked against it.
 
-**`tb_s4` at ÷19 was stopped at job 27 of 28:**
+**`tb_s4` at ÷19 was stopped at job 27 of 28** (later, on the shipping tree, both sets passed 28 of 28 in c76, `synth_reloads` with its holds placed at `+holdstep=7`: plan 5.2, `DARIA_CORE.md`, "Step 7 work"):
 - By the lane's notes, 25 of jobs 1-26 pass, with 0 PSRAM model violations throughout; the stress mutants are caught as at ÷18.
 - `synth_reloads` failed only its placement requirement: both of its holds fell mid-access at ÷19. Its data checks were clean: PCM identical, 0 violations, snap ok. A re-placed rerun was queued but not run.
 - Job 27 (song 13 across a 20 ms pause) was interrupted, and job 28 never started.

@@ -8,7 +8,9 @@
 
 DIR receives the planted copies. Every case prints "ok" when the checker
 gave the expected verdict, "WRONG" otherwise; the last line is SELFTEST
-pass or FAIL, and so is the exit status (0 or 1).
+pass or FAIL, and so is the exit status (0 or 1). The line before it names
+the input-dependent groups below that did not run for want of their input
+(step7_gates.sh's selftest gate is then PARTIAL).
   --run-sim LOG    a passing run_sim.sh log: wrong TONE ratio, BIOS_BOOT
                    FAIL, a skipped section, a missing PLL_REGION line, a
                    truncated log, a geometry change, BUPCHIP_E2E FAIL, a
@@ -56,14 +58,29 @@ pass or FAIL, and so is the exit status (0 or 1).
                    each form a doc or script spells it: backticks, > and 2>,
                    brackets, a comma, a file:/// URL, a doubled leading
                    slash and the rest, a listed name, also inside
-                   an identifier, no list, a list inside the repository, a
-                   binary and an oversized file) and pp_equiv.py on a small
+                   an identifier, no list, an empty list and one of comment
+                   lines only, a list inside the repository, a binary and
+                   an oversized file) and pp_equiv.py on a small
                    Quartus tree (a comment, a layout and a dead-ifdef edit
                    keep the hash; a code edit, a live ifdef edit and a
                    removed macro change it; --expect and --max-token fail;
                    an excluded daria_ file holding a directive that reaches
                    later files is refused); needs git and VERILATOR
-  always           frame_gate on synthetic R1/R2 run directories: identical;
+  always           div_check.py on a copy of the tree's divider sites:
+                   passes as it is, fails when one default names the other
+                   divider (each site in turn) or pll_core.v's counter 3
+                   moves without the benches; and
+                   frame_gate on synthetic R1/R2 run directories. The V1
+                   rule (the default): identical; audio differences counted,
+                   not gated (sparse, long, after Spiders' overrun); a RIOT
+                   difference (also one of the release_shift class), a
+                   video difference (frame 1's excused only after a frame-0
+                   call's hold differs, and only that frame and column), an
+                   ARM instruction count difference on one call (thumb + arm;
+                   a different split with an equal sum passes), a calls.csv
+                   without the instruction columns, a run without bench
+                   parity (the Pocket's inputs or none stated; --any-inputs),
+                   an unexpected guard lock. The strict rule (--rule shift):
                    a release_shift that is excused; one that lasts too long;
                    one that starts the frame after the shifted call's; one
                    that reaches the last frame (never equal again); holds
@@ -72,7 +89,32 @@ pass or FAIL, and so is the exit status (0 or 1).
                    len_sys and a cpu difference; a truncated file; a call
                    count and a late-call difference; the STATUS line's halts,
                    PSRAM violations, guard and unlocks; Spiders' excused
-                   overrun frames, and the same frames when later ones differ
+                   overrun frames, and the same frames when later ones differ;
+                   --auto by the loader's scheme, among them P27's ARM image
+                   whose REF run makes no call (strict: identical passes; a
+                   RIOT byte, an audio frame, calls in CAND, a halt in its
+                   STATUS line, a RIOT byte with a halt, another REF scheme
+                   and no calls.csv fail), each --auto run with one verdict
+                   line, which agrees with its exit status;
+                   and wire.py's mutant verdict (plan 7.2, 7.3's wire gate) on
+                   the records (WIRE_JSON) of wire.py run on a fake tb_wire:
+                   CAUGHT when each scenario that catches the mutant fails on
+                   its key; NOT CAUGHT when one fails only on other checks;
+                   ERROR when a run exits 127, gives no WIRE summary, hits a
+                   %Fatal (also with the key failing), times out
+                   (WIRE_TIMEOUT), or reports no value for a judged key, when
+                   a scenario left no record, when none of the mutant's
+                   scenarios ran; and wire.py mutant with an unknown mutant,
+                   an unknown scenario or none of its scenarios named: ERROR
+                   before it copies or builds anything; and step7_gates.sh
+                   itself on a scratch tree with stand-in run_frames.sh,
+                   frame_gate.py and selftest.py (nothing simulated): a
+                   misspelt --only or --skip name and an empty --only exit
+                   2 before any gate runs, a run with no gate run exits 3;
+                   the frames gate runs plan 1.2 row 7's 16 images by
+                   default and is PARTIAL, naming the images not run, for a
+                   list that leaves any out (FAIL when an image fails); the
+                   selftest gate is PARTIAL and names each missing input
 SPDX-License-Identifier: MIT
 """
 import argparse
@@ -94,17 +136,19 @@ def run(cmd, py=True, env=None):
     return (2 if crashed else r.returncode), r.stdout + (r.stderr if r.returncode not in (0, 1) or crashed else "")
 
 
-def expect(name, cmd, want_pass, py=True, env=None):
+def expect(name, cmd, want_pass, py=True, env=None, check=None):
     # a checker that crashes (a Python traceback) gives no verdict: WRONG,
-    # whatever its exit status
+    # whatever its exit status; check(out, rc), when given, names what else
+    # is wrong with the output ("" when nothing is)
     rc, out = run(cmd, py, env)
-    ok = (rc == 0) == want_pass and rc in (0, 1)
+    bad = check(out, rc) if check and rc in (0, 1) else ""
+    ok = (rc == 0) == want_pass and rc in (0, 1) and not bad
     results.append(ok)
     last = out.strip().splitlines()[-1] if out.strip() else "(no output)"
     # the first finding, when the last line does not name it
     why = next((l.strip() for l in out.splitlines() if re.search(r"FAIL|REFUSED|MISMATCH", l) and l.strip() != last.strip()), "")
     print(f"  {'ok   ' if ok else 'WRONG'} {name}: expected {'pass' if want_pass else 'fail'}, got rc {rc} ({last})"
-          + (f" [{why[:150]}]" if rc == 1 and why else ""))
+          + (f" [{why[:150]}]" if rc == 1 and why else "") + (f" {{{bad}}}" if bad else ""))
     if not ok:
         print("\n".join("        " + l for l in out.splitlines()[-12:]))
 
@@ -520,6 +564,10 @@ def hygiene_cases(w):
     # a made-up name stands in for the real list, which is never written in a tracked file
     names = os.path.join(w, "hygiene_names.txt")
     open(names, "w").write("# test list\nQuuxbot\n")
+    empty_names = os.path.join(w, "hygiene_names_empty.txt")
+    open(empty_names, "w").write("")
+    comment_names = os.path.join(w, "hygiene_names_comments.txt")
+    open(comment_names, "w").write("# only a comment\n  # an indented one\n\n")
     env = {k: v for k, v in os.environ.items() if k != "HYGIENE_NAMES"}
     print("hygiene.sh on a scratch repository:")
     tmp = "/" + "tmp/x.log"          # spelled in pieces: hygiene.sh would flag this file
@@ -533,6 +581,9 @@ def hygiene_cases(w):
         ("scratch directory", lambda: write(d, "sim/x.sh", "see scratch" + "pad/notes\n"), False, ["--names", names]),
         ("listed name", lambda: write(d, "docs/x.md", "written with quuxbot\n"), False, ["--names", names]),
         ("no name list", lambda: write(d, "sim/x.py", "print('ok')\n"), False, []),
+        ("an empty name list", lambda: write(d, "sim/x.py", "print('ok')\n"), False, ["--names", empty_names]),
+        ("a name list of comment lines only", lambda: write(d, "sim/x.py", "print('ok')\n"), False,
+         ["--names", comment_names]),
         ("name list inside the repository", lambda: (write(d, "names.txt", "Quuxbot\n"), write(d, "sim/x.py", "1\n")), False,
          ["--names", os.path.join(d, "names.txt")]),
         ("binary file", lambda: write(d, "sim/blob.dat", bytes(range(256)) * 4, "wb"), False, ["--names", names]),
@@ -638,11 +689,14 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23):
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="unlocked", frames=False, cross=(), scheme=23,
+          inputs="tb_daria's"):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
-    hold reaches into the next frame."""
+    hold reaches into the next frame. The guard's status is unlocked, as at
+    VCO/19 (frame_gate.py's default --expect-guard); run.log says the paddle
+    inputs were tb_daria's (bench parity) unless inputs is None."""
     rnd = random.Random(1)
     d = os.path.join(w, name)
     shutil.rmtree(d, ignore_errors=True)
@@ -654,7 +708,7 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
         for j in range(calls_per):
             k += 1
             t_req = f * L + L - 1000 if (f in cross and j == 0) else f * L + 10000 + 100000 * j
-            calls.append([k, f, 10 + 100 * j, t_req, 3000 + 7 * (k % 5), 2999, "00000000"])
+            calls.append([k, f, 10 + 100 * j, t_req, 3000 + 7 * (k % 5), 2999, "00000000", 20000, 1000 + k % 7, 0])
             slack.append([k, 1, 500, -100 if f in late else 4000, "f000"])
     if frames:
         open(os.path.join(d, "frames.csv"), "w").write(
@@ -665,7 +719,7 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
     if mutate:
         mutate(fp, calls, slack, st)
     open(os.path.join(d, "fp.csv"), "w").write("frame,len_sys,riot,video,audio\n" + "".join(",".join(r) + "\n" for r in fp))
-    open(os.path.join(d, "calls.csv"), "w").write("call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl\n" +
+    open(os.path.join(d, "calls.csv"), "w").write("call,frame,line,t_req_sys,busy_sys,stall_sys,first_bl,arm_cyc,thumb,arm\n" +
                                                   "".join(",".join(map(str, c)) + "\n" for c in calls))
     open(os.path.join(d, "slack.csv"), "w").write("call,kind,sys_end_to_poll,slack_sys,poll_pc\n" +
                                                   "".join(",".join(map(str, s)) + "\n" for s in slack))
@@ -674,8 +728,308 @@ def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", fr
         f"OPTIONS RAM0 bytes non-zero after load: 0 of 2048; 2600 mapper {scheme} (override 0)\n"
         f"STATUS calls {st['calls']}, late {st['late']}, halts {st['halts']}, halt_code {st['halt_code']}, "
         f"psram_viol {st['psram_viol']}, guard {st['guard']}, unlocks {st['unlocks']}\n"
-        f"ran {n} frames, {len(calls)} calls\n")
+        f"ran {n} frames, {len(calls)} calls\n"
+        + (f"FRAMES inputs: {inputs} (synthetic)\n" if inputs else ""))
     return d
+
+
+DIV_SITES = [   # (file, the default's text at VCO/19, the same at VCO/18)
+    ("sim/tb_load.sv", "int arm_div = 19,", "int arm_div = 18,"),
+    ("sim/tb_system.sv", "int arm_div = 19,", "int arm_div = 18,"),
+    ("sim/bupchip/daria/wire/wire.py", 'os.environ.get("ARM_DIV", "19")', 'os.environ.get("ARM_DIV", "18")'),
+    ("sim/run_sim.sh", "guard=unlocked; [ \"${ARM_DIV:-19}\" = 18 ] && guard=locked",
+     "guard=locked; [ \"${ARM_DIV:-18}\" = 19 ] && guard=unlocked"),
+    ("sim/check/frame_gate.py", '"--expect-guard", default="unlocked"', '"--expect-guard", default="locked"'),
+    ("sim/step7_gates.sh", "${FRAMES_GUARD:-unlocked}", "${FRAMES_GUARD:-locked}"),
+    ("sim/step7_gates.sh", "\tDARIA=1 ARM19=1 PSRAM_CS=", "\tDARIA=1 ARM38=1 PSRAM_CS="),
+    ("sim/bupchip/quartus_probe/step7/step7_report.tcl", "fixb 1 div 19}", "fixb 1 div 18}"),
+    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV=19'),
+    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-18}"'),
+]
+
+
+def div_cases(w):
+    """div_check.py on a scratch copy of the files it reads (the tree's, at
+    VCO/19): it passes; each site moved to the other divider fails it; and
+    pll_core.v's counter 3 at VCO/18 (step7_prep.py's own C3 table) with
+    the benches left at 19 fails it."""
+    dc = os.path.join(HERE, "div_check.py")
+    repo = os.path.dirname(SIM)
+    d = os.path.join(w, "divtree")
+    print("div_check.py on a copy of the tree's divider sites:")
+    files = sorted({s[0] for s in DIV_SITES} | {"src/fpga/core/pll/pll_core.v",
+                                                  "sim/bupchip/quartus_probe/step7/step7_prep.py"})
+
+    def fresh():
+        shutil.rmtree(d, ignore_errors=True)
+        for f in files:
+            os.makedirs(os.path.dirname(os.path.join(d, f)), exist_ok=True)
+            shutil.copyfile(os.path.join(repo, f), os.path.join(d, f))
+    fresh()
+    tree = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
+                           os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
+    if tree != "19":
+        print(f"  (the tree's divider is {tree or 'unreadable'}, not 19: the planted cases assume 19; skipped)")
+        expect("div_check on the tree's copy", [dc, "--repo", d], True)
+        return
+    expect("div_check on the tree's copy", [dc, "--repo", d], True)
+    for f, at19, at18 in DIV_SITES:
+        fresh()
+        p = os.path.join(d, f)
+        t = open(p).read()
+        if t.count(at19) != 1:
+            print(f"  WRONG the site's text in {f} is not there once: {at19!r}")
+            results.append(False)
+            continue
+        open(p, "w").write(t.replace(at19, at18))
+        expect(f"div_check with {f} at the other divider", [dc, "--repo", d], False)
+    # pll_core.v moved to C3 = 18 (step7_prep.py's table of ip-generate's
+    # values, read from its source: the script runs at import), the benches
+    # left at 19
+    fresh()
+    import ast
+    src = open(os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py")).read()
+    tab = {}
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], "id", "") in ("C3_VALUES", "C3_COL"):
+            tab[node.targets[0].id] = ast.literal_eval(node.value)
+    p = os.path.join(d, "src/fpga/core/pll/pll_core.v")
+    n, out = 0, []
+    for line in open(p).read().split("\n"):
+        m = re.match(r"^\s*\.(\w+)\((.*)\),?\s*$", line)
+        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][19]]:
+            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][18]], 1)
+            n += 1
+        out.append(line)
+    open(p, "w").write("\n".join(out))
+    got = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
+                          os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
+    if got != "18":
+        print(f"  WRONG pll_core.v's copy did not move to C3 = 18 ({n} lines edited; --tree-div {got or 'failed'})")
+        results.append(False)
+    else:
+        expect(f"div_check with pll_core.v at C3 = 18 ({n} lines), the benches at 19", [dc, "--repo", d], False)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+# a fake tb_wire (wire.py run's binary): its output depends on the scenario,
+# its run directory. The summary's counts are made up; the keys are tb_wire's
+WIRE_FAKE = r"""#!/bin/bash
+S="WIRE summary build=daria releases=2 f6=2 f6_win=1 f6_rst=1 f6_win_dt=1 f6_rst_low=0 f6_busy=0 f6_noib=0"
+S="$S f6_live=0 f6_ram_diff=0 wr_crb=100 wr_stb=10 wr_busy=0 wr_stop=0 wr_drop=0 wr_after_load2=0 hold_rise=2"
+S="$S prof_clk=1000 calls=5 calls_arm=5 rets=5 rets_fe=5 ret_max_us=2 open_old=0 abandoned=0 orphans=0 smp_req=0"
+S="$S smp_ack=0 halts=0 unlocks=0 locked=0 psram_viol=0 psram_cs=50.000000 misses=0 rt_rst_low=0 rt_f6=1"
+S="$S rt_f6_early=0 rs_f6=1 rs_f6_rst_low=0 f6_pend=0 rgn_bad=0 calls_rs=5 calls_rt=5 marker=5 errors=0"
+S="$S marker_rs=2 retunes=1 b2b=0 pal_chg=1 is_pal=1"
+case "${PWD##*/}" in
+seq_menu_dpc) echo "${S/rgn_bad=0/rgn_bad=7}" ;;
+seq_auto_dpc) echo "cannot start" >&2; exit 127 ;;
+seq_load_cdf) exit 0 ;;
+seq_slot_dpc) echo "${S/rgn_bad=0/rgn_bad=7}"; echo "%Fatal: tb_wire.sv:1: an assertion" ;;
+seq_rfirst_dpc) exec sleep 60 ;;
+seq_back_dpc) echo "$S" ;;
+pal_dpc) echo "${S/ rgn_bad=0/}" ;;
+*) exit 3 ;;
+esac
+"""
+
+
+def wire_cases(w):
+    """wire.py run on a fake tb_wire (WIRE_FAKE) writes a record per
+    scenario; wire.py verdict judges a mutant from them, as wire.py mutant
+    does after its run: palsel's key is rgn_bad, nofrzpend's scenario is
+    seq_back_dpc (wire.py's CATCH)."""
+    wp = os.path.join(SIM, "bupchip/daria/wire/wire.py")
+    d = os.path.join(w, "wire")
+    shutil.rmtree(d, ignore_errors=True)
+    vtb = os.path.join(d, "daria", "obj_wire", "vtb")
+    os.makedirs(os.path.dirname(vtb))
+    open(vtb, "w").write(WIRE_FAKE)
+    os.chmod(vtb, 0o755)
+    js = os.path.join(d, "results.json")
+    env = dict(os.environ, WORK=d, WIRE_JSON=js, WIRE_TIMEOUT="2", BUPFW=os.path.join(d, "no_firmware"),
+               GAMES="", BIOS="")
+    for k in ("DIRECTED", "RTL_TREE"):
+        env.pop(k, None)
+    print("wire.py's mutant verdict on a fake tb_wire:")
+    names = ["seq_menu_dpc", "seq_auto_dpc", "seq_load_cdf", "seq_slot_dpc", "seq_rfirst_dpc", "seq_back_dpc", "pal_dpc"]
+    r = subprocess.run([sys.executable, wp, "run"] + names, env=env, capture_output=True, text=True)
+    got = set()
+    if os.path.isfile(js):
+        import json
+        got = {json.loads(l)["name"] for l in open(js) if l.strip()}
+    ok = r.returncode == 1 and "Traceback" not in r.stderr and got == set(names)
+    results.append(ok)
+    print(f"  {'ok   ' if ok else 'WRONG'} wire.py run on the fake tb_wire: expected exit 1 and a record for each of "
+          f"{len(names)} scenarios, got exit {r.returncode} and {len(got)}")
+    if not ok:
+        print("\n".join("        " + l for l in (r.stdout + r.stderr).splitlines()[-12:]))
+        return
+
+    def case(label, args, want):
+        word = {0: "CAUGHT", 1: "NOT CAUGHT", 2: "ERROR"}[want]
+        r = subprocess.run([sys.executable, wp] + args, env=env, capture_output=True, text=True)
+        last = (r.stdout.strip().splitlines() or ["(no output)"])[-1]
+        ok = r.returncode == want and "Traceback" not in r.stderr and re.match(r"MUTANT \w+: %s\b" % word, last)
+        if args[0] == "mutant" and os.path.exists(os.path.join(d, "mut_" + args[1])):
+            ok, last = False, last + " [it made " + os.path.join(d, "mut_" + args[1]) + "]"
+        results.append(bool(ok))
+        print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected {word}, got rc {r.returncode} ({last[:200]})")
+        if not ok:
+            print("\n".join("        " + l for l in (r.stdout + r.stderr).splitlines()[-8:]))
+    v = lambda mut, *n: ["verdict", mut, js] + list(n)
+    case("palsel, seq_menu_dpc failing on rgn_bad", v("palsel", "seq_menu_dpc"), 0)
+    case("palsel, seq_back_dpc failing only on other checks", v("palsel", "seq_back_dpc"), 1)
+    case("palsel, one of its two scenarios failing on rgn_bad", v("palsel", "seq_menu_dpc", "seq_back_dpc"), 1)
+    case("palsel, a run that exits 127", v("palsel", "seq_menu_dpc", "seq_auto_dpc"), 2)
+    case("palsel, a run with no WIRE summary", v("palsel", "seq_menu_dpc", "seq_load_cdf"), 2)
+    case("palsel, a %Fatal in a run failing on rgn_bad", v("palsel", "seq_menu_dpc", "seq_slot_dpc"), 2)
+    case("palsel, a run killed at WIRE_TIMEOUT", v("palsel", "seq_menu_dpc", "seq_rfirst_dpc"), 2)
+    case("palsel, a summary without rgn_bad", v("palsel", "seq_menu_dpc", "pal_dpc"), 2)
+    case("palsel, a scenario with no record", v("palsel", "seq_menu_dpc", "seq_tia_dpc"), 2)
+    case("nofrzpend, none of its scenarios run", v("nofrzpend", "seq_menu_dpc"), 2)
+    case("wire.py mutant, an unknown scenario", ["mutant", "palsel", "no_such_scenario"], 2)
+    case("wire.py mutant, an unknown mutant", ["mutant", "no_such_mutant"], 2)
+    case("wire.py mutant, none of its scenarios named", ["mutant", "nofrzpend", "seq_menu_dpc"], 2)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+# stand-ins for the scripts step7_gates.sh's frames and selftest gates call (gates_sh_cases): nothing is simulated
+GATES_FAKE_FRAMES = r"""#!/bin/bash
+# stand-in run_frames.sh: the run directory tb_frames would write
+mkdir -p "$WORK/runs/$NAME" && echo "stand-in run_frames.sh $*" > "$WORK/runs/$NAME/run.log"
+"""
+GATES_FAKE_GATE = r"""#!/usr/bin/env python3
+# stand-in frame_gate.py: FAIL for the image named in FAKE_FAIL, pass for any other
+import os, sys
+n = sys.argv[sys.argv.index("--name") + 1]
+bad = n == os.environ.get("FAKE_FAIL")
+print("FRAME_GATE %s %s" % ("FAIL" if bad else "pass", n))
+sys.exit(1 if bad else 0)
+"""
+GATES_FAKE_SELFTEST = r"""#!/usr/bin/env python3
+# stand-in selftest.py: its arguments, and a pass
+import sys
+print("stand-in selftest.py " + " ".join(sys.argv[1:]))
+print("SELFTEST pass (1 of 1 cases as expected)")
+"""
+
+
+def gates_sh_cases(w):
+    """step7_gates.sh itself, copied into a scratch tree of its layout with
+    stand-ins (GATES_FAKE_*) for run_frames.sh, frame_gate.py and
+    selftest.py: --only or --skip with a name that is not a gate, and an
+    empty --only, exit 2 before any gate runs; a run in which no gate ran
+    exits 3; the frames gate runs plan 1.2 row 7's 16 images (its FRAMES16)
+    by default, is PARTIAL (exit 3) and names the images not run for a
+    FRAMES_LIST that leaves any out, and fails when an image fails; the
+    selftest gate is PARTIAL and names each log-based input that is missing
+    (--reset only with Fix B in the tree), and passes with all six."""
+    src = os.path.join(SIM, "step7_gates.sh")
+    text = open(src).read()
+    m16 = re.search(r'(?ms)^FRAMES16="(.*?)"', text)
+    mg = re.search(r"(?m)^GATES=\((.*?)\)", text)
+    print("step7_gates.sh on a scratch tree with stand-in gate scripts:")
+    if not m16 or not mg:
+        print("  WRONG step7_gates.sh has no FRAMES16 or GATES line")
+        results.append(False)
+        return
+    f16, gates = m16.group(1).split(), mg.group(1).split()
+    d = os.path.join(w, "gates_sh")
+    shutil.rmtree(d, ignore_errors=True)
+    for rel, body, mode in (("sim/run_frames.sh", GATES_FAKE_FRAMES, 0o755),
+                            ("sim/check/frame_gate.py", GATES_FAKE_GATE, 0o755),
+                            ("sim/check/selftest.py", GATES_FAKE_SELFTEST, 0o755),
+                            ("sim/tb_frames.sv", "// stand-in\n", 0o644),
+                            ("src/fpga/ap_core.qsf", "# stand-in\n", 0o644),
+                            ("src/fpga/core/sram_ctrl.sv", "// stand-in: t_new (Fix B in the tree)\n", 0o644)):
+        p = os.path.join(d, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write(body)
+        os.chmod(p, mode)
+    gs = os.path.join(d, "sim", "step7_gates.sh")
+    shutil.copy2(src, gs)
+    games, r1 = os.path.join(d, "games"), os.path.join(d, "r1")
+    juno = "Juno-First_demo_final_CGP_NTSC"
+    os.makedirs(games)
+    for n in f16 + [juno]:
+        open(os.path.join(games, n + ".bin"), "wb").write(b"\0")
+        os.makedirs(os.path.join(r1, n))
+        open(os.path.join(r1, n, "fp.csv"), "w").write("frame,len_sys\n1,100\n")
+    env0 = {k: v for k, v in os.environ.items() if k not in (
+        "SIM_LOCK", "FRAMES_LIST", "FRAMES_GUARD", "FRAMES_RULE", "EXTRA_REF", "FAKE_FAIL")}
+    env0.update(VERILATOR="true", GAMES=games, R1_DIR=r1)
+    k = [0]
+
+    def ran(out):
+        p = os.path.join(out, "frames.log")
+        return re.findall(r"(?m)^== (?!gate )(\S+)$", open(p).read()) if os.path.exists(p) else []
+
+    def case(label, args, want_rc, want=(), env=None, pre=None, check=None):
+        k[0] += 1
+        out = os.path.join(d, "out%d" % k[0])
+        os.makedirs(out)
+        if pre:
+            pre(out)
+        r = subprocess.run(["bash", gs, "--out", out] + args, env=dict(env0, **(env or {})),
+                           capture_output=True, text=True)
+        logs = "".join(open(os.path.join(out, f), errors="replace").read()
+                       for f in ("frames.log", "selftest.log") if os.path.exists(os.path.join(out, f)))
+        got = r.stdout + r.stderr + logs
+        miss = [x for x in want if x not in got]
+        why = check(out, got) if check else ""
+        ok = r.returncode == want_rc and not miss and not why
+        results.append(ok)
+        last = (r.stdout.strip().splitlines() or r.stderr.strip().splitlines() or ["(no output)"])[-1]
+        print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected exit {want_rc}, got {r.returncode} ({last[:150]})")
+        if not ok:
+            print(f"        missing: {miss}; {why}")
+            print("\n".join("        " + l for l in got.splitlines()[-10:]))
+
+    nosum = lambda out, got: "summary.txt written: a gate ran" if os.path.exists(os.path.join(out, "summary.txt")) else ""
+    case("--only with two misspelt names (wrie, selftset)", ["--only", "wrie,selftset"], 2,
+         ["unknown gate 'wrie'"], check=nosum)
+    case("--skip with a name that is not a gate", ["--skip", "frames,no_such_gate"], 2,
+         ["unknown gate 'no_such_gate'"], check=nosum)
+    case("--only with no name", ["--only", ""], 2, ["--only names no gate"], check=nosum)
+    case(f"--skip all {len(gates)} gates: no gate ran", ["--skip", ",".join(gates)], 3, ["no gate ran"])
+    case("--only frames, FRAMES_LIST not set: plan 1.2 row 7's 16 images", ["--only", "frames"], 0,
+         ["frames       PASS", "STEP7_GATES pass (1 gates)"],
+         check=lambda out, got: "" if sorted(ran(out)) == sorted(f16) and len(f16) == 16
+         else f"ran {ran(out)}, not the 16 of FRAMES16 ({len(f16)})")
+    case("--only frames, FRAMES_LIST one of the 16 and the calibration image", ["--only", "frames"], 3,
+         ["PARTIAL: 15 of plan 1.2 row 7's 16 images not run", f16[-1]],
+         env={"FRAMES_LIST": f"{f16[0]} {juno}"})
+    case("--only frames, FRAMES_LIST the calibration image alone (the old default)", ["--only", "frames"], 3,
+         ["PARTIAL: 16 of plan 1.2 row 7's 16 images not run", "STEP7_GATES incomplete"], env={"FRAMES_LIST": juno})
+    case("--only frames, the 16 with one failing", ["--only", "frames"], 1, ["frames       FAIL", "STEP7_GATES FAIL"],
+         env={"FAKE_FAIL": f16[3]})
+    case("--only frames, FRAMES_LIST one image, which fails: FAIL, not PARTIAL", ["--only", "frames"], 1,
+         ["frames       FAIL"], env={"FRAMES_LIST": f16[0], "FAKE_FAIL": f16[0]})
+    inputs = {"--run-sim": "run_sim.out", "--fp": "rs/fp/load_a26.csv", "--cartram": "cartram_work/cartram/logs/e7_b0.log",
+              "--reset": "cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log", "--artape": "rs/cartram/logs/artape_b0.log",
+              "--extra": "extra_tests.out"}
+
+    def put(names):
+        def f(out):
+            for o in names:
+                p = os.path.join(out, inputs[o])
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                open(p, "w").write("stand-in\n")
+        return f
+    eref = os.path.join(d, "extra_ref.log")
+    open(eref, "w").write("stand-in\n")
+    case("--only selftest on an empty OUT: PARTIAL, the six inputs named", ["--only", "selftest"], 3,
+         ["PARTIAL: every planted fault that ran was caught"] + [f"missing: {o} (" for o in inputs])
+    case("--only selftest with all six inputs and EXTRA_REF", ["--only", "selftest"], 0,
+         ["selftest     PASS"] + [f" {o} " for o in inputs], env={"EXTRA_REF": eref}, pre=put(inputs))
+    case("--only selftest without the artape log", ["--only", "selftest"], 3,
+         ["missing: --artape ("], env={"EXTRA_REF": eref}, pre=put([o for o in inputs if o != "--artape"]),
+         check=lambda out, got: "" if got.count("  missing: ") == 1 else "more than --artape named")
+    case("--only selftest with every log but no EXTRA_REF", ["--only", "selftest"], 3,
+         ["missing: --extra ("], pre=put(inputs),
+         check=lambda out, got: "" if got.count("  missing: ") == 1 else "more than --extra named")
+    shutil.rmtree(d, ignore_errors=True)
 
 
 def gate_cases(w):
@@ -702,31 +1056,87 @@ def gate_cases(w):
             for f in range(lo, hi + 1):
                 setcol(fp, f, c)
         return m
+    # G: the default rule (V1); S: the strict rule (--rule shift)
     G = lambda name, *extra, want: expect(name, [fg, ref, synth(w, name, mutate=extra[0] if extra else None), "--frames", "200"]
                                           + list(extra[1:]), want)
+    S = lambda name, *extra, want: expect("shift: " + name, [fg, ref, synth(w, "s_" + name, mutate=extra[0] if extra else None),
+                                                             "--frames", "200", "--rule", "shift"] + list(extra[1:]), want)
     expect("identical", [fg, ref, synth(w, "same"), "--frames", "200", "--scheme", "23"], True)
-    G("release_shift_riot_3_frames", m_shift(50, 52), want=True)
-    G("release_shift_audio_8_frames", m_shift(60, 67, "audio"), want=True)
-    G("release_shift_too_long_9_frames", m_shift(70, 78), want=False)
+    expect("shift: identical", [fg, ref, synth(w, "same_s"), "--frames", "200", "--scheme", "23", "--rule", "shift"], True)
+
+    # ---- the V1 rule (the default): len_sys, video, riot and each call's ARM
+    # instruction count gated; audio counted, not gated
+    def instr(k, dt, da=0):
+        def m(fp, calls, slack, st):
+            for c in calls:
+                if c[0] == k:
+                    c[8] += dt
+                    c[9] += da
+        return m
+
+    def boot(by):          # every call requested in frame 0 held `by` clocks longer
+        def m(calls):
+            for c in calls:
+                if c[1] == 0:
+                    c[4] += by
+        return m
+    G("v1_audio_on_every_other_frame_counted", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(2, 200, 2)],
+      want=True)
+    G("v1_audio_run_of_40_frames_counted", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(60, 100)], want=True)
+    G("v1_one_riot_byte", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
+    G("v1_riot_release_shift_3_frames", m_shift(50, 52), want=False)
+    G("v1_one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
+    G("v1_len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
+    G("v1_instructions_one_call", instr(77, 1), want=False)
+    G("v1_instructions_last_call_of_frame_0", instr(2, -1), want=False)
+    G("v1_instructions_split_differs_sum_equal", lambda fp, c, s, st: [instr(k, -1, 1)(fp, c, s, st) for k in range(1, 401)],
+      want=True)
+    G("v1_frame_1_video_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video")),
+      want=True)
+    G("v1_frame_1_video_with_equal_frame_0_holds", lambda fp, c, s, st: setcol(fp, 1, "video"), want=False)
+    G("v1_frame_2_video_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 2, "video")),
+      want=False)
+    G("v1_frame_1_riot_after_a_frame_0_hold_differs", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "riot")),
+      want=False)
+    G("v1_frames_1_and_2_video_after_a_frame_0_hold_differs",
+      lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video"), setcol(fp, 2, "video")), want=False)
+    expect("v1_pocket_inputs (no bench parity)",
+           [fg, ref, synth(w, "v1_pocket", inputs="the Pocket's"), "--frames", "200"], False)
+    expect("v1_no_inputs_line", [fg, ref, synth(w, "v1_noinp", inputs=None), "--frames", "200"], False)
+    expect("v1_pocket_inputs_with_--any-inputs",
+           [fg, ref, synth(w, "v1_pocket_any", inputs="the Pocket's"), "--frames", "200", "--any-inputs"], True)
+    noi = synth(w, "v1_noinstr")
+    cp = os.path.join(noi, "calls.csv")
+    lines = open(cp).read().splitlines()
+    open(cp, "w").write("".join(",".join(l.split(",")[:7]) + "\n" for l in lines))
+    expect("v1_calls_without_thumb_and_arm", [fg, ref, noi, "--frames", "200"], False)
+    expect("v1_status_guard_locked_expected", [fg, synth(w, "ref_lk", status="locked"), synth(w, "v1_lk", status="locked"),
+                                               "--frames", "200", "--expect-guard", "locked"], True)
+
+    # ---- the strict rule (--rule shift): riot and audio equal or release_shift
+    S("release_shift_riot_3_frames", m_shift(50, 52), want=True)
+    S("release_shift_audio_8_frames", m_shift(60, 67, "audio"), want=True)
+    S("release_shift_too_long_9_frames", m_shift(70, 78), want=False)
+    S("audio_run_of_40_frames", lambda fp, c, s, st: [setcol(fp, f, "audio") for f in range(60, 100)], want=False)
     # the difference must start where a call whose release differs is held:
     # the frame after it does not count, unless the hold reaches into it
-    G("riot_starts_one_frame_after_the_shifted_call", lambda fp, c, s, st: (shift_call(c, 80), setcol(fp, 81, "riot")),
+    S("riot_starts_one_frame_after_the_shifted_call", lambda fp, c, s, st: (shift_call(c, 80), setcol(fp, 81, "riot")),
       want=False)
     # the column must be equal again within the file
-    G("riot_from_a_shifted_frame_to_the_end_of_the_file", m_shift(195, 199), want=False)
+    S("riot_from_a_shifted_frame_to_the_end_of_the_file", m_shift(195, 199), want=False)
     xref = synth(w, "ref_cross", frames=True, cross=(60, 70))
-    expect("riot_in_the_frame_a_crossing_hold_is_released_in",
+    expect("shift: riot_in_the_frame_a_crossing_hold_is_released_in",
            [fg, xref, synth(w, "cross_ok", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 60), setcol(fp, 61, "riot"), setcol(fp, 62, "riot"))),
-            "--frames", "200"], True)
-    expect("riot_two_frames_after_a_crossing_hold",
+            "--frames", "200", "--rule", "shift"], True)
+    expect("shift: riot_two_frames_after_a_crossing_hold",
            [fg, xref, synth(w, "cross_late", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 70), setcol(fp, 72, "riot"))),
-            "--frames", "200"], False)
-    expect("riot_one_frame_after_a_hold_inside_its_frame (frames.csv)",
+            "--frames", "200", "--rule", "shift"], False)
+    expect("shift: riot_one_frame_after_a_hold_inside_its_frame (frames.csv)",
            [fg, xref, synth(w, "cross_inside", frames=True, cross=(60, 70),
                             mutate=lambda fp, c, s, st: (shift_call(c, 90), setcol(fp, 91, "riot"))),
-            "--frames", "200"], False)
+            "--frames", "200", "--rule", "shift"], False)
     # R2's regime: every call's release differs (each frame holds a shifted
     # release), so only the settle rule and the cap bound what passes
     def every_call(by):
@@ -742,9 +1152,12 @@ def gate_cases(w):
                 if (f % every == 0) != keep:
                     setcol(fp, f, c)
         return m
-    G("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
-    G("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
-    G("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    S("sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=False)
+    S("sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
+    S("every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    G("v1_every_release_shifted_columns_equal", lambda fp, c, s, st: every_call(5)(c), want=True)
+    G("v1_sparse_audio_on_7_of_8_frames_every_release_shifted", sparse("audio", 8, 3, keep=True), want=True)
+    G("v1_sparse_riot_on_every_10th_frame_every_release_shifted", sparse("riot", 10, 1, keep=False), want=False)
 
     def runs_at(spans, c="riot"):
         def m(fp, calls, slack, st):
@@ -753,32 +1166,66 @@ def gate_cases(w):
                 for f in range(lo, hi + 1):
                     setcol(fp, f, c)
         return m
-    G("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
-    G("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
-    G("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
-    G("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
-    G("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
-    G("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
-    G("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
-    G("len_sys_one_clock", lambda fp, c, s, st: setcol(fp, 110, "len_sys"), want=False)
-    G("video_on_a_shifted_release", lambda fp, c, s, st: (shift_call(c, 120), setcol(fp, 120, "video")), want=False)
-    G("truncated", lambda fp, c, s, st: fp.pop(), want=False)
-    G("one_frame_shift", lambda fp, c, s, st: fp.__setitem__(slice(None), [[str(i + 1)] + fp[i + 1][1:] for i in range(len(fp) - 1)] + [[str(len(fp))] + fp[0][1:]]), want=False)
-    G("call_missing", lambda fp, c, s, st: (c.pop(), st.__setitem__("calls", st["calls"] - 1)), want=False)
-    G("late_call_extra", lambda fp, c, s, st: (s[10].__setitem__(3, -5), st.__setitem__("late", 1)), want=False)
-    G("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
-    G("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
-    G("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
-    G("status_guard_unlocked", lambda fp, c, s, st: st.__setitem__("guard", "unlocked"), want=False)
+    S("release_shift_two_runs_2_frames_apart", runs_at([(50, 50), (53, 53)]), want=False)
+    S("release_shift_two_runs_8_frames_apart", runs_at([(50, 51), (60, 61)]), want=True)
+    S("release_shift_settles_only_5_frames_before_the_end", runs_at([(190, 193)]), want=False)
+    S("release_shift_three_runs_over_the_cap_9_frames", runs_at([(30, 32), (60, 62), (90, 92)]), want=False)
+    S("release_shift_three_runs_cap_raised_to_9", runs_at([(30, 32), (60, 62), (90, 92)]), "--shift-cap", "9", want=True)
+    S("riot_without_shifted_release", lambda fp, c, s, st: setcol(fp, 90, "riot"), want=False)
+    S("one_pixel_hash", lambda fp, c, s, st: setcol(fp, 100, "video"), want=False)
+    S("frame_1_video_after_a_frame_0_hold_differs (no excuse)", lambda fp, c, s, st: (boot(579)(c), setcol(fp, 1, "video")),
+      want=False)
+    S("instructions_one_call (not checked)", instr(77, 1), want=True)
+
+    # ---- both rules
+    for R in (G, S):
+        R("video_on_a_shifted_release", lambda fp, c, s, st: (shift_call(c, 120), setcol(fp, 120, "video")), want=False)
+        R("truncated", lambda fp, c, s, st: fp.pop(), want=False)
+        R("one_frame_shift", lambda fp, c, s, st: fp.__setitem__(slice(None), [[str(i + 1)] + fp[i + 1][1:] for i in range(len(fp) - 1)] + [[str(len(fp))] + fp[0][1:]]), want=False)
+        R("call_missing", lambda fp, c, s, st: (c.pop(), st.__setitem__("calls", st["calls"] - 1)), want=False)
+        R("late_call_extra", lambda fp, c, s, st: (s[10].__setitem__(3, -5), st.__setitem__("late", 1)), want=False)
+        R("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
+        R("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
+        R("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
+        R("status_guard_locked", lambda fp, c, s, st: st.__setitem__("guard", "locked"), want=False)
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
-    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found
-    A = lambda name, r, cand, want: expect(name, [fg, "--auto", r, cand, "--frames", "200"], want)
+    # --auto (step7_gates.sh g_frames): the mode from the scheme CAND's loader found. Each
+    # run prints one verdict line, which agrees with the exit status (a strict
+    # comparison that passes is not reported as a pass when the calls or the
+    # status line then fail)
+    def one_verdict(out, rc):
+        v = [l for l in out.splitlines() if l.startswith("FRAME_GATE ")]
+        if len(v) != 1:
+            return f"{len(v)} verdict lines: " + " | ".join(v)
+        return "" if v[0].startswith("FRAME_GATE pass") == (rc == 0) else "the verdict line disagrees with the exit status"
+    A = lambda name, r, cand, want, *x: expect(name, [fg, "--auto", r, cand, "--frames", "200"] + list(x), want,
+                                               check=one_verdict)
     A("auto_arm_identical", ref, synth(w, "auto_same"), True)
     A("auto_arm_one_riot_byte", ref, synth(w, "auto_riot", mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
-    A("auto_arm_reference_without_calls", synth(w, "auto_ref_void", calls_per=0),
-      synth(w, "auto_cand_void", calls_per=0), False)
+    A("auto_arm_audio_counted (V1)", ref, synth(w, "auto_audio", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")), True)
+    A("auto_arm_audio_with_--rule_shift", ref, synth(w, "auto_audio_s", mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")),
+      False, "--rule", "shift")
+    A("auto_arm_instructions_one_call", ref, synth(w, "auto_instr", mutate=instr(301, 7)), False)
+    # P27: an ARM image whose R1 run makes no call is compared strictly, its load shown by detect2600's scheme
+    vref = synth(w, "auto_ref_void", calls_per=0)
+    A("auto_arm_reference_without_calls (P27: strict, identical)", vref, synth(w, "auto_cand_void", calls_per=0), True)
+    A("auto_arm_no_calls, one riot byte (strict)", vref,
+      synth(w, "auto_void_riot", calls_per=0, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
+    A("auto_arm_no_calls, one audio frame (strict: audio gated too)", vref,
+      synth(w, "auto_void_audio", calls_per=0, mutate=lambda fp, c, s, st: setcol(fp, 90, "audio")), False)
+    A("auto_arm_no_calls in REF, calls in CAND", vref, synth(w, "auto_void_calls", calls_per=1), False)
+    A("auto_arm_no_calls, CAND's STATUS halts 1", vref,
+      synth(w, "auto_void_halt", calls_per=0, mutate=lambda fp, c, s, st: st.update(halts=1)), False)
+    A("auto_arm_no_calls, one riot byte and CAND's STATUS halts 1", vref,
+      synth(w, "auto_void_riot_halt", calls_per=0, mutate=lambda fp, c, s, st: (setcol(fp, 90, "riot"), st.update(halts=1))),
+      False)
+    A("auto_arm_no_calls, REF's detect2600 another ARM scheme", synth(w, "auto_ref_void21", calls_per=0, scheme=21),
+      synth(w, "auto_cand_void23", calls_per=0), False)
+    nocalls = synth(w, "auto_ref_nofile", calls_per=0)
+    os.remove(os.path.join(nocalls, "calls.csv"))
+    A("auto_arm_reference_with_no_calls.csv (void)", nocalls, synth(w, "auto_cand_nofile", calls_per=0), False)
     A("auto_scheme_differs_from_the_loader's", ref, synth(w, "auto_dpcp", scheme=21), False)
     A("auto_with_the_mapper_line (control)", ref, synth(w, "auto_nomap"), True)
     nomap = os.path.join(w, "auto_nomap", "run.log")
@@ -793,7 +1240,7 @@ def gate_cases(w):
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
-    def sp(extra_after=False, riot_run=None):
+    def sp(extra_after=False, riot_run=None, audio_after=False):
         def m(fp, c, s, st):
             for f in range(150, 166):
                 setcol(fp, f, "video")
@@ -802,25 +1249,39 @@ def gate_cases(w):
                     setcol(fp, f, "riot")
             if extra_after:
                 setcol(fp, 170, "riot")
+            if audio_after:
+                for f in range(166, 175):
+                    setcol(fp, f, "audio")
             if riot_run:
                 shift_call(c, riot_run[0])
                 for f in range(riot_run[0], riot_run[1] + 1):
                     setcol(fp, f, "riot")
         return m
-    expect("spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
-                               "--excuse", "150-165"], True)
-    expect("spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames", "200",
-                                     "--excuse", "150-165"], False)
-    expect("spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
-                                           "--excuse", "150-165"], False)
+    for rule in ([], ["--rule", "shift"]):
+        tag = "" if not rule else "shift: "
+        expect(tag + "spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
+                                         "--excuse", "150-165"] + rule, True)
+        expect(tag + "spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames",
+                                               "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
+                                                     "--excuse", "150-165"] + rule, False)
+    expect("v1_spiders_audio_differs_after (counted)",
+           [fg, sref, synth(w, "spiders_aud", mutate=sp(audio_after=True), late=late), "--frames", "200",
+            "--excuse", "150-165"], True)
+    expect("shift: spiders_audio_differs_after",
+           [fg, sref, synth(w, "spiders_aud_s", mutate=sp(audio_after=True), late=late), "--frames", "200",
+            "--excuse", "150-165", "--rule", "shift"], False)
     # a release_shift run must settle on truly equal frames: the excused
     # overrun frames (riot differing there too) do not count
-    expect("spiders_release_shift_3_frames_before_the_overrun",
+    expect("shift: spiders_release_shift_3_frames_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
-            "--excuse", "150-165"], False)
-    expect("spiders_release_shift_well_before_the_overrun",
+            "--excuse", "150-165", "--rule", "shift"], False)
+    expect("shift: spiders_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165"], True)
+            "--excuse", "150-165", "--rule", "shift"], True)
+    expect("v1_spiders_riot_release_shift_well_before_the_overrun",
+           [fg, sref, synth(w, "spiders_rs_far_v1", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
+            "--excuse", "150-165"], False)
 
 
 def main():
@@ -855,7 +1316,13 @@ def main():
         guard_cases(w)
         hygiene_cases(w)
         pp_equiv_cases(w)
+    div_cases(w)
     gate_cases(w)
+    wire_cases(w)
+    gates_sh_cases(w)
+    skipped = [o for o, v in (("--run-sim", a.run_sim), ("--extra", a.extra), ("--fp", a.fp), ("--cartram", a.cartram),
+                              ("--reset", a.reset), ("--artape", a.artape), ("--tools", a.tools)) if not v]
+    print("groups not run (no input given): " + (", ".join(skipped) if skipped else "none"))
     print(f"SELFTEST {'pass' if all(results) else 'FAIL'} ({sum(results)} of {len(results)} cases as expected)")
     sys.exit(0 if all(results) else 1)
 

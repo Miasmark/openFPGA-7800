@@ -13,7 +13,8 @@
 #   FP=1           every run also writes its per-frame fingerprint (tb_load's
 #                  and tb_system's +fp) to $WORK/fp/<case>.csv, for comparing
 #                  two builds frame by frame (sim/check/frame_gate.py --strict)
-#   ARM_DIV=19     the DARIA build's clk_arm at VCO/19 instead of VCO/18
+#   ARM_DIV=18     the DARIA build's clk_arm at VCO/18 instead of VCO/19 (the
+#                  benches' default, pll_core.v's divider)
 #   RTL_TREE=DIR   build the RTL of another checkout (DIR/src/fpga) with this
 #                  checkout's benches, e.g. a lane's worktree
 #   BUILD_TOP=TOP  only build the bench TOP (tb_system, tb_load,
@@ -385,8 +386,9 @@ fi
 # 32 KB) through the real loader and wrapper. Each must boot and finish its
 # test bodies (RIOT $FF at least the count its .meta needs, $FE 0: no failed
 # self-check), every call daria_fe posts must return, with 0 PSRAM model
-# violations, no CPU halt, and the guard locked with 0 unlocks (at VCO/19
-# the guard does not lock, so ARM_DIV=19 expects it unlocked). Only in the
+# violations, no CPU halt, and the guard unlocked with 0 unlocks at VCO/19,
+# the default (the guard never locks there), or locked with 0 unlocks with
+# ARM_DIV=18. Only in the
 # DARIA build; without POCKET_DARIA the section is inactive, which is not a
 # pass (run_sim_check.py).
 if [ "$DARIA_ON" = 1 ]; then
@@ -395,7 +397,7 @@ if [ "$DARIA_ON" = 1 ]; then
 	mkdir -p "$DR"; ln -sfn "$WORK/rtl" "$DR/rtl"
 	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" smoke_dpc smoke_cdf digital_cdfj > "$DR/mkimg.log"
 	daria_ok=1
-	guard=locked; [ "${ARM_DIV:-18}" = 19 ] && guard=unlocked
+	guard=unlocked; [ "${ARM_DIV:-19}" = 18 ] && guard=locked
 	for t in smoke_dpc smoke_cdf digital_cdfj; do
 		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $(fp daria_$t) < /dev/null > "$t.log" 2>&1) || true
 		line="$(grep -m1 "^DARIA result:" "$DR/$t.log" || echo "DARIA result: none (the run did not finish; see $DR/$t.log)")"

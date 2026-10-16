@@ -6,8 +6,8 @@
 //
 // Clocks. clk_sys (console, loader, audio out); clk_arm (the CPU and
 // everything around it), from the same VCO as clk_sys (VCO/48): VCO/24, 2 x
-// clk_sys, for the BupChip alone; VCO/18, 38.18 MHz, with POCKET_DARIA, so 8
-// clk_arm to 3 clk_sys with one clk_sys edge in three shared; clk_74a (the
+// clk_sys, for the BupChip alone; VCO/19, 36.17 MHz, with POCKET_DARIA, so 48
+// clk_arm to 19 clk_sys with one clk_sys edge in 19 shared; clk_74a (the
 // 48 kHz tick only). Crossings (design, "Crossings"):
 //
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect
@@ -58,12 +58,16 @@
 // waits one clock, so the frame read is never stale.
 //
 // PSRAM: the wrapper drives psram.sv's user ports (agg23, MIT, vendored in
-// pocket_utils/psram.sv, instantiated by the parent on clk_arm with
-// CLOCK_SPEED = 28.636364 and bank 0 of cram0).
+// pocket_utils/psram.sv, instantiated by the parent on clk_arm with bank 0
+// of cram0, CLOCK_SPEED = 28.636364, or 50.0 with POCKET_DARIA:
+// atari7800_pocket.sv).
 //
 // BUP_DEBUG adds dbg_status / dbg_halt_pc (clk_arm), dbg_load, shadow FIFO
 // counters and the throttle (BUP_THROTTLE of every 16 clocks may start an
-// instruction):
+// instruction). With POCKET_DARIA clk_arm is no longer 2 x clk_sys, so the
+// clk_arm bits of all three reach clk_sys through a snapshot
+// (bup_dbg_snap.sv, one copy every 1,024 clk_sys; the clk_sys bits of
+// dbg_load pass straight through) and the outputs are clk_sys registers:
 //
 //   dbg_status [31] cpu_run      [30] fw_loaded     [29] asset_ready
 //              [28] halted       [27:24] halt_code
@@ -187,7 +191,7 @@ module bupchip_pocket #(
 	// DARIA, clk_sys: the profile, and the front ends' side of the CPU.
 	input  wire        daria_profile,   // a 2600 ARM cartridge; static while the CPU runs
 	input  wire        daria_ram32,     // its cart RAM is 32 KB (CDFJ+), else 8 KB
-	input  wire        daria_pal,       // the region, for timer 1's rate
+	input  wire        daria_pal,       // the region clk_sys runs at, for timer 1's rate
 	input  wire        daria_mreset,    // the mapper reset, a level
 	input  wire        daria_call_tog,  // a call is posted in the call block
 	output wire        daria_ret_tog,   // its return words are in the call block (clk_arm)
@@ -606,10 +610,9 @@ module bupchip_pocket #(
 	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
 
 	wire [10:0] sh_min11 = (sh_min > LW'(2047)) ? 11'h7FF : 11'(sh_min);
-	assign dbg_status = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
+	wire [31:0] dbg_status_arm = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
 		sh_cmd_ovf, sh_pcm_ovf, sh_pcm_unf, muted, fault_code,
 		cap_err_a[1] | wr_overrun, sh_min11};
-	assign dbg_halt_pc = halt_pc;
 
 	// The firmware as written into the ROM (clk_arm): words since FWSTART,
 	// whether each went to the word after the last, and their CRC-32 (zlib's,
@@ -651,10 +654,29 @@ module bupchip_pocket #(
 		.t_pre(pr_t_pre), .fw_tail(pr_fw_tail), .cart_tail(pr_cart_tail), .word_min(pr_word_min),
 		.err_at(pr_err_at));
 
+`ifdef POCKET_DARIA
+	// The clk_arm bits through the snapshot (plan P15, open item 11): the
+	// status word, the halt PC and dbg_load's wr_overrun, fc_crc_ok,
+	// fc_order and fc_count. dbg_status_arm and dbg_halt_pc are the words
+	// on the clk_arm side, dbg_snap.q_sys the copy on clk_sys.
+	wire [14:0] dbg_load_arm = {wr_overrun, fc_crc_ok, fc_order, fc_count};
+	wire [78:0] dbg_snap_q;
+	bup_dbg_snap #(.N(79)) dbg_snap (
+		.clk_sys, .clk_arm, .d_arm({dbg_status_arm, halt_pc, dbg_load_arm}), .q_sys(dbg_snap_q));
+	assign dbg_status = dbg_snap_q[78:47];
+	assign dbg_halt_pc = dbg_snap_q[46:15];
+	// Display only: bup_status_osd samples it on clk_sys.
+	assign dbg_load = {cap_seq_err, cap_lost, dbg_snap_q[14],
+		pr_err_at, pr_word_min, pr_cart_tail, pr_fw_tail, pr_t_pre, pr_dropped,
+		pr_cart_late, pr_fw_late, dbg_snap_q[13:12], 2'b00, pr_foreign, dbg_snap_q[11:0]};
+`else
+	assign dbg_status = dbg_status_arm;
+	assign dbg_halt_pc = halt_pc;
 	// Display only: bup_status_osd samples it on clk_sys.
 	assign dbg_load = {cap_seq_err, cap_lost, wr_overrun,
 		pr_err_at, pr_word_min, pr_cart_tail, pr_fw_tail, pr_t_pre, pr_dropped,
 		pr_cart_late, pr_fw_late, fc_crc_ok, fc_order, 2'b00, pr_foreign, fc_count};
+`endif
 `endif
 endmodule
 
