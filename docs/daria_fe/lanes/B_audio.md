@@ -276,6 +276,8 @@ The first mutation run caught 51 of 64. Each miss pointed at a stimulus the benc
 
 ## 6. Area and timing
 
+**Correction (2026-10-16):** the Quartus used is 21.1 Lite, not Standard as the next line says (`docs/ENVIRONMENT.md` 3.1).
+
 Quartus 21.1 Standard, 5CEBA4F23C8, `ap_core.qsf`'s settings, `daria_fe_map.sh --fit` under `flock /tmp/daria_quartus.lock`. The stub baselines are the step-0 stub (commit 8fee22a) in the same wrapper.
 
 | Probe | ALMs needed | ALMs placed − [B] | Stub baseline (needed / placed − [B]) | L-4 measure | Registers | M10K | `clk_sys` setup slack |

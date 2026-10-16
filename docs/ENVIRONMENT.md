@@ -162,7 +162,7 @@ apt-get install -y dasm
 - **Version:** Quartus Prime 21.1.1 Build 850 06/23/2022 SJ Lite Edition. The same string appears in the Quartus reports (for example `src/fpga/output_files/ap_core.fit.rpt`) and in `src/fpga/ap_core.qsf:45` (`LAST_QUARTUS_VERSION "21.1.1 Lite Edition"`).
 - **Licence:** Lite needs no licence file, and the image sets no `LM_LICENSE_FILE`.
 - **LogicLock:** not available in Lite (Warning 292013, Critical Warning 140003; `sim/bupchip/quartus_probe/README.md:83`).
-- **Doc error:** `docs/daria_fe/lanes/B_audio.md:279` and `docs/daria_fe/lanes/D_arb_guard.md:328` say "Quartus 21.1 Standard". That is wrong.
+- **Doc error, corrected 2026-10-16:** `docs/daria_fe/lanes/B_audio.md:279` and `docs/daria_fe/lanes/D_arb_guard.md:328` said "Quartus 21.1 Standard". Each now has a correction line above it: Lite. (The lines themselves are kept, because they also cite the Quartus lock's path, which `sim/check/hygiene.sh` refuses in an added line.)
 - **No host install:** `quartus_sh` is not on the host PATH. Quartus runs only inside the image.
 
 ### 3.2 The image
@@ -237,6 +237,8 @@ docker run --rm -v $PWD:/build -w /build/src/fpga raetro/quartus:21.1 quartus_sh
 | `sim/bupchip/quartus_probe/upstream_arm_map.sh` | `qupstream` | none; keep `WORK` inside the repo yourself | [not recorded] |
 | `sim/bupchip/quartus_probe/full/run_full.sh` (Docker only) | `fullprobe/<tag>` | line 28 | about 12 min (README.md:144) |
 | `sim/bupchip/daria/frontend_study/run_study.sh` | `daria/frontend_study` | [not recorded] | [not recorded]; runs 4 builds at a time (lines 6-7), so do not run it alongside other Quartus jobs |
+| `sim/bupchip/quartus_probe/step7/run_step7.sh`, the step-7 and release fit driver: one compile of a tree's `src/fpga` as CI compiles it, then `step7_report.tcl` and `step7_checks.py` (plan 5.4's checks); `TREE`, `SEED`, `TAG`, `NODARIA=1`, `PIN_ID=1`, `KEEP_DB=1`, `REPORT_ONLY=1`, `DRYRUN=1` (header) | `sim/work/step7/fit/<TAG>`, outside `sim/work/bupchip/` (`WORK` overrides) | not needed: it mounts the run directory itself; it refuses run_full.sh's and R1's directories | 12-25 min a fit; exit 0 PASS, 3 FAIL verdict, 1 compile failure, 2 refused. Needs `QUARTUS_LOCK` and refuses to start unless an ancestor holds that lock (section 3.5). Its self-test, `step7/selftest.sh`, runs without Quartus and needs 100 MB free |
+| `sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh`, the report script's smoke test on a small fitted design (`daria.qip`'s marks, (c.cells), (f), (k), (k')) | `sim/work/step7/smoke` (`WORK` overrides) | protected directories refused, as above | about 3 min a project, four projects; needs `QUARTUS_LOCK` as `run_step7.sh` |
 
 Only the `daria_fe_map.sh <block> --fit` invocation is recorded here. Arguments for the other wrappers are in `sim/bupchip/quartus_probe/README.md`.
 
@@ -248,7 +250,7 @@ Run one Quartus job at a time. The convention is recorded in the lane docs (`doc
 flock /tmp/daria_quartus.lock sim/bupchip/quartus_probe/daria_fe_map.sh <block> --fit
 ```
 
-- **No script takes the lock itself,** so wrap every Quartus job by hand.
+- **No script takes the lock itself,** so wrap every Quartus job by hand. `run_step7.sh` and `smoke/run_smoke.sh` check it: they need `QUARTUS_LOCK` set to the lock file and refuse to start unless the lock is held by one of their ancestors, so run them as `flock "$QUARTUS_LOCK" <script>`.
 - **The lock file.** `/tmp/daria_quartus.lock` is an empty file owned by root. It survives VM restarts because the disk persists: it dates from 2026-10-07 21:28, before the current boot.
 
 ### 3.6 Network and disk
@@ -379,6 +381,8 @@ How to read the table:
 | Step 7 gates | `sim/step7_gates.sh` (`--list` shows what is available) | hours | as its header: `SIM_LOCK`, `BIOS`, `BUPFW`, `HYGIENE_NAMES`, `PP_EXPECT`, `PP_GUARD_FROM`, `EXTRA_REF`; optional `RUN_SIM_REF`, `FP_REF` (fingerprints in tb_load's current nine-column format), `PP_ORACLE_BASE`, `CARTRAM_ONLY`, `S4_GAME` and `REFDIR`, `S4_JOBS` (`s4_check`'s simulations at once, default 2), `GAMES`, `R1_DIR`, `FRAMES_LIST`, `FRAMES_GUARD`, `FRAMES_RULE` (`v1`, the default, or `shift`), `WIRE_ONLY` and `WIRE_MUT` (the `wire` gate on some scenarios or mutants only: a quick look) | `STEP7_GATES pass`, exit 0; exit 3 when a gate is not available yet or ran only in part (PARTIAL: `s4_check` without the firmware and game jobs, `cartram` with `CARTRAM_ONLY`, `wire` without `GAMES` (the Turbo run), `BIOS` or `BUPFW` (the four Souper runs; by default the tree's gitignored `src/fpga/mister/rtl/bupchip.hex`), or with `WIRE_ONLY` or `WIRE_MUT`). |
 | Whole-core frames | `sim/run_frames.sh IMAGE.bin` (`tb_frames`: the Pocket core on a 2600 image with `tb_daria`'s fingerprint, input script and call log; `NAME`, `FRAMES`, `WORK`; `INPUTS=tb_daria` presents the TIA's paddle inputs as `tb_daria` does, which a comparison with R1 needs) | non-DARIA build: 196 s of wall time per emulated second (Juno First, 1,500 frames, 25.0 s emulated in 82 min, beside two to three other simulations); DARIA build (`u_fe` wired): about 270 s on a 12-frame run (load included) | a `tb_frames` build (`run_sim.sh BUILD_TOP=tb_frames`, which the script makes) | `FRAMES result: PASS`, exit 0 (in a DARIA build also the call_tog, call_go and returned counts equal to the busy periods); against R1, `sim/check/frame_gate.py --auto` (the scheme the loader found picks `--strict` or the gate's rules: `--rule v1` by default, which gates `len_sys`, video, RIOT and each call's ARM instruction count and counts audio, or `--rule shift`, the strict rule; `--ref-prefix` for a run shorter than R1's; `--shift-cap` for the release_shift frames allowed per column, default the larger of 8 and 1% of the frames). |
 | Step 7 lint | `sim/lint_step7.sh` | about 20 s | Verilator 5.040 | `LINT pass`: no Verilator `-Wall` warning added against `aeee6d2` in the three macro sets of plan 3.3 item 1, exit 0. |
+| `tb_wire` (step 7) | `sim/bupchip/daria/wire/wire.py build daria plain`, then `wire.py run [SCENARIO ...]`; `wire.py mutant NAME` for each of plan 7.2's seven mutants; `wire.py list` shows the scenarios | hours for the full set (96 scenarios with `DIRECTED=1`, `GAMES` and `BIOS`); each simulation is limited to `WIRE_TIMEOUT` (7,200 s); split the set by scenario name (section 8.4) | Verilator 5.040; `BUPFW` (the firmware) for the four Souper runs, `GAMES=DIR` for the Turbo run, `BIOS=FILE` for decision 11's runs; `ARM_DIV` (19, the default) | `wire.py run`: every scenario PASS, exit 0 (`WORK/results.txt`, one line per scenario). A mutant: `CAUGHT` (exit 0) only on the keys plan 7.2 names; NOT CAUGHT is exit 1, and a crash, timeout or `%Fatal` is ERROR (exit 2). `step7_gates.sh`'s `wire` gate runs both |
+| `tb_dbg_snap` (step 7) | `sim/bupchip/dbgsnap/run_dbgsnap.sh` | not recorded | Verilator 5.040 (`VERILATOR` overrides); `MUTATIONS=0` skips the mutations, `DBGSNAP_MUTS` picks some | `run_dbgsnap.sh: PASS`: the control and power-up runs end with errors=0 and every word asked for (32 runs), and each of the 7 mutations is caught by a run that ends with its result line and errors > 0; a run without its result line, a non-zero exit or a `%Fatal` is an ERROR and fails the script |
 | BupChip whole chip | `sim/bupchip/run_bupchip.sh GAME.a78 SONG` (DEVELOPING.md:95) | not recorded | Verilator 5.040 (the default) | Not recorded. |
 | Jukebox | `sim/bupchip/run_jukebox.sh` | about 7 min game-free, 10 with a game (lines 13-14) | firmware; a `tb_load` build from `run_sim.sh` | Exits with status 2 without firmware or the `tb_load` build (lines 20-21); otherwise not recorded. |
 | verif | `sim/bupchip/verif/run_all.sh` | about 3 min | firmware for steps 2-3; the venv | Prints a PASS/FAIL/SKIP line per step and exits non-zero on any FAIL (lines 60-61). |
@@ -524,7 +528,7 @@ Without the firmware or the OpenBIOS, several benches skip tests instead of fail
 ### 8.7 Stale references
 
 - Docs cite scripts that are not in the repo (section 5.6).
-- Two lane docs say "Quartus 21.1 Standard" (section 3.1).
+- Two lane docs said "Quartus 21.1 Standard" until 2026-10-16 (section 3.1).
 - `upstream_arm_map.sh` does not check that `WORK` is inside the repo (section 3.4).
 
 ## 9. What this file adds to docs/DEVELOPING.md
