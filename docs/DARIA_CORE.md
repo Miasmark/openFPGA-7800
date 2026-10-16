@@ -677,6 +677,7 @@ Plan 7.6's reruns, on `317eaa8`'s `src/`.
 - **`pp_guards`:** 4 guards, 0 findings.
 - **`divider`:** 11 bench and gate defaults, all at VCO/19.
 - **Lint:** no warning added in any of the three macro sets.
+- **The builds:** `tb_wire` (DARIA and plain), `tb_frames` (DARIA, `BUP_DEBUG` off), and `tb_daria` mode B with and without the wrapper at `WIN_KB=64`. Every later piece names the binary it ran, and each is one of these.
 
 #### `run_sim`, the cartram matrix and `extra_tests`, on both builds
 
@@ -729,7 +730,8 @@ Plan 7.6's reruns, on `317eaa8`'s `src/`.
     - `nofrzpend` by `f6` and `b2b`;
     - `palpll` by `rgn_bad` in 5 scenarios;
     - `palsel` by `rgn_bad` in 7.
-  - Round 4's logs are in the gitignored `sim/work/step7/fix/fix/r4/mut/`. The D fix round's record (`progress.md`, on DARIA-dev) says this run "waits for a slot"; it ran on 2026-10-15.
+  - Round 4 also re-ran the 7 `+wire_pll` scenarios outside `seq_*` with the new `wire.py`, and all pass. Its gate test exits 1, as intended: with `WIRE_MUT=nofrzpend,nofrzarm` and only `seq_back_dpc` run, `nofrzpend` is CAUGHT and `nofrzarm`, whose scenario did not run, is an ERROR, which fails the gate.
+  - Round 4's logs are in the gitignored `sim/work/step7/fix/fix/r4/mut/`. This is the run on real simulations that the D fix round's record in `progress.md` was waiting for; it ran on 2026-10-15.
 
 #### The fits
 
@@ -760,11 +762,12 @@ Figures are in ns. Setup is at the worse slow corner, and the guard pair's slack
   - the guard pair removed fails (a), (b), (k) and (e), because the path is timed at 20 ns instead of 6 / 1;
   - a clock-group cut added after the ±20 ns lines fails (a), (b), (k), (e) and (k');
   - the cut in place of those lines fails the same five.
+- **The guard detail on the `KEEP_DB` database** (information, not a gate): the chain's script stopped on a Tcl option error (rc 3), and its rerun by hand agrees with seed 3. Setup −0.046 / +0.049 / +2.860 / +3.198 ns and hold +2.265 / +2.116 / +0.439 / +0.271 ns, at slow 85 °C, slow 0 °C, fast 85 °C and fast 0 °C.
 - **Q5:**
   - Each fit's own verdict failed (c.cells), because `317eaa8`'s report table expected `cap_err_a[0]`, a flop no build has (plan 2.7).
   - Re-judged by the corrected table, 22 of 22 rows match on all three seeds, and every check passes: P29 holds on all three.
   - The second reader made that re-judgement by hand. Since `6477f78` (the final review) `step7_checks.py` makes it from each fit's `firstflops.tsv`: on copies of the c76 fits, Q5 seeds 1-3 give `verdict: PASS` with the tracked tools.
-  - Area: 15,799-15,818 ALMs.
+  - Area: 15,799-15,818 ALMs, peak interconnect 59.2-72.2%.
 - **Open item 12's margins** (Q2 seeds 1 / 2 / 3):
   - `t_*_q` → `clk_sdram`: setup +4.298 / +6.697 / +6.338 ns, hold +0.263 / +0.337 / +0.266 ns.
   - The `c_rdata` multicycle into `clk_sys`: setup +70.904 / +68.276 / +68.613 ns against an 87.306 ns relationship; hold +0.795 / +0.784 / +1.000 ns.
@@ -804,7 +807,7 @@ Audio is counted, not gated (plan 7.4 asks for the numbers per image):
 | Zoo Keeper | 2,999 | 307 | 21 (48) | 42 (259) |
 | **All 16** | | **8,928 of 23,984 (37.2%)** | **152 (390)** | **800 (8,538)** |
 
-- **The differences are timing, not content.** On Gorf the owner listened to 25 s of both and judged the audio "a hair out of sync for the most part". Writes after a call land earlier on DARIA, and the CDF music tick runs at another phase (`progress.md` on DARIA-dev, "Audio against a real Harmony").
+- **The differences are timing, not content.** On Gorf the owner listened to 25 s of both and judged the audio "a hair out of sync for the most part". Writes after a call land earlier on DARIA, and the CDF music tick runs at another phase (`progress.md`, "Audio against a real Harmony").
 - **Against a real Harmony** (a model of the LPC2103's MAM): on Gorf's own settings DARIA's calls run 5.6% faster than the real cartridge and upstream's 7.6% slower.
 - **What V1 does not prove:** under V1 the frame gate is no evidence of audio-path correctness. `daria_fe`'s audio is checked access by access against upstream in mode A and mode B (step 6, and mode B below).
 
@@ -814,9 +817,10 @@ All 19 runs pass at `+d_div=19`.
 - **The runs:** 10 with the wrapper (the six images of the halt's record, plus Galagon and Spiders at the two other lattice phases) and the nine of `G_modeB.md` without it.
 - **The calls:** every call equals upstream's (0 differ, 0 skipped), with 0 front-end failures, and every audio read is checked against the RAM at the read.
 - **The guard** never locked, as expected at ÷19.
-- **Spiders** has its 16 late calls at every phase.
+- **Spiders** has its 16 late calls at every phase, with the worst slack −1,776 `clk_sys`.
+- **The frames:** the seven 600-frame wrapper runs equal R1 on frames 1-599. In mode B the console runs upstream's ARM with DARIA beside it, so this checks the bench, not DARIA's frames.
 
-**Shared-edge pairs** are a DARIA store and a front-end read of the same cart RAM word less than 69.84 ns apart. Every one is a front-end audio read during a DARIA call; there are no write-load or write-write pairs.
+**Shared-edge pairs** are a DARIA store and a front-end read of the same cart RAM word less than 69.84 ns apart. Every one is a front-end audio read during a DARIA call; there are no write-load or write-write pairs. The bench's 0-period bins equal its coincidence counters, and no distance falls off the lattice.
 
 | Run (frames) | Pairs | At 0 / 1 / 2 VCO periods (under 3 ns) | At 3-6 | Over 6 | Stores that changed the word |
 |---|---|---|---|---|---|
@@ -833,13 +837,14 @@ All 19 runs pass at `+d_div=19`.
   - Galagon's at 1 period (1.46 ns), whose store changed the word;
   - Mappy's at 0 and 2 periods, each a store of 0 over 0.
 - **The phase runs add one near pair:** Galagon at 8,730 ps, at 2 periods (2.91 ns), whose store also changed the word.
+- **Galagon's word-changing pairs come from three stores** (frames 441, 560 and 573), which change the word at every phase. The phase decides only which of them, if any, falls within 3 ns of a read. In the bench the read took the old value when it came first (phase 0, frame 573) and the new value when the store came first (8,730 ps, frame 560).
 - **Over all 19 runs** (7,800 frames, about 130 s of play) there are 4 near pairs. 2 of them changed the word, both on Galagon. On hardware each is open item 7's counted race, accepted for V1.
 
 #### What c76 does not cover
 
-- **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above.
-- **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames.
-- **No single gate run at the head** covers `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together.
+- **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above. c77 ran both on 2026-10-16, and both pass (`progress.md`, "The final review and c77 (2026-10-16)").
+- **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames. c77 ran all four, and all pass.
+- **No single gate run at the head** covers `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together. c77's `wire` gate at `356cea9` passes 96 of 96 scenarios and catches 7 of 7 mutants; the 97th scenario, `pal2600_a78` (`82d05f1`), has run only alone.
 - **Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed.**
 
 ### After c76: the final review (2026-10-16)
@@ -870,9 +875,9 @@ The re-runs after those fixes:
 
 The other `src/` findings are listed under "After 2.2.1" below.
 
-Two documentation findings belong to the merge into DARIA-dev, not to this branch:
-- linking `docs/IMPROVEMENTS.md` from `DEVELOPING.md`;
-- reconciling `ENVIRONMENT.md` 8.4's VM restarts with DARIA-dev's later explanation.
+Two documentation findings were left to the merge into DARIA-dev, and were done there:
+- linking `docs/IMPROVEMENTS.md` from `DEVELOPING.md` (DOC-7);
+- reconciling `ENVIRONMENT.md` 8.4's VM restarts with DARIA-dev's later explanation (DOC-8).
 
 ### Step 7's done-when, item by item (as amended for V1)
 
@@ -881,7 +886,7 @@ Two documentation findings belong to the merge into DARIA-dev, not to this branc
 3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16. Audio is documented per image above.
 4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
 
-Step 7 is not marked done here. Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed, and the plan items under "What c76 does not cover" are for the lead to run or accept.
+Step 7 is not marked done here. Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed. c77 ran the plan items under "What c76 does not cover" on 2026-10-16, and all pass (`progress.md`, "The final review and c77 (2026-10-16)").
 
 ### Hand-over to step 8
 

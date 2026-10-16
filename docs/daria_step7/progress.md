@@ -376,3 +376,118 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
 
   - **So on Gorf DARIA is the closer of the two.** A real cart's NOP/JMP hand-back adds a few 6507 cycles after each call that RDY does not.
 - **Recorded limit.** A Melody board's optional EEPROM (up to 4 MB) would be reached through the chip's serial peripherals, which DARIA reads as 0. No traced image uses them (`docs/IMPROVEMENTS.md`; `DARIA_CORE.md` open item 19).
+
+### The final review and c77 (2026-10-16)
+
+- **c76 is complete.** The verification campaign on the shipping tree (`317eaa8`'s `src/`) finished at 00:58 UTC. All 48 pieces exit 0, and every gate passes under the amended rules. Its record, judged piece by piece by a second reader, is in `DARIA_CORE.md`, "Step 7 work".
+- **The final review** read the whole of `s7/D` at `356cea9` in four parts: RTL (3 findings), timing and constraints (4), gates and tools (11), and docs (16). That is 34 findings. A second reader checked each one against the tree and the logs, and confirmed all 34. After the check none is a blocker: 2 are major, 19 minor and 13 nits. The one reported as a blocker, the README still listing 2600 ARM cartridges as not included, was rated minor, because the README describes the released core until 2.2.1 ships.
+- **The owner's decisions:**
+  - **RTL-1 ships as is in 2.2.1 and is fixed later** ("Ship as is, fix later"). In the DARIA build a PAL A78 loaded after a PAL 2600 image on Auto region costs two extra retunes; the final region is right (`DARIA_CORE.md`, open item 20).
+  - **`src/` is frozen for 2.2.1** as `317eaa8`'s, the tree c76 verified. The review's `src/`-only findings wait for the first change after the release (`DARIA_CORE.md`, "After 2.2.1: `src/` clean-ups"; `docs/IMPROVEMENTS.md`).
+- **The fix round** changed nothing under `src/`:
+  - **Tools:** `6477f78` (`step7_checks.py` judges (c.cells) from `firstflops.tsv`, and the fit driver's self-test needs 100 MB: VG-1, VG-2, VG-9), `82d05f1` (`tb_wire`'s `pal2600_a78` pins RTL-1 on both builds), `95c3352` (`step7_gates.sh`: VG-4, VG-5, VG-6), `5e1badb` (`hygiene.sh`: VG-7), `ce14cc0` (`run_dbgsnap.sh`: VG-8), `3344b92` (`frame_gate.py`: VG-10) and `f3a9b49` (`selftest.py` runs `step7_gates.sh` on stand-ins).
+  - **Re-runs after the tools commits:** `selftest.py` with c76's inputs, 267 of 267; `fit_selftest`, 117 of 117; `frame_gate.py` on c76's 16 frame runs, 16 of 16, each report byte-identical to c76's; and `step7_checks.py` on copies of every c76 fit, with the verdicts in `DARIA_CORE.md`.
+  - **Docs:** `42ff9db` (the plan and this file), `bf3d61a` (`DARIA_CORE.md`'s step-7 record, the V1 done-when, open items 7, 10, 11, 12 and 20, and the after-2.2.1 list), `7ff3276` (the README for 2.2.1) and `51b2927` (`DEVELOPING.md`, `design.md`, `ENVIRONMENT.md` and the sim READMEs).
+- **Two re-reviews of `51b2927`,** one of the tools and one of the docs, passed every finding. The tools re-review built `tb_wire` again and re-ran `pal2600_a78`: the same binaries (md5) and the same timings. Between them they found one new minor item, N1 (below), and 14 smaller ones (NEW-1 to NEW-3 and N2 to N12; NEW-1 and N2 are the same).
+- **The nits round** fixed the 14: `5676558` (`frame_gate.py --auto` prints one verdict line, NEW-3) and `baca4cd` (the docs). After it `selftest.py` with c76's inputs passes 268 of 268, and `frame_gate.py` on c76's 16 frame runs gives each report byte for byte. `src/` is still `317eaa8`'s.
+- **The merge.** `s7/D` at `baca4cd` is merged into DARIA-dev (`0bfd157`) with no conflict; `src/` and `sim/` equal `s7/D`'s. The merge items were the D fix round's text above, brought up to date; `docs/IMPROVEMENTS.md`, linked from `DEVELOPING.md` (DOC-7) and given the after-2.2.1 list (N1); `ENVIRONMENT.md` 8.4, reworded to agree with 8.1 and `AGENT_RUNS.md` section 2 (DOC-8); and this record.
+
+**c77: the runs c76 did not cover.** The final review found three items of plans 7.3 and 7.4 that c76 did not run (`DARIA_CORE.md`, "What c76 does not cover"). c77 ran them from 02:04 to 06:52 UTC, as seven pieces:
+- **Plan 7.3's last item:** SF2fix and draconian RC8 in `tb_frames`.
+- **Plan 7.4's R2 phase runs:** Galagon and Spiders in `tb_frames` at 8,730 and 17,460 ps.
+- **One `wire` gate run at `s7/D`'s head of that time, `356cea9`.**
+
+**The trees:**
+- The frame runs ran on c76's tree, a detached worktree at `317eaa8` with a clean status. They used c76's `tb_frames` binary (md5 `9a6b65a6…`, built on 10-14 and unchanged since) with `NOBUILD=1`.
+- The wire gate ran in a new detached worktree at `356cea9`, clean before and after the run. Its `src/fpga` hashes the same as `317eaa8`'s (`6e010d35…`). Its wire bench is newer than c76's: `tb_wire.sv`, `wire.py` and `step7_gates.sh` changed after `317eaa8`, so the gate built its own binaries.
+- Verilator 5.040, benches at VCO/19.
+
+**How it ran.** The wire gate ran three times.
+- Its first attempt, at 02:04-02:05, was stopped because its builds took the free space on `/` to 2,184 MB, under the 2,200 MB floor. The later attempts kept the builds off `/`.
+- At about 02:40 the machine stopped: the working session ended early (`docs/AGENT_RUNS.md` section 2). That stopped the three pieces then running, the wire gate's second attempt (from 02:06) and SF2fix and draconian (from 02:04). Each restarted from its beginning at 02:41.
+- In the run that counts, free space on `/` stayed at 2,307 MB or more.
+- Every simulation ran through the simulation slots. The logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c77/`.
+- A second reader judged every piece from its files, and a third checked the figures again from the CSVs.
+
+**Result: all seven pieces exit 0, and each passes its plan's gate.**
+- The two plan-7.3 runs and the four phase runs pass the V1 rule.
+- The wire gate passes: 96 of 96 scenarios, and 7 of 7 mutants CAUGHT on their named keys.
+- c77 found no difference from c76 or round 4 that the rules gate.
+
+**c77, plan 7.3's last item: SF2fix and draconian RC8 in `tb_frames`.** `tb_frames` ran on the DARIA build with `INPUTS=tb_daria`, at VCO/19, phase 0, for 600 frames. R1's runs of these two images are 600 frames long, so each was compared with the whole R1 run, by `frame_gate.py --auto --rule v1 --expect-guard unlocked`. The second reader re-ran `frame_gate.py` on the four files of each run, at `317eaa8` and at `baca4cd`, and got c77's gate output byte for byte. Both pass:
+- Each run holds 599 of 599 frames. `len_sys` and RIOT RAM are equal on every frame, and video on every frame but SF2fix's frame 1. The rule excuses that frame: the two calls requested in frame 0 hold the 6507 for 5,197 and 1,261 `clk_sys`, against R1's 4,342 and 1,352.
+- Every call's ARM instruction count equals R1's.
+- Each status line shows 0 halts, 0 PSRAM violations, the guard unlocked and 0 unlocks. The call counts equal R1's, with 0 late calls. The call cross-check is consistent: busy periods, `call_tog` flips, `call_go` and returns are equal in number, with 0 in flight at the end.
+- Audio is counted, not gated:
+
+| Image | Scheme | Calls | Frames with audio differing | `release_shift` runs (frames) | Other runs (frames) | Release difference: median; total hold |
+|---|---|---|---|---|---|---|
+| SF2fix | DPC+ | 775 | 391 | 0 | 2 (391): frames 4-119 and 325-599 | −59 `clk_sys`; 0.911 of R1's |
+| draconian RC8 | CDF | 1,200 | 1 (frame 1) | 1 (1) | 0 | −128 `clk_sys`; 0.945 of R1's |
+
+- **Against the D runs at ÷18** ("Frame runs on D against R1", above):
+  - SF2fix, against D's run with the inputs matched, gives the same figures: audio on 391 frames in the same two spans, and frame 1's video the only other difference.
+  - draconian RC8 had every column equal on all 599 frames at ÷18, in D's run on the Pocket's inputs; the D record shows no draconian run with the inputs matched. At ÷19 its frame-1 audio differs, in the `release_shift` class, and every later frame is equal.
+  - The median release differences at ÷19 are −59 `clk_sys` on SF2fix and −128 on draconian. The D record gives −137 and −406 at ÷18; it does not say which inputs SF2fix's figure used.
+
+**c77, plan 7.4's R2 phase runs: Galagon and Spiders at 8,730 and 17,460 ps.** The runs are as above, with `+arm_ofs=8730` and `+arm_ofs=17460` added: `clk_arm`'s lattice starts 6 or 12 VCO periods of 1,455 ps late. They ran 600 frames each and were compared with R1's first 600 frames of 1,500 (`--ref-prefix`).
+
+The phase was applied:
+- Each `run.log` prints the offset ("CLK_ARM VCO/19, phase offset 8730 ps", or 17460), and the run's arguments carry it.
+- `tb_load`'s lattice check, which stops a run when a `clk_arm` edge leaves the shifted lattice, did not fire.
+- Against c76's phase-0 runs of the same images (their first 1,197 calls and frames 1-599):
+
+| Run | Calls whose release differs from phase 0's | By | Equal to phase 0's |
+|---|---|---|---|
+| Galagon, 8,730 ps | 7 of 1,197 | +1 `clk_sys` | every call's request time, ARM cycles and instruction count; `fp.csv` on every column of frames 1-599, audio included |
+| Galagon, 17,460 ps | 201 | +1 on 138, −1 on 62, −7 on 1 | the same |
+| Spiders, 8,730 ps | 55 | +1 on 52, +7 on 2, −1 on 1 | the same |
+| Spiders, 17,460 ps | 89 | +1 on 61, −1 on 24, +7 on 4 | the same |
+
+- The two phases also differ from each other: on 196 Galagon calls and 44 Spiders calls.
+
+All four pass:
+- Each run holds 599 of 599 frames, and `len_sys`, video and RIOT RAM are equal on every frame.
+- The 1,197 calls compared have the same ARM instruction counts as R1's.
+- Each run makes 1,199 calls in 600 frames, with 0 halts, 0 PSRAM violations, the guard unlocked and 0 unlocks.
+- Spiders has 16 late calls at every phase, at the overrun frames 557-572, as R1 does; its worst slack is −1,776 `clk_sys`, as at phase 0. Spiders' rule from P13 excuses those frames, and 1 audio frame falls in them.
+- Galagon has no late call. Its worst slack is 9,108 `clk_sys` at 8,730 ps and 9,120 at 17,460 ps, against 9,108 at phase 0 over the same calls.
+- Audio is counted, not gated. The figures are equal at both phases. The differing frames are also phase 0's, since `fp.csv` equals phase 0's on frames 1-599:
+
+| Image | Frames with audio differing (frames 1-599) | `release_shift` runs (frames) | Other runs (frames) | Release difference: median; total hold |
+|---|---|---|---|---|
+| Galagon, both phases | 61 | 2 (4) | 10 (57) | −262 `clk_sys`; 0.924 of R1's |
+| Spiders, both phases | 163, and 1 in the excused overrun frames | 6 (23) | 17 (140) | −239 `clk_sys`; 0.924 of R1's |
+
+- **Against the other phase runs:** c76's mode-B runs at the same two offsets, with the wrapper and 600 frames, passed: 0 calls differ from upstream's, 0 front-end failures, and every audio read was checked against the RAM at the read. The `tb_frames` runs now add DARIA's own frames at those offsets.
+- **What the offsets are at ÷19:**
+  - At ÷18 the lattice repeats every 3 `clk_sys`, and 0, 8,730 and 17,460 ps are its three alignments with `clk_sys`. Plan 7.4's "the other two phases" was written for that.
+  - At ÷19 it repeats every 19 `clk_sys` (`tb_load.sv:41-42`). An offset of k VCO periods is the phase-0 lattice moved by 2k mod 19 `clk_sys`: 12 for 8,730 ps and 5 for 17,460 ps. So the runs cover 3 of the 19 alignments.
+  - Within a run, call starts do not spread over the alignments. A Galagon or Spiders frame is 238,944 `clk_sys` (19 × 12,576; Spiders' overrun frames are 322,848, 19 × 16,992), and the calls come at the same points of each frame. So in every run each image's calls are requested on 3 of the 19 alignments: 599 calls on each of two, and the first call on a third. The 5-`clk_sys` shift of 17,460 ps moves one of the two large groups onto the other's phase-0 alignment, so over the three runs the two groups start on 5 alignments, not 6.
+  - Call ends do spread: because the ARM cycle count differs from call to call, the releases fall on 18 or 19 of the 19 alignments in each run.
+  - Mode B's `run.log` still labels its offsets with the ÷18 classes ("shared edges: clk_sys k mod 3", `fe_shadow.svh:2995-2996`, chosen from `+d_ofs` alone). No verdict reads that label.
+
+**c77, the `wire` gate at `356cea9`.** `step7_gates.sh --only wire` ran in the worktree at `356cea9`, with `GAMES` (the Turbo run), `BIOS` (decision 11's runs) and `BUPFW` (the four Souper runs) given, as one call through the simulation slots. It ran from 02:41 to 06:52 UTC: the two builds, the 96 scenarios with `DIRECTED=1` until 06:26, then the seven mutants. The gate's verdict is `wire PASS` and `STEP7_GATES pass`, exit 0.
+
+Scenarios, 96 of 96 pass:
+- That is the whole set at `356cea9`. `pal2600_a78` was added later (`82d05f1`).
+- In all 15 `+wire_pll` scenarios, `f6_pend` and `rgn_bad` are 0.
+- Turbo: 138 calls, 138 returns, 20 cache misses, 0 PSRAM violations.
+- **Against c76** (`317eaa8`'s bench): the same 96 scenarios, and each of the 26 counters a scenario reports is equal, scenario by scenario. The newer `rgn_bad`, which also reads `daria_mmio`'s `pal`, gives the same value in every scenario: 0 in the 15 `+wire_pll` ones.
+
+Mutants, all seven of plan 7.2 CAUGHT, each on its named keys:
+- `nomask` by `f6_live`, `f6_busy` and `wr_busy`, in `seq_menu_dpc`, `seq_auto_dpc` and `seq_slot_dpc`;
+- `nowd` by `rt_f6_early` and `f6`, in `seq_load_cdf`;
+- `nohold` by `releases` and `rs_f6_rst_low` in `seq_menu_dpc` and `seq_auto_dpc`, and by `releases` in `seq_slot_dpc`;
+- `nofrzpend` by `f6` and `b2b`, in `seq_back_dpc`;
+- `nofrzarm` by `f6_busy` and `f6`, in `seq_rfirst_dpc`;
+- `palsel` by `rgn_bad` in 7 scenarios;
+- `palpll` by `rgn_bad` in 5.
+- **Against round 4** (`r4/mut/`, at `0b2f9e1`, whose `sim/` equals `356cea9`'s): every mutant's failing lines and verdict are the same, figure for figure. For example, `palsel`'s seven `rgn_bad` counts run from 2,099 to 513,468 in both.
+
+This is the single `wire` gate run at the head that c76's record found missing.
+
+**What c77 leaves:**
+- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run.
+- **Plan 7.7's fresh-clone `step7_gates.sh` run** is still owed.
+- **The phase runs cover 3 of the 19 alignments at ÷19** (above). Over the three runs, every Galagon and Spiders call but the first starts on one of 5 of them. Plan 7.4's wording, "the other two phases", dates from ÷18.
