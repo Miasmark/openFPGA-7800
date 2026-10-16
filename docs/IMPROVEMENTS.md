@@ -46,6 +46,26 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - It is shown at ÷18 for Galagon (599 frames) and SF2fix's DPC+ music (29 frames), not yet at ÷19, for CDF music or for the other images (`docs/daria_step7/progress.md`, "Frame runs on D against R1").
   - Cost: two bench options and one more run per image.
 
+### After 2.2.1: RTL-1 and the `src/` clean-ups
+
+*Added 2026-10-16, from step 7's final review. The owner froze `src/` for 2.2.1 that day, so each item waits for the first `src/` change after the release. The numbers are those of `docs/DARIA_CORE.md`, "After 2.2.1: `src/` clean-ups", which has the details and the line numbers.*
+
+1. **RTL-1: a PAL A78 after a PAL 2600 image, Region on Auto** (`docs/DARIA_CORE.md`, open item 20).
+   - **What it would fix.** In the DARIA build such an A78 costs two extra retunes, to NTSC and back to PAL, and its console is released 62 µs later than without DARIA. The final region is right. Main and the build without DARIA make no extra retune. The owner accepted it for 2.2.1 as a known minor issue.
+   - **Cost.** A few lines in `atari7800_pocket.sv`: let `region_pll` follow the region while an A78 downloads, even with a retune pending. The last few `clk_sys` of a download need checking against the `seq_*` scenarios and the mutants. As a change to DARIA's RTL it re-runs the gates of `docs/daria_step7/plan.md` 7.6, with a new Q2.
+   - **Evidence.** `tb_wire`'s scenario `pal2600_a78` pins the two retunes on both builds. Its expected DARIA count drops to 0 with the fix.
+   - **When.** The next revision after 2.2.1.
+2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1.
+3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`.
+4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, not Q2's on the shipping tree, and still asks for a fix in `sram_ctrl` that Fix B made.
+5. **`daria_sync.tcl`'s FORCED mark on `cap_err_a[0]`** matches no build, and Quartus lists it as ignored.
+6. **`core_top.v`'s audio comment** says 298 samples per output, about 48 kHz. `audio_filter.sv` averages 256, about 55.9 kHz.
+7. **`pll_core.v`'s comment** says the VCO/19 display strings are "one digit lower". Only two of the four are.
+8. **`src/fpga/mister/POCKET_CHANGES.md`** counts eight modified upstream files where there are eleven, and its "Updating" list re-applies six. Until it is fixed, `docs/DEVELOPING.md`, "Update the MiSTer core", lists all eleven.
+
+- **Cost of items 3-8.** Items 3, 4, 6 and 7 change comments only. They need plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Item 5 changes an assignment file, so it needs a new Q2 and the smoke test. Item 8 is a document.
+- **When.** Items 1 and 2 in the next revision; the rest with the first `src/` change after 2.2.1.
+
 ## The 7800 core (both builds: with and without DARIA)
 
 - **A PAL 2600 game's picture window after its one retune.**

@@ -911,7 +911,7 @@ Plan section 9, corrected for ÷19 at the final review.
 
 ### After 2.2.1: `src/` clean-ups
 
-The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md` on DARIA-dev mirrors this list after the merge.
+The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md`, "After 2.2.1: RTL-1 and the `src/` clean-ups", mirrors this list in short.
 
 1. **RTL-1** (open item 20): the freeze of `region_pll` in `atari7800_pocket.sv:1037`. The fix is sketched there; `pal2600_a78`'s expected DARIA count then drops to 0.
 2. **RTL-2:** in the withdrawal branch (`atari7800_pocket.sv:1032-1036`), `region_pll <= daria_rgn` uses `daria_rgn`'s old value on the clock where `daria_rgn` updates. `region_pll` then holds the previous region for one `clk_sys`.
