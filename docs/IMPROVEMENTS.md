@@ -53,7 +53,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 1. **RTL-1: a PAL A78 after a PAL 2600 image, Region on Auto** (`docs/DARIA_CORE.md`, open item 20).
    - **What it would fix.** In the DARIA build such an A78 costs two extra retunes, to NTSC and back to PAL, and its console is released 62 µs later than without DARIA. The final region is right. Main and the build without DARIA make no extra retune. The owner accepted it for 2.2.1 as a known minor issue.
    - **Cost.** A few lines in `atari7800_pocket.sv`: let `region_pll` follow the region while an A78 downloads, even with a retune pending. The last few `clk_sys` of a download need checking against the `seq_*` scenarios and the mutants. As a change to DARIA's RTL it re-runs the gates of `docs/daria_step7/plan.md` 7.6, with a new Q2.
-   - **Evidence.** `tb_wire`'s scenario `pal2600_a78` pins the two retunes on both builds. Its expected DARIA count drops to 0 with the fix.
+   - **Evidence.** `tb_wire`'s scenario `pal2600_a78` runs on both builds and pins the DARIA build's two extra retunes; the build without DARIA makes none. Its expected DARIA count drops to 0 with the fix.
    - **When.** The next revision after 2.2.1.
 2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1.
 3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`.

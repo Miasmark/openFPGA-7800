@@ -843,7 +843,7 @@ All 19 runs pass at `+d_div=19`.
 #### What c76 does not cover
 
 - **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above. c77 ran both on 2026-10-16, and both pass (`progress.md`, "The final review and c77 (2026-10-16)").
-- **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames. c77 ran all four, and all pass.
+- **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames. c77 ran all four, and all pass. At ÷19 the three phases cover 3 of the lattice's 19 alignments, and every call but the first starts on one of 5 of them (`progress.md`, "The final review and c77 (2026-10-16)").
 - **No single gate run at the head** covers `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together. c77's `wire` gate at `356cea9` passes 96 of 96 scenarios and catches 7 of 7 mutants; the 97th scenario, `pal2600_a78` (`82d05f1`), has run only alone.
 - **Plan 7.7's fresh-clone run of `step7_gates.sh` is still owed.**
 
