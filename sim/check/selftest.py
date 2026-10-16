@@ -8,7 +8,9 @@
 
 DIR receives the planted copies. Every case prints "ok" when the checker
 gave the expected verdict, "WRONG" otherwise; the last line is SELFTEST
-pass or FAIL, and so is the exit status (0 or 1).
+pass or FAIL, and so is the exit status (0 or 1). The line before it names
+the input-dependent groups below that did not run for want of their input
+(step7_gates.sh's selftest gate is then PARTIAL).
   --run-sim LOG    a passing run_sim.sh log: wrong TONE ratio, BIOS_BOOT
                    FAIL, a skipped section, a missing PLL_REGION line, a
                    truncated log, a geometry change, BUPCHIP_E2E FAIL, a
@@ -56,8 +58,9 @@ pass or FAIL, and so is the exit status (0 or 1).
                    each form a doc or script spells it: backticks, > and 2>,
                    brackets, a comma, a file:/// URL, a doubled leading
                    slash and the rest, a listed name, also inside
-                   an identifier, no list, a list inside the repository, a
-                   binary and an oversized file) and pp_equiv.py on a small
+                   an identifier, no list, an empty list and one of comment
+                   lines only, a list inside the repository, a binary and
+                   an oversized file) and pp_equiv.py on a small
                    Quartus tree (a comment, a layout and a dead-ifdef edit
                    keep the hash; a code edit, a live ifdef edit and a
                    removed macro change it; --expect and --max-token fail;
@@ -545,6 +548,10 @@ def hygiene_cases(w):
     # a made-up name stands in for the real list, which is never written in a tracked file
     names = os.path.join(w, "hygiene_names.txt")
     open(names, "w").write("# test list\nQuuxbot\n")
+    empty_names = os.path.join(w, "hygiene_names_empty.txt")
+    open(empty_names, "w").write("")
+    comment_names = os.path.join(w, "hygiene_names_comments.txt")
+    open(comment_names, "w").write("# only a comment\n  # an indented one\n\n")
     env = {k: v for k, v in os.environ.items() if k != "HYGIENE_NAMES"}
     print("hygiene.sh on a scratch repository:")
     tmp = "/" + "tmp/x.log"          # spelled in pieces: hygiene.sh would flag this file
@@ -558,6 +565,9 @@ def hygiene_cases(w):
         ("scratch directory", lambda: write(d, "sim/x.sh", "see scratch" + "pad/notes\n"), False, ["--names", names]),
         ("listed name", lambda: write(d, "docs/x.md", "written with quuxbot\n"), False, ["--names", names]),
         ("no name list", lambda: write(d, "sim/x.py", "print('ok')\n"), False, []),
+        ("an empty name list", lambda: write(d, "sim/x.py", "print('ok')\n"), False, ["--names", empty_names]),
+        ("a name list of comment lines only", lambda: write(d, "sim/x.py", "print('ok')\n"), False,
+         ["--names", comment_names]),
         ("name list inside the repository", lambda: (write(d, "names.txt", "Quuxbot\n"), write(d, "sim/x.py", "1\n")), False,
          ["--names", os.path.join(d, "names.txt")]),
         ("binary file", lambda: write(d, "sim/blob.dat", bytes(range(256)) * 4, "wb"), False, ["--names", names]),
@@ -1130,6 +1140,9 @@ def main():
     div_cases(w)
     gate_cases(w)
     wire_cases(w)
+    skipped = [o for o, v in (("--run-sim", a.run_sim), ("--extra", a.extra), ("--fp", a.fp), ("--cartram", a.cartram),
+                              ("--reset", a.reset), ("--artape", a.artape), ("--tools", a.tools)) if not v]
+    print("groups not run (no input given): " + (", ".join(skipped) if skipped else "none"))
     print(f"SELFTEST {'pass' if all(results) else 'FAIL'} ({sum(results)} of {len(results)} cases as expected)")
     sys.exit(0 if all(results) else 1)
 
