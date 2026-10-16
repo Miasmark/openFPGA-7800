@@ -677,7 +677,7 @@ Plan 7.6's reruns, on `317eaa8`'s `src/`.
 - **`pp_guards`:** 4 guards, 0 findings.
 - **`divider`:** 11 bench and gate defaults, all at VCO/19.
 - **Lint:** no warning added in any of the three macro sets.
-- **The builds:** `tb_wire` (DARIA and plain), `tb_frames` (DARIA, `BUP_DEBUG` off), and `tb_daria` mode B with and without the wrapper at `WIN_KB=64`. Every later piece names the binary it ran, and each is one of these.
+- **The builds:** `tb_wire` (DARIA and plain), `tb_frames` (DARIA, `BUP_DEBUG` off), and `tb_daria` mode B with and without the wrapper at `WIN_KB=64`. Every wire, frame and mode-B piece names the binary it ran, and each is one of these. `run_sim`, the cartram matrix, `extra_tests`, `s4/check.sh` and the unit benches build their own.
 
 #### `run_sim`, the cartram matrix and `extra_tests`, on both builds
 
