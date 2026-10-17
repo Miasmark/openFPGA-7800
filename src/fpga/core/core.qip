@@ -15,6 +15,10 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) sram_ctrl.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) stick_dirs.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) audio_filter.sv]
+# The AtariVox's voice (POCKET_ATARIVOX)
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) atarivox/avox_rx.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) atarivox/avox_engine.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) atarivox/atarivox.sv]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) pll/pll_core.qip]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../pocket_utils/data_loader.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../pocket_utils/sound_i2s.sv]

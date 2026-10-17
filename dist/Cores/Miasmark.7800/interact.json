@@ -255,6 +255,35 @@
         ]
       },
       {
+        "name": "AtariVox Voice",
+        "id": 28,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x100002C4",
+        "defaultval": 2,
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "value": 0,
+            "name": "Off"
+          },
+          {
+            "value": 1,
+            "name": "Quiet"
+          },
+          {
+            "value": 2,
+            "name": "Normal"
+          },
+          {
+            "value": 3,
+            "name": "Loud"
+          }
+        ]
+      },
+      {
         "name": "Skip BIOS",
         "id": 12,
         "type": "check",

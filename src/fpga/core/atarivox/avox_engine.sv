@@ -47,7 +47,7 @@ module avox_engine (
 		.ADDR_WIDTH    (10),
 		.DATA_WIDTH    (40),
 		.MEM_INIT_FILE ("core/atarivox/vox_irom.mif"),
-		.SIM_INIT_FILE ("vox_irom.hex")
+		.SIM_INIT_FILE ("rtl/vox_irom.hex")
 	) irom (
 		.clk_i   (clk),
 		.addr_i  (pc),
@@ -74,7 +74,7 @@ module avox_engine (
 		.ADDR_WIDTH    (12),
 		.DATA_WIDTH    (20),
 		.MEM_INIT_FILE ("core/atarivox/vox_drom.mif"),
-		.SIM_INIT_FILE ("vox_drom.hex")
+		.SIM_INIT_FILE ("rtl/vox_drom.hex")
 	) drom (
 		.clk_i   (clk),
 		.addr_i  (drom_addr),

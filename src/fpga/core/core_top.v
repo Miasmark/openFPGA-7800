@@ -384,6 +384,7 @@ localparam [15:0] SLOT_BUPFW = 16'h0109;
     reg     [2:0]   set_port1     = 3'd0;   // 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun
     reg     [2:0]   set_port2     = 3'd0;
     reg     [1:0]   set_turbo     = 2'd0;   // X / Y turbo: off, fast, medium, slow
+    reg     [1:0]   set_atarivox  = 2'd2;   // AtariVox voice: off, quiet, normal, loud
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -413,6 +414,7 @@ always @(posedge clk_74a) begin
             12'h2A4: set_port1     <= bridge_wr_data[2:0];
             12'h2A8: set_port2     <= bridge_wr_data[2:0];
             12'h2AC: set_turbo     <= bridge_wr_data[1:0];
+            12'h2C4: set_atarivox  <= bridge_wr_data[1:0];
             // Combined menu entries (the Pocket takes at most 16): each
             // sets two of the settings above.
             12'h2B0: {set_rdiff_b, set_ldiff_b}   <= bridge_wr_data[1:0];
@@ -749,9 +751,9 @@ end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
 // a two stage synchroniser per bit is enough.
-    reg     [34:0]  set_s1, set_s2;
+    reg     [36:0]  set_s1, set_s2;
 always @(posedge clk_sys) begin
-    set_s1 <= {set_turbo, set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
+    set_s1 <= {set_atarivox, set_turbo, set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
                set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
                set_blend, set_pokey_irq, set_savekey, 1'b0};
@@ -875,6 +877,7 @@ atari7800_pocket atari (
     .flicker_blend  ( set_s2[4] ),
     .pokey_irq      ( set_s2[3] ),
     .savekey_setting( set_s2[2:1] ),
+    .atarivox_setting( set_s2[36:35] ),
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),
     .bs_override    ( set_s2[26:22] ),

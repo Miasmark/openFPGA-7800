@@ -82,7 +82,7 @@ module tb_load;
 
 	logic reset_in = 1'b1;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
-	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
+	logic [1:0] sk_setting = 2'd2; logic [1:0] vox_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
@@ -197,7 +197,7 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
-		.savekey_setting(sk_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
+		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
@@ -684,6 +684,17 @@ module tb_load;
 		end
 	end
 
+`ifdef POCKET_ATARIVOX
+	// ---------------- AtariVox voice (+voxpcm) ----------------
+	// Every sample the AtariVox engine puts out (16,384 Hz, s16le) to
+	// vox.pcm; tools/atarivox/sjhw.py's write_wav scale is x8.
+	integer voxpcm_fd = 0;
+	initial if ($test$plusargs("voxpcm")) voxpcm_fd = $fopen("vox.pcm", "wb");
+	always @(posedge clk_sys)
+		if (voxpcm_fd != 0 && dut.atarivox.engine.sample_strobe)
+			$fwrite(voxpcm_fd, "%c%c", dut.atarivox.sample[7:0], dut.atarivox.sample[15:8]);
+`endif
+
 	// ---------------- save device probe ----------------
 	// Which save devices a cart actually talks to: CPU accesses to the HSC
 	// RAM ($1000-$17FF) and ROM ($3000-$3FFF) while the HSC is enabled, SCL
@@ -1038,6 +1049,7 @@ module tb_load;
 		if ($test$plusargs("hsc_off")) hsc_setting = 2'd2;
 		if ($test$plusargs("sk_on")) sk_setting = 2'd1;
 		if ($test$plusargs("sk_auto")) sk_setting = 2'd0;
+		void'($value$plusargs("voxset=%d", vox_setting));   // AtariVox voice: 0 off .. 3 loud
 		// +sksave=FILE: write a 32 KiB SaveKey image through its save slot port.
 		if ($value$plusargs("sksave=%s", sk_path)) begin
 			fd = $fopen(sk_path, "rb");

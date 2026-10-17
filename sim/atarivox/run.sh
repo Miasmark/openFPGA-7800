@@ -10,7 +10,8 @@ AV="$ROOT/src/fpga/core/atarivox"
 WORK="${WORK:-$HERE/work}"
 mkdir -p "$WORK"
 python3 "$ROOT/tools/atarivox/sjhw.py" --build "$AV"
-cp "$AV/vox_irom.hex" "$AV/vox_drom.hex" "$WORK/"
+mkdir -p "$WORK/rtl"
+cp "$AV/vox_irom.hex" "$AV/vox_drom.hex" "$WORK/rtl/"
 if [ ! -x "$WORK/obj/vtb" ] || [ -n "$(find "$AV" "$HERE/tb_avox.sv" -newer "$WORK/obj/vtb" -name '*.sv')" ]; then
 	"${VERILATOR:-verilator}" --binary --timing -j 4 -O2 -Wno-fatal -Wno-lint -Wno-style \
 		--top-module tb_avox -Mdir "$WORK/obj" -o vtb \

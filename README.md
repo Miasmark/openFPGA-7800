@@ -64,6 +64,15 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   on port 2); 2600 SaveKey games need it set to On. Unlike MiSTer, the high
   score cart stays available alongside it, since each has its own file: a
   cart whose header asks for both (such as Triple Punch) gets both.
+- **AtariVox voice** (the SpeakJet speech chip on port 2), with the SaveKey
+  that is the AtariVox's other half: the voice is there whenever the SaveKey
+  is on (so 2600 AtariVox games need *SaveKey (port 2)* set to On), and
+  *AtariVox Voice* sets its level in the mix (Off, Quiet, Normal, Loud). It
+  is mixed into the core's output, where a real AtariVox has a jack of its
+  own. The SpeakJet's sound tables are not published, so the voice is our
+  own: a speech engine of our own design built from recordings of the real
+  chip ([docs/ATARIVOX.md](docs/ATARIVOX.md)). It reads the same codes, at
+  the same lengths, pitches and speeds; the timbre is an approximation.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
   core skips it, as MiSTer does. Turn off *Skip BIOS* to boot 7800 games
   through it. Unlike on MiSTer, 2600 games always start directly, without
@@ -91,7 +100,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   - *Difficulty*: both difficulty switches.
   - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
   - *Region*, *Palette* (warm/cool/hot), *High Score Cart*, *SaveKey
-    (port 2)*, *Skip BIOS*.
+    (port 2)*, *AtariVox Voice*, *Skip BIOS*.
   - *Picture*: the border on or off, and *Overscan* (below).
   - *Audio*: Stereo TIA, and a blend of the left and right channels (25%,
     50%, or full mono) for Stereo TIA and stereo carts on headphones.

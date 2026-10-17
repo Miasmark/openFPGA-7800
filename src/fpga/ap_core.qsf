@@ -753,6 +753,10 @@ set_global_assignment -name VERILOG_MACRO "NO_MEM_EDITOR=1"
 # replaces upstream's, which NO_BUPCHIP keeps out.
 set_global_assignment -name VERILOG_MACRO "POCKET_BUPCHIP=1"
 set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"
+# The AtariVox's voice (core/atarivox/, docs/ATARIVOX.md): the SpeakJet's
+# serial input on port 2 and a speech engine of our own, on whenever the
+# SaveKey is and the AtariVox Voice setting is not Off.
+set_global_assignment -name VERILOG_MACRO "POCKET_ATARIVOX=1"
 # Hardware test builds add VERILOG_MACRO "BUP_DEBUG=1" here: the BupChip's
 # status word, shadow FIFO counters, load probe and its status cells on
 # screen (core/bupchip/bup_status_osd.sv). Releases leave it out
