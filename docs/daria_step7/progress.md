@@ -245,7 +245,7 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 
 **The owner halted all work.** Every agent and simulation was stopped; no Quartus job was running. Nothing is merged beyond DARIA-dev; the local branches `s7/D`, `s7/G` and `s7/C19` keep their commits.
 
-**Mode B at ÷19: the cart RAM coincidences.** These were counted by the lane but **not yet checked by a second reader**. (Later: the review of `317eaa8` recounted them from the runs' pair logs and found the same counts, every pair a front-end audio read during a call, plan 5.2; on the shipping tree, c76's six phase-0 wrapper runs gave the same counts bin for bin, `DARIA_CORE.md`, "Step 7 work".) Each pair is a DARIA store and a front-end read of the same cart RAM word within 69.84 ns. The distance is between their clock edges, in VCO periods of 1.455 ns:
+**Mode B at ÷19: the cart RAM coincidences.** These were counted by the lane but **not yet checked by a second reader**. (Later: the review of `317eaa8` recounted them from the runs' pair logs and found the same counts, every pair a front-end audio read during a call, plan 5.2; on the shipping tree, c76's six phase-0 wrapper runs gave the same counts bin for bin, `record.md`, "Mode B at VCO/19".) Each pair is a DARIA store and a front-end read of the same cart RAM word within 69.84 ns. The distance is between their clock edges, in VCO periods of 1.455 ns:
 
 | Image (frames) | Pairs | At 0 / 1 / 2 periods | At 3-6 periods | Over 6 | Pairs where the value changed | Per minute, all pairs |
 |---|---|---|---|---|---|---|
@@ -263,7 +263,7 @@ Results as they land, against `plan.md`. Figures are from the lane logs named; t
 - **The runs are short** (5-10 seconds of play each), so the counts of near pairs are rough.
 - **What a race gives:** in the Quartus image's own `altsyncram` model, a dual-clock read of a word being written in the same step gives X on the written byte lanes and the stored value on the others. The Cyclone V handbook was not in the image, so this was not checked against it.
 
-**`tb_s4` at ÷19 was stopped at job 27 of 28** (later, on the shipping tree, both sets passed 28 of 28 in c76, `synth_reloads` with its holds placed at `+holdstep=7`: plan 5.2, `DARIA_CORE.md`, "Step 7 work"):
+**`tb_s4` at ÷19 was stopped at job 27 of 28** (later, on the shipping tree, both sets passed 28 of 28 in c76, `synth_reloads` with its holds placed at `+holdstep=7`: plan 5.2, `record.md`, "`s4/check.sh` on both sets"):
 - By the lane's notes, 25 of jobs 1-26 pass, with 0 PSRAM model violations throughout; the stress mutants are caught as at ÷18.
 - `synth_reloads` failed only its placement requirement: both of its holds fell mid-access at ÷19. Its data checks were clean: PCM identical, 0 violations, snap ok. A re-placed rerun was queued but not run.
 - Job 27 (song 13 across a 20 ms pause) was interrupted, and job 28 never started.
@@ -320,7 +320,7 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - `frame_gate.py`'s default is the V1 rule, with the strict rule as an option.
   - `synth_reloads` places its holds correctly at ÷19.
   - Three new gates: `divider` checks every bench's default divider against `pll_core.v`'s, `wire` runs `tb_wire`'s full set and its mutants, and `fit_selftest` runs the fit driver's selftest.
-  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error. This stricter verdict had then been checked only by re-judging earlier logs (all 7 caught) and by selftest cases. (Later: its run on real simulations, round 4 at `0b2f9e1`, ran on 2026-10-15 and caught 7 of 7 on their named keys; the logs are named in `DARIA_CORE.md`, "Step 7 work".)
+  - `wire.py` counts a mutant as caught only on the named keys; a crash or timeout is an error. This stricter verdict had then been checked only by re-judging earlier logs (all 7 caught) and by selftest cases. (Later: its run on real simulations, round 4 at `0b2f9e1`, ran on 2026-10-15 and caught 7 of 7 on their named keys; the logs are named in `record.md`, "`tb_wire`'s full set and its mutants".)
   - The plan and the docs are amended for the owner's and the lead's decisions.
 - **The amended checks** of 5.4 (the lead's decision above) are in `step7_checks.py`, by divider. Judged again from the fits' report files, without refitting:
   - Q2 seeds 1-3, and seed 3's `KEEP_DB` refit, pass as amended.
@@ -328,14 +328,14 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
   - The I3 STA mutants and Q-mut still fail as required.
 - **Q5** (`BUP_DEBUG` + DARIA, seeds 1-3):
   - Each fit's own verdict failed (c.cells), (f) and (k') on a table error: the table expected `cap_err_a[0]`, a flop with no load in any build. Seed 3 also failed (a) and (l) as first written, on the guard pair.
-  - Judged again from the fits' report files, with the corrected table and the amended (a), (l) and (h), all three seeds pass. That re-judge of (c.cells) relies on a helper outside the repository; the tracked checker on the fits as fitted still reports the old table's failure. (Later: since `6477f78` the tracked checker makes it, and Q5 passes with it; `DARIA_CORE.md`, "Step 7 work".)
+  - Judged again from the fits' report files, with the corrected table and the amended (a), (l) and (h), all three seeds pass. That re-judge of (c.cells) relies on a helper outside the repository; the tracked checker on the fits as fitted still reports the old table's failure. (Later: since `6477f78` the tracked checker makes it, and Q5 passes with it; `record.md`, "The fits".)
   - The guard pair's setup slack at slow 85 °C is +0.603 / +0.131 / −0.060 ns; (a) gates on it only at ÷18.
   - `daria_sync.tcl`'s line for `cap_err_a` now matches no build. It goes with the next `src/` change.
-- **Review:** five rounds. The last signed off the fix round's changes at `0b2f9e1`; it does not cover the campaign's open results, which the release then still needed. (Later: c76 finished on 2026-10-16, and the final review covered its results; "The final review and c77", below.) Three minor findings were open. The final review of 2026-10-16 confirmed them as VG-1 to VG-3, and all three are now fixed (`DARIA_CORE.md`, "Step 7 work"):
+- **Review:** five rounds. The last signed off the fix round's changes at `0b2f9e1`; it does not cover the campaign's open results, which the release then still needed. (Later: c76 finished on 2026-10-16, and the final review covered its results; "The final review and c77", below.) Three minor findings were open. The final review of 2026-10-16 confirmed them as VG-1 to VG-3, and all three are now fixed (`record.md`, "After c76: the final review"):
   - Q5's re-judge relies on the untracked helper above, and plan 7.6's rule overstates what the tracked tools can re-judge. *Fixed:* `step7_checks.py` judges (c.cells) from each fit's `firstflops.tsv` (`6477f78`), and plan 5.4 and 7.6 say which checks a fit's own report files judge again (`baca4cd`).
   - `fit_selftest` fails below 2,100 MB free, so a fresh-clone run (7.7) on this machine may fail for disk alone. Two branches of the amended checks, (h)'s hold test and (a)'s every-corner requirement, are not covered by it. *Fixed* (`6477f78`): it needs 100 MB, is PARTIAL below that, and has planted cases for both branches.
   - The plan header's list of amendments is incomplete, and the 2.7 correction is undated. *Fixed* (`42ff9db`): the header lists them, and the 2.7 row is dated 2026-10-14.
-- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`) finished on 2026-10-16 at 00:58 UTC, with 48 of 48 pieces passing. Its record is in `DARIA_CORE.md`, "Step 7 work". At 19:24 UTC on 2026-10-14 it stood as follows:
+- **The verification campaign on the shipping tree** (`317eaa8`'s `src/`) finished on 2026-10-16 at 00:58 UTC, with 48 of 48 pieces passing. Its record is in `record.md`, "The verification campaign c76 on the shipping tree". At 19:24 UTC on 2026-10-14 it stood as follows:
   - **Done:** the static gates, `run_sim`, the cartram matrix, the unit benches, `tb_wire`'s full set, Q2 seeds 1-3, Q4 (equal to Q1''), Q-mut, Q5 seeds 1-3, and the three I3 STA mutants.
   - **Running:** `s4/check.sh`'s DARIA set (17 of 28 jobs passed), `extra_tests` with `AR_TAPE=1` on both builds, and the V1 frame gate on 16 images at 1,500 frames (2 passed, 1 running).
   - **Waiting:** the gate `selftest`, `s4/check.sh`'s non-DARIA set, and mode B with the wrapper (10 runs) and without it (9 runs).
@@ -379,20 +379,20 @@ On `s7/D`, local, head `0b2f9e1`. `src/` has not changed since `317eaa8`, so the
 
 ### The final review and c77 (2026-10-16)
 
-- **c76 is complete.** The verification campaign on the shipping tree (`317eaa8`'s `src/`) finished at 00:58 UTC. All 48 pieces exit 0, and every gate passes under the amended rules. Its record, judged piece by piece by a second reader, is in `DARIA_CORE.md`, "Step 7 work".
+- **c76 is complete.** The verification campaign on the shipping tree (`317eaa8`'s `src/`) finished at 00:58 UTC. All 48 pieces exit 0, and every gate passes under the amended rules. Its record, judged piece by piece by a second reader, is in `record.md`, "The verification campaign c76 on the shipping tree".
 - **The final review** read the whole of `s7/D` at `356cea9` in four parts: RTL (3 findings), timing and constraints (4), gates and tools (11), and docs (16). That is 34 findings. A second reader checked each one against the tree and the logs, and confirmed all 34. After the check none is a blocker: 2 are major, 19 minor and 13 nits. The one reported as a blocker, the README still listing 2600 ARM cartridges as not included, was rated minor, because the README describes the released core until 2.2.1 ships.
 - **The owner's decisions:**
   - **RTL-1 ships as is in 2.2.1 and is fixed later** ("Ship as is, fix later"). In the DARIA build a PAL A78 loaded after a PAL 2600 image on Auto region costs two extra retunes; the final region is right (`DARIA_CORE.md`, open item 20).
-  - **`src/` is frozen for 2.2.1** as `317eaa8`'s, the tree c76 verified. The review's `src/`-only findings wait for the first change after the release (`DARIA_CORE.md`, "After 2.2.1: `src/` clean-ups"; `docs/IMPROVEMENTS.md`).
+  - **`src/` is frozen for 2.2.1** as `317eaa8`'s, the tree c76 verified. The review's `src/`-only findings wait for the first change after the release (`record.md`, "After 2.2.1: `src/` clean-ups"; `docs/IMPROVEMENTS.md`).
 - **The fix round** changed nothing under `src/`:
   - **Tools:** `6477f78` (`step7_checks.py` judges (c.cells) from `firstflops.tsv`, and the fit driver's self-test needs 100 MB: VG-1, VG-2, VG-9), `82d05f1` (`tb_wire`'s `pal2600_a78` pins RTL-1 on both builds), `95c3352` (`step7_gates.sh`: VG-4, VG-5, VG-6), `5e1badb` (`hygiene.sh`: VG-7), `ce14cc0` (`run_dbgsnap.sh`: VG-8), `3344b92` (`frame_gate.py`: VG-10) and `f3a9b49` (`selftest.py` runs `step7_gates.sh` on stand-ins).
-  - **Re-runs after the tools commits:** `selftest.py` with c76's inputs, 267 of 267; `fit_selftest`, 117 of 117; `frame_gate.py` on c76's 16 frame runs, 16 of 16, each report byte-identical to c76's; and `step7_checks.py` on copies of every c76 fit, with the verdicts in `DARIA_CORE.md`.
+  - **Re-runs after the tools commits:** `selftest.py` with c76's inputs, 267 of 267; `fit_selftest`, 117 of 117; `frame_gate.py` on c76's 16 frame runs, 16 of 16, each report byte-identical to c76's; and `step7_checks.py` on copies of every c76 fit, with the verdicts in `record.md`, "The fits".
   - **Docs:** `42ff9db` (the plan and this file), `bf3d61a` (`DARIA_CORE.md`'s step-7 record, the V1 done-when, open items 7, 10, 11, 12 and 20, and the after-2.2.1 list), `7ff3276` (the README for 2.2.1) and `51b2927` (`DEVELOPING.md`, `design.md`, `ENVIRONMENT.md` and the sim READMEs).
 - **Two re-reviews of `51b2927`,** one of the tools and one of the docs, passed every finding. The tools re-review built `tb_wire` again and re-ran `pal2600_a78`: the same binaries (md5) and the same timings. Between them they found one new minor item, N1 (below), and 13 smaller ones (NEW-1 to NEW-3 and N2 to N12, where NEW-1 and N2 are one item).
 - **The nits round** fixed all 13: `5676558` (`frame_gate.py --auto` prints one verdict line, NEW-3) and `baca4cd` (the docs). After it `selftest.py` with c76's inputs passes 268 of 268, and `frame_gate.py` on c76's 16 frame runs gives each report byte-identical to c76's. `src/` is still `317eaa8`'s.
 - **The merge.** `s7/D` at `baca4cd` is merged into DARIA-dev (`0bfd157`) with no conflict; `src/` and `sim/` equal `s7/D`'s. The merge items were the D fix round's text above, brought up to date; `docs/IMPROVEMENTS.md`, linked from `DEVELOPING.md` (DOC-7) and given the after-2.2.1 list (N1); `ENVIRONMENT.md` 8.4, reworded to agree with 8.1 and `AGENT_RUNS.md` section 2 (DOC-8); and this record.
 
-**c77: the runs c76 did not cover.** The final review found two items of plans 7.3 and 7.4 that c76 did not run, and no single `wire` gate run at the head (`DARIA_CORE.md`, "What c76 does not cover"). c77 ran the two items and one `wire` gate run at the head, from 02:04 to 06:52 UTC, as seven pieces:
+**c77: the runs c76 did not cover.** The final review found two items of plans 7.3 and 7.4 that c76 did not run, and no single `wire` gate run at the head (`record.md`, "What c76 does not cover"). c77 ran the two items and one `wire` gate run at the head, from 02:04 to 06:52 UTC, as seven pieces:
 - **Plan 7.3's last item:** SF2fix and draconian RC8 in `tb_frames`.
 - **Plan 7.4's R2 phase runs:** Galagon and Spiders in `tb_frames` at 8,730 and 17,460 ps.
 - **One `wire` gate run at `s7/D`'s head of that time, `356cea9`.**
@@ -531,7 +531,7 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - All 16 images pass the V1 rule, 1,499 of 1,499 frames each, with `len_sys`, video and RIOT RAM equal on every frame.
   - Every call's ARM instruction count equals R1's. Every status line shows 0 halts, 0 PSRAM violations, the guard unlocked and 0 unlocks. Spiders has its 16 late calls, as R1 has.
   - Frame 1's video was excused on Wizard of Wor, Zaxxon and Zoo Keeper, as in c76.
-  - Audio differs on 8,928 frames, as in `DARIA_CORE.md`'s frame-gate table for c76. It is counted, not gated.
+  - Audio differs on 8,928 frames, as in `record.md`'s frame-gate table for c76. It is counted, not gated.
   - The second reader re-ran `frame_gate.py` on Spiders and on Wizard of Wor with the gate's arguments: both exit 0, with output byte-equal to the piece logs.
 - **The simulation binaries** differ in md5 from c76's and c77's: each was built in c78, and a build embeds its source path. `tb_frames` is `398f0f36…` in all 16 frame pieces (c76: `9a6b65a6…`), and `tb_wire` is `b5254e16…` (DARIA) and `22c997d4…` (plain), against c77's `8a3f6a62…` and `19fe82b7…`.
 - **Free space on `/`:** the lowest value recorded was 2,235 MB (c78's `free.log`). The monitor trimmed the shared ccache 5 times, each time free space fell under 2,240 MB.
@@ -571,4 +571,4 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - The last piece cut was the whole `wire` run, at 12:48 on 10-16. The notes said only that none was cut after 01:24 on 10-17.
   - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. The monitor started at 08:20, about 5 minutes after the first pieces, and died with the stops at 09:16 and 12:28 on 10-16; it was restarted at 09:24 and 12:40. So free space went unrecorded while pieces ran for about 5, 6 and 10 minutes, from 08:15, 09:17 and 12:29.
   - `extra_tests` took dasm, 7800basic and MiSTer's two firmware files from a cache, as c76 did, which the notes' list of deviations left out. So the run does not show that the gates need only the firmware and the game images.
-- **Step 7 is done for V1.** `DARIA_CORE.md`, "Step 7 work", "Plan 7.7's fresh-clone run: c78", records c78 in short, and its status line, done-when and hand-over now say so. What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.
+- **Step 7 is done for V1.** `record.md`, "Plan 7.7's fresh-clone run: c78", records c78 in short, and `DARIA_CORE.md`'s status line and done-when and the record's hand-over now say so. What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.

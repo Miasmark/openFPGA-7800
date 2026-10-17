@@ -48,7 +48,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 ### After 2.2.1: RTL-1 and the `src/` clean-ups
 
-*Added 2026-10-16, from step 7's final review. The owner froze `src/` for 2.2.1 that day, so each item waits for the first `src/` change after the release. The numbers are those of `docs/DARIA_CORE.md`, "After 2.2.1: `src/` clean-ups", which has the details and the line numbers.*
+*Added 2026-10-16, from step 7's final review. The owner froze `src/` for 2.2.1 that day, so each item waits for the first `src/` change after the release. The numbers are those of `docs/daria_step7/record.md`, "After 2.2.1: `src/` clean-ups", which has the details and the line numbers.*
 
 1. **RTL-1: a PAL A78 after a PAL 2600 image, Region on Auto** (`docs/DARIA_CORE.md`, open item 20).
    - **What it would fix.** In the DARIA build such an A78 costs two extra retunes, to NTSC and back to PAL, and its console is released 62 µs later than without DARIA. The final region is right. Main and the build without DARIA make no extra retune. The owner accepted it for 2.2.1 as a known minor issue.

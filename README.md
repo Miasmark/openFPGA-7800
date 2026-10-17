@@ -221,8 +221,8 @@ gate of +1.5 ns), +1.077 ns on DARIA's CPU clock, and +0.397 ns
 on the one 6 ns path of DARIA's front end (its phase detector). Worst hold
 slack +0.098 ns. It uses 15,625 of 18,480 ALMs (85%), 195 of 308 M10K
 blocks and 12 DSP blocks. Seeds 1 and 3 give clk_sdram +2.462 and +2.919
-ns ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), "Step 7 work"). 2.2.1 has
-Fix B, the structural fix in the SRAM controller: the 2600 mappers'
+ns ([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
+2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
 had +1.60 ns with 12,909 ALMs (70%) and 78 M10K blocks, 2.1.2 +1.92 ns,
