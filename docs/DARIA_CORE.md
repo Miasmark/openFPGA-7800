@@ -883,7 +883,7 @@ Two documentation findings were left to the merge into DARIA-dev, and were done 
 
 c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`, whose `src/` is `317eaa8`'s, from 2026-10-16 08:15 to 10-17 13:04 UTC. The clone stayed clean and has no `sim/work/fixb/`. The firmware was linked into its gitignored path; the game images, BIOS and references came by path from the main checkout's and the base worktree's gitignored `sim/work/`.
 
-**Every gate passes, and the frames gate's 16 pieces cover all 16 images.** By the lead's rule for this run, a gate run in pieces passes when its pieces cover it and each passes, as c76's `s4` jobs did; under that rule c78 is plan 7.7's pass. A second reader re-derived every verdict and confirmed all 15. The full record is in `progress.md`, "Plan 7.7's fresh-clone run, c78"; the logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c78/`.
+**Every gate passes, and the frames gate's 16 pieces cover all 16 images.** By the lead's rule for this run (2026-10-16), a gate run in pieces passes when its pieces cover it and each passes, as c76's `s4` jobs did; under that rule c78 is plan 7.7's pass. A second reader re-derived every verdict and confirmed all 15. The full record is in `progress.md`, "Plan 7.7's fresh-clone run, c78"; the logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c78/`.
 
 **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the `s4` jobs 16.3 h, `extra_tests`' halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So it ran as 45 resumable pieces: 29 exit 0, and the 16 frame pieces exit 3, PARTIAL alone.
 
@@ -899,7 +899,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 | `daria_smp`, `dbg_snap` | PASS: 18 runs, 8 of 8 mutants; 32 runs, 7 of 7 mutations | result lines equal |
 | `frames` | PASS (16 pieces): 1,499 of 1,499 frames each; every call's ARM count equal to R1's; audio on 8,928 frames, counted | all 80 CSVs byte-equal |
 
-**Deviations from plan 7.7:** no single call that exits 0; `s4_check` per job (`ONLY=`, `JOBS=1`), so its verdict line and log header (P23) were never written; `wire` as one build, 8 scenario groups and a piece per mutant, judged as a union by `wire_judge.py`, written for c78; `extra_tests`' two halves in parallel (c76 ran them in turn), with dasm, 7800basic and MiSTer's firmware from a cache, as c76 did (`sim/extra_tests.sh:47,78,82,166`); the frames one image per call; and the machine's stops at 09:16 and 12:28 on 10-16, after each of which the chain restarted, and after the second a whole `wire` run.
+**Deviations from plan 7.7:** no single call that exits 0; `s4_check` per job (`ONLY=`, `JOBS=1`), so its verdict line and log header (P23) were never written; `wire` as one build, 8 scenario groups and a piece per mutant, judged as a union by `wire_judge.py`, written for c78; `extra_tests`' two halves in parallel (c76 ran them in turn), with dasm, 7800basic and MiSTer's firmware from a cache, as c76 did (`sim/extra_tests.sh:47,78,82,166`); the frames one image per call. The chain restarted after the stops at 09:16 and 12:28 on 10-16 and the driver change at 09:28; the 12:28 stop cut a whole `wire` run.
 
 **What c78 does not show:** `step7_gates.sh` running all 15 gates in one process and exiting 0; the frames gate's default list; the `s4_check`, `wire` and `extra_tests` gate functions as written (`g_s4_check` has not run whole since it took `ARM19=1` in `b177e64`); and that the gates need only the firmware and the game images, since `extra_tests` also needs network access or that cache.
 
@@ -914,7 +914,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 
 ### Hand-over to step 8
 
-Plan section 9, corrected for ÷19 at the final review. Step 7 is done for V1 (2026-10-17), so this list and the release are what remain for 2.2.1.
+Plan section 9, corrected for ÷19 at the final review. Step 7 is done for V1 (2026-10-17), so step 8 (its done-when, Steps item 8, and this list) and the release remain for 2.2.1.
 
 - **Fix B on hardware:**
   - Fix A's list, plus a Superchip game, an E7, a 3E and a CV title;

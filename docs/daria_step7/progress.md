@@ -488,7 +488,7 @@ Mutants, all seven of plan 7.2 CAUGHT, each on its named keys:
 This is the single `wire` gate run at the head that c76's record found missing.
 
 **What c77 leaves:**
-- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run. c78 then ran all 97 in its `wire` gate, in pieces, on both builds from one build step (below).
+- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run. c78 then ran all 97 in its `wire` gate, in pieces (below).
 - **Plan 7.7's fresh-clone `step7_gates.sh` run** was still owed. c78 ran it (below).
 - **The phase runs cover 3 of the 19 alignments at ÷19** (above). Over the three runs, every Galagon and Spiders call but the first starts on one of 5 of them. Plan 7.4's wording, "the other two phases", dates from ÷18.
 
@@ -503,9 +503,9 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - dasm, 7800basic and MiSTer's high score and Supercharger firmware for `extra_tests`: the D worktree's gitignored `sim/work/step7/gates/extra_cache/` (deviation 5);
   - the hygiene name list, kept outside the repository (plan 7.7);
   - `AR_TAPE=1` and `S4_JOBS=1`, with `FP_REF` and `RUN_SIM_REF` unset, as in c76.
-- **How it ran.** Verilator 5.040, the benches at VCO/19, and at most three simulations at once through the simulation slots. Each gate wrote to a fresh output directory on tmpfs, not on `/`, and each piece's text results were copied to disk as it ended. Every simulation binary was built in c78; dasm and 7800basic came built from a cache (deviation 5). The builds shared the machine's ccache; a hit needs identical compiler input, so it cannot change a result.
+- **How it ran.** Verilator 5.040, the benches at VCO/19, and at most three simulations at once through the simulation slots. Each gate wrote to a fresh output directory, and each piece's text results were copied to c78's directory as it ended. Every simulation binary was built in c78; dasm and 7800basic came built from a cache (deviation 5). The builds shared the machine's ccache; a hit needs identical compiler input, so it cannot change a result.
 - **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the 56 `s4` jobs 16.3 h, and `extra_tests`' two halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So the gates ran as 45 resumable pieces; four gates were split into several pieces or calls each (deviations 2, 3, 4 and 6, below).
-- **Result: every gate passes.** 29 pieces exit 0, and the 16 frame pieces exit 3, PARTIAL alone, with 16 of 16 images passing together. By the lead's rule for this run, a gate run in pieces passes when its pieces cover it and each passes. A second reader re-derived every verdict from the logs and confirmed all 15.
+- **Result: every gate passes.** 29 pieces exit 0, and the 16 frame pieces exit 3, PARTIAL alone, with 16 of 16 images passing together. By the lead's rule for this run (2026-10-16, set when the machine's stops cut the whole `s4_check` and `wire` runs), a gate run in pieces passes when its pieces cover it and each passes. A second reader re-derived every verdict from the logs and confirmed all 15.
 
 **The gates** (`DARIA_CORE.md` has a short form of this table):
 
@@ -564,6 +564,8 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - `g_wire` is unchanged since `356cea9`, where c77 ran the `wire` gate whole and it passed. `g_extra_tests` is unchanged since then too, and c76 also ran its halves as separate calls.
   - `g_s4_check` changed from `ARM38=1` to `ARM19=1` (`b177e64`) after its last whole run, which passed at `70a63ca`. It has not run whole at `ARM19`; c76 and c78 ran its 56 jobs with its environment.
 - That the gates need only the firmware and the game images: `extra_tests` also needs network access, or the cache of deviation 5.
+
+**Notes on the record:**
 
 - **The second reader corrected the run's own notes** (c78's `NOTES.txt`, its final judgement):
   - The last piece cut was the whole `wire` run, at 12:48 on 10-16. The notes said only that none was cut after 01:24 on 10-17.
