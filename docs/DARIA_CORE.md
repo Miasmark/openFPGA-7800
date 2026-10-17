@@ -2,7 +2,7 @@
 
 **DARIA** (Dual-use Atari RISC Interface Accelerator) is ARIA, the Pocket's BupChip CPU (`docs/BUPCHIP_CORE.md`), extended to run the 2600's ARM cartridge schemes: DPC+, CDF, CDFJ and CDFJ+ (Harmony and Melody cartridges). Upstream MiSTer runs them on its ARM7TDMI core, which the Pocket build leaves out (`NO_ARM_MAPPER`). The first release with DARIA will be 2.2.1.
 
-**Steps 0 (scope), 1 (design), 2 (Thumb in simulation), 3 (the probe build), 5 (the memory system), 6 (the front end, in simulation) and 7 (integration and Fix B, for V1) are done; step 4 (S3) is not built. Step 7's results are on the tree that ships in 2.2.1: every item of its done-when holds, and plan 7.7's fresh-clone run passes ("Step 7 work", 2026-10-17). Step 8, the hardware test builds, is next, then the release.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
+**Steps 0 (scope), 1 (design), 2 (Thumb in simulation), 3 (the probe build), 5 (the memory system), 6 (the front end, in simulation) and 7 (integration and Fix B, for V1) are done; step 4 (S3) is not built. Step 7's results are on the tree that ships in 2.2.1: every item of its done-when holds, and plan 7.7's fresh-clone run passes as the union of its pieces ("Step 7 work", 2026-10-17). Step 8, the hardware test builds, is next, then the release.** The first half of this document is what DARIA must do, taken from upstream's RTL and checked against traces of real games, and the decisions taken on it. "Design (step 1)" is how DARIA does it. "Steps" lists the work that follows, and "Open items" what is still to settle and when. The work started from `BUPCHIP_CORE.md`, "Later: 2600 ARM cartridges".
 
 Tags, as in `BUPCHIP_CORE.md`:
 
@@ -627,7 +627,7 @@ Not met, or not run:
 
 ## Step 7 work: integration and Fix B (2026-10-09 to 10-17)
 
-`docs/daria_step7/plan.md` is the plan, with every amendment marked in place, and `docs/daria_step7/progress.md` records the runs as they landed. This section records the result. **The tree that ships in 2.2.1 is `317eaa8`'s `src/`.** `src/` has not changed since: at the final review's head it is byte-identical, and the owner froze it as verified (2026-10-16). The verification campaign on that tree, c76, ran from 2026-10-14 09:13 to 2026-10-16 00:58 UTC. Every piece exits 0, and every gate passes under the amended rules. Plan 7.7's fresh-clone run, c78 (2026-10-16 to 10-17), passes every gate on DARIA-dev at `843830e`, with the same `src/` (below).
+`docs/daria_step7/plan.md` is the plan, with every amendment marked in place, and `docs/daria_step7/progress.md` records the runs as they landed. This section records the result. **The tree that ships in 2.2.1 is `317eaa8`'s `src/`.** `src/` has not changed since: at the final review's head it is byte-identical, and the owner froze it as verified (2026-10-16). The verification campaign on that tree, c76, ran from 2026-10-14 09:13 to 2026-10-16 00:58 UTC. Every piece exits 0, and every gate passes under the amended rules. Plan 7.7's fresh-clone run, c78 (2026-10-16 to 10-17), passes every gate, as the union of its pieces, on DARIA-dev at `843830e`, with the same `src/` (below).
 
 ### What was built
 
@@ -844,7 +844,7 @@ All 19 runs pass at `+d_div=19`.
 
 - **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above. c77 ran both on 2026-10-16, and both pass (`progress.md`, "The final review and c77 (2026-10-16)").
 - **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames. c77 ran all four, and all pass. At ÷19 the three phases cover 3 of the lattice's 19 alignments, and every call but the first starts on one of 5 of them (`progress.md`, "The final review and c77 (2026-10-16)").
-- **No single gate run at the head** covered `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together, and c77's `wire` gate at `356cea9` passes 96 of 96 scenarios and catches 7 of 7 mutants. c78 ran both at `843830e`, the 97th scenario, `pal2600_a78` (`82d05f1`), included (below).
+- **No single gate run at the head** covered `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together, and c77's `wire` gate at `356cea9` passes 96 of 96 scenarios and catches 7 of 7 mutants. c78 ran both at `843830e`, `selftest` as one gate call and `wire` in pieces judged as a union, its 97th scenario, `pal2600_a78` (`82d05f1`), included (below).
 - **Plan 7.7's fresh-clone run** was owed; c78 ran it (below).
 
 ### After c76: the final review (2026-10-16)
@@ -889,7 +889,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 
 | Gate | Result | Against c76 and c77 |
 |---|---|---|
-| the six static gates, one call | PASS: hygiene over `aeee6d2..843830e`, 89 files; stream `9b9e7e5e…`, 0 `daria` tokens; 4 guards, 0 findings; 11 defaults at VCO/19; no lint warning added; 117 of 117 | logs equal c76's but headers and paths; `fit_selftest` as the final review's re-run |
+| the six static gates, one call | PASS: hygiene over `aeee6d2..843830e`, 89 files; stream `9b9e7e5e…`, 0 `daria` tokens; 4 guards, 0 findings; 11 defaults at VCO/19; no lint warning added; 117 of 117 | logs equal c76's but headers and paths, hygiene aside (c76: `70a63ca..317eaa8`, 43 files); `fit_selftest` as the final review's re-run |
 | `run_sim` | PASS: the DARIA section's 391, 1 and 112 calls, 0 halts; 21 fingerprint cases identical, DARIA against plain | `.out` files equal but paths and md5 |
 | `cartram` | PASS: 21 matrix cases, s19 at most, 14 reset cases, both mutants CAUGHT, 20 fingerprints identical | equal but paths, md5, HEAD, date |
 | `extra_tests`, `AR_TAPE=1` | PASS: both halves exit 0 and pass the checks; 37 fingerprints identical | equal but paths, md5 and the plain half's own `tb_cartram` build |
@@ -899,7 +899,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 | `daria_smp`, `dbg_snap` | PASS: 18 runs, 8 of 8 mutants; 32 runs, 7 of 7 mutations | result lines equal |
 | `frames` | PASS (16 pieces): 1,499 of 1,499 frames each; every call's ARM count equal to R1's; audio on 8,928 frames, counted | all 80 CSVs byte-equal |
 
-**Deviations from plan 7.7:** no single call that exits 0; `s4_check` per job (`ONLY=`, `JOBS=1`), so its verdict line and log header (P23) were never written; `wire` as one build, 8 scenario groups and a piece per mutant, judged as a union by `wire_judge.py`, written for c78; `extra_tests`' two halves in parallel, with dasm, 7800basic and MiSTer's firmware from a cache, as in c76 (`sim/extra_tests.sh:47,78,82,166`); the frames one image per call; and the machine's stops at 09:16 and 12:28 on 10-16, after which the chain and a whole `wire` run restarted.
+**Deviations from plan 7.7:** no single call that exits 0; `s4_check` per job (`ONLY=`, `JOBS=1`), so its verdict line and log header (P23) were never written; `wire` as one build, 8 scenario groups and a piece per mutant, judged as a union by `wire_judge.py`, written for c78; `extra_tests`' two halves in parallel (c76 ran them in turn), with dasm, 7800basic and MiSTer's firmware from a cache, as c76 did (`sim/extra_tests.sh:47,78,82,166`); the frames one image per call; and the machine's stops at 09:16 and 12:28 on 10-16, after each of which the chain restarted, and after the second a whole `wire` run.
 
 **What c78 does not show:** `step7_gates.sh` running all 15 gates in one process and exiting 0; the frames gate's default list; the `s4_check`, `wire` and `extra_tests` gate functions as written (`g_s4_check` has not run whole since it took `ARM19=1` in `b177e64`); and that the gates need only the firmware and the game images, since `extra_tests` also needs network access or that cache.
 
