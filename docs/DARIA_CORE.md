@@ -844,7 +844,7 @@ All 19 runs pass at `+d_div=19`.
 
 - **`tb_frames` on SF2fix and draconian RC8** (600 frames against R1, plan 7.3's last item) was not run on the shipping tree. Galagon and Turbo are covered by their 1,500-frame runs above. c77 ran both on 2026-10-16, and both pass (`progress.md`, "The final review and c77 (2026-10-16)").
 - **R2's phase runs** (plan 7.4: Galagon and Spiders in `tb_frames` at the two other lattice phases, 600 frames) were not run. The mode-B runs at those phases check every call and audio read against upstream, but say nothing about DARIA's frames. c77 ran all four, and all pass. At ÷19 the three phases cover 3 of the lattice's 19 alignments, and every call but the first starts on one of 5 of them (`progress.md`, "The final review and c77 (2026-10-16)").
-- **No single gate run at the head** covered `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 cover them together, and c77's `wire` gate at `356cea9` passes 96 of 96 scenarios and catches 7 of 7 mutants. c78 ran both at `843830e`, `selftest` as one gate call and `wire` in pieces judged as a union, its 97th scenario, `pal2600_a78` (`82d05f1`), included (below).
+- **No single gate run at the head** covered `tb_wire`'s current bench or the current selftest. c76 and rounds 3 and 4 covered them together, and c77's `wire` gate at `356cea9` passed 96 of 96 scenarios and caught 7 of 7 mutants. c78 ran both at `843830e` (below). `selftest` ran as one gate call. `wire` ran in pieces, judged as a union, and included its 97th scenario, `pal2600_a78` (`82d05f1`).
 - **Plan 7.7's fresh-clone run** was owed; c78 ran it (below).
 
 ### After c76: the final review (2026-10-16)
@@ -885,7 +885,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 
 **Every gate passes, and the frames gate's 16 pieces cover all 16 images.** By the lead's rule for this run, a gate run in pieces passes when its pieces cover it and each passes, as c76's `s4` jobs did; under that rule c78 is plan 7.7's pass. A second reader re-derived every verdict and confirmed all 15. The full record is in `progress.md`, "Plan 7.7's fresh-clone run, c78"; the logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c78/`.
 
-**Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h: the 16 frame runs 2.1-2.2 h each, the `s4` jobs 16.3 h, `extra_tests`' halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So it ran as 45 resumable pieces: 29 exit 0, and the 16 frame pieces exit 3, PARTIAL alone.
+**Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the `s4` jobs 16.3 h, `extra_tests`' halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So it ran as 45 resumable pieces: 29 exit 0, and the 16 frame pieces exit 3, PARTIAL alone.
 
 | Gate | Result | Against c76 and c77 |
 |---|---|---|
