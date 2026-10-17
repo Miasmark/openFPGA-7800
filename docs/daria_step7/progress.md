@@ -488,7 +488,7 @@ Mutants, all seven of plan 7.2 CAUGHT, each on its named keys:
 This is the single `wire` gate run at the head that c76's record found missing.
 
 **What c77 leaves:**
-- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run. c78 then ran all 97 in its `wire` gate, in pieces on one build (below).
+- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run. c78 then ran all 97 in its `wire` gate, in pieces, on both builds from one build step (below).
 - **Plan 7.7's fresh-clone `step7_gates.sh` run** was still owed. c78 ran it (below).
 - **The phase runs cover 3 of the 19 alignments at ÷19** (above). Over the three runs, every Galagon and Spiders call but the first starts on one of 5 of them. Plan 7.4's wording, "the other two phases", dates from ÷18.
 
@@ -512,10 +512,10 @@ This is the single `wire` gate run at the head that c76's record found missing.
 | Gate | Ran as | Result | Against c76 and c77 |
 |---|---|---|---|
 | `hygiene` | the static call | PASS: `aeee6d2..843830e`, 89 files, 18,966 added lines | c76 checked `70a63ca..317eaa8`, 43 files |
-| `pp_equiv` | the static call | PASS: the non-DARIA stream is `9b9e7e5e…`, with 0 `daria` tokens; `top.sv` and `cart2600.sv` equal `aeee6d2`'s under both macro sets | the log equals c76's but its header |
-| `pp_guards` | the static call | PASS: 4 guards, 0 findings | equal but the tree path |
-| `divider` | the static call | PASS: 11 defaults, all at VCO/19 | equal |
-| `lint` | the static call | PASS: no warning added in the 3 sets; 71, 1 and 0 removed | equal but the tree line |
+| `pp_equiv` | the static call | PASS: the non-DARIA stream is `9b9e7e5e…`, with 0 `daria` tokens; `top.sv` and `cart2600.sv` equal `aeee6d2`'s under both macro sets | equal but the header (HEAD and date) |
+| `pp_guards` | the static call | PASS: 4 guards, 0 findings | equal but the header and the tree path |
+| `divider` | the static call | PASS: 11 defaults, all at VCO/19 | equal but the header |
+| `lint` | the static call | PASS: no warning added in the 3 sets; 71, 1 and 0 removed | equal but the header and the tree line |
 | `fit_selftest` | the static call | PASS: 117 of 117 | 117 of 117 in the final review's re-run |
 | `run_sim` | its own call | PASS on both builds: `BIOS_BOOT`, `BUPCHIP_E2E` (PCM identical) and `PLL_REGION` (0 errors); the DARIA section's 391, 1 and 112 calls, 0 halts, the guard unlocked; 21 fingerprint cases identical, DARIA against plain | both `.out` files equal c76's but the RTL path and md5 lines |
 | `cartram` | its own call | PASS: 21 matrix cases; the s19 hand-over at s19, never above; 14 reset cases, `midswap` and `forcecoinc`; `nohold` and `nocmp` CAUGHT; 20 fingerprints identical | the log equals c76's after paths, md5, HEAD and date |
@@ -550,9 +550,9 @@ This is the single `wire` gate run at the head that c76's record found missing.
 6. **The frames gate ran one image per piece** (`FRAMES_LIST` with one name). Each piece alone is PARTIAL; the 16 together are the gate.
 7. **`GAMES` differed by gate:** Turbo's directory for `wire`, and each image's own directory for the frames, where one call takes a single `GAMES`. Each of the 16 images has one content under `sim/work/bupchip/` (Stratovox's three copies are identical), so this changes nothing.
 8. **Restarts.** The machine stopped at 09:16 and 12:28 UTC on 10-16, stops of the kind `docs/AGENT_RUNS.md` section 2 describes, and the workers were stopped by PID at 09:28 to change the driver.
-   - Each time, the chain (`run_sim`, `cartram`, `extra_tests` and `selftest`, which share one output directory) restarted from its beginning. After 12:29 it also kept its state on disk; it never had to restore from it.
+   - Each time, the chain (`run_sim`, `cartram`, `extra_tests` and `selftest`, which share one output directory) restarted from its beginning. The chain started at 12:29 also kept its state on disk, from the driver's fourth version (12:48); it never had to restore from it.
    - `run_sim` ran 4 times in all: two runs were cut (09:16 and 09:28), and one finished with exit 0 at 10:45 but was lost with its chain at 12:28. Their logs are kept (`logs/ch_run_sim.lost*.log`).
-   - Worker 2 alone was stopped by PID at 10:45, to restart it on the driver's third version. That cut `s4d`'s job `cache`, which reran; the chain ran on.
+   - Worker 2 alone was stopped by PID at 10:45 so that `extra_tests`' plain half could start at once. It was running `s4d` on the driver's second version, which could not yield to another piece. It restarted on the third version. That cut `s4d`'s job `cache`, which reran; the chain ran on.
    - No piece was cut after 12:48 on 10-16, and the machine did not stop again.
 
 `lint` writes into the tree's gitignored `sim/work/step7/lint` rather than under the gate's output directory (`sim/lint_step7.sh:22`). A single call does the same, so this is no deviation; the status stays clean.
@@ -567,7 +567,6 @@ This is the single `wire` gate run at the head that c76's record found missing.
 
 - **The second reader corrected the run's own notes** (c78's `NOTES.txt`, its final judgement):
   - The last piece cut was the whole `wire` run, at 12:48 on 10-16. The notes said only that none was cut after 01:24 on 10-17.
-  - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. The monitor died with the stops at 09:16 and 12:28 on 10-16 and was restarted at 09:24 and 12:40, so free space went unrecorded while pieces ran from 09:17 and 12:29, about 6 and 10 minutes.
+  - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. The monitor started at 08:20, about 5 minutes after the first pieces, and died with the stops at 09:16 and 12:28 on 10-16; it was restarted at 09:24 and 12:40. So free space went unrecorded while pieces ran for about 5, 6 and 10 minutes, from 08:15, 09:17 and 12:29.
   - `extra_tests` took dasm, 7800basic and MiSTer's two firmware files from a cache, as c76 did, which the notes' list of deviations left out. So the run does not show that the gates need only the firmware and the game images.
-  - `lint`'s writing into the tree's gitignored `sim/work/step7/lint` is the script's own behaviour (`sim/lint_step7.sh:22`), not a deviation.
 - **Step 7 is done for V1.** `DARIA_CORE.md`, "Step 7 work", "Plan 7.7's fresh-clone run: c78", records c78 in short, and its status line, done-when and hand-over now say so. What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.
