@@ -13,8 +13,12 @@
 //            (+rom); the cartridge's header byte 53 sets souper_profile, as
 //            atari7800_pocket.sv's cart_flags does
 //   PSRAM    agg23's psram.sv (src/fpga/pocket_utils/) at CLOCK_SPEED =
-//            28.636364 on a psram_model.sv die, or, built with
-//            -DPSRAM_STANDIN, psram_standin.sv (the same port timing)
+//            28.636364 (-DPSRAM_CS sets another) on a psram_model.sv die,
+//            or, built with -DPSRAM_STANDIN, psram_standin.sv (the same port
+//            timing)
+//   DARIA    built with -DPOCKET_DARIA, the wrapper as DARIA builds it
+//            (THUMB 1, the cache's two ways, daria_mem's cart RAM, the
+//            profile mux), held in the BupChip profile
 //   command  $80|+song on the clk_sys command port once the firmware has
 //            enabled PCM, as cart.sv's $8007 pair does
 //
@@ -57,6 +61,15 @@
 //   +pal            PAL clocks from the start
 //   +arm15          clk_arm at 1.5 x clk_sys (21.477 MHz; 21.281 with +pal),
 //                   S3's clock, instead of 2 x
+//   +arm38          clk_arm at 8/3 x clk_sys (38.18 MHz, DARIA's VCO / 18;
+//                   37.83 with +pal), rising edges together every 3 clk_sys
+//   +arm19          clk_arm at 48/19 x clk_sys (36.17 MHz, DARIA's shipped
+//                   divider VCO / 19; 35.84 with +pal), 9.5 VCO periods high
+//                   and 9.5 low, rising edges together every 19 clk_sys
+//                   (docs/daria_step7/plan.md F5, 5.2)
+//   +ramjunk=SEED   POCKET_DARIA builds: fill all 32 KB of cart RAM with
+//                   random words before the downloads, as a 2600 ARM game
+//                   leaves it (DARIA_CORE.md, open item 8)
 //   +silent=MS      no song: after the downloads, run MS ms and require the
 //                   BupChip held and silent (missing or short firmware)
 //   +reload=MS      MS ms into the song, download +rom2 (default +rom) again,
@@ -98,7 +111,21 @@
 //                   that reaches it before its pops are done, or a run still
 //                   going 1 s later, ends with "result: timeout"
 //
-// The last line, "result: ...", is for run_s4.sh.
+// The BUP_DEBUG snapshot (built with -DS4_SNAP: build_s4.sh sets it in every
+// POCKET_DARIA build once core/bupchip/bup_dbg_snap.sv exists; the bench reads
+// the period from the instance, dut.dbg_snap.PERIOD, so such a build fails to
+// elaborate when bupchip_pocket.sv has no bup_dbg_snap instance dbg_snap):
+// dbg_status and dbg_halt_pc are clk_sys copies of the clk_arm words
+// dut.dbg_status_arm and dut.halt_pc (docs/daria_step7/plan.md P15, open
+// item 11). Checked while it runs: the copies change only on a clk_sys rising
+// edge, at most once per snapshot period, and every word they take is one the
+// clk_arm side held (no torn word); at the end, once both clk_arm words have
+// held still for two snapshot periods (the pops paused first when the FIFO
+// is still playing, as in a run of 0 s), the copies equal them. The shadow
+// minimum (dbg_status[10:0]) is reported beside the bench's minlev. The "snap:"
+// line gives the verdict: ok, FAIL, or na in a build without the snapshot.
+//
+// The last line, "result: ...", is for run_s4.sh, and the "snap:" line after it.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -116,6 +143,10 @@
 `define BUP_THROTTLE 16
 `endif
 
+`ifndef PSRAM_CS
+`define PSRAM_CS 28.636364
+`endif
+
 module tb_s4;
 	localparam int PCM_DEPTH = `PCM_DEPTH;
 
@@ -123,10 +154,30 @@ module tb_s4;
 	longint arm_half = 17460;           // ps: 28.636 MHz; clk_sys is half the rate
 	longint u15 = 11640;                // ps, +arm15: clk_arm period 4 u15, clk_sys 6 u15
 	bit     r15 = 0;
+	longint u38 = 4365;                 // ps, +arm38: clk_arm period 6 u38, clk_sys 16 u38
+	bit     r38 = 0;
+	// +arm19: the bench steps in half VCO periods (hv ps; the VCO is 48 x
+	// clk_sys): clk_sys toggles every 48 of them, clk_arm every 19, rising
+	// together every 1,824. Each edge is placed on the nearest ps of its exact
+	// time, so neither clock drifts off the lattice.
+	real    hv = 727.5;
+	bit     r19 = 0;
 	real    arm_mhz = 28.636364;
 	logic   clk_arm = 0, clk_sys = 0, clk_74a = 0;
 	initial forever begin
-		if (!r15) begin
+		if (r19) begin                  // rising edges together every 1,824 hv
+			for (int n = 0; n < 1824; n++) begin
+				if (n % 19 == 0) clk_arm = (n / 19) % 2 == 0;
+				if (n % 48 == 0) clk_sys = (n / 48) % 2 == 0;
+				#(longint'($floor(real'(n + 1) * hv + 0.5)) - longint'($floor(real'(n) * hv + 0.5)));
+			end
+		end else if (r38) begin         // rising edges together every 48 u38
+			for (int k = 0; k < 48; k++) begin
+				if (k % 3 == 0) clk_arm = (k / 3) % 2 == 0;
+				if (k % 8 == 0) clk_sys = (k / 8) % 2 == 0;
+				#(u38);
+			end
+		end else if (!r15) begin
 			#(arm_half); clk_arm = 1; clk_sys = 1;
 			#(arm_half); clk_arm = 0;
 			#(arm_half); clk_arm = 1;
@@ -145,16 +196,18 @@ module tb_s4;
 	always #6734 clk_74a = ~clk_74a;
 
 	function automatic longint arm_per();
-		return r15 ? 4 * u15 : 2 * arm_half;
+		return r19 ? longint'(38.0 * hv + 0.5) : r38 ? 6 * u38 : r15 ? 4 * u15 : 2 * arm_half;
 	endfunction
 	function automatic longint sys_per();
-		return r15 ? 6 * u15 : 4 * arm_half;
+		return r19 ? longint'(96.0 * hv + 0.5) : r38 ? 16 * u38 : r15 ? 6 * u15 : 4 * arm_half;
 	endfunction
 
 	task automatic set_pal(input bit pal);
 		arm_half = pal ? 17621 : 17460;
 		u15 = pal ? 11747 : 11640;
-		arm_mhz = (r15 ? 21.477273 : 28.636364) * (pal ? 0.99088 : 1.0);
+		u38 = pal ? 4405 : 4365;
+		hv = pal ? 70480.0 / 96.0 : 69840.0 / 96.0;	// clk_sys 16 u38, as +arm38
+		arm_mhz = (r19 ? 36.172249 : r38 ? 38.181818 : r15 ? 21.477273 : 28.636364) * (pal ? 0.99088 : 1.0);
 	endtask
 
 	// ---- the wrapper's inputs ----------------------------------------------------------------
@@ -187,7 +240,35 @@ module tb_s4;
 		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
 		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
 		.psram_read_avail(p_avail), .psram_data_out(p_dout), .psram_busy(p_busy),
+`ifdef POCKET_DARIA
+		// The BupChip profile only: the 2600 side is idle.
+		.daria_profile(1'b0), .daria_ram32(1'b0), .daria_pal(1'b0), .daria_mreset(1'b0),
+		.daria_call_tog(1'b0), .daria_ret_tog(), .daria_ready(), .daria_halted(),
+		.daria_stb_addr(8'd0), .daria_stb_we(1'b0), .daria_stb_be(4'd0), .daria_stb_wd(32'd0), .daria_stb_q(),
+		.daria_crb_addr(13'd0), .daria_crb_we(1'b0), .daria_crb_be(4'd0), .daria_crb_wd(32'd0), .daria_crb_q(),
+		.daria_fea_addr(13'd0), .daria_fea_q(), .daria_feb_addr(13'd0), .daria_feb_q(),
+		.daria_cart_win(),
+		// the front end's sample port: no requests (daria_smp answers only
+		// in the 2600 profile)
+		.daria_smp_req(1'b0), .daria_smp_addr(19'd0), .daria_smp_ack(), .daria_smp_data(),
+`endif
 		.dbg_status, .dbg_halt_pc, .dbg_load());
+
+`ifdef POCKET_DARIA
+	initial begin
+		int junk_seed;
+		if ($value$plusargs("ramjunk=%d", junk_seed)) begin
+			int unsigned x;
+			x = junk_seed;
+			#1;	// after the RAM model's own power-up zeroes
+			for (int i = 0; i < 8192; i++) begin
+				x = x ^ (x << 13); x = x ^ (x >> 17); x = x ^ (x << 5);
+				dut.mem.cart_ram.mem_q[i] = x;
+			end
+			$display("cart RAM filled with random words (seed %0d)", junk_seed);
+		end
+	end
+`endif
 
 `ifdef PSRAM_STANDIN
 	psram_standin ps (
@@ -205,7 +286,7 @@ module tb_s4;
 	wire  [15:0] cram_dq;
 	wire         cram_wait, cram_clk, cram_adv_n, cram_cre, cram_ce0_n, cram_ce1_n;
 	wire         cram_oe_n, cram_we_n, cram_ub_n, cram_lb_n;
-	psram #(.CLOCK_SPEED(28.636364)) ps (
+	psram #(.CLOCK_SPEED(`PSRAM_CS)) ps (
 		.clk(clk_arm), .bank_sel(p_bank), .addr(p_addr), .write_en(p_we), .data_in(p_din),
 		.write_high_byte(p_hi), .write_low_byte(p_lo), .read_en(p_re),
 		.read_avail(p_avail), .data_out(p_dout), .busy(p_busy),
@@ -765,6 +846,11 @@ module tb_s4;
 		void'($value$plusargs("holddelay=%d", hold_delay));
 		void'($value$plusargs("holdstep=%d", hold_step));
 		r15 = $test$plusargs("arm15");
+		r38 = $test$plusargs("arm38") && !r15;
+		r19 = $test$plusargs("arm19");
+		if (r19 && (r15 || r38)) $fatal(1, "+arm19 does not combine with +arm15 or +arm38");
+		if (r38) arm_mhz = 38.181818;
+		if (r19) arm_mhz = 36.172249;
 		byte_ps *= 1000.0;
 		jit_ps *= 1000.0;
 		void'($urandom(seed));
@@ -790,7 +876,7 @@ module tb_s4;
 		if (rom_file == "") $fatal(1, "no +rom");
 		read_image(rom_file);
 		$display("BupChip at %.3f MHz (%s clk_sys), PCM FIFO %0d, pre-emption %0d, prefetch %0d, throttle %0d/16; PSRAM: %s",
-			arm_mhz, r15 ? "1.5 x" : "2 x", PCM_DEPTH, `PREEMPT, `PREFETCH, `BUP_THROTTLE, PSRAM_KIND);
+			arm_mhz, r19 ? "48/19 x" : r38 ? "8/3 x" : r15 ? "1.5 x" : "2 x", PCM_DEPTH, `PREEMPT, `PREFETCH, `BUP_THROTTLE, PSRAM_KIND);
 		begin
 			string fw_s, skip_s;
 			fw_s = fw_file == "" ? "(none)" : fw_file;
@@ -834,6 +920,7 @@ module tb_s4;
 				dut.cpu_run == 0 && nret == 0 && pushes == 0 && nz_held == 0, dut.cpu_run, dut.fw_loaded,
 				dut.asset_ready, nret, pushes, ncap - n0, nz_held, rom_bad, psram_bad,
 				dut.cap_seq_err | dut.cap_lost | dut.wr_overrun | dut.capture.seq_sim, cross_bad);
+			snap_final();
 			$finish;
 		end
 
@@ -893,8 +980,104 @@ module tb_s4;
 		end else
 			play(pops_cfg > 0 ? pops_cfg : 48000 * secs);
 		report(1);
+		snap_final();
 		$finish;
 	end
+
+	// ---- the BUP_DEBUG snapshot (see the header) ---------------------------------------------
+	int snap_chg = 0, snap_off_edge = 0, snap_fast = 0, snap_torn = 0;
+`ifdef S4_SNAP
+	// The instance's own period (1,024 clk_sys in D), read at run time: in
+	// a constant expression, version 5.040 of the simulator gives a
+	// hierarchical parameter its default, not the instance's override (a
+	// PERIOD(256) instance read as 1,024); the run-time read gives the override.
+	int          SNAP_PER = 0;
+	initial begin
+		SNAP_PER = dut.dbg_snap.PERIOD;
+		if (SNAP_PER < 2) $fatal(1, "tb_s4: dut.dbg_snap.PERIOD %0d", SNAP_PER);
+		$display("snapshot   bup_dbg_snap's period %0d clk_sys (dut.dbg_snap.PERIOD)", SNAP_PER);
+	end
+	wire  [63:0] snap_arm = {dut.dbg_status_arm, dut.halt_pc};   // clk_arm
+	wire  [63:0] snap_sys = {dbg_status, dbg_halt_pc};           // clk_sys copies
+	longint      snap_ns = 0;                // clk_sys rising edges since time 0
+	real         snap_t_sys = -1.0;          // the time of the last one
+	longint      snap_last = -1;             // snap_ns at the last change of the copies
+	logic [63:0] snap_hw [$];                // the clk_arm words held, newest last,
+	longint      snap_ht [$];                // and the clk_sys count when each was first seen
+	always @(posedge clk_sys) begin
+		snap_ns++;
+		snap_t_sys = $realtime;
+		// keep the words of the last three periods, and always the newest
+		while (snap_ht.size() > 1 && snap_ht[1] < snap_ns - 3 * SNAP_PER) begin
+			void'(snap_hw.pop_front());
+			void'(snap_ht.pop_front());
+		end
+	end
+	// every value the clk_arm side holds between two of its edges (read
+	// before the edge's own updates, as the snapshot's copy register does)
+	always @(posedge clk_arm)
+		if (snap_hw.size() == 0 || snap_hw[$] !== snap_arm) begin
+			snap_hw.push_back(snap_arm);
+			snap_ht.push_back(snap_ns);
+		end
+	always @(snap_sys) if ($realtime > 0) begin
+		bit found;
+		snap_chg++;
+		if ($realtime != snap_t_sys) begin
+			if (snap_off_edge < 5) $display("snap check: dbg_status/dbg_halt_pc changed at %.3f us, not on a clk_sys rising edge", $realtime / 1.0e6);
+			snap_off_edge++;
+		end
+		if (snap_last >= 0 && snap_ns - snap_last < SNAP_PER / 2) begin
+			if (snap_fast < 5) $display("snap check: the copies changed %0d clk_sys after the last change (period %0d)", snap_ns - snap_last, SNAP_PER);
+			snap_fast++;
+		end
+		snap_last = snap_ns;
+		found = 0;
+		foreach (snap_hw[i]) if (snap_hw[i] === snap_sys) found = 1;
+		if (!found && snap_sys !== 64'd0) begin	// 0: the power-up word of the copy register
+			if (snap_torn < 5) $display("snap check: the copies took %016x, a word the clk_arm side did not hold in the last periods", snap_sys);
+			snap_torn++;
+		end
+	end
+`endif
+	task automatic snap_final();
+`ifdef S4_SNAP
+		longint n0, t_still;
+		bit ok, eq, paused_end;
+		logic [63:0] w;
+		// Wait (at most 64 periods) until both clk_arm words have held still
+		// for two periods, then two periods more for the copy to arrive. A
+		// FIFO still playing (a run of 0 s: the lowest level still falling)
+		// keeps the status word moving: then the pops are paused, so that
+		// the FIFO goes idle (plan 3.6), and the wait starts again.
+		paused_end = 0;
+		for (int pass = 0; pass < 2; pass++) begin
+			n0 = snap_ns;
+			w = snap_arm;
+			t_still = snap_ns;
+			while (snap_ns - t_still < 2 * SNAP_PER + 16 && snap_ns - n0 < 64 * SNAP_PER) begin
+				@(posedge clk_sys);
+				if (snap_arm !== w) begin w = snap_arm; t_still = snap_ns; end
+			end
+			if (snap_ns - t_still >= 2 * SNAP_PER + 16 || pass == 1) break;
+			pause <= 1;
+			paused_end = 1;
+		end
+		if (paused_end) $display("snapshot   the clk_arm words kept changing for 64 periods: pops paused at %.3f ms, the FIFO idle, then compared", ms($time));
+		eq = snap_ns - t_still >= 2 * SNAP_PER + 16 && snap_sys === snap_arm;
+		ok = eq && snap_off_edge == 0 && snap_fast == 0 && snap_torn == 0 && snap_chg > 0;
+		$display("snapshot   %0d changes of the clk_sys copies, %0d off a clk_sys edge, %0d within half a period of the last, %0d torn; at the end (still %0d clk_sys) dbg_status %08x / clk_arm %08x, dbg_halt_pc %08x / %08x",
+			snap_chg, snap_off_edge, snap_fast, snap_torn, snap_ns - t_still, dbg_status, dut.dbg_status_arm,
+			dbg_halt_pc, dut.halt_pc);
+		$display("snapshot   shadow lowest %0d (dbg_status[10:0]), the bench's lowest while playing %0d: %0s",
+			dbg_status[10:0], minlev, minlev == (1 << 30) ? "the bench measured nothing" :
+			int'(dbg_status[10:0]) == minlev ? "equal" : int'(dbg_status[10:0]) > minlev ? "the shadow's higher" : "the shadow's lower");
+		$display("snap: %0s changes=%0d off_edge=%0d fast=%0d torn=%0d end_equal=%0d",
+			ok ? "ok" : "FAIL", snap_chg, snap_off_edge, snap_fast, snap_torn, eq);
+`else
+		$display("snap: na (built without S4_SNAP: not a POCKET_DARIA build, or no bup_dbg_snap.sv in the tree)");
+`endif
+	endtask
 
 	task automatic report(input bit result_line);
 		real secs_r;

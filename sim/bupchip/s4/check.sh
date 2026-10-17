@@ -60,6 +60,12 @@
 # the game and JOBS=3 (27 jobs), 27 without it (15 jobs, of which
 # stress/run_reload.sh alone takes 10). Exits 0 when everything passes.
 #
+# ONLY=NAME[,NAME...] runs only the jobs whose log is NAME.out or
+# logs/NAME.log (synth_reloads, song13_retune, cache, stress_xing, ...): a
+# rerun of one job, or a run in pieces short enough to survive a restart of
+# the machine; the builds of step 3 still run. A subset is never the gate:
+# its last line says so.
+#
 # bup_cpu.sv is not part of step 4; if it changes, run ../s1/check.sh too.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -93,14 +99,40 @@ for t in iverilog python3 arm-none-eabi-gcc arm-none-eabi-objcopy; do
 done
 T0=$SECONDS
 
+# The retune job's hold must land while psram.sv is mid-access: 2 clk_arm
+# after the trigger at 28.64 MHz, 3 at 38.18 MHz (ARM38=1, where a read takes
+# a clock more with PSRAM_CS=50.0) and at 36.17 MHz (ARM19=1, the same
+# PSRAM_CS=50.0 clock counts).
+HOLD_MID=2
+{ [ "${ARM38:-0}" = 0 ] && [ "${ARM19:-0}" = 0 ]; } || HOLD_MID=3
+# synth_reloads' two holds during cache fills must land one with psram.sv
+# mid-access and one with the halfword arriving: hold k comes +holdstep x k
+# clk_arm after a fill's first read. At 28.64 and 38.18 MHz a step of 2 does
+# it. At 36.17 MHz (ARM19=1) a fill's read takes 6 clk_arm (busy 5, the
+# halfword on the 6th), and the hold, which reaches the CPU from clk_sys,
+# lands on clk_sys's edges of the 48:19 lattice: for steps 1-6 the second
+# hold's first held clock was 9, 12, 12, 14, 14 and 14 clocks after the
+# fill's start, all mid-access, never the 11th, where the halfword arrives.
+# A step of 7 puts it on the 17th, the next arriving halfword (2026-10-14,
+# a per-clock trace of tb_s4).
+HOLD_STEP=2
+[ "${ARM19:-0}" = 0 ] || HOLD_STEP=7
+
 # ---- the job pool -------------------------------------------------------------------------
 NAMES=(); PIDS=(); LOGS=()
 job() {         # job NAME LOG command...
-	local name="$1" log="$2"
+	local name="$1" log="$2" base
 	shift 2
+	if [ -n "${ONLY:-}" ]; then
+		base="$(basename "$log")"; base="${base%.*}"
+		[[ ",$ONLY," == *",$base,"* ]] || return 0
+	fi
 	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 2; done
 	echo "start  $name"
-	("$@") > "$log" 2>&1 &
+	# Each job writes its own exit code: on runs of several hours, wait can
+	# lose a finished job's status once its PID has been reused.
+	rm -f "$log.rc"
+	(rc=0; "$@" || rc=$?; echo "$rc" > "$log.rc") > "$log" 2>&1 &
 	NAMES+=("$name"); PIDS+=("$!"); LOGS+=("$log")
 }
 S4() {          # S4 NAME SONG SECONDS GAME [env...] -- [plusargs...]
@@ -160,7 +192,7 @@ EOF
 	job "synthetic ARSC: three reloads (Souper; not Souper: held; Souper), holds during fills, song 0 identical" "$WORK/synth_reloads.out" \
 		S4 synth_reloads 0 2 "$S/synth_souper.a78" REF="$R0" HOLDFILL=2 HOLDLAND=1 HOLDMID=1 -- \
 		+reload=150 +reloads=3 +rom2="$S/synth_souper.a78" +rom3="$S/synth.a78" +rom4="$S/synth_souper.a78" \
-		+holdfill +holdstep=2
+		+holdfill +holdstep="$HOLD_STEP"
 	job "synthetic ARSC: download and boot at 21.281 MHz (1.5 x clk_sys, PAL)" "$WORK/synth_arm15pal.out" \
 		S4 synth_arm15pal 0 0 "$S/synth_souper.a78" REF=none -- +arm15 +pal
 	job "not a Souper cartridge: held and silent" "$WORK/synth_notsouper.out" \
@@ -185,7 +217,7 @@ if [ -n "$GAME" ]; then
 		S4 song13_reloads 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=2 HOLDLAND=1 HOLDMID=1 -- \
 		+reload=300 +reloads=3 +rom3="$WORK/noarsc.a78" +holdfill +holdstep=2
 	job "song 13 after a PAL retune, hold during a fill" "$WORK/song13_retune.out" \
-		S4 song13_retune 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=1 HOLDMID=1 -- +retune=500 +holdfill +holddelay=2
+		S4 song13_retune 13 "$SECS" "$GAME" REF="$R13" HOLDFILL=1 HOLDMID=1 -- +retune=500 +holdfill +holddelay="$HOLD_MID"
 	job "song 14 at 21.281 MHz (1.5 x clk_sys, PAL)" "$WORK/song14_arm15pal.out" \
 		S4 song14_arm15pal 14 "$SECS" "$GAME" REF="$REFDIR/song14.pcm" -- +arm15 +pal
 	job "song 13, loader 174.6-250 ns per byte" "$WORK/song13_jit.out" \
@@ -201,7 +233,8 @@ fi
 # ---- results --------------------------------------------------------------------------------
 RESULTS=()
 for i in "${!PIDS[@]}"; do
-	if wait "${PIDS[$i]}"; then r=PASS; else r=FAIL; fi
+	wait "${PIDS[$i]}" 2> /dev/null || true
+	if [ "$(cat "${LOGS[$i]}.rc" 2> /dev/null)" = 0 ]; then r=PASS; else r=FAIL; fi
 	RESULTS+=("$r  ${NAMES[$i]}")
 	echo "=== $r  ${NAMES[$i]} (${LOGS[$i]})"
 	grep -E "^(PASS|FAIL|SKIP|firmware slot|cartridge:|booted|reload|retune|hold at|held|pause|resume|busy|work|audio|fifo|cache|capture|crossing|m10k|holds|pop|watermark|mute|wmsweep|PCM|lowest|directed|G tag|  [0-9]+ (halfwords|tags|word loads)|run_[a-z]*\.sh:|stress)" \
@@ -212,4 +245,8 @@ printf '%s\n' "${RESULTS[@]}"
 n="${#RESULTS[@]}"
 f="$(printf '%s\n' "${RESULTS[@]}" | grep -c '^FAIL' || true)"
 echo "$((n - f)) of $n passed in $(( (SECONDS - T0) / 60 )) min $(( (SECONDS - T0) % 60 )) s"
+if [ -n "${ONLY:-}" ]; then
+	echo "ONLY=$ONLY: $n of the jobs, a subset, not the gate"
+	[ "$n" -gt 0 ] || { echo "check.sh: ONLY=$ONLY selected no job" >&2; exit 1; }
+fi
 [ "$f" = 0 ]

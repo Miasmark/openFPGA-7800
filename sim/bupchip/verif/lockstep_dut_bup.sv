@@ -18,6 +18,9 @@
 //   +throttle=P   raise freeze (the debug throttle) on P% of clocks (default 0)
 //   +seed=S       for +await and +throttle
 //
+// Built with -DBUP_MODES the core has MODES 1; with -DBUP_THUMB, THUMB 1 (and
+// MODES 1), with arm_only low unless -DBUP_ARM_ONLY (the BupChip profile).
+//
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 module lockstep_dut_bup (
@@ -28,6 +31,9 @@ module lockstep_dut_bup (
 	output logic [31:0] rt_pc,
 	output logic [31:0] rt_insn,
 	output logic  [3:0] rt_nzcv,
+	output logic  [4:0] rt_mode,
+	output logic        rt_t,
+	output logic        rt_cunk,
 	output logic        rt_e_we,
 	output logic  [3:0] rt_e_idx,
 	output logic [31:0] rt_e_data,
@@ -83,8 +89,21 @@ module lockstep_dut_bup (
 	logic [31:0] asset_q;
 	wire         inj = cpu.rt_w_we && nloads + 1 == inject;	// flip this load's bit 0
 
+`ifdef BUP_ARM_ONLY
+	localparam bit ARM_ONLY = 1'b1;
+`else
+	localparam bit ARM_ONLY = 1'b0;
+`endif
+`ifdef BUP_THUMB
+	bup_cpu #(.MODES(1'b1), .THUMB(1'b1)) cpu (
+`elsif BUP_MODES
+	bup_cpu #(.MODES(1'b1)) cpu (
+`else
 	bup_cpu cpu (
-		.clk, .rst, .freeze, .w_wait(pr_wait || (asset_wait && w_asset)),
+`endif
+		.clk, .rst, .freeze, .w_wait(pr_wait || (asset_wait && w_asset)), .arm_only(ARM_ONLY),
+		.prof26(1'b0), .img_size(20'd0), .ram32(1'b0), .call_go(1'b0), .clr_wd(32'd0), .clr_pc(32'd0),
+		.clr_e(), .parked(), .returned(), .ro_valid(), .ro_idx(), .ro_data(),
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata,
 		.rom_dq(rom_dq ^ {31'd0, inj}), .ram_q(ram_q ^ {31'd0, inj}),
@@ -92,7 +111,7 @@ module lockstep_dut_bup (
 		.w_asset, .w_addr, .w_size,
 		.reg_sel, .reg_addr, .reg_write, .reg_wdata, .reg_rdata(pr_data ^ {31'd0, inj}),
 		.halted, .halt_code, .halt_pc,
-		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv,
+		.rt_start, .rt_valid, .rt_pc, .rt_insn, .rt_nzcv, .rt_mode, .rt_t, .rt_cunk,
 		.rt_e_we, .rt_e_idx, .rt_e_data, .rt_w_we, .rt_w_idx, .rt_w_data);
 
 	cache_ram_dp #(.ADDR_WIDTH(12), .DATA_WIDTH(32), .SIM_INIT_FILE(`ROMHEX)) rom (

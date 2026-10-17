@@ -33,8 +33,24 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   parses them: mappers (SuperGame, Activision, Absolute, Souper, bankset, XM,
   and others), POKEY at $450/$4000, dual POKEY, YM2151, Covox, and the
   high score cartridge.
-- 2600 cartridges (`.a26`, `.bin`), with MiSTer's bankswitch auto-detection.
-  The ARM-based schemes (DPC+, CDF/CDFJ) are not included; see below.
+- 2600 cartridges (`.a26`, `.bin`), with MiSTer's bankswitch auto-detection,
+  and from 2.2.1 the ARM-based schemes too (next item).
+- **2600 ARM cartridges** (from 2.2.1): DPC+ and the CDF family (CDF, CDFJ
+  and CDFJ+), the Harmony and Melody games such as the Champ Games releases.
+  On MiSTer they run on a soft ARM7TDMI that doesn't fit the Pocket; this
+  port runs them on **DARIA**, ARIA (the BupChip's CPU, below) extended with
+  Thumb, at 36.17 MHz, with its own front end for the cartridge's 6507 side
+  ([docs/DARIA_CORE.md](docs/DARIA_CORE.md)). In simulation every tested
+  game runs the same ARM code as on MiSTer, call for call, with the same
+  picture on every frame after the first; Spiders is late on the same 16
+  calls at the start of play as on MiSTer. Sound effects and music are the
+  same writes, landing slightly earlier or later in time (the verification
+  table below). Limits: BUS and ELF cartridges are not supported (no
+  released game uses BUS); ARM code beyond the first 64 KB of an image halts
+  the CPU (no known game has any there; [open item
+  5](docs/DARIA_CORE.md#open-items)); and the ARM chip's peripherals beyond
+  its timer and memory accelerator, such as a Melody board's optional
+  EEPROM, read as zero ([open item 19](docs/DARIA_CORE.md#open-items)).
 - The high score cartridge, which needs its firmware as a file (see
   *Firmware files* below). Its saves go in **one shared file for all games**, like the
   real HSC's single RAM: `hsc.sav` (the Pocket keeps it under
@@ -49,7 +65,12 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   score cart stays available alongside it, since each has its own file: a
   cart whose header asks for both (such as Triple Punch) gets both.
 - An optional BIOS: `7800bios.bin` in `/Assets/7800/common/`. By default the
-  core skips it, as MiSTer does. Turn off *Skip BIOS* to boot through it.
+  core skips it, as MiSTer does. Turn off *Skip BIOS* to boot 7800 games
+  through it. Unlike on MiSTer, 2600 games always start directly, without
+  the BIOS, whatever the setting: the BIOS recognises a 2600 cartridge by a
+  bus clash that the core does not reproduce, so it would miss some 2600
+  games and never start them. A 7800 game therefore needs its A78 header:
+  an image without one is taken as a 2600 game.
 - **The BupChip** (from 2.1.1), the Souper cartridge's music co-processor:
   Rikki & Vikki plays its whole soundtrack. On MiSTer it is firmware running
   on a soft ARM7TDMI; this port runs the same, unmodified firmware on
@@ -110,7 +131,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 
 | Feature | Why |
 |---|---|
-| 2600 ARM cartridges (DPC+, CDF, CDFJ, BUS) | These run on MiSTer's soft ARM CPU, which doesn't fit; the core shows its unsupported-cartridge screen for them. ARIA may run them later, with a Thumb front end (DARIA); the measurements so far are in [docs/BUPCHIP_CORE.md](docs/BUPCHIP_CORE.md), "Later: 2600 ARM cartridges". |
+| 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
+| 2600 FA2 saves (Star Castle Arcade) | Star Castle Arcade does not keep its high scores on the Pocket. The FA2 scheme saves 256 bytes to the cartridge's flash, and the Pocket wrapper has never connected that port (`atari7800_pocket.sv`, the `fa2_nvram_*` lines): the game always reads a blank flash, and what it saves is lost. A 256-byte save file, like `hsc.sav`, is planned after 2.2.1 ([docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md)). |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
@@ -140,7 +162,8 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
 1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
-the whole core uses 79% of the FPGA. In simulation its output matches
+the whole core used 79% of the FPGA in 2.1.1 (85% in 2.2.1, with DARIA).
+From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges, at 36.17 MHz. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
 [docs/BUPCHIP.md](docs/BUPCHIP.md) has the details it started from:
@@ -184,19 +207,32 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 | BupChip, end to end (2.1.1) | The firmware slot after the cartridge, as the Pocket loads them, then a game-free Souper cartridge with a synthetic music block: the ROM equals the firmware file, the block's 5,192 bytes are in the PSRAM model with no timing violation, and the song's PCM equals the Python model's frame for frame, as pushed and as returned to the core clock. Without the firmware the same cartridge leaves the BupChip held and silent. `sim/bupchip/` checks the CPU in lockstep with MiSTer's ARM7TDMI and the wrapper with Rikki & Vikki's songs (`s1/check.sh`, `s4/check.sh`) |
+| 2600 ARM cartridges, whole core (2.2.1) | The 15 Champ Games demos and Stratovox, 1,500 frames each (frames 1-1,499 compared, 23,984 in all), against MiSTer's core with its ARM7TDMI: frame length, picture and RIOT RAM equal on every frame (the first frame's picture excused on 3 games, whose first call holds the console for a different time), and every ARM call runs the same number of instructions. Spiders is late on the same 16 calls as on MiSTer. The sound is the same writes at slightly other times: 8,928 of the 23,984 frames (37.2%) carry an audio difference, 0 on Elevator Agent and 1,025 on Zaxxon. No CPU halt, no PSRAM timing violation |
+| DARIA's CPU and front end against MiSTer's | Every call of 21 images compared with MiSTer's ARM: registers at return, every RAM write, the audio values. The front end clock by clock beside MiSTer's on 30 images, 1,500 frames each. With DARIA's own CPU at its real clock ratio, 19 runs: every call equal to MiSTer's |
+| Everything else unchanged by DARIA (2.2.1) | `run_sim.sh`, `extra_tests.sh` and the 2600 cartridge-RAM matrix give the same frame-by-frame fingerprints with and without DARIA; the BupChip's songs are identical by PCM |
+| PAL 2600 game, Region on Auto (2.2.1) | One retune, to PAL, at 955 ms, then the game runs in PAL. With the region logic of 2.1.3 and earlier, the same simulation retuned 41,293 times in 1.3 s and ended in NTSC |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.1.3) meets timing on all four corners: worst setup
-slack +1.60 ns (on clk_sdram, the SRAM request path), worst hold slack
-+0.11 ns. It uses 12,909 of 18,480 ALMs (70%), 78 of 308 M10K blocks and 12
-DSP blocks. Since 2.1.2 the core leaves out the 6507-side logic of the ARM
-cartridge schemes, which can't run without the ARM: about 1,750 ALMs, and
-the slowest leg of that path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md),
-Fix A). 2.1.2 had +1.92 ns, 2.1.1 +0.44 ns and 79%; a structural fix in
-the SRAM controller (Fix B) is still planned before 2600 ARM cartridges
-come back.
+The Quartus build (2.2.1, fitter seed 2) meets timing on all four corners.
+Worst setup slack: +2.683 ns on clk_sdram (Flicker Blend's half-period
+capture of the TIA's colour into the SRAM controller, against a release
+gate of +1.5 ns), +1.077 ns on DARIA's CPU clock, and +0.397 ns
+on the one 6 ns path of DARIA's front end (its phase detector). Worst hold
+slack +0.098 ns. It uses 15,625 of 18,480 ALMs (85%), 195 of 308 M10K
+blocks and 12 DSP blocks. Seeds 1 and 3 give clk_sdram +2.462 and +2.919
+ns ([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
+2.2.1 ships, unchanged, the plain bitstream of daria-test1, the hardware
+test build below; its fit gives the figures above.
+2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
+cartridge-RAM request reaches it through registers of its own, off the
+SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
+had +1.60 ns with 12,909 ALMs (70%) and 78 M10K blocks, 2.1.2 +1.92 ns,
+and 2.1.1 +0.44 ns at 79%. From 2.1.2 to 2.1.3 the core left out the
+6507-side logic of the ARM cartridge schemes, about 1,750 ALMs and the
+slowest leg of that path (Fix A); 2.2.1 puts DARIA's own front end in
+their place.
 The 2.0.21 build: worst setup
 slack +1.32 ns, worst hold +0.06 ns.
 Up to 2.0.13 the worst setup slack was about +0.8 ns, on paths from the
@@ -208,7 +244,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.0.21, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.1, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -240,6 +276,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
+| The 2.2.1 candidate with DARIA (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay is not built yet ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
+| DARIA's known differences seen on hardware (2.2.1 candidate) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware cannot count them until the DARIA status overlay exists. Play does not seem affected: a couple of levels beaten |
 
 ### Changes to the MiSTer sources
 
@@ -345,7 +383,7 @@ files go in `/Assets/7800/common/`:
 
 | File | What it is | Size | Without it |
 |---|---|---|---|
-| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. Only one can be installed: to boot PAL carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
+| `7800bios.bin` | Atari 7800 BIOS | 4 KiB (NTSC) or 16 KiB (PAL) | The core skips the BIOS, as it does by default. With it, and *Skip BIOS* off, 7800 games boot through the BIOS; 2600 games always start directly, without it. Only one can be installed: to boot PAL 7800 carts through the BIOS use the PAL one, since the NTSC BIOS checks for the signature NTSC carts carry |
 | `highscor.rom` or `hsc.a78` | High Score Cartridge firmware: a raw 4 KiB image, or the same with an A78 header | 4 KiB (+128 byte header) | No high score cart, whatever the setting |
 | `supercharger.bin` | Starpath Supercharger BIOS | 2 KiB | Supercharger games load through the core's own loader, without the tape loading screen |
 | `bupchip.bin` | BupChip firmware (CoreTone), from MiSTer's `bupchip.hex`: `python3 tools/hex2bin.py bupchip.hex > bupchip.bin` ([docs/BUPCHIP.md](docs/BUPCHIP.md)) | 7,824 bytes (CRC32 `95b8b4f8`); up to 16 KiB | Souper games run without the BupChip's music |

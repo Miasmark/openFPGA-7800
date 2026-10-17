@@ -81,3 +81,140 @@ The worst path into each other kind of endpoint, at 28.636 MHz:
   The other 21 are the boundary flip-flops `halt_pc_o` bits 0, 1 and 14–31 and `halt_code_o[3]`, which follow those constants. The 32 × 32 multiplier is in 3 DSP blocks, and its product register is packed into them.
 
 **LogicLock is not available.** Quartus Prime Lite prints Warning 292013, "Feature LogicLock is only available with a valid subscription license", in every compile, both this probe's and the 2.0.21 build's (`src/fpga/output_files/ap_core.fit.rpt:8748`). To check whether it still honours a region, the 28.636 MHz probe was compiled once more with `bup_cpu:cpu` locked into a 15 × 24 region at X38_Y20 (X38–52, Y20–43), clear of where the unconstrained fit puts it (X7–36, Y9–38). The test used `LL_*` assignments, and its reports are in `sim/work/bupchip/qprobe_ll/`. The fitter printed Critical Warning 140003, "Current license file does not support LogicLock regions. The Quartus Prime software removes all the LogicLock regions in your design automatically". Every cell's placement matched the unconstrained fit, and none of the CPU's 2,751 cells was inside the region. The fit used the same 1,527 ALMs and reached the same slack, +6.323 / +5.916 ns. A LogicLock region is therefore no mitigation for this project.
+
+## MODES 1 (DARIA's processor modes, 2026-10-04)
+
+`MODES=1 run_probe.sh 28.636364` compiles `bup_cpu` with `MODES` 1: SVC, SYS and FIQ switched by MSR, FIQ's r8–r14 and SVC's r13–r14 banked (`../daria/modes/`). The same flow with `MODES` 0 gave the figures above again to the decimal (1,297.3 ALMs, 2,058 ALUTs, 607 registers), so the default build is unchanged.
+
+| `bup_cpu` | MODES 0 | MODES 1 | Change |
+|---|---|---|---|
+| After synthesis: ALUTs / registers | 1,866 / 308 | 1,897 / 320 | +31 / +12 |
+| After fitting: ALMs needed | 1,297.3 | 1,258.8 | −38.5 (placement; see below) |
+| After fitting: ALUTs / registers | 2,058 / 607 | 1,978 / 480 | |
+| Register file | 4 MLABs, 16 × 32 used | 4 MLABs, 32 × 32 used | none |
+| Worst setup slack, slow 85 °C / 0 °C | +6.323 / +5.916 ns | +6.835 / +6.699 ns | |
+
+The register file was already two 32-deep MLAB pairs with half the words unused, so the banks cost no memory. The logic is the mode register, the bank remap in front of each read port and the write port, the wider bypass compare and the MSR check: +31 ALUTs and +12 registers after synthesis, roughly 20–30 ALMs. After fitting the MODES 1 build came out smaller, because physical synthesis duplicated fewer registers (480 against 607). That swing is placement noise, larger than the change itself, so the synthesis figures are the ones to quote.
+
+## WINDOW 1 and THUMB 1 (DARIA's memories and Thumb, 2026-10-05)
+
+`WINDOW=1 run_probe.sh MHZ` gives the CPU DARIA's memories at full size (`bup_probe_top.sv`, `docs/DARIA_CORE.md`, "The memory system", 1). It has the 16 KB firmware ROM and the 128 KB image window, an `altsyncram` with `maximum_depth` 8192, so 8K × 1 slices and a 4:1 output mux, behind a registered profile mux. It adds the 32 KB cart RAM with port B on a second clock, `clk_sys`, and the asset cache's 4 KB of data read at `d_addr`. That is 180 M10K, and the core has `CODE_AW` 15 and `MODES` 1. `THUMB=1` compiles the core with `THUMB` 1, with `arm_only` from a pin so that Quartus keeps the Thumb logic. Builds go to `<MHz>_window[_thumb]`.
+
+One seed each, worst setup slack at slow 85 °C:
+
+| Build | CPU ALMs | 32.727273 MHz | 40.427807 MHz |
+|---|---|---|---|
+| `MODES=1` (ARIA's memories) | 1,268 | +4.707 ns (Fmax 38.69) | −0.569 ns (39.52) |
+| `WINDOW=1` | 1,375 | +2.746 ns (35.96) | −1.462 ns (38.17) |
+| `WINDOW=1 THUMB=1` | 1,720 | +0.025 ns (32.75) | −3.968 ns (34.84) |
+
+The worst path with `THUMB=1` at 32.73 MHz runs from window port A through:
+
+1. the slice mux and the profile mux;
+2. the read-index select;
+3. the MLAB read and the bypass;
+4. the shifter, the operand mux and the adder;
+5. the one-clock-store decision on the sum, then `done` and `rom_addr`;
+6. the window's address registers, 29.1 ns of data delay over 20 levels.
+
+`docs/DARIA_CORE.md`, "Clock", has what follows from it.
+
+## DARIA step 3: the store fix, three seeds, and the full build (2026-10-05)
+
+`SEED=N run_probe.sh` fits with seed N, in `<MHz>[...]_sN`. With the one-clock store decided on its own adder (`docs/DARIA_CORE.md`, "Step 3 work"), `WINDOW=1 THUMB=1` gives, at slow 85 °C:
+
+| Seed | CPU ALMs | 32.727273 MHz | 40.427807 MHz |
+|---|---|---|---|
+| 1 | 1,773 | +3.135 ns (Fmax 36.47) | −2.310 ns (36.97) |
+| 2 | 1,778 | +2.042 ns (35.07) | |
+| 3 | 1,769 | +2.771 ns (35.99) | |
+
+The worst paths now end in the register file's write data (seeds 1 and 2), or in the window's clock enables through the Thumb BL suffix's `jump(sum)` and `altsyncram`'s per-slice read-enable decode (seed 3). None runs through the store decision.
+
+### The full build (`full/`)
+
+`full/run_full.sh` compiles the shipped core (`src/fpga`, `quartus_sh --flow compile ap_core`, as CI) with DARIA's CPU and memories in a copy under `sim/work/bupchip/fullprobe/<tag>/`. The firmware files are not copied.
+
+```sh
+sim/bupchip/quartus_probe/full/run_full.sh                # clk_arm at VCO / 21, the qsf's seed
+DIV=17 SEED=1 sim/bupchip/quartus_probe/full/run_full.sh  # 40.43 MHz, seed 1
+BASE=1 SEED=2 sim/bupchip/quartus_probe/full/run_full.sh  # the core unchanged, for comparison
+```
+
+Each build takes about 12 minutes on 4 cores. `KEEP_DB=1` keeps `db/` and `incremental_db/`.
+
+| File | What it is |
+|---|---|
+| `run_full.sh` | Copies `src/fpga`, applies `daria_probe.py` (unless `BASE=1`), sets the seed, compiles in Docker, runs `full_report.tcl`, and prints `summary.txt` with `full_summary.py` |
+| `daria_probe.py` | Its edits to the copy. **`bupchip_pocket.sv`:** `bup_cpu` with `THUMB` 1 and `CODE_AW` 15, and `arm_only` low in the 2600 profile (`tia_en` through two `clk_arm` flops). The firmware ROM and the 128 KB window (`altsyncram`, `maximum_depth` 8192) behind the profile mux on fetch and data. The 32 KB cart RAM with port B on `clk_sys`, and the 32 KB front-end ROM on `clk_sys`. The image and front-end writes take the loader's stream, the front-end ROM's second port reads at a counter, and the `clk_sys` read data reach `audio_l[0]` in the 2600 profile, so nothing is optimised away. **`pll_core.v`:** counter 3 at VCO / `DIV` (odd divisors with odd duty). **`core_constraints.sdc`:** `set_max_delay 20` and `set_min_delay -20` (`--mind`) between `clk_sys` and `clk_arm`, the clock groups unchanged (`--all-clocks` bounds `clk_sdram` and `clk_sys_90` too). **`--win4`** (`WIN4=1`): the window as four 8K-deep RAMs and a registered 4:1 mux, with no per-slice read-enable decode |
+| `full_report.tcl` | `timing.txt`: setup and hold slack per core clock at each corner, `clk_arm`'s own Fmax and worst path, and the endpoints and slack of each crossing between `clk_arm` and another core clock. `arm_paths.rpt`: the ten worst `clk_arm` paths. `arm_hold.rpt`: the ten worst hold paths into `clk_arm` at each fast corner. `cross.rpt`: the crossings with `clk_sys`. `exceptions.rpt`: Quartus's exceptions report |
+| `full_summary.py` | The resources, the ALMs of the BupChip's entities, and `timing.txt` |
+
+Not modelled: the front ends' logic, the call port, the MMIO and timer, the state RAM and the cache's second way (4 M10K), and Fix B.
+
+At slow 85 °C (the hold column is the worst corner, which is fast 0 °C; the first row is the core unchanged):
+
+| Build | ALMs | M10K | CPU ALMs | `clk_arm` setup (Fmax) | hold into `clk_arm` | `clk_sdram` setup |
+|---|---|---|---|---|---|---|
+| `BASE=1 SEED=2` (ARIA, ÷24) | 12,968 | 78 | 1,308 | +9.552 ns (39.42) | +0.121 ns | +1.158 ns |
+| `SEED=1` (÷21) | 13,617 | 254 | 1,748 | +2.197 ns (35.26) | +0.128 ns | +2.356 ns |
+| `SEED=2` | 13,604 | 254 | 1,729 | +3.072 ns (36.38) | +0.023 ns | +2.656 ns |
+| `SEED=3` | 13,609 | 254 | 1,741 | +3.019 ns (36.31) | −0.033 ns | +2.109 ns |
+| `DIV=17 SEED=2` | 13,710 | 254 | 1,812 | −1.181 ns (38.58) | +0.139 ns | +2.471 ns |
+| `DIV=17 SEED=2 WIN4=1`, with `bl_sum` | 13,705 | 254 | 1,891 | −0.466 ns (39.68) | +0.166 ns | +2.106 ns |
+| `DIV=18 SEED=1 WIN4=1`, with `bl_sum` | 13,700 | 254 | 1,876 | +1.305 ns (40.18) | +0.143 ns | +1.852 ns |
+| `DIV=18 SEED=2 WIN4=1` | 13,712 | 254 | 1,877 | +0.288 ns (38.61) | +0.112 ns | +2.210 ns |
+| `DIV=18 SEED=3 WIN4=1` | 13,684 | 254 | 1,866 | +0.708 ns (39.24) | +0.170 ns | +2.998 ns |
+
+**The ÷21 builds.**
+- **The SDC form.** Seeds 1 and 2 were built with `--all-clocks`, seed 3 with the default form. Seed 3 shows no path between `clk_arm` and `clk_sdram` or `clk_sys_90`, so the two forms time the same paths.
+- **The crossings** with `clk_sys` have at worst +15.1 ns of setup slack.
+- **Hold.** These three builds used `set_min_delay` 0. On seed 3 that fails hold by 0.033 ns at fast 0 °C, on the $8007 command byte (`arm_hold.rpt`). That is a held bus, so the check means nothing for it. Every path inside `clk_arm` meets hold. `daria_probe.py` now defaults to the design's −20 (`--mind`), which leaves the held buses no hold check.
+
+**The later builds** (÷17 and ÷18) use −20.
+- **`bl_sum`.** These rows have the core with the BL suffix's target on its own adder.
+- **The window.** `WIN4=1` builds the window as four RAMs.
+- **The worst paths.** At 40.43 MHz without them, they ran through the BL suffix's sum into the window's per-slice read-enable decode. With them, and at ÷18, the worst path is S1's execute path into the register file.
+
+`docs/DARIA_CORE.md`, "Step 3 work", has what follows from these: S1 with Thumb at ÷18.
+
+## DARIA's front end: `daria_fe_map.sh`
+
+`daria_fe_map.sh [TOP] [--synth | --fit]` compiles `daria_fe` (`src/fpga/core/bupchip/daria_fe*.sv`), or one of its blocks alone (`daria_fe_seq`, `_dec`, `_core`, `_audio`, `_call`, `_copy`, `_arb`, `_guard`), on the 5CEBA4F23C8 with `ap_core.qsf`'s settings and every port but `clk_sys`/`clk_arm` a virtual pin, in `sim/work/bupchip/qfe/<TOP>-<mode>/`. The default is Analysis & Elaboration; `--synth` adds the resource counts of Analysis & Synthesis; `--fit` runs the Fitter and Timing Analyzer as `docs/daria_fe/design.md` 10.3's probes do, and prints ALMs placed less those recoverable by dense packing. `docs/daria_fe/interfaces.md`, section 8, has the options and the results on the step-0 stubs.
+
+## DARIA step 7: the fit driver (`step7/`)
+
+`step7/run_step7.sh` compiles a whole tree's `src/fpga` as CI does
+(`quartus_sh --flow compile ap_core` in `raetro/quartus:21.1`), then runs
+`step7_report.tcl` (`quartus_sta`) and `step7_checks.py`: timing per clock
+and corner, and the checks (a)-(o) of `docs/daria_step7/plan.md` 5.4, with
+a verdict for the kind of build. Its header lists the options (`TREE`,
+`SEED`, `TAG`, `NODARIA=1`, `PIN_ID=1`, `DIV`, `KEEP_DB=1`, `REPORT_ONLY=1`,
+`DRYRUN=1`, `FORCE=1`). A fit takes 12-25 minutes. It writes only its run
+directory, `sim/work/step7/fit/<TAG>` by default, and refuses
+`full/run_full.sh`'s baselines and the R1 references. Run it under the
+machine's Quartus lock, with `QUARTUS_LOCK` naming the lock file
+(`docs/ENVIRONMENT.md` 3.5); it refuses to start otherwise. Exit 0 is a
+PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
+
+- `step7_checks.py` judges a fit again from its own report files without a
+  refit: (a), (l) and (h) by the build's divider (amended for VCO/19,
+  2026-10-14), and (c.cells) from `firstflops.tsv` by the tree's table. It
+  prints the verdict as amended and the rules as first written. A change
+  to any other check that `step7_report.tcl` makes, or to what it writes,
+  needs the fit's kept database (`REPORT_ONLY=1`) or a refit (plan 5.4).
+- `step7/selftest.sh` tests the driver's refusals, `step7_prep.py` and
+  `step7_checks.py` on made-up report files, without Quartus: 117 cases
+  at `f3a9b49`. It needs 100 MB free on `/`; with less it skips the cases
+  that copy `src/fpga` and exits 3 (PARTIAL). `sim/step7_gates.sh`'s
+  `fit_selftest` gate runs it.
+- `step7/smoke/run_smoke.sh` fits a small design whose register names are
+  the core's (`smoke.sv`, four projects of about 3 minutes each) to test
+  `core/daria.qip`'s synchroniser marks, `step7_report.tcl` and
+  `step7_checks.py` against real Quartus output. It needs the lock too.
+- `step7/f3_crossings.txt` and the table in `step7_report.tcl` are the two
+  copies of plan 2.7's synchroniser table; the self-test checks that they
+  agree.
+
+The step-7 fits and their results are in `docs/daria_step7/record.md`
+("Fix B (Build A)" and "The fits") and `docs/daria_step7/plan.md` 5.2-5.4.

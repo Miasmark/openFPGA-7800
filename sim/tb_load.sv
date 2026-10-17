@@ -16,15 +16,69 @@ module tb_load;
 	// and now and then the clk_sys register missed one of the loader's
 	// four-clk_sdram strobes and dropped a cartridge byte.
 	localparam real T_HALF_SDRAM = 8.730;
-	always #(T_HALF_SDRAM) clk_sdram = ~clk_sdram;
-	always #(4 * T_HALF_SDRAM) clk_sys = ~clk_sys;
-	always #6.734 clk_74a = ~clk_74a;
+	// clk_run is 0 while +retune has the PLL's outputs stopped ("PLL retune"
+	// below), run74 is 0 while +stop74 has clk_74a stopped. A stopped clock
+	// keeps its level and skips its edges; the times of its edges do not
+	// move, so it restarts on its lattice.
+	// The time in ns as a real. Verilator 5.040 turns $realtime into whole
+	// ns inside an integer cast (longint'($realtime * 1000.0) loses the ps);
+	// through a real variable it keeps them.
+	function automatic real now_ns();
+		real r;
+		r = $realtime;
+		return r;
+	endfunction
+	logic clk_run = 1'b1, run74 = 1'b1;
+	always #(T_HALF_SDRAM) if (clk_run) clk_sdram = ~clk_sdram;
+	always #(4 * T_HALF_SDRAM) if (clk_run) clk_sys = ~clk_sys;
+	always #6.734 if (run74) clk_74a = ~clk_74a;
 `ifdef POCKET_BUPCHIP
+	logic clk_arm = 1'b1;
+`ifdef POCKET_DARIA
+	// clk_arm on the PLL's lattice (docs/daria_step7/plan.md, F5). The VCO
+	// is 48 x clk_sys (687.27 MHz, 1.455 ns): clk_sdram is VCO/12 and
+	// clk_arm, by default, VCO/19 (36.17 MHz; pll_core.v's divider, plan
+	// 5.2): rising edges every 19 VCO periods (27.645 ns), PLL phase 0, so
+	// one meets a clk_sys rising edge every 19 clk_sys (48 clk_arm), the
+	// falling edge 9.5 VCO periods after (the counter's odd duty
+	// correction), which the bench's 1 ps step gives as 13.823 ns high,
+	// 13.822 ns low. +arm_div=18 selects VCO/18 (38.18 MHz), half period
+	// 13.095 ns = 1.5 x T_HALF_SDRAM, a rising edge on a clk_sys rising edge
+	// every 3 clk_sys (8 clk_arm). +arm_ofs=PS starts the lattice PS ps late
+	// (the phase runs). The check below stops the run if an edge leaves its
+	// lattice.
+	int arm_div = 19, arm_ofs = 0;
+	bit arm_init = 1'b0, arm_ph = 1'b0;
+	always begin
+		if (!arm_init) begin
+			arm_init = 1'b1;
+			void'($value$plusargs("arm_div=%d", arm_div));
+			void'($value$plusargs("arm_ofs=%d", arm_ofs));
+			if (arm_div != 18 && arm_div != 19) $fatal(1, "+arm_div=%0d: 18 or 19", arm_div);
+			$display("CLK_ARM VCO/%0d, phase offset %0d ps", arm_div, arm_ofs);
+			if (arm_ofs > 0) #(arm_ofs * 0.001);
+		end
+		#(arm_div == 19 ? (arm_ph ? 13.822 : 13.823) : 1.5 * T_HALF_SDRAM);
+		arm_ph = ~arm_ph;
+		if (clk_run) clk_arm = ~clk_arm;
+	end
+	// (the initial value is no edge)
+	always @(clk_arm) if ($realtime > 0) begin
+		automatic longint t = longint'(now_ns() * 1000.0) - arm_ofs;
+		automatic longint p = arm_div == 19 ? 27645 : 26190;
+		if (t % p != (clk_arm ? 0 : (arm_div == 19 ? 13823 : 13095)))
+			$fatal(1, "clk_arm %0s edge at %0d ps is off its VCO/%0d lattice", clk_arm ? "rising" : "falling", t, arm_div);
+	end
+`else
 	// clk_arm, the BupChip's: exactly 2 x clk_sys, edge aligned, as the PLL
 	// makes it (counter[3]).
-	logic clk_arm = 1'b1;
-	always #(2 * T_HALF_SDRAM) clk_arm = ~clk_arm;
+	always #(2 * T_HALF_SDRAM) if (clk_run) clk_arm = ~clk_arm;
 `endif
+`endif
+
+	// pll_locked and pll_busy as the DUT sees them: 1 and 0, except during a
+	// +retune ("PLL retune" below).
+	logic pll_locked_tb = 1'b1, pll_busy_tb = 1'b0;
 
 	logic reset_in = 1'b1;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
@@ -32,6 +86,14 @@ module tb_load;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
+	// +bios=FILE: a 7800 BIOS through its data slot, before the cartridge
+	// (+bioslast: after it). +skipbios=0 turns Skip BIOS off (default 1).
+	// +nocart: no cartridge download, so with +bios the BIOS boots alone.
+	logic bios_download = 1'b0, skip_bios = 1'b1, nocart = 1'b0;
+	initial begin
+		void'($value$plusargs("skipbios=%d", skip_bios));
+		nocart = $test$plusargs("nocart");
+	end
 	logic pokey_irq_on = 1'b0;
 	logic overscan_on = 1'b0;
 	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
@@ -53,6 +115,14 @@ module tb_load;
 		void'($value$plusargs("port2=%d", port2_in));
 	end
 	logic [1:0] hsc_setting = 2'd0;
+	// +region=N: region_setting (0 auto, 1 NTSC, 2 PAL; default 0). A wrapper
+	// bench (tb_frames) may also set region_tb before the load ends.
+	logic [1:0] region_tb = 2'd0;
+	initial void'($value$plusargs("region=%d", region_tb));
+	// ext_end: a wrapper bench (tb_frames) that ends the run itself sets this
+	// before the load ends; the flow below then stops at the reset release,
+	// running none of its own cases.
+	bit ext_end = 1'b0;
 
 	// ---------------- APF bridge + loader ----------------
 	logic        bridge_wr = 1'b0;
@@ -110,13 +180,13 @@ module tb_load;
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
 		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
 `endif
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(1'b1), .pll_busy(1'b0), .reset_in(reset_in),
-		.cart_download(cart_download), .bios_download(1'b0),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in),
+		.cart_download(cart_download), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr_r & (cart_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
-		.region_setting(2'd0), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
+		.ioctl_wr(ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
-		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
+		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
 		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
@@ -134,6 +204,239 @@ module tb_load;
 		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),
 		.SRAM_UB_N(SRAM_UB_N), .SRAM_LB_N(SRAM_LB_N)
 	);
+
+	// ---------------- PLL retune (+retune=MS) ----------------
+	// pll_region (core/pll_region.v) retuning pll_core for a PAL/NTSC change,
+	// MS ms after reset_in falls: pll_busy rises; 256 clk_74a later the two
+	// register writes start the reconfiguration and the PLL's outputs
+	// (clk_sys, clk_sdram, clk_arm) stop; they restart +retune_us=N us later
+	// (default 20), rounded up to whole periods of all three, so each
+	// restarts on its lattice; pll_locked, low while they are stopped, rises
+	// 1 us after they restart, and pll_busy falls 256 clk_74a after that.
+	// The frequencies do not change: the region itself is not modelled.
+	initial begin
+		int rt_ms, rt_us;
+		longint lcm, now_ps, t_ps, w_ps;
+		real t_busy, t_stop;
+		if ($value$plusargs("retune=%d", rt_ms)) begin
+			rt_us = 20;
+			void'($value$plusargs("retune_us=%d", rt_us));
+			wait (reset_in == 1'b0);
+			#(rt_ms * 1.0e6);
+			pll_busy_tb = 1'b1;
+			t_busy = $realtime;
+			#(258 * 13.468);
+			// the clocks' common period: clk_sys is 48 VCO periods, clk_sdram 12,
+			// clk_arm 24 (2 x clk_sys), 18 or 19
+			lcm = 69840;
+`ifdef POCKET_BUPCHIP
+`ifdef POCKET_DARIA
+			lcm = arm_div == 19 ? 1326960 : 209520;
+`endif
+`endif
+			now_ps = longint'(now_ns() * 1000.0);
+			t_ps = (now_ps / lcm + 1) * lcm + 1;
+			// stop and restart between edges, never on one
+			while (t_ps % 8730 == 0
+`ifdef POCKET_BUPCHIP
+`ifdef POCKET_DARIA
+				|| (t_ps - arm_ofs) % (arm_div == 19 ? 27645 : 13095) == 0
+				|| (arm_div == 19 && (t_ps - arm_ofs) % 27645 == 13823)
+`endif
+`endif
+				) t_ps++;
+			w_ps = (longint'(rt_us) * 1000000 + lcm - 1) / lcm * lcm;
+			#((t_ps - now_ps) * 0.001);
+			if (longint'(now_ns() * 1000.0) != t_ps)
+				$fatal(1, "+retune: the stop landed at %0d ps, not %0d", longint'(now_ns() * 1000.0), t_ps);
+			clk_run = 1'b0;
+			pll_locked_tb = 1'b0;
+			t_stop = $realtime;
+			#(w_ps * 0.001);
+			clk_run = 1'b1;
+			#1000.0;
+			pll_locked_tb = 1'b1;
+			#(258 * 13.468);
+			pll_busy_tb = 1'b0;
+			$display("RETUNE pll_busy at %0.3f ms; clocks stopped at %0.3f ms for %0.3f us; pll_locked low until %0.3f ms; pll_busy low at %0.3f ms",
+				t_busy / 1.0e6, t_stop / 1.0e6, w_ps / 1.0e6, (t_stop + w_ps * 0.001 + 1000.0) / 1.0e6, $realtime / 1.0e6);
+		end
+	end
+
+	// ---------------- +stop74 ----------------
+	// clk_74a feeds the APF loader, the save-slot ports (HSC and SaveKey RAM
+	// port B, sram_ctrl's bridge) and the BupChip's 48 kHz tick
+	// (bupchip_pocket's bup_tick48k). +stop74 stops it after the last load,
+	// for speed, and runs it again for a +image2 load and for the save-slot
+	// reads at the end. Refused with +bupms, which needs the 48 kHz tick.
+	bit stop74 = 1'b0;
+	initial stop74 = $test$plusargs("stop74");
+
+	// ---------------- P2 assertion (Fix B) ----------------
+	// docs/daria_step7/plan.md P2: with Fix B, sram_ctrl's 7800/BIOS request
+	// (m_new) and its 2600 request (t_new) are mode-exclusive and never
+	// meet in one clk_sdram cycle. run_sim.sh defines SIM_FIXB when
+	// sram_ctrl.sv has t_new; the RTL itself carries no bench code.
+// +p2count counts the coincidences instead of stopping, for a diagnosis on
+// a tree that has the fault (tb_cartram's +rsmode reproduction); a run with
+// it is no gate run (no "P2 armed" line).
+`ifdef SIM_FIXB
+	bit p2_count = 1'b0;
+	int p2_n = 0;
+	initial begin
+		p2_count = $test$plusargs("p2count");
+		if (p2_count) $display("P2 counting (+p2count): sram_ctrl m_new and t_new counted on every clk_sdram, not stopped");
+		else $display("P2 armed: sram_ctrl m_new and t_new checked on every clk_sdram");
+	end
+	always @(posedge clk_sdram)
+		if (dut.sram.m_new && dut.sram.t_new) begin
+			if (!p2_count) $fatal(1, "P2: sram_ctrl m_new and t_new in the same clk_sdram cycle at %0.3f us", $realtime / 1000.0);
+			p2_n++;
+			if (p2_n <= 10) $display("P2 COINCIDENCE (+p2count) at %0.3f us: m_new and t_new in one clk_sdram cycle", $realtime / 1000.0);
+		end
+	final if (p2_count) $display("P2 counted: %0d clk_sdram cycles with m_new and t_new together", p2_n);
+`endif
+
+	// ---------------- frame fingerprint (+fp=FILE) ----------------
+	// One line per rising edge of the core's VSync output (MARIA's in 7800
+	// mode, the TIA's in 2600 mode), for comparing two builds frame by frame
+	// (sim/check/frame_gate.py --strict). Columns, as tb_daria's fp.csv
+	// (bupchip/daria/tb_daria.sv, "Frame fingerprint") plus cpu:
+	//   frame    1, 2, ...: frame 1 starts at the first rising edge of the
+	//            run; its line is written at the edge that ends it
+	//   len_sys  clk_sys from the edge that starts the frame to the one that
+	//            ends it (the clock that sees an edge belongs to the new frame)
+	//   riot     FNV-1a 64 of the RIOT's 128 RAM bytes, address 0 first, read
+	//            at the edge that ends the frame
+	//   video    FNV-1a 64 of R, G, B on every clk_sys with ce_pix and
+	//            neither blank
+	//   audio    FNV-1a 64 of {AUDIO_L, AUDIO_R}, low byte first, on every
+	//            clk_sys where it differs from the last value folded (that
+	//            value carries across frames and starts at 0)
+	//   cpu      FNV-1a 64 of the 6502's address (low byte first), R/W and
+	//            data at every phase-2 enable (core_phi2_en): data_in on a
+	//            read, data_out on a write
+	// and three columns that place the frame in absolute time, so that a
+	// whole run shifted by some clocks (every column above restarts with the
+	// console's reset) does not compare equal:
+	//   t_sys    clk_sys counted from time 0 at the edge that ends the frame
+	//   rst_n    how many times the wrapper's console reset (the register
+	//            reset in atari7800_pocket.sv, which P6's daria_hold joins)
+	//            has been released so far, counted from time 0
+	//   rst_sys  clk_sys counted from time 0 at the last of those releases:
+	//            the clock whose edge first sees reset low (plan P6: the
+	//            DARIA and the plain build release on the same edge)
+	// When the run ends, one more line: the frame still in progress, from the
+	// last VSync edge (or from time 0 when there was none: numbered 1), with
+	// its clocks so far and the same columns. A run that never raises VSync
+	// (cartram2600_test.py's images never write VSYNC) then still has one
+	// line to compare, and the clocks after the last edge are covered too.
+	localparam logic [63:0] FNV_OFFSET = 64'hcbf29ce484222325;
+	localparam logic [63:0] FNV_PRIME  = 64'h00000100000001b3;
+	function automatic logic [63:0] fnv(input logic [63:0] h, input logic [7:0] b);
+		return (h ^ {56'd0, b}) * FNV_PRIME;
+	endfunction
+	`define FP_CPU dut.main.cpu_inst.cpu
+	int          fp_fd = 0, fp_frame = 0;
+	longint      fp_now = 0, fp_tvs = 0;
+	logic        fp_vs = 1'b0, fp_rs = 1'b1;
+	longint      fp_rst_n = 0, fp_rst_t = 0;
+	logic [63:0] fp_video = FNV_OFFSET, fp_audio = FNV_OFFSET, fp_cpu = FNV_OFFSET;
+	logic [31:0] fp_last = 32'd0;
+	string       fp_path;
+	initial if ($value$plusargs("fp=%s", fp_path)) begin
+		fp_fd = $fopen(fp_path, "w");
+		if (fp_fd == 0) $fatal(1, "cannot open %s", fp_path);
+		$fwrite(fp_fd, "frame,len_sys,riot,video,audio,cpu,t_sys,rst_n,rst_sys\n");
+	end
+	always @(posedge clk_sys) if (fp_fd != 0) begin
+		fp_now++;
+		fp_vs <= VSync;
+		if (fp_rs && !dut.reset) begin
+			fp_rst_n++;
+			fp_rst_t = fp_now;
+		end
+		fp_rs = dut.reset;
+		if (VSync && !fp_vs) begin
+			automatic logic [63:0] h = FNV_OFFSET;
+			for (int i = 0; i < 128; i++) h = fnv(h, dut.main.riot_inst.riot_ram.mem_q[i]);
+			if (fp_frame > 0) begin
+				$fwrite(fp_fd, "%0d,%0d,%016x,%016x,%016x,%016x,%0d,%0d,%0d\n", fp_frame, fp_now - fp_tvs, h,
+					fp_video, fp_audio, fp_cpu, fp_now, fp_rst_n, fp_rst_t);
+				$fflush(fp_fd);
+			end
+			fp_video = FNV_OFFSET;
+			fp_audio = FNV_OFFSET;
+			fp_cpu = FNV_OFFSET;
+			fp_frame++;
+			fp_tvs = fp_now;
+		end
+		if (ce_pix && !HBlank && !VBlank) fp_video = fnv(fnv(fnv(fp_video, R), G), B);
+		if ({AUDIO_L, AUDIO_R} != fp_last) begin
+			fp_last = {AUDIO_L, AUDIO_R};
+			for (int i = 0; i < 4; i++) fp_audio = fnv(fp_audio, fp_last[i*8 +: 8]);
+		end
+		if (`FP_CPU.core_phi2_en)
+			fp_cpu = fnv(fnv(fnv(fnv(fp_cpu, `FP_CPU.addr_out[7:0]), `FP_CPU.addr_out[15:8]),
+				{7'd0, `FP_CPU.rw_n}), `FP_CPU.rw_n ? `FP_CPU.data_in : `FP_CPU.data_out);
+	end
+	final if (fp_fd != 0) begin
+		automatic logic [63:0] h = FNV_OFFSET;
+		for (int i = 0; i < 128; i++) h = fnv(h, dut.main.riot_inst.riot_ram.mem_q[i]);
+		$fwrite(fp_fd, "%0d,%0d,%016x,%016x,%016x,%016x,%0d,%0d,%0d\n", fp_frame > 0 ? fp_frame : 1, fp_now - fp_tvs, h,
+			fp_video, fp_audio, fp_cpu, fp_now, fp_rst_n, fp_rst_t);
+		$fclose(fp_fd);
+	end
+
+`ifdef POCKET_DARIA
+	// ---------------- P18: psram.sv's CLOCK_SPEED ----------------
+	// 50.0 under POCKET_DARIA (docs/daria_step7/plan.md P18). No PSRAM model
+	// run told it from 28.636364 at 38.18 MHz (VCO/18, DARIA's clock when
+	// this check was written; the benches now default to VCO/19, 36.17 MHz),
+	// so the parameter is checked.
+	initial begin
+		$display("P18 bup_psram CLOCK_SPEED %0.6f", dut.bup_psram.CLOCK_SPEED);
+		if (dut.bup_psram.CLOCK_SPEED != 50.0)
+			$fatal(1, "P18: bup_psram CLOCK_SPEED is %0.6f, not 50.0, in the POCKET_DARIA build", dut.bup_psram.CLOCK_SPEED);
+	end
+
+	// ---------------- DARIA (+daria=MS) ----------------
+	// run_sim.sh's DARIA section: a synthetic ARM image (fe_dir/mkimg.py)
+	// runs MS ms after reset_in falls, then one line: the image's RIOT
+	// markers (fe_dir's convention: $FF counts finished test bodies, $FE its
+	// own failed checks), the calls daria_fe posted (call_tog flips), the
+	// returns it saw (ret_tog flips), the PSRAM model's violations, the
+	// BupChip CPU's halt, and the guard's lock and unlocks (P22's ports).
+	// The taps need daria_fe in the wrapper as dut.u_fe: run_sim.sh defines
+	// SIM_DARIA_FE when atari7800_pocket.sv instantiates it.
+	int     daria_ms = 0;
+	longint dr_calls = 0, dr_rets = 0, dr_unlocks = 0;
+`ifdef SIM_DARIA_FE
+	logic dr_ct = 1'b0, dr_rt = 1'b0, dr_on = 1'b0, dr_on_a = 1'b0;
+	always @(posedge clk_sys) begin
+		dr_on <= 1'b1;
+		dr_ct <= dut.u_fe.call_tog;
+		if (dr_on && dut.u_fe.call_tog != dr_ct) dr_calls++;
+		if (dr_on && dut.u_fe.dbg_unlock) dr_unlocks++;
+	end
+	always @(posedge clk_arm) begin
+		dr_on_a <= 1'b1;
+		dr_rt <= dut.u_fe.ret_tog;
+		if (dr_on_a && dut.u_fe.ret_tog != dr_rt) dr_rets++;
+	end
+`endif
+	task automatic daria_report();
+		$display("DARIA result: marker %0d, self-check errors %0d, calls %0d, returns %0d, psram_viol %0d, halted %0d, guard %0s, unlocks %0d",
+			dut.main.riot_inst.riot_ram.mem_q[127], dut.main.riot_inst.riot_ram.mem_q[126], dr_calls, dr_rets,
+			cram0_chip.n_viol, dut.bupchip.halted,
+`ifdef SIM_DARIA_FE
+			dut.u_fe.dbg_locked ? "locked" : "unlocked",
+`else
+			"absent (atari7800_pocket.sv has no daria_fe u_fe)",
+`endif
+			dr_unlocks);
+	endtask
+`endif
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
 	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0, fire_at = 0, fire_at2 = 0, reset_at = 0;
@@ -270,6 +573,56 @@ module tb_load;
 		if (!old_wr41 && !dut.RW && dut.bios_addr == 16'h0041) main_writes <= main_writes + 1;
 		old_wr4k <= !dut.RW && dut.bios_addr == 16'h4000;
 		if (!old_wr4k && !dut.RW && dut.bios_addr == 16'h4000) audf_writes <= audf_writes + 1;
+	end
+
+	// ---------------- boot probe ----------------
+	// At each release of the core's reset (top.sv's effective_reset): the
+	// BIOS switch as the core got it (use_bios, and top.sv's bypass_bios,
+	// tia_mode and cart_present). Then the 6502's reset vector, read at
+	// $FFFC/$FFFD, and its first opcode fetch, each with where the bytes came
+	// from: the BIOS ROM (top.sv's bios_sel) or the cartridge slot. Then, 50
+	// ms after the release (or at the next reset), the CPU's reads from the
+	// BIOS ROM so far, and tia_en. run_sim.sh's BIOS tests check these lines.
+	`define BOOT_CPU dut.main.cpu_inst.cpu
+	int boot_n = 0;
+	logic boot_rst_d = 1'b1, boot_on = 1'b0, boot_fetched = 1'b0;
+	logic [1:0] boot_vec_seen = 2'b00, boot_vec_bios = 2'b00;
+	logic [15:0] boot_vec = 16'h0000;
+	longint boot_t0 = 0, boot_bios_rd = 0;
+	function automatic string boot_src(logic [1:0] from_bios);
+		return from_bios == 2'b11 ? "the BIOS ROM" : from_bios == 2'b00 ? "the cartridge slot" : "both";
+	endfunction
+	always @(posedge clk_sys) begin
+		boot_rst_d <= dut.main.effective_reset;
+		if (boot_on && (dut.main.effective_reset || $time - boot_t0 >= 50000000)) begin
+			$display("BOOT %0d after %0d ms: %0d CPU reads from the BIOS ROM, tia_en %0d",
+				boot_n, ($time - boot_t0) / 1000000, boot_bios_rd, dut.main.tia_en);
+			boot_on = 1'b0;
+		end
+		if (boot_rst_d && !dut.main.effective_reset) begin
+			boot_n++;
+			boot_on = 1'b1; boot_fetched = 1'b0; boot_vec_seen = 2'b00; boot_vec_bios = 2'b00;
+			boot_bios_rd = 0; boot_t0 = $time;
+			$display("BOOT %0d at %0d ms: use_bios %0d, bypass_bios %0d, tia_mode %0d, cart_present %0d",
+				boot_n, $time / 1000000, dut.use_bios, dut.main.bypass_bios, dut.main.tia_mode, dut.main.cart_present);
+		end
+		// A read cycle of the CPU's own, at the edge where it takes the byte
+		if (boot_on && `BOOT_CPU.core_phi2_en && `BOOT_CPU.rw_n) begin
+			if (dut.main.bios_sel) boot_bios_rd++;
+			for (int k = 0; k < 2; k++)
+				if (`BOOT_CPU.addr_out == 16'hFFFC + 16'(k) && !boot_vec_seen[k]) begin
+					boot_vec_seen[k] = 1'b1;
+					boot_vec_bios[k] = dut.main.bios_sel;
+					if (k == 0) boot_vec[7:0] = `BOOT_CPU.data_in; else boot_vec[15:8] = `BOOT_CPU.data_in;
+				end
+			// The first SYNC after the vector: the reset sequence raises SYNC
+			// once before it, on its first cycle.
+			if (`BOOT_CPU.sync && boot_vec_seen == 2'b11 && !boot_fetched) begin
+				boot_fetched = 1'b1;
+				$display("BOOT %0d vector: $%04x from %0s, first opcode fetch at $%04x from %0s", boot_n, boot_vec,
+					boot_src(boot_vec_bios), `BOOT_CPU.addr_out, boot_src({2{dut.main.bios_sel}}));
+			end
+		end
 	end
 
 	// ---------------- Supercharger probe (+arprobe) ----------------
@@ -592,6 +945,40 @@ module tb_load;
 	bit have_save = 0;
 	int save_diffs;
 
+	// +bios=FILE: the 7800 BIOS through its data slot (0x103, bridge address
+	// 0x02000000, data.json's), at most 16 KiB.
+	string bios_path;
+	logic [7:0] bios_img [$];
+	task automatic load_bios();
+		int n;
+		if ($value$plusargs("bios=%s", bios_path)) begin
+			bios_img.delete();
+			fd = $fopen(bios_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", bios_path); $finish; end
+			c = $fgetc(fd);
+			while (c != -1) begin bios_img.push_back(c[7:0]); c = $fgetc(fd); end
+			$fclose(fd);
+			n = bios_img.size();
+			while (bios_img.size() % 4) bios_img.push_back(8'hFF);
+			bios_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			for (int i = 0; i < bios_img.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = 32'h02000000 + i;
+				bridge_wr_data = {bios_img[i], bios_img[i+1], bios_img[i+2], bios_img[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			bios_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
+			$display("BIOS slot: %0d byte file, bios_loaded %0d, address mask %04x, skip_bios %0d",
+				n, dut.bios_loaded, dut.bios_mask, skip_bios);
+		end
+	endtask
+
 `ifdef POCKET_BUPCHIP
 	// +bupfw=FILE: the BupChip firmware (bupchip.bin) through its data slot
 	// (0x109, bridge address 0x0A000000), before the cartridge, or after it
@@ -638,10 +1025,12 @@ module tb_load;
 	initial begin
 		if (!$value$plusargs("image=%s", path)) path = "load_test.a78";
 		if (!$value$plusargs("audf=%d", audf)) audf = 7;
-		fd = $fopen(path, "rb");
-		if (fd == 0) begin $display("cannot open %s", path); $finish; end
-		while ((c = $fgetc(fd)) != -1) image.push_back(c[7:0]);
-		$fclose(fd);
+		if (!nocart) begin
+			fd = $fopen(path, "rb");
+			if (fd == 0) begin $display("cannot open %s", path); $finish; end
+			while ((c = $fgetc(fd)) != -1) image.push_back(c[7:0]);
+			$fclose(fd);
+		end
 		image_n = image.size();
 		while (image.size() % 4) image.push_back(8'hFF);
 
@@ -684,6 +1073,7 @@ module tb_load;
 			end
 			have_save = 1;
 		end
+		if (!$test$plusargs("bioslast")) load_bios();
 		// +hscfw=FILE / +arfw=FILE: load the HSC firmware / Supercharger BIOS
 		// through their data slots first, as the Pocket does at core start.
 		for (int slot = 0; slot < 2; slot++)
@@ -720,27 +1110,33 @@ module tb_load;
 		if (!$test$plusargs("bupfwlast")) load_bupfw();
 `endif
 		repeat (100) @(posedge clk_74a);
-		cart_download = 1'b1;
-		repeat (100) @(posedge clk_74a);
-		// One 32 bit bridge write every 80 clk_74a, big endian, as APF does.
-		for (int i = 0; i < image.size(); i += 4) begin
-			@(posedge clk_74a);
-			bridge_addr = i;
-			bridge_wr_data = {image[i], image[i+1], image[i+2], image[i+3]};
-			bridge_wr = 1'b1;
-			@(posedge clk_74a);
-			bridge_wr = 1'b0;
-			repeat (78) @(posedge clk_74a);
+		if (!nocart) begin
+			cart_download = 1'b1;
+			repeat (100) @(posedge clk_74a);
+			// One 32 bit bridge write every 80 clk_74a, big endian, as APF does.
+			for (int i = 0; i < image.size(); i += 4) begin
+				@(posedge clk_74a);
+				bridge_addr = i;
+				bridge_wr_data = {image[i], image[i+1], image[i+2], image[i+3]};
+				bridge_wr = 1'b1;
+				@(posedge clk_74a);
+				bridge_wr = 1'b0;
+				repeat (78) @(posedge clk_74a);
+			end
+			repeat (2000) @(posedge clk_74a);
+			cart_download = 1'b0;
+			repeat (100) @(posedge clk_sys);
 		end
-		repeat (2000) @(posedge clk_74a);
-		cart_download = 1'b0;
-		repeat (100) @(posedge clk_sys);
 `ifdef POCKET_BUPCHIP
 		if ($test$plusargs("bupfwlast")) begin
 			repeat (100) @(posedge clk_74a);
 			load_bupfw();
 		end
 `endif
+		if ($test$plusargs("bioslast")) begin
+			repeat (100) @(posedge clk_74a);
+			load_bios();
+		end
 
 		$display("HSC_EN %0d (setting %0d, firmware loaded %0d)", dut.hsc_en, hsc_setting, dut.hscfw_loaded);
 		begin
@@ -778,7 +1174,22 @@ module tb_load;
 			dut.hsc_ram.lane[2].ram.mem[5], dut.hsc_ram.lane[3].ram.mem[5]);
 
 		end
+		if (stop74) begin
+			if ($test$plusargs("bupms")) $display("STOP74 refused: +bupms needs clk_74a (the BupChip's 48 kHz tick)");
+			else begin
+				run74 = 1'b0;
+				$display("STOP74 clk_74a stopped at %0.3f ms", $realtime / 1.0e6);
+			end
+		end
 		reset_in = 1'b0;
+		if (ext_end) wait (1'b0);
+`ifdef POCKET_DARIA
+		if ($value$plusargs("daria=%d", daria_ms)) begin
+			for (int ms_i = 0; ms_i < daria_ms; ms_i++) repeat (14318) @(posedge clk_sys);
+			daria_report();
+			$finish;
+		end
+`endif
 `ifdef POCKET_BUPCHIP
 		// +bupms=MS: run MS ms with the BupChip watched, then report. The
 		// ARSC block (from 128 + the header's ROM size) must be in the PSRAM
@@ -922,6 +1333,7 @@ module tb_load;
 					$fclose(f2);
 					while (img2.size() % 4) img2.push_back(8'hFF);
 					repeat (longint'(14318) * at) @(posedge clk_sys);
+					run74 = 1'b1;
 					@(posedge clk_74a); cart_download = 1'b1;
 					repeat (100) @(posedge clk_74a);
 					for (int i = 0; i < img2.size(); i += 4) begin
@@ -935,6 +1347,7 @@ module tb_load;
 					end
 					repeat (2000) @(posedge clk_74a);
 					cart_download = 1'b0;
+					if (stop74) run74 = 1'b0;
 					$display("IMAGE2 %s loaded at %0d ms: %0d bytes, tia_mode=%0d, mapper %0d",
 						image2_path, $time / 1000000, img2.size(), dut.tia_mode, dut.main.cart2600.mapper);
 				end
@@ -977,6 +1390,7 @@ module tb_load;
 		ideal = 3579545.0 / 114.0 / (audf + 1) / 2.0;
 		$display("TONE from loaded cart AUDF0=%0d: measured %.1f Hz, TIA reference %.1f Hz, ratio %.3f",
 			audf, measured, ideal, measured / ideal);
+		run74 = 1'b1;   // the save-slot reads below are clk_74a transactions
 		if (have_save) begin
 			// Read it back the way the Pocket saves it. APF read transaction:
 			// the address is set, the data is sampled four clk_74a later, then

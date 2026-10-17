@@ -446,6 +446,9 @@ module tb_capstress;
 				if ($urandom_range(99) < 5) Rdecl = R + B + 1 + $urandom_range(100);   // the block is past the end
 				img_n = 128 + R + B;
 				for (int i = 0; i < img_n; i++) img[i] = 8'($urandom);
+				// An A78 header: bup_capture takes a file as an A78 only with
+				// "ATARI" at bytes 1-5 (otherwise it is a 2600 image, DARIA).
+				img[1] = "A"; img[2] = "T"; img[3] = "A"; img[4] = "R"; img[5] = "I";
 				img[49] = 8'(Rdecl >> 24); img[50] = 8'(Rdecl >> 16); img[51] = 8'(Rdecl >> 8); img[52] = 8'(Rdecl);
 				blk_n = (Rdecl == 0 || Rdecl != R) ? 0 : B;
 				for (int i = 0; i < blk_n; i++) blk[i] = img[128 + R + i];

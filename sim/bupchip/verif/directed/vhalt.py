@@ -13,7 +13,9 @@ to the end marker: the last byte or word of each window (an unaligned word
 load whose first byte is the last ROM or asset byte included), LDM from the
 ROM, MSR forms that write only what the core has, and condition-failed forms
 of halting encodings. IMAGE.a78 must hold 1 KiB of assets (run.sh makes it).
-Exit status 1 if any case fails.
+Exit status 1 if any case fails. With THUMB=1 (or MODES=1) in the
+environment the binary is DARIA's core, whose MODES 1 accepts SYS mode and
+the I and F bits: those two MSR cases then must run on instead of halting.
 SPDX-License-Identifier: MIT
 """
 import os
@@ -23,6 +25,9 @@ import sys
 
 UNDEF, REG, THUMB, FETCH, DATA, RO, BLOCK = 1, 2, 3, 4, 5, 6, 7
 GO = 0
+# MODES 1 (DARIA's core, also in the BupChip profile) takes MSR to SYS mode
+# and with I or F clear; MODES 0 halts on both.
+MODES1 = os.environ.get("THUMB", "0") != "0" or os.environ.get("MODES", "0") != "0"
 
 # (name, expected code or GO, set-up lines, the instruction under test)
 CASES = [
@@ -49,8 +54,8 @@ CASES = [
     ("mrs_sbz", UNDEF, [], ".word 0xe10f0001"),
     ("msr_s_field", UNDEF, [], ".word 0xe124f000"),        # msr cpsr_s, r0
     ("msr_fs", UNDEF, [], ".word 0xe12cf000"),             # msr cpsr_fs, r0
-    ("msr_sys_mode", UNDEF, ["mov r0, #0xdf"], "msr cpsr_c, r0"),
-    ("msr_irq_enable", UNDEF, ["mov r0, #0x53"], "msr cpsr_c, r0"),
+    ("msr_sys_mode", GO if MODES1 else UNDEF, ["mov r0, #0xdf"], "msr cpsr_c, r0"),
+    ("msr_irq_enable", GO if MODES1 else UNDEF, ["mov r0, #0x53"], "msr cpsr_c, r0"),
     ("msr_fc_reserved", UNDEF, ["ldr r0, =0x010000d3"], "msr cpsr_fc, r0"),
     ("umulls", UNDEF, [], ".word 0xe0910392"),
     ("smlal", UNDEF, [], ".word 0xe0e10392"),

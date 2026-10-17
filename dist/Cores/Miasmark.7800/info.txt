@@ -4,7 +4,7 @@ with thanks to its contributors. See the project README for full credits.
 
 Cartridges: .a78 (with header), .a26 / .bin (2600).
 Firmware (all optional, in /Assets/7800/common/):
-  7800bios.bin      7800 BIOS; turn off "Skip BIOS" to boot through it
+  7800bios.bin      7800 BIOS; turn off "Skip BIOS" to boot 7800 games through it
   highscor.rom      High Score Cartridge firmware (4 KiB), needed for the HSC;
   or hsc.a78        the same firmware with an A78 header
   supercharger.bin  Starpath Supercharger BIOS (2 KiB), for 2600 SC games

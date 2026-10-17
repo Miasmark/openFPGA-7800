@@ -5,8 +5,10 @@
 // between clk_sys, clk_arm and clk_74a.
 //
 // Clocks. clk_sys (console, loader, audio out); clk_arm (the CPU and
-// everything around it; 2 x clk_sys for S1, from the same VCO and edge
-// aligned); clk_74a (the 48 kHz tick only). Crossings (design, "Crossings"):
+// everything around it), from the same VCO as clk_sys (VCO/48): VCO/24, 2 x
+// clk_sys, for the BupChip alone; VCO/19, 36.17 MHz, with POCKET_DARIA, so 48
+// clk_arm to 19 clk_sys with one clk_sys edge in 19 shared; clk_74a (the
+// 48 kHz tick only). Crossings (design, "Crossings"):
 //
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect
 //   hold, pause      clk_sys -> clk_arm   two flops
@@ -15,6 +17,8 @@
 //   audio frame      clk_arm -> clk_sys   frame held, toggle, captured on the
 //                                         change between the second and third
 //                                         flops
+//
+// and with POCKET_DARIA the ones listed under DARIA below.
 //
 // Nothing else crosses, so the wrapper stays correct if clk_arm ever gets a
 // PLL of its own: the peripheral's mute (clk_arm) is applied to the frame as
@@ -54,12 +58,16 @@
 // waits one clock, so the frame read is never stale.
 //
 // PSRAM: the wrapper drives psram.sv's user ports (agg23, MIT, vendored in
-// pocket_utils/psram.sv, instantiated by the parent on clk_arm with
-// CLOCK_SPEED = 28.636364 and bank 0 of cram0).
+// pocket_utils/psram.sv, instantiated by the parent on clk_arm with bank 0
+// of cram0, CLOCK_SPEED = 28.636364, or 50.0 with POCKET_DARIA:
+// atari7800_pocket.sv).
 //
 // BUP_DEBUG adds dbg_status / dbg_halt_pc (clk_arm), dbg_load, shadow FIFO
 // counters and the throttle (BUP_THROTTLE of every 16 clocks may start an
-// instruction):
+// instruction). With POCKET_DARIA clk_arm is no longer 2 x clk_sys, so the
+// clk_arm bits of all three reach clk_sys through a snapshot
+// (bup_dbg_snap.sv, one copy every 1,024 clk_sys; the clk_sys bits of
+// dbg_load pass straight through) and the outputs are clk_sys registers:
 //
 //   dbg_status [31] cpu_run      [30] fw_loaded     [29] asset_ready
 //              [28] halted       [27:24] halt_code
@@ -79,6 +87,51 @@
 // pop while not empty; overflow is a push at PCM_DEPTH, underflow a pop while
 // pcm_available is low.
 //
+// DARIA (docs/DARIA_CORE.md, "The memory system"), built with POCKET_DARIA:
+// the same CPU instance runs the 2600 ARM cartridges too, with THUMB 1 and
+// CODE_AW 15, in a second profile. daria_profile (clk_sys, static while the
+// CPU runs) picks it; the profile, daria_ram32 and the mapper reset reach
+// clk_arm through two flops.
+//
+//   hold    = ~pll_locked_s | pll_busy_s | ~(souper_profile | daria_profile)
+//   pre_run = ~hold (two clk_arm flops) & ready & ~(prof26 & mapper reset)
+//             ready: prof26 ? img_ready : fw_loaded & asset_ready
+//
+// Memories (daria_mem.sv): the firmware ROM stays as above; the image window
+// (the image's first WIN_KB, 64 KB: two 8K x 32 RAMs) gives the fetch and data
+// words in the 2600 profile, the profile picking rom_q and rom_dq; the cart
+// RAM (8K x 32, byte lanes) replaces the BupChip's RAM, which is its low
+// 16 KB, its port B the front ends' on clk_sys; the front-end ROM takes the
+// cartridge's first 32 KB as the loader delivers them (the capture's
+// cartridge window); the state RAM holds the call block (daria_call.sv). The
+// asset cache has WAYS 2 and serves both profiles. MMIO: the peripheral sees
+// reg_sel only in the BupChip profile, daria_mmio.sv only in the 2600 one,
+// and reg_rdata is their OR, the peripheral's masked in the 2600 profile
+// (it decodes reg_addr alone). While cpu_run is low the CPU, the peripheral,
+// daria_call and daria_mmio (both clocks) are held, so a new cartridge, a
+// mapper reset or a PAL retune clears MAMCR, TCR and TC (P4) and abandons a
+// call. The front ends' side (clk_sys): call_tog in, ret_tog out (the call
+// block in state RAM port B), daria_ready (parked & img_ready, registered on
+// clk_arm first, so the first clk_sys flop samples one register: ready_a)
+// and daria_halted through two clk_sys flops, cart RAM port B, front-end ROM
+// ports A and B, the capture's cartridge window (daria_cart_win, clk_sys),
+// and the sample port: daria_smp.sv answers the front end's sample
+// requests (a toggle and a held address in, a held byte and a toggle out)
+// with one PSRAM halfword read each, ahead of the cache at the writer's read
+// port, and $FF at once while the image is not readable (the 2600 profile,
+// img_ready and no hold). It is never reset.
+//
+// DARIA's crossings, besides the ones above (the profile, daria_ram32 and
+// the mapper reset are levels through two clk_arm flops):
+//
+//   call_tog         clk_sys -> clk_arm   daria_call.sv
+//   ret_tog          clk_arm -> clk_sys   daria_fe (two clk_sys flops)
+//   ready, halted    clk_arm -> clk_sys   two flops (ready from ready_a)
+//   cpu_run          clk_arm -> clk_sys   two flops (daria_mmio's reset)
+//   MMIO             both ways            daria_mmio.sv
+//   sample request   clk_sys -> clk_arm   toggle, two flops; address held
+//   sample answer    clk_arm -> clk_sys   byte held, toggle (daria_fe)
+//
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 
@@ -88,7 +141,8 @@ module bupchip_pocket #(
 	parameter int PCM_DEPTH    = 1024,
 	parameter int BUP_THROTTLE = 16,    // BUP_DEBUG: clocks of every 16 that may start an instruction
 	parameter bit PREEMPT      = 1'b1,  // bup_asset_cache
-	parameter bit PREFETCH     = 1'b1   // bup_asset_cache
+	parameter bit PREFETCH     = 1'b1,  // bup_asset_cache
+	parameter int WIN_KB       = 64     // POCKET_DARIA: the image window (decision 8; up to 128 for tests)
 ) (
 	input  wire        clk_sys,
 	input  wire        clk_arm,
@@ -132,6 +186,40 @@ module bupchip_pocket #(
 	input  wire        psram_read_avail,
 	input  wire [15:0] psram_data_out,
 	input  wire        psram_busy
+`ifdef POCKET_DARIA
+	,
+	// DARIA, clk_sys: the profile, and the front ends' side of the CPU.
+	input  wire        daria_profile,   // a 2600 ARM cartridge; static while the CPU runs
+	input  wire        daria_ram32,     // its cart RAM is 32 KB (CDFJ+), else 8 KB
+	input  wire        daria_pal,       // the region clk_sys runs at, for timer 1's rate
+	input  wire        daria_mreset,    // the mapper reset, a level
+	input  wire        daria_call_tog,  // a call is posted in the call block
+	output wire        daria_ret_tog,   // its return words are in the call block (clk_arm)
+	output logic       daria_ready,     // parked & img_ready, two clk_sys flops
+	output logic       daria_halted,    // the CPU halted, two clk_sys flops
+	input  wire  [7:0] daria_stb_addr,  // state RAM port B
+	input  wire        daria_stb_we,
+	input  wire  [3:0] daria_stb_be,
+	input  wire [31:0] daria_stb_wd,
+	output wire [31:0] daria_stb_q,
+	input  wire [12:0] daria_crb_addr,  // cart RAM port B
+	input  wire        daria_crb_we,
+	input  wire  [3:0] daria_crb_be,
+	input  wire [31:0] daria_crb_wd,
+	output wire [31:0] daria_crb_q,
+	input  wire [12:0] daria_fea_addr,  // front-end ROM port A (not while the cartridge loads)
+	output wire [31:0] daria_fea_q,
+	input  wire [12:0] daria_feb_addr,  // front-end ROM port B
+	output wire [31:0] daria_feb_q,
+	output wire        daria_cart_win,  // the capture's cartridge window (bup_capture.cart_win)
+	// The front end's sample port (daria_fe smp_*): a request toggle and the
+	// image byte offset, held while the request is open (clk_sys); the answer
+	// byte, held from before the answer toggle flips (clk_arm).
+	input  wire        daria_smp_req,
+	input  wire [18:0] daria_smp_addr,
+	output wire        daria_smp_ack,
+	output wire  [7:0] daria_smp_data
+`endif
 `ifdef BUP_DEBUG
 	,
 	output logic [31:0] dbg_status,
@@ -149,7 +237,11 @@ module bupchip_pocket #(
 	always_ff @(posedge clk_sys) begin
 		locked_s <= {locked_s[0], pll_locked};
 		busy_s <= {busy_s[0], pll_busy};
+`ifdef POCKET_DARIA
+		hold_sys <= ~locked_s[1] | busy_s[1] | ~(souper_profile | daria_profile);
+`else
 		hold_sys <= ~locked_s[1] | busy_s[1] | ~souper_profile;
+`endif
 	end
 
 	logic [1:0] hold_a = 2'b11, pause_a = 2'b00;
@@ -161,7 +253,23 @@ module bupchip_pocket #(
 
 	wire        asset_ready, fw_loaded, sweep_done;
 	wire [23:0] asset_size;
+	wire        img_ready;
+	wire [19:0] img_size;
+`ifdef POCKET_DARIA
+	// The profile and the mapper reset, static while the CPU runs.
+	logic [1:0] prof_a = 2'b00, ram32_a = 2'b00, mres_a = 2'b11;
+	always_ff @(posedge clk_arm) begin
+		prof_a <= {prof_a[0], daria_profile};
+		ram32_a <= {ram32_a[0], daria_ram32};
+		mres_a <= {mres_a[0], daria_mreset};
+	end
+	wire        prof26 = prof_a[1];
+	wire        pre_run = ~hold_a[1] & ~(prof26 & mres_a[1]) &
+	                      (prof26 ? img_ready : fw_loaded & asset_ready);
+`else
+	wire        prof26 = 1'b0;
 	wire        pre_run = ~hold_a[1] & fw_loaded & asset_ready;
+`endif
 	logic       cpu_run = 1'b0;
 	always_ff @(posedge clk_arm)
 		cpu_run <= pre_run & sweep_done;
@@ -179,6 +287,9 @@ module bupchip_pocket #(
 		.fw_download, .fw_valid,
 		.msg_type, .msg_pl, .msg_tog,
 		.seq_err(cap_seq_err), .lost(cap_lost), .cart_win(cap_cart_win), .fw_win(cap_fw_win));
+`ifdef POCKET_DARIA
+	assign daria_cart_win = cap_cart_win;	// daria_fe's c_close is its fall
+`endif
 
 	wire        rom_we;
 	wire [11:0] rom_wa;
@@ -186,18 +297,30 @@ module bupchip_pocket #(
 	wire        rd_req, rd_ack;
 	wire [21:0] rd_addr;
 
+	wire        win_we;
+	wire [14:0] win_wa;
+	wire [31:0] win_wd;
+	wire  [3:0] win_be;
+
 	bup_asset_wr writer (
 		.clk(clk_arm),
 		.msg_type, .msg_pl, .msg_tog,
-		.asset_ready, .asset_size, .fw_loaded,
+		.asset_ready, .asset_size, .fw_loaded, .img_ready, .img_size,
 		.rom_we, .rom_wa, .rom_wd,
+		.win_we, .win_wa, .win_wd, .win_be,
 		.rd_req, .rd_addr, .rd_ack,
 		.psram_bank_sel, .psram_addr, .psram_write_en, .psram_data_in,
 		.psram_write_high_byte, .psram_write_low_byte, .psram_read_en, .psram_busy,
 		.overrun(wr_overrun), .fw_start(wr_fw_start));
 
 	// ---- the CPU and its memories -------------------------------------------------------
+`ifdef POCKET_DARIA
+	wire  [14:0] rom_addr;
+	localparam int CACHE_WAYS = 2;
+`else
 	wire  [11:0] rom_addr;
+	localparam int CACHE_WAYS = 1;
+`endif
 	wire  [31:0] rom_q, rom_dq, ram_q, d_addr, ram_wdata, w_addr, reg_wdata, reg_rdata, asset_q;
 	wire   [3:0] ram_be;
 	wire   [1:0] w_size;
@@ -215,8 +338,22 @@ module bupchip_pocket #(
 	wire   [3:0] rt_nzcv, rt_e_idx, rt_w_idx;
 `endif
 
+`ifdef POCKET_DARIA
+	wire         call_go, parked, returned, ro_valid;
+	wire   [4:0] clr_e;
+	wire   [2:0] ro_idx;
+	wire  [31:0] clr_wd, clr_pc, ro_data;
+
+	bup_cpu #(.MODES(1'b1), .THUMB(1'b1), .CODE_AW(15), .WIN_KB(WIN_KB)) cpu (
+		.clk(clk_arm), .rst(~cpu_run), .freeze, .w_wait, .arm_only(~prof26),
+		.prof26, .img_size, .ram32(ram32_a[1]), .call_go, .clr_wd, .clr_pc,
+		.clr_e, .parked, .returned, .ro_valid, .ro_idx, .ro_data,
+`else
 	bup_cpu cpu (
-		.clk(clk_arm), .rst(~cpu_run), .freeze, .w_wait,
+		.clk(clk_arm), .rst(~cpu_run), .freeze, .w_wait, .arm_only(1'b1),
+		.prof26(1'b0), .img_size(20'd0), .ram32(1'b0), .call_go(1'b0), .clr_wd(32'd0), .clr_pc(32'd0),
+		.clr_e(), .parked(), .returned(), .ro_valid(), .ro_idx(), .ro_data(),
+`endif
 		.rom_addr, .rom_q,
 		.d_addr, .ram_we, .ram_be, .ram_wdata, .rom_dq, .ram_q,
 		.asset_size, .asset_q, .w_asset, .w_addr, .w_size,
@@ -229,6 +366,59 @@ module bupchip_pocket #(
 `endif
 	);
 
+`ifdef POCKET_DARIA
+	// The firmware ROM's words, picked with the window's by the profile.
+	wire [31:0] fw_q, fw_dq;
+	cache_ram_dp #(.ADDR_WIDTH(12), .DATA_WIDTH(32)) rom (
+		.clk_i(clk_arm),
+		.addr_a_i(rom_addr[11:0]), .wren_a_i(1'b0), .wdata_a_i(32'd0), .q_a_o(fw_q),
+		.addr_b_i(fw_loaded ? d_addr[13:2] : rom_wa), .wren_b_i(rom_we && !fw_loaded),
+		.wdata_b_i(rom_wd), .q_b_o(fw_dq));
+
+	// The window, the cart RAM (the BupChip's RAM is its low 16 KB), the
+	// front-end ROM and the state RAM. The front-end ROM takes the cartridge
+	// slot's bytes below 32 KB inside the capture's cartridge window.
+	wire [31:0] win_qa, win_qb;
+	wire  [7:0] sta_addr;
+	wire        sta_we;
+	wire [31:0] sta_wd, sta_q;
+	daria_mem #(.WIN_KB(WIN_KB)) mem (
+		.clk_arm, .clk_sys,
+		.rom_addr, .win_qa, .d_addr, .win_qb,
+		.ram_we, .ram_be, .ram_wdata, .ram_q,
+		.img_ready, .win_we, .win_wa, .win_wd, .win_be,
+		.sta_addr, .sta_we, .sta_wd, .sta_q,
+		.cap_we(load_valid && cap_cart_win && load_addr[24:15] == 10'd0),
+		.cap_addr(load_addr[14:0]), .cap_data(load_data),
+		.fea_addr(daria_fea_addr), .fea_q(daria_fea_q), .feb_addr(daria_feb_addr), .feb_q(daria_feb_q),
+		.crb_addr(daria_crb_addr), .crb_we(daria_crb_we), .crb_be(daria_crb_be), .crb_wd(daria_crb_wd),
+		.crb_q(daria_crb_q),
+		.stb_addr(daria_stb_addr), .stb_we(daria_stb_we), .stb_be(daria_stb_be), .stb_wd(daria_stb_wd), .stb_q(daria_stb_q));
+	assign rom_q  = prof26 ? win_qa : fw_q;
+	assign rom_dq = prof26 ? win_qb : fw_dq;
+
+	// The call port's clk_arm side; reset while the CPU is held.
+	daria_call call (
+		.clk(clk_arm), .rst(~cpu_run), .call_tog(daria_call_tog), .ret_tog(daria_ret_tog),
+		.parked, .call_go, .clr_e, .clr_wd, .clr_pc,
+		.ro_valid, .ro_idx, .ro_data, .returned,
+		.sta_addr, .sta_we, .sta_wd, .sta_q);
+
+	// Ready and halted, to the front ends. parked decodes the CPU's state, so
+	// ready is registered on clk_arm first: the first clk_sys flop samples
+	// one register, never a decode that may be settling (plan P21).
+	/* verilator lint_off PROCASSINIT */
+	logic       ready_a = 1'b0;
+	/* verilator lint_on PROCASSINIT */
+	always_ff @(posedge clk_arm) ready_a <= parked & img_ready;
+	logic [1:0] ready_s = 2'b00, halted_s = 2'b00;
+	always_ff @(posedge clk_sys) begin
+		ready_s <= {ready_s[0], ready_a};
+		halted_s <= {halted_s[0], halted};
+	end
+	assign daria_ready = ready_s[1];
+	assign daria_halted = halted_s[1];
+`else
 	// Port B belongs to the receiver while fw_loaded is low: the CPU is held
 	// then, so it makes no data reads.
 	cache_ram_dp #(.ADDR_WIDTH(12), .DATA_WIDTH(32)) rom (
@@ -242,12 +432,29 @@ module bupchip_pocket #(
 		.wdata_a_i(ram_wdata), .q_a_o(ram_q),
 		.clk_b_i(clk_arm), .addr_b_i(12'd0), .wren_b_i(1'b0), .byteena_b_i(4'd0),
 		.wdata_b_i(32'd0), .q_b_o());
+`endif
 
 	wire st_miss, st_pf, st_preempt, st_late, st_stall;
-	bup_asset_cache #(.PREEMPT(PREEMPT), .PREFETCH(PREFETCH)) cache (
+`ifdef POCKET_DARIA
+	// The cache's reads reach the writer through the sample requester, which
+	// takes the read port for the front end's samples (daria_smp.sv).
+	wire        c_rd_req, c_rd_ack;
+	wire [21:0] c_rd_addr;
+	daria_smp smp (
+		.clk(clk_arm),
+		.smp_req(daria_smp_req), .smp_addr(daria_smp_addr), .smp_ack(daria_smp_ack), .smp_data(daria_smp_data),
+		.readable(prof26 & img_ready & ~hold_a[1]),
+		.c_rd_req, .c_rd_addr, .c_rd_ack,
+		.rd_req, .rd_addr, .rd_ack, .rd_avail(psram_read_avail), .rd_data(psram_data_out));
+`endif
+	bup_asset_cache #(.PREEMPT(PREEMPT), .PREFETCH(PREFETCH), .WAYS(CACHE_WAYS)) cache (
 		.clk(clk_arm), .pre_run, .run(cpu_run), .sweep_done,
 		.d_addr, .w_asset, .w_addr, .w_size, .asset_q, .w_wait,
+`ifdef POCKET_DARIA
+		.rd_req(c_rd_req), .rd_addr(c_rd_addr), .rd_ack(c_rd_ack), .rd_avail(psram_read_avail), .rd_data(psram_data_out),
+`else
 		.rd_req, .rd_addr, .rd_ack, .rd_avail(psram_read_avail), .rd_data(psram_data_out),
+`endif
 		.st_miss, .st_pf, .st_preempt, .st_late, .st_stall);
 
 `ifdef BUP_DEBUG
@@ -295,11 +502,34 @@ module bupchip_pocket #(
 	wire [31:0] pcm_frame;
 	wire  [7:0] fault_code;
 
+`ifdef POCKET_DARIA
+	// Each profile's MMIO sees reg_sel only in its own profile. daria_mmio
+	// answers 0 unless selected; the peripheral decodes reg_addr alone, so its
+	// word is masked in the 2600 profile. The peripheral is held there.
+	wire        per_sel = reg_sel && !prof26;
+	wire [31:0] per_rdata, mmio_rdata;
+	assign reg_rdata = (prof26 ? 32'd0 : per_rdata) | mmio_rdata;
+
+	logic [1:0] run_s = 2'b00;
+	always_ff @(posedge clk_sys) run_s <= {run_s[0], cpu_run};
+	daria_mmio mmio (
+		.clk_arm, .rst_arm(~cpu_run), .sel(reg_sel && prof26), .write(reg_write), .addr(w_addr),
+		.size(w_size), .wdata(reg_wdata), .rdata(mmio_rdata),
+		.clk_sys, .rst_sys(~run_s[1]), .pal(daria_pal), .run(~pause));
+
+	bupchip_peripheral #(.CMD_DEPTH(8), .PCM_DEPTH(PCM_DEPTH)) per (
+		.clk(clk_arm), .reset(~cpu_run | prof26),
+		.cmd_valid(cmd_valid_arm), .cmd_data(cmd_data_arm),
+		.reg_sel(per_sel), .reg_addr, .reg_write, .reg_wdata(reg_wdata_eff), .reg_rdata(per_rdata),
+		.pcm_pop, .pcm_frame, .pcm_available, .pcm_enabled, .muted, .fault_code);
+`else
+	wire        per_sel = reg_sel;
 	bupchip_peripheral #(.CMD_DEPTH(8), .PCM_DEPTH(PCM_DEPTH)) per (
 		.clk(clk_arm), .reset(~cpu_run),
 		.cmd_valid(cmd_valid_arm), .cmd_data(cmd_data_arm),
 		.reg_sel, .reg_addr, .reg_write, .reg_wdata(reg_wdata_eff), .reg_rdata,
 		.pcm_pop, .pcm_frame, .pcm_available, .pcm_enabled, .muted, .fault_code);
+`endif
 
 	// ---- 48 kHz pop and the frame register ------------------------------------------------
 	wire  tick;
@@ -344,9 +574,9 @@ module bupchip_pocket #(
 	logic [LW-1:0] sh_pcm = '0, sh_min = '0, sh_wm = '0;
 	logic          sh_cmd_ovf = 1'b0, sh_pcm_ovf = 1'b0, sh_pcm_unf = 1'b0, sh_armed = 1'b0;
 
-	wire c_wr    = reg_sel && reg_write;
+	wire c_wr    = per_sel && reg_write;
 	wire c_inc   = cmd_valid_arm && sh_cmd != 4'd8;
-	wire c_dec   = reg_sel && !reg_write && reg_addr == 8'h04 && sh_cmd != 4'd0;
+	wire c_dec   = per_sel && !reg_write && reg_addr == 8'h04 && sh_cmd != 4'd0;
 	wire c_flush = c_wr && reg_addr == 8'h0C && reg_wdata[1];
 	wire p_push  = c_wr && reg_addr == 8'h10;
 	wire p_inc   = p_push && sh_pcm != LW'(PCM_DEPTH);
@@ -380,10 +610,9 @@ module bupchip_pocket #(
 	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
 
 	wire [10:0] sh_min11 = (sh_min > LW'(2047)) ? 11'h7FF : 11'(sh_min);
-	assign dbg_status = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
+	wire [31:0] dbg_status_arm = {cpu_run, fw_loaded, asset_ready, halted, halt_code,
 		sh_cmd_ovf, sh_pcm_ovf, sh_pcm_unf, muted, fault_code,
 		cap_err_a[1] | wr_overrun, sh_min11};
-	assign dbg_halt_pc = halt_pc;
 
 	// The firmware as written into the ROM (clk_arm): words since FWSTART,
 	// whether each went to the word after the last, and their CRC-32 (zlib's,
@@ -425,10 +654,29 @@ module bupchip_pocket #(
 		.t_pre(pr_t_pre), .fw_tail(pr_fw_tail), .cart_tail(pr_cart_tail), .word_min(pr_word_min),
 		.err_at(pr_err_at));
 
+`ifdef POCKET_DARIA
+	// The clk_arm bits through the snapshot (plan P15, open item 11): the
+	// status word, the halt PC and dbg_load's wr_overrun, fc_crc_ok,
+	// fc_order and fc_count. dbg_status_arm and dbg_halt_pc are the words
+	// on the clk_arm side, dbg_snap.q_sys the copy on clk_sys.
+	wire [14:0] dbg_load_arm = {wr_overrun, fc_crc_ok, fc_order, fc_count};
+	wire [78:0] dbg_snap_q;
+	bup_dbg_snap #(.N(79)) dbg_snap (
+		.clk_sys, .clk_arm, .d_arm({dbg_status_arm, halt_pc, dbg_load_arm}), .q_sys(dbg_snap_q));
+	assign dbg_status = dbg_snap_q[78:47];
+	assign dbg_halt_pc = dbg_snap_q[46:15];
+	// Display only: bup_status_osd samples it on clk_sys.
+	assign dbg_load = {cap_seq_err, cap_lost, dbg_snap_q[14],
+		pr_err_at, pr_word_min, pr_cart_tail, pr_fw_tail, pr_t_pre, pr_dropped,
+		pr_cart_late, pr_fw_late, dbg_snap_q[13:12], 2'b00, pr_foreign, dbg_snap_q[11:0]};
+`else
+	assign dbg_status = dbg_status_arm;
+	assign dbg_halt_pc = halt_pc;
 	// Display only: bup_status_osd samples it on clk_sys.
 	assign dbg_load = {cap_seq_err, cap_lost, wr_overrun,
 		pr_err_at, pr_word_min, pr_cart_tail, pr_fw_tail, pr_t_pre, pr_dropped,
 		pr_cart_late, pr_fw_late, fc_crc_ok, fc_order, 2'b00, pr_foreign, fc_count};
+`endif
 `endif
 endmodule
 

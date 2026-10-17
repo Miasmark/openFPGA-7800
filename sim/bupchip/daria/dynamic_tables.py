@@ -3,8 +3,8 @@
 
   dynamic_tables.py [--scan scan.json] [--margin F] [--only SECTION,...] RUN_DIR...
 
-Sections: schemes, overview, types, clock, overruns, late, cache, mix, rom, ram, harmony, polls,
-determinism
+Sections: schemes, overview, types, clock, overruns, late, divs, daria, cache, mix, rom, ram, harmony,
+polls, determinism
 (--ref DIR: compare each run with the run of the same name under DIR).
 
 Safe budget of a call: the time the 6507 was held plus the slack it had left
@@ -584,6 +584,177 @@ def sec_late(runs, margin):
     return table(hdr, rows)
 
 
+def sec_divs(runs, margin):
+    """Late calls (no margin) and the highest share of a call's safe budget, for S1
+    and S3 at each clk_arm divider of the 687.27 MHz VCO (block RAM, zero-wait;
+    DARIA_CORE.md, "Step 3 work")."""
+    vco = 687.272727
+    cfg = [("S1", "s1_cyc", d) for d in (21, 20, 19, 18, 17)] + [("S3", "s3_cyc", d) for d in (24, 21)]
+    hdr = ["Demo"] + ["%s \u00f7%d (%.2f MHz)" % (c, d, vco / d) for c, _, d in cfg]
+    rows = []
+    tot = [0] * len(cfg)
+    for R in runs:
+        if not R.has_s:
+            continue
+        bud = R.budgeted
+        cells = []
+        for i, (_, col, d) in enumerate(cfg):
+            hz = vco / d * 1e6
+            late = sum(1 for r in bud if r[col] / hz > r["safe"] / SYS_HZ)
+            share = max(((r[col] / hz) / (r["safe"] / SYS_HZ) for r in bud), default=0)
+            tot[i] += late
+            cells.append("%d (%.0f%%)" % (late, 100 * share))
+        rows.append([R.short] + cells)
+    rows.append(["total late"] + [str(t) for t in tot])
+    return table(hdr, rows)
+
+
+def load_daria(R):
+    """daria.csv of a SHADOW=1 run (daria_shadow.svh), by call; None without one."""
+    p = os.path.join(R.path, "daria.csv")
+    if not os.path.exists(p):
+        return None
+    with open(p) as f:
+        return {int(r["call"]): r for r in csv.DictReader(f)}
+
+
+def sec_daria(runs, margin):
+    """DARIA beside upstream (SHADOW=1 runs): calls compared and how many differ;
+    late calls, DARIA's measured time from the post to the last return word
+    read against the safe budget (no margin), beside the model's S1 at ÷18
+    (sec_divs); the highest share of a budget; and DARIA's clocks per call
+    over the model's s1_cyc (DARIA's include the launch and readout, 28)."""
+    hz = 687.272727e6 / 18
+    hdr = ["Demo", "Calls compared", "Differ", "Skipped", "Budgeted", "DARIA late", "Model late",
+           "DARIA max share", "Model max share", "DARIA clk / s1_cyc p50", "max"]
+    rows = []
+    tot = [0, 0, 0, 0]
+    for R in runs:
+        D = load_daria(R)
+        if D is None:
+            continue
+        skipped = 0
+        with open(os.path.join(R.path, "run.log")) as f:
+            for line in f:
+                if line.startswith("DARIA shadow:"):
+                    skipped = int(line.split(",")[2].split()[0])
+        differ = sum(1 for d in D.values() if d["result"] != "ok")
+        bud = [(r, D[r["call"]]) for r in R.budgeted if r["call"] in D]
+        dl = sum(1 for r, d in bud if int(d["e2e_sys"]) > r["safe"])
+        ml = sum(1 for r, d in bud if r["s1_cyc"] / hz > r["safe"] / SYS_HZ) if R.has_s else None
+        dshare = max((int(d["e2e_sys"]) / r["safe"] for r, d in bud), default=0)
+        mshare = max(((r["s1_cyc"] / hz) / (r["safe"] / SYS_HZ) for r, d in bud), default=0) if R.has_s else 0
+        ratio = sorted(int(D[r["call"]]["daria_clk"]) / r["s1_cyc"] for r in R.rows
+                       if r["call"] in D and R.has_s and r["s1_cyc"] > 0)
+        tot[0] += len(D)
+        tot[1] += differ
+        tot[2] += dl
+        tot[3] += ml or 0
+        rows.append([R.short, len(D), differ, skipped, len(bud), dl, "-" if ml is None else ml,
+                     "%.0f%%" % (100 * dshare), "%.0f%%" % (100 * mshare),
+                     "%.2f" % pct(ratio, 50) if ratio else "-", "%.2f" % ratio[-1] if ratio else "-"])
+    if not rows:
+        return "No run has daria.csv (run_daria.sh with SHADOW=1)."
+    rows.append(["total", tot[0], tot[1], "", "", tot[2], tot[3], "", "", "", ""])
+    return table(hdr, rows)
+
+
+def sec_fe(runs, margin):
+    """The front-end shadow (FE=1 runs, fe_shadow.svh). Not in the default list: --only fe.
+
+    Stage 1 (daria_fe as u_fe, design 12.4): per run, the 6507 latches, commits,
+    calls, services and audio ticks compared; every must-be-0 count that is not
+    0 (bad, from the "FE bad:" line: L1 dout, C1/C2 state, C3/C4/I1/K1/K2/R3 RAM,
+    R1 call, R2 svc, T1 tick, A1 audio, the RTL assertions, A2/A3, the bench
+    assertions); the counted classes of design 9.5 that occurred; the stage-0
+    reference's dout/state beside it; the result.
+
+    Stage 0 (the reference alone, FE_STAGE0=1, and older runs): the latches and
+    commits checked, the bad counts (dout is L1, state is C1/C2, the tap checks
+    are port, rom, ram, pointer, jump map and L3), the read latches whose byte
+    came from RAM, the hidden pclk0 edges (information), the E0 -> latch range
+    (S1) and the console resets and handoffs."""
+    import re
+    s1_hdr = ["Demo", "Scheme", "Hook", "Frames", "Latches", "Commits", "Calls", "Services", "Ticks",
+              "Bad (must be 0)", "Classes counted", "Reference dout/state", "Result"]
+    s0_hdr = ["Demo", "Scheme", "Frames", "Latches", "Commits", "dout bad", "state bad",
+              "port/rom/ram/ptr/jump/L3 bad", "RAM reads", "Hidden pclk0 (differ)", "E0->latch",
+              "E0->latch < 6", "Resets/handoffs"]
+    s1_rows, s0_rows = [], []
+    for R in runs:
+        if not os.path.exists(os.path.join(R.path, "fe.csv")):
+            continue
+        with open(os.path.join(R.path, "fe.csv")) as f:
+            frames = sum(1 for _ in csv.DictReader(f))
+        sh = det = rd = rs = short6 = None
+        st1 = bad = cls = ref = res = inp = None
+        with open(os.path.join(R.path, "run.log")) as f:
+            for line in f:
+                if line.startswith("FE shadow:"):
+                    st1 = re.match(r"FE shadow: (\S+) (\d+) latches, (\d+) commits, (\d+) calls, (\d+) services, "
+                                   r"(\d+) ticks compared", line)
+                    sh = re.match(r"FE shadow: (\S+) (\d+) latches, (\d+) commits; dout (\d+), "
+                                  r"state (\d+) bad; E0->latch (\S+)", line)
+                elif line.startswith("FE bad:"):
+                    bad = line[len("FE bad:"):].strip()
+                elif line.startswith("FE classes:"):
+                    cls = line[len("FE classes:"):].strip()
+                elif line.startswith("FE reference:"):
+                    ref = re.match(r"FE reference: \S+ \d+ latches, \d+ commits; dout (\d+), state (\d+) bad", line)
+                elif line.startswith("FE result:"):
+                    res = line[len("FE result:"):].strip()
+                elif line.startswith("FE inputs:"):
+                    inp = re.search(r"hook (\d+)", line)
+                elif line.startswith("FE detail:"):
+                    # Older runs have no ram/pointer fields.
+                    det = re.search(r"(?P<hid>\d+) hidden pclk0 \((?P<hbad>\d+) differ.*"
+                                    r"port (?P<port>\d+), rom (?P<rom>\d+), "
+                                    r"(?:ram (?P<ram>\d+), pointer (?P<ptr>\d+), )?"
+                                    r"jump map (?P<jump>\d+), L3 (?P<l3>\d+) bad", line)
+                elif line.startswith("FE reads:"):
+                    rd = re.search(r"(\d+) with a RAM byte", line)
+                elif line.startswith("FE resets:"):
+                    rs = re.match(r"FE resets: (\d+) console resets.*, (\d+) handoffs", line)
+                elif line.startswith("FE S1:") and "latches with" in line:
+                    short6 = line.split()[2]
+        if st1:
+            def nonzero(text, skip=()):
+                if not text:
+                    return "?"
+                text = text.split(";")[0]
+                items = [x.strip() for x in text.split(",")]
+                nz = [x for x in items if x and not x.endswith(" 0") and not x.startswith(skip)]
+                return ", ".join(nz) if nz else "0"
+            tot = re.search(r"total (\d+)", bad or "")
+            badtxt = nonzero(bad)
+            if tot and badtxt == "0" and tot.group(1) != "0":
+                badtxt = "posts/accepts unpaired (%s)" % tot.group(1)
+            s1_rows.append([R.short, st1.group(1), inp.group(1) if inp else "?", frames, st1.group(2), st1.group(3),
+                            st1.group(4), st1.group(5), st1.group(6), badtxt,
+                            nonzero(cls, ("drift_",)) if cls else "?",  # drift_up/drift_fe: O1 information
+                            "%s/%s" % (ref.group(1), ref.group(2)) if ref else "-", res or "?"])
+            continue
+        if sh is None:
+            s0_rows.append([R.short, "(no FE shadow line)"] + [""] * (len(s0_hdr) - 2))
+            continue
+        if det:
+            tap = "/".join(det.group(k) or "-" for k in ("port", "rom", "ram", "ptr", "jump", "l3"))
+            hid = "%s (%s)" % (det.group("hid"), det.group("hbad"))
+        else:
+            tap = hid = "?"
+        s0_rows.append([R.short, sh.group(1), frames, sh.group(2), sh.group(3), sh.group(4),
+                        sh.group(5), tap, rd.group(1) if rd else "-", hid, sh.group(6), short6 or "?",
+                        "%s/%s" % (rs.group(1), rs.group(2)) if rs else "-"])
+    if not s1_rows and not s0_rows:
+        return "No run has fe.csv (run_daria.sh with FE=1)."
+    out = []
+    if s1_rows:
+        out.append("Stage 1 (daria_fe, mode A):\n\n" + table(s1_hdr, s1_rows))
+    if s0_rows:
+        out.append("Stage 0 (the reference front end):\n\n" + table(s0_hdr, s0_rows))
+    return "\n\n".join(out)
+
+
 def sec_harmony(runs, margin):
     """The call that uses most of its budget on a Harmony at zero wait.
 
@@ -674,8 +845,8 @@ def sec_determinism(runs, margin, ref):
     return table(hdr, rows)
 
 
-SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "cache", "mix", "rom", "ram", "harmony", "polls",
-            "determinism"]
+SECTIONS = ["schemes", "overview", "types", "clock", "overruns", "late", "divs", "daria", "cache", "mix", "rom", "ram", "harmony",
+            "polls", "determinism"]
 
 
 def main():

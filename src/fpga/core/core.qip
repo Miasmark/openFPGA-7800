@@ -73,6 +73,26 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 # identical redefinition without a warning.
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../pocket_utils/psram.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_cpu.sv]
+# DARIA (POCKET_DARIA; docs/DARIA_CORE.md): the memory system, the call port,
+# the timer, the debug snapshot (BUP_DEBUG) and the front end, its package
+# first. A build without the macro instantiates none of them, so Quartus
+# reads them but builds nothing from them. Their constraints and
+# synchroniser marks come in through ap_core.qsf's DARIA lines.
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_mem.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_call.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_mmio.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_smp.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_dbg_snap.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_pkg.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_seq.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_dec.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_core.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_audio.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_call.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_copy.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_arb.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe_guard.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/daria_fe.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_capture.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_wr.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) bupchip/bup_asset_cache.sv]

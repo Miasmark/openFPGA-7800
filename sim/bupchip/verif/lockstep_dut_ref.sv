@@ -12,7 +12,9 @@
 // P% of clocks are idle, and an owed W write may land in one of them or
 // with the next instruction's first clock, as a frozen execute stage would
 // do. This exercises the testbench's shadow-state rules before the new core
-// exists.
+// exists. A register is reported when its entry in the core's flat file
+// (every bank) changed, under the mode after the instruction, and each beat
+// carries the mode before it on rt_mode.
 //
 //   +romhex=FILE  firmware ROM (default: the ROMHEX define)
 //   +rom=FILE     .a78 image; the bytes after the cartridge are the assets
@@ -33,6 +35,9 @@ module lockstep_dut_ref (
 	output logic [31:0] rt_pc,
 	output logic [31:0] rt_insn,
 	output logic  [3:0] rt_nzcv,
+	output logic  [4:0] rt_mode,
+	output logic        rt_t,			// T after the instruction
+	output logic        rt_cunk,		// always 0: the reference's C is always known
 	output logic        rt_e_we,
 	output logic  [3:0] rt_e_idx,
 	output logic [31:0] rt_e_data,
@@ -155,6 +160,8 @@ module lockstep_dut_ref (
 		logic        start, v;
 		logic [31:0] pc, insn;
 		logic  [3:0] f;
+		logic        t;			// T after the instruction
+		logic  [4:0] mode;			// the mode before the instruction
 		logic        e_we;			// port E this beat
 		logic  [3:0] e_idx;
 		logic [31:0] e_d;
@@ -163,24 +170,28 @@ module lockstep_dut_ref (
 		logic [31:0] wn_d;
 	} beat_t;
 	beat_t       bq [$];
-	logic [31:0] snap [15];
+	assign rt_cunk = 1'b0;
+	logic [31:0] snap [30];		// the flat register file, every bank
 	logic  [3:0] snap_f;
+	logic  [4:0] snap_m;
 	logic        owe_we;
 	logic  [3:0] owe_idx;
 	logic [31:0] owe_d;
 
-	function automatic logic [31:0] dreg(input int k);	// as ref_reg in ref_system.svh
-		logic [4:0] m;
-		m = core.cpsr[4:0];
-		if (k < 8 || m == 5'h10 || m == 5'h1f) return core.rf[k];
-		if (m == 5'h11) return core.rf[k + 7];
-		if (k < 13) return core.rf[k];
+	// As bank and ref_reg in ref_system.svh.
+	function automatic int bank(input int k, input logic [4:0] m);
+		if (k < 8 || m == 5'h10 || m == 5'h1f) return k;
+		if (m == 5'h11) return k + 7;
+		if (k < 13) return k;
 		case (m)
-			5'h12:   return core.rf[22 + k - 13];
-			5'h13:   return core.rf[24 + k - 13];
-			5'h17:   return core.rf[26 + k - 13];
-			default: return core.rf[28 + k - 13];
+			5'h12:   return 22 + k - 13;
+			5'h13:   return 24 + k - 13;
+			5'h17:   return 26 + k - 13;
+			default: return 28 + k - 13;
 		endcase
+	endfunction
+	function automatic logic [31:0] dreg(input int k);
+		return core.rf[bank(k, core.cpsr[4:0])];
 	endfunction
 
 	// ARM condition codes on {N, Z, C, V}.
@@ -217,7 +228,11 @@ module lockstep_dut_ref (
 		z.pc = core.trace_retire_pc;
 		z.insn = i;
 		z.f = f;
-		if (cond_pass(i[31:28], snap_f)) begin
+		z.t = core.cpsr[5];
+		z.mode = snap_m;
+		// A Thumb retire (encoding {16'h0, halfword}) is one beat with every
+		// register it changed on port E, by the catch-all below.
+		if (!core.trace_retire_thumb && cond_pass(i[31:28], snap_f)) begin
 			if (i[27:25] == 3'b100) begin                                   // LDM / STM
 				for (int k = 0; k < 16; k++) if (i[k]) begin
 					beat_t x;
@@ -257,7 +272,7 @@ module lockstep_dut_ref (
 		// port E, the last one in the retire beat.
 		if (b.size() == 0) b.push_back(z);
 		for (int k = 14; k >= 0; k--)
-			if (post[k] !== snap[k] && !covered[k]) begin
+			if (post[k] !== snap[bank(k, core.cpsr[4:0])] && !covered[k]) begin
 				if (!b[b.size() - 1].e_we) begin
 					b[b.size() - 1].e_we = 1; b[b.size() - 1].e_idx = 4'(k); b[b.size() - 1].e_d = post[k];
 				end else begin
@@ -269,8 +284,9 @@ module lockstep_dut_ref (
 		b[0].start = 1;
 		b[b.size() - 1].v = 1;
 		foreach (b[n]) bq.push_back(b[n]);
-		for (int k = 0; k < 15; k++) snap[k] = post[k];
+		for (int k = 0; k < 30; k++) snap[k] = core.rf[k];
 		snap_f = f;
+		snap_m = core.cpsr[4:0];
 	endtask
 
 	always @(posedge clk) begin
@@ -280,8 +296,11 @@ module lockstep_dut_ref (
 		rt_w_we <= 0;
 		if (rst) begin
 			bq.delete();
-			for (int k = 0; k < 15; k++) snap[k] = 32'b0;
+			for (int k = 0; k < 30; k++) snap[k] = 32'b0;
 			snap_f = 4'b0;
+			snap_m = 5'h13;			// SVC, as the core leaves reset
+			rt_mode <= 5'h13;
+			rt_t <= 1'b0;
 			owe_we = 0;
 		end else begin
 			if (d_retire) add_record();
@@ -301,6 +320,8 @@ module lockstep_dut_ref (
 				rt_pc <= x.pc;
 				rt_insn <= x.insn;
 				rt_nzcv <= x.f;
+				rt_t <= x.t;
+				rt_mode <= x.mode;
 				rt_e_we <= x.e_we;
 				rt_e_idx <= x.e_idx;
 				rt_e_data <= x.e_d;

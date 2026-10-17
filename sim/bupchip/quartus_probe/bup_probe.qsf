@@ -58,3 +58,16 @@ set_instance_assignment -name VIRTUAL_PIN ON -to reg_wdata_o[*]
 set_instance_assignment -name VIRTUAL_PIN ON -to halted_o
 set_instance_assignment -name VIRTUAL_PIN ON -to halt_code_o[*]
 set_instance_assignment -name VIRTUAL_PIN ON -to halt_pc_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to prof_i
+set_instance_assignment -name VIRTUAL_PIN ON -to win_we_i
+set_instance_assignment -name VIRTUAL_PIN ON -to win_addr_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to win_data_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to crb_we_i
+set_instance_assignment -name VIRTUAL_PIN ON -to crb_addr_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to crb_be_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to crb_data_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to crb_q_o[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to cf_we_i
+set_instance_assignment -name VIRTUAL_PIN ON -to cf_addr_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to cf_data_i[*]
+set_instance_assignment -name VIRTUAL_PIN ON -to arm_only_i
