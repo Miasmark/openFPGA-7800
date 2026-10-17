@@ -637,8 +637,6 @@ The full record of step 7 is [`docs/daria_step7/record.md`](daria_step7/record.m
 
 The record's main sections are "What was built", "Decisions taken in step 7", "Fix B (Build A)", "The verification campaign c76 on the shipping tree" (the gates, the fits, the frame gate with its audio table, and mode B), "After c76: the final review", "Plan 7.7's fresh-clone run: c78", "Step 7's done-when, item by item", "Hand-over to step 8" and "After 2.2.1: `src/` clean-ups".
 
-Two `sim/` READMEs still cite this section for facts that are now only in the record. `sim/bupchip/s4/README.md` cites it for both sets' 28 of 28: see the record's "`s4/check.sh` on both sets". `sim/bupchip/quartus_probe/README.md` cites it for the step-7 fits: see "The fits". Both READMEs will point at the record at the next change to `sim/`.
-
 ## Comparisons: upstream and lroby74's fork (2026-10-07)
 
 Upstream MiSTer's ARM is the reference DARIA follows. The owner asked how a second implementation handles the same cartridges: lroby74's fork of the MiSTer core (github.com/lroby74/Atari7800_ARM_MiSTer, CC BY-NC 4.0). Its ARM and Thumb sources are not read (the clean-room rule), so it is measured as a black box only: its own Quartus build and its reports, and simulation of the whole core at the console's outputs. Everything built from it stays in `sim/work`.

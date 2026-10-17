@@ -216,5 +216,5 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
   copies of plan 2.7's synchroniser table; the self-test checks that they
   agree.
 
-The step-7 fits and their results are in `docs/DARIA_CORE.md`, "Step 7
-work", and `docs/daria_step7/plan.md` 5.2-5.4.
+The step-7 fits and their results are in `docs/daria_step7/record.md`
+("Fix B (Build A)" and "The fits") and `docs/daria_step7/plan.md` 5.2-5.4.
