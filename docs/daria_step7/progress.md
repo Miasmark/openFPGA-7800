@@ -488,6 +488,28 @@ Mutants, all seven of plan 7.2 CAUGHT, each on its named keys:
 This is the single `wire` gate run at the head that c76's record found missing.
 
 **What c77 leaves:**
-- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run.
-- **Plan 7.7's fresh-clone `step7_gates.sh` run** is still owed.
+- **The wire set at `baca4cd`, the merged head, is 97 scenarios.** The 97th, `pal2600_a78` (RTL-1, pinned and accepted for 2.2.1), ran on both builds in the fix round and in the tools re-review, not inside a full gate run. c78 then ran all 97 in its `wire` gate, in pieces on one build (below).
+- **Plan 7.7's fresh-clone `step7_gates.sh` run** was still owed. c78 ran it (below).
 - **The phase runs cover 3 of the 19 alignments at ÷19** (above). Over the three runs, every Galagon and Spiders call but the first starts on one of 5 of them. Plan 7.4's wording, "the other two phases", dates from ÷18.
+
+### Plan 7.7's fresh-clone run, c78 (2026-10-16 to 10-17)
+
+- **The run.** c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`, from 2026-10-16 08:15 to 10-17 13:04 UTC. The clone's `src/` is `317eaa8`'s, and its status was clean before and after every piece. The firmware was linked into its gitignored path; the game images, the BIOS and the references were given by path. Every simulation ran through the simulation slots. The driver and the logs are in the D worktree's gitignored `sim/work/step7/fix/fix/c78/`.
+- **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time; sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So the gates ran as resumable pieces, 45 in all, and four of them were split further:
+  - `s4_check` per job, after the 09:16 stop cut the whole gate;
+  - `wire` as one build, 8 scenario groups and one piece per mutant, after the 12:28 stop cut one whole run about 3 h in and a second was stopped at 12:48 to run in pieces;
+  - `extra_tests` as its two halves in parallel;
+  - the frames one image per call, each PARTIAL alone.
+- **Restarts.** The machine stopped at 09:16 and 12:28 UTC on 10-16 (`docs/AGENT_RUNS.md` section 2), and the workers were stopped at 09:28 to change the driver. Each time the chain (`run_sim`, `cartram`, `extra_tests`, `selftest`) restarted from its beginning. No piece was cut after 12:48 on 10-16.
+- **Result: every gate passes.** 29 pieces exit 0, and the 16 frame pieces exit 3, PARTIAL alone, with 16 of 16 images passing together. By the lead's rule for this run, a gate run in pieces passes when its pieces cover it and each passes. A second reader re-derived every verdict from the logs and confirmed all 15.
+- **Against c76 and c77,** the results are the same wherever they can be compared:
+  - the frame runs' CSVs are byte-equal to c76's, all 80;
+  - the 56 `s4` jobs' outputs equal c76's after paths, times and md5;
+  - the `wire` set's 96 scenarios that c77 ran have all 26 counters equal, and the mutants' lines are equal to c77's.
+  - Only the binaries' md5 differ, because each was built in c78.
+- **The second reader corrected the run's own notes** (c78's `NOTES.txt`, its final judgement):
+  - The last piece cut was the whole `wire` run, at 12:48 on 10-16; nothing happened at 01:24 on 10-17, which the notes gave.
+  - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. It was not running from 09:09 to 09:24 or from 12:24 to 12:40 on 10-16.
+  - `extra_tests` took dasm, 7800basic and MiSTer's two firmware files from a cache, as c76 did, which the notes' list of deviations left out. So the run does not show that the gates need only the firmware and the game images.
+  - `lint`'s writing into the tree's gitignored `sim/work/step7/lint` is the script's own behaviour (`sim/lint_step7.sh:22`), not a deviation.
+- **Step 7 is done for V1.** The record, the gate table, the deviations and what c78 does not show are in `DARIA_CORE.md`, "Step 7 work", "Plan 7.7's fresh-clone run: c78". What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.
