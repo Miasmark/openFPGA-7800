@@ -12,6 +12,17 @@
 #   PCM_DEPTH      1024 (default) or 4096
 #   THROTTLE       BUP_THROTTLE: clocks of every 16 that may start an
 #                  instruction (16, no throttle)
+#   DARIA=1        the wrapper built with POCKET_DARIA (docs/DARIA_CORE.md):
+#                  THUMB 1, the cache's two ways, daria_mem, daria_call,
+#                  daria_mmio and daria_smp, in the BupChip profile; and,
+#                  once bup_dbg_snap.sv exists (lane I3's file, which arrives
+#                  with commit D), that file with -DS4_SNAP: the bench checks
+#                  the snapshot (tb_s4.sv's header; object directory _snap).
+#                  It reads the instance dut.dbg_snap's PERIOD, so the build
+#                  fails when bupchip_pocket.sv does not instantiate
+#                  bup_dbg_snap as dbg_snap (under BUP_DEBUG and POCKET_DARIA):
+#                  a tree that has the file cannot skip the check
+#   PSRAM_CS       psram.sv's CLOCK_SPEED (28.636364)
 #   WORK           build products (default sim/work/bupchip/s4)
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -35,6 +46,20 @@ DEFS=(-DBUP_DEBUG -DPCM_DEPTH="$DEPTH" -DPREEMPT="$PRE" -DPREFETCH="$PF" -DBUP_T
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
 	"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv" "$CORE/bup_load_probe.sv"
 	"$CORE/bup_asset_cache.sv" "$CORE/bupchip_pocket.sv")
+if [ "${DARIA:-0}" != 0 ]; then
+	OBJ="${OBJ}_daria"
+	DEFS+=(-DPOCKET_DARIA)
+	SRCS+=("$CORE/daria_mem.sv" "$CORE/daria_call.sv" "$CORE/daria_mmio.sv" "$CORE/daria_smp.sv")
+	if [ -f "$CORE/bup_dbg_snap.sv" ]; then
+		SRCS+=("$CORE/bup_dbg_snap.sv")
+		OBJ="${OBJ}_snap"
+		DEFS+=(-DS4_SNAP)
+	fi
+fi
+if [ -n "$PSRAM_CS" ]; then
+	OBJ="${OBJ}_cs${PSRAM_CS%%.*}"
+	DEFS+=(-DPSRAM_CS="$PSRAM_CS")
+fi
 case "$PSRAM" in
 	real)    SRCS+=("$PU/psram.sv" "$HERE/psram_model.sv") ;;
 	standin) SRCS+=("$HERE/psram_standin.sv"); DEFS+=(-DPSRAM_STANDIN) ;;
@@ -47,8 +72,10 @@ fi
 rm -rf "$OBJ"
 mkdir -p "$OBJ"
 "$VERILATOR" --binary --timing -O3 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
-	--top-module tb_s4 "${DEFS[@]}" -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
-	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2; echo "build failed: $OBJ.log" >&2; exit 1; }
+	-Wno-MULTIDRIVEN --top-module tb_s4 "${DEFS[@]}" -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
+	|| { grep -E "^%Error" "$OBJ.log" | head -20 >&2
+	     grep -q "dbg_snap" "$OBJ.log" && echo "build_s4.sh: with bup_dbg_snap.sv in the tree, tb_s4 needs bupchip_pocket.sv's bup_dbg_snap instance dbg_snap (S4_SNAP)" >&2
+	     echo "build failed: $OBJ.log" >&2; exit 1; }
 find "$OBJ" -name '*.gch' -delete
 find "$OBJ" -name '*.o' ! -name 'vtb' -delete 2>/dev/null || true
 echo "$OBJ/vtb"

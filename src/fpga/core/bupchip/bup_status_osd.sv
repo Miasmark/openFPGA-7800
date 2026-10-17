@@ -41,8 +41,12 @@
 // capture's flags and the probe's counts are kept from power-up.
 //
 // The status comes from clk_arm and clk_sys registers and is sampled here on
-// clk_sys: timed paths, as clk_arm is 2 x clk_sys from the same VCO.
-// Display only; nothing else depends on it.
+// clk_sys. Without POCKET_DARIA clk_arm is 2 x clk_sys from the same VCO, so
+// the clk_arm bits are timed paths. With it clk_arm is VCO/19, and
+// bupchip_pocket.sv passes its clk_arm bits through bup_dbg_snap.sv, a
+// snapshot taken every 1,024 clk_sys, so every bit arrives here from a clk_sys
+// register (open item 11, docs/DARIA_CORE.md). Display only; nothing else
+// depends on it.
 //
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -52,9 +56,9 @@
 module bup_status_osd (
 	input  wire        clk,         // clk_sys
 	input  wire        en,          // souper_profile
-	input  wire [31:0] status,      // bupchip_pocket dbg_status (clk_arm)
-	input  wire [31:0] halt_pc,     // bupchip_pocket dbg_halt_pc (clk_arm)
-	input  wire [110:0] load,       // bupchip_pocket dbg_load (clk_sys, clk_arm)
+	input  wire [31:0] status,      // bupchip_pocket dbg_status (clk_arm; clk_sys with POCKET_DARIA)
+	input  wire [31:0] halt_pc,     // bupchip_pocket dbg_halt_pc (likewise)
+	input  wire [110:0] load,       // bupchip_pocket dbg_load (clk_sys and clk_arm; clk_sys with POCKET_DARIA)
 
 	input  wire        ce_pix,
 	input  wire        hblank,

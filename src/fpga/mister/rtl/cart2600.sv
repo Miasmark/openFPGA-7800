@@ -127,6 +127,20 @@ module cart2600
 	input           tape_rewind, // a cartridge load: Supercharger tape back to its start
 `endif
 	input           fix_sc_cs   // Fix Supercharger Checksums menu option
+`ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+	,
+	// Pocket (POCKET_DARIA): the DARIA front end (core/bupchip/daria_fe.sv)
+	// runs the DPC+ and CDF cartridges in place of the left-out ARM mapper.
+	// fe_do is its data byte (a register) and fe_oe its output enable (A12);
+	// its busys hold the 6507 as the ARM mapper's do (top.sv's
+	// arm_call_stall).
+	input    [7:0]  fe_do,
+	input           fe_oe,
+	input           fe_call_busy,
+	input           fe_dma_busy
+`endif
+`endif
 );
 	`define NUM_MAPPERS BANKEND
 
@@ -156,11 +170,17 @@ module cart2600
 	assign rom_mask = rom_size[18:0] - 1'd1;
 	assign rom_read = mapper == BANKAR ? ar_read : ~address_change;
 `ifdef NO_ARM_MAPPER
+`ifdef POCKET_DARIA
+	// Pocket (POCKET_DARIA): DPC+ and the CDF family run on the DARIA front
+	// end (below); ELF and BUS keep the bad game screen.
+	wire is_bad_game = mapper == BANKELF || mapper == BANKBUS;
+`else
 	// Pocket: without the ARM the DPC+, CDF and BUS front ends are left out
 	// (below), so their cartridges get the bad game screen instead of
 	// running broken.
 	wire is_bad_game = mapper == BANKELF || mapper == BANKDPCP ||
 		mapper == BANKCDF || mapper == BANKBUS;
+`endif
 `else
 	wire is_bad_game = mapper == BANKELF ||
 		(mapper == BANKBUS && mapper_revision == 3'd0);
@@ -532,14 +552,23 @@ module cart2600
 	assign load_wait = 1'b0;
 	assign arm_shadow_ready = 1'b0;
 	assign arm_dma_ready = 1'b0;
+`ifdef POCKET_DARIA
+	// Pocket (POCKET_DARIA): the DARIA front end's busys stall the 6507.
+	assign arm_dma_busy = fe_dma_busy;
+`else
 	assign arm_dma_busy = 1'b0;
+`endif
 	assign arm_dma_done = 1'b0;
 	assign arm_sample_ready = 1'b0;
 	assign arm_sample_busy = 1'b0;
 	assign arm_sample_done = 1'b0;
 	assign arm_sample_data = 8'b0;
 	assign arm_call_ready = 1'b0;
+`ifdef POCKET_DARIA
+	assign arm_call_busy = fe_call_busy;
+`else
 	assign arm_call_busy = 1'b0;
+`endif
 	assign arm_call_done = 1'b0;
 	assign arm_audio_counter0_return = 32'b0;
 	assign arm_audio_counter1_return = 32'b0;
@@ -627,6 +656,27 @@ module cart2600
 	assign arm_call_entry = '0;
 	assign arm_call_stack = '0;
 	assign arm_call_thumb = 1'b0;
+`ifdef POCKET_DARIA
+	// Pocket (POCKET_DARIA): the DARIA front end answers for DPC+ and the CDF
+	// family. Its byte goes straight to the bus (flag bit 0) while it drives
+	// A12. It keeps the cartridge's ROM and RAM in its own memories, so the
+	// cartridge RAM is never selected for these mappers and the ROM address
+	// stays 0, as in the build without DARIA.
+	assign direct_do[BANKDPCP] = fe_do;
+	assign flags_out[BANKDPCP] = 16'd1;
+	assign out_en[BANKDPCP]    = {8{fe_oe}};
+	assign ram_sel[BANKDPCP]   = 0;
+	assign ram_rw[BANKDPCP]    = 1;
+	assign ram_a[BANKDPCP]     = '0;
+	assign rom_addr[BANKDPCP]  = '0;
+	assign direct_do[BANKCDF]  = fe_do;
+	assign flags_out[BANKCDF]  = 16'd1;
+	assign out_en[BANKCDF]     = {8{fe_oe}};
+	assign ram_sel[BANKCDF]    = 0;
+	assign ram_rw[BANKCDF]     = 1;
+	assign ram_a[BANKCDF]      = '0;
+	assign rom_addr[BANKCDF]   = '0;
+`else
 	assign direct_do[BANKDPCP] = bg_data;
 	assign flags_out[BANKDPCP] = 16'd1;
 	assign out_en[BANKDPCP]    = 8'hFF;
@@ -641,6 +691,7 @@ module cart2600
 	assign ram_rw[BANKCDF]     = 1;
 	assign ram_a[BANKCDF]      = '0;
 	assign rom_addr[BANKCDF]   = '0;
+`endif
 	assign direct_do[BANKBUS]  = bg_data;
 	assign flags_out[BANKBUS]  = 16'd1;
 	assign out_en[BANKBUS]     = 8'hFF;

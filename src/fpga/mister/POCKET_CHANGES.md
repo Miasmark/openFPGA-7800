@@ -19,8 +19,8 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 ## Changes from upstream
 
 Eight upstream files are modified (`top.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `EEPROM_24LC256.sv`, and for the firmware switch `cart.sv`, `cart2600.sv`,
-`banks2600.sv`), three firmware images are removed, and the POKEY is swapped
+`Maria/video_sync.sv`, `video_mux.sv`, `EEPROM_24LC256.sv`, and for the firmware switch
+`cart.sv`, `cart2600.sv`, `banks2600.sv`), three firmware images are removed, and the POKEY is swapped
 for an older one.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
@@ -89,7 +89,7 @@ and waits for STOP or START. `sim/tb_load.sv +i2ctrace` decodes the bus.
 
 ### `rtl/top.sv`: build switches
 
-Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
+Five build switches were added next to upstream's own `NO_ARM_MAPPER`:
 
 | Macro        | Effect |
 |--------------|--------|
@@ -97,9 +97,13 @@ Four build switches were added next to upstream's own `NO_ARM_MAPPER`:
 | `NO_BUPCHIP` | Leaves out the BupChip player (`bupchip_subsystem`): an ARM program with DDR-resident assets. Souper carts still run; their music channel is silent unless `POCKET_BUPCHIP` brings in the Pocket's own player. |
 | `POCKET_BUPCHIP` | With `NO_BUPCHIP`: `top.sv` hands the BupChip's inputs out and takes its audio back, so that the Pocket's own BupChip (`../core/bupchip/`, ARIA; `../../../docs/BUPCHIP_CORE.md`) can play the music outside it. New ports `bup_cmd_valid_o` / `bup_cmd_data_o` (the `$8007` command, `bup_cmd_*_eff`), `souper_profile_o` (`souper_profile`), and `bup_audio_l_i` / `bup_audio_r_i`, which drive `bupchip_audio_l/r` in place of the zeros, so the audio goes through upstream's gain, saturation and mix unchanged. Both blocks are `ifdef`s: a port group next to `POCKET_SRAM`'s, and the assignments inside the `NO_BUPCHIP` branch. |
 | `EXTERNAL_FIRMWARE` | Builds the HSC and Supercharger firmware ROMs empty, with a load port (see below). |
+| `POCKET_DARIA` | Only together with `NO_ARM_MAPPER`: hooks for the Pocket's DARIA front end, which runs the 2600 ARM cartridges outside this module. See "DARIA front end hooks" below. |
 
-The Pocket build defines all five (`NO_ARM_MAPPER`, `NO_DDRAM`,
-`NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`) in `../ap_core.qsf`.
+The Pocket build defines all six (`NO_ARM_MAPPER`, `NO_DDRAM`,
+`NO_BUPCHIP`, `POCKET_BUPCHIP`, `EXTERNAL_FIRMWARE`, `POCKET_DARIA`) in
+`../ap_core.qsf`. A build without the DARIA front end deletes
+`POCKET_DARIA` there, with the qsf's two other DARIA lines (`core/daria.qip`
+and `core/daria_constraints.sdc`).
 Without the macros the changed files are identical to upstream in behaviour.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
@@ -134,10 +138,16 @@ Upstream 0dc8ad2 also moved PAL timing into the PLL (MiSTer retunes it to
 14.18758 MHz). The Pocket does the same with its own PLL
 (`../core/pll/pll_core.v`, `../core/pll_region.v`), from its 74.25 MHz
 reference. One difference: the TIA's 2600 region detection is cleared by
-the core reset that a retune causes, which as upstream's wrapper is written
-could send a PAL 2600 game back to NTSC and into another retune.
+the core reset that a retune causes, and while the console is in reset the
+Auto region falls back to the A78 header's region byte, which a 2600 image
+does not have; as upstream's wrapper is written, that sends a PAL 2600 game
+back to NTSC and into another retune, without end.
 `../core/atari7800_pocket.sv` latches the detected region until the next
-cart load instead.
+cart load (`tia_pal_seen`), and asks the PLL for `region_pll`, which holds
+a 2600 image's region during its download and while its console is in
+reset, so a PAL 2600 game retunes once. An A78's region (its header) and
+the Region setting reach the PLL as before, one `clk_sys` later (a setting
+changed while a 2600 image's console is in reset, when it is released).
 
 `TIA.sv`, `video_stabilize`: the stabilised 2600 window ends 1 line before
 the frame's end instead of 4. Upstream's 4 gives a standard 262-line frame
@@ -177,6 +187,16 @@ is required. That frees 256 M10K blocks.
 - `rtl/top.sv` (`POCKET_SRAM`): new outputs `mclk1_out` (MARIA's 7.16 MHz
   strobe, the SRAM's slot reference), `bios_sel_out` (a cartridge-space read
   is the BIOS), and the Flicker Blend port, passed through from `video_mux`.
+  Fix B (`../../../docs/DARIA_CORE.md`, "Fix B") adds the outputs
+  `cartram_addr26_out`, `cartram_wr26_out`, `cartram_rd26_out` and
+  `cartram_wrdata26_out`, and splits upstream's merge of the 2600 and 7800
+  cartridge-RAM requests (an `ifdef POCKET_SRAM` / `else` upstream merge /
+  `endif` block) under the merge's own select: `cartram_*` carries the 7800
+  request alone, and the new ports carry the 2600 request, which `sram_ctrl`
+  registers on `clk_sys`. That keeps the 2600 mappers' decode off the SRAM's
+  `clk_sdram` request path. `POCKET_SRAM` therefore needs `EXTERNAL_CARTRAM`
+  (`../ap_core.qsf` and `sim/run_sim.sh` set both): without it,
+  `cart_ram_tdp` would see no 2600 request.
 - `rtl/video_mux.sv` (`POCKET_SRAM`): the frame's `spram` becomes the port
   `fb_addr` / `fb_we` / `fb_wdata` / `fb_q`, plus `fb_active`. `sram_ctrl`
   answers like the `spram` did, prefetching the next pixel.
@@ -200,6 +220,40 @@ and stay.
 It saves about 1,750 ALMs and takes the DPC+ decode off the SRAM's
 `clk_sdram` request path: Fix A in `../../../docs/SRAM_TIMING.md`. Without
 the macro the file is unchanged from upstream.
+
+### DARIA front end hooks (`POCKET_DARIA`, inside `NO_ARM_MAPPER`)
+
+With `POCKET_DARIA` the Pocket runs DPC+ and the CDF family (CDF0, CDF1,
+CDFJ, CDFJ+) again, on its own front end (`../core/bupchip/daria_fe.sv`,
+instance `u_fe` in `../core/atari7800_pocket.sv`) and the BupChip's CPU
+(`../../../docs/DARIA_CORE.md`, `../../../docs/daria_fe/design.md`). Every
+hook below sits inside `ifdef NO_ARM_MAPPER` and `ifdef POCKET_DARIA`, so
+upstream's own build with the ARM (`NO_ARM_MAPPER` undefined, as the
+simulation oracle `sim/bupchip/daria/tb_daria.sv` builds it, `POCKET_DARIA`
+or not) sees none of it.
+
+- `rtl/cart2600.sv`: four inputs, `fe_do[7:0]` (the front end's data byte,
+  a register), `fe_oe` (its output enable, A12), `fe_call_busy` and
+  `fe_dma_busy`. `BANKDPCP` and `BANKCDF` drive `fe_do` as their direct
+  byte with `out_en` from `fe_oe`; the cartridge RAM is never selected for
+  them and their ROM address stays 0, as without DARIA. `arm_call_busy`
+  and `arm_dma_busy` take the front end's busys in place of the stubs, so
+  `top.sv`'s `arm_call_stall` (and with it `RDY` and `mapper_phi2`) keeps
+  upstream's text; `mapper_init_busy` stays 0. `is_bad_game` keeps the bad
+  game screen for ELF and BUS only.
+- `rtl/top.sv`: a port group after `POCKET_BUPCHIP`'s, with outputs
+  `daria_a_in_o` (`{AB[12] & bios_en_b, AB[11:0]}`, cart2600's `a_in`),
+  `daria_pclk0_o` (`pclk0`), `daria_access_o` (`mapper_phi2 && lock_ctrl
+  && tia_en`, cart2600's `arm_access`) and `daria_reset_o`
+  (`effective_reset`), and inputs `daria_fe_do_i`, `daria_fe_oe_i`,
+  `daria_call_busy_i` and `daria_dma_busy_i`, which go to the four
+  `cart2600` inputs above. The front end also takes the CPU's clock enable
+  from the existing `cpu_ce` output (`pclk1`), and `write_DB` and `RW` from
+  `dout` and `RW`.
+
+The wrapper holds the console in reset through the front end's RAM image at
+load and after a reset (`init_busy`, for an ARM image only) and across a PLL
+retune; see the DARIA section of `../core/atari7800_pocket.sv`.
 
 ### Supercharger: tape position and loading without the BIOS (`POCKET_SUPERCHARGER`)
 

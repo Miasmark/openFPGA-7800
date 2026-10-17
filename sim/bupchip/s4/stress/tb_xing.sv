@@ -144,6 +144,9 @@ module tb_xing;
 		return 8'((b * 7 + 3) ^ (b >> 8) ^ 8'h5A);
 	endfunction
 	function automatic logic [7:0] cart_byte(input int k);
+		// An A78 header: "ATARI" at bytes 1-5, or bup_capture takes the file
+		// as a 2600 image.
+		if (k >= 1 && k <= 5) return 8'(40'("ATARI") >> (8 * (5 - k)));
 		if (k == 49) return 8'(R >> 24);
 		if (k == 50) return 8'(R >> 16);
 		if (k == 51) return 8'(R >> 8);

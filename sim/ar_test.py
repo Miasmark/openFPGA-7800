@@ -20,7 +20,8 @@ sets a background colour and a TIA tone, and draws NTSC frames.
   ar_test.py full > ar_full.bin
       One load of all 24 pages (pseudo-random bytes, the code in page 1 of
       bank 2; magenta, AUDF0 5), for checking every RAM byte after a load
-      (tb_load +ardump=FILE, then ar_test.py check FILE ar_full.bin).
+      (tb_load +ardump=FILE, then ar_test.py check FILE ar_full.bin, which
+      exits 1 unless every byte of the load is in the RAM dump).
 
 The TIA tone is there for the simulation (tb_load +arprobe logs the
 COLUBK and AUDF0 writes); the colour is for a screen.
@@ -132,7 +133,10 @@ def check(dump_path, image_path):
         m = h[16 + j]
         at = (m & 3) * 2048 + ((m >> 2) & 7) * 256
         bad += sum(a != b for a, b in zip(ram[at:at + 256], img[j * 256:(j + 1) * 256]))
-    print(f"ARCHECK {h[3]} pages, {bad} of {h[3] * 256} RAM bytes differ from the image")
+    short = len(ram) < 6144
+    print(f"ARCHECK {h[3]} pages, {bad} of {h[3] * 256} RAM bytes differ from the image"
+          + (f" (the dump has {len(ram)} of 6144 bytes)" if short else ""))
+    return 0 if bad == 0 and h[3] > 0 and not short else 1
 
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "multi"
@@ -141,7 +145,7 @@ if mode == "multi":
 elif mode == "full":
     img = load_image(0, program(0x54, 5), full=True)
 elif mode == "check":
-    check(sys.argv[2], sys.argv[3]); sys.exit()
+    sys.exit(check(sys.argv[2], sys.argv[3]))
 elif mode == "tape":
     img = load_image(0, program(0x84, 3)) + load_image(0, program(0x1E, 20))
 else:

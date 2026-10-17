@@ -9,11 +9,54 @@
 # calls.csv.gz, slack.csv, frames.csv, summary.txt, pcs.txt.gz, dtrace.txt.gz
 # (the ARM's ROM data reads; DTRACE=0 leaves it out), snapshots as PNG, run.log
 # and report.txt. Everything there derives from the game: it stays in sim/work
-# (gitignored). Tested with Verilator 5.040; about 1 minute of wall time per
-# emulated second, on one CPU. Set NAME= to name the run directory.
+# (gitignored). Tested with Verilator 5.040; a plain build takes 79-104 s of
+# wall time per emulated second, on one CPU, and mode B (MODE_B=1) about 286 s
+# (3.5 simulated ms per wall second). Set NAME= to name the run directory.
+# SHADOW=1 builds DARIA in beside upstream's ARM (daria_shadow.svh) and adds
+# daria.csv, the call-by-call comparison, to the run; WIN_KB sets its window
+# (default 128). Those builds go to obj_shadow<WIN_KB>, their runs to
+# runs/shadow<WIN_KB>/<rom name>/. With WRAPPER=1 as well, DARIA is the
+# whole wrapper (bupchip_pocket.sv with POCKET_DARIA: capture, window, the
+# two-way cache over psram.sv and psram_model.sv, MMIO, the call port, the
+# sample requester daria_smp.sv; bup_dbg_snap.sv too once it exists, which
+# BUP_DEBUG builds need): obj_wrap<WIN_KB>, runs/wrap<WIN_KB>/. NOBUILD=1 runs
+# the binary that is there
+# without checking its sources (run_all.sh builds once, then sets it).
+# FE=1 adds the front-end shadow (fe_shadow.svh, -DFE_SHADOW): fe.csv,
+# fe_err.txt and the "FE ..." lines of run.log. It combines with the others:
+# the object directory gets _fe (obj_fe, obj_shadow<WIN_KB>_fe, ...), the
+# runs go to runs/fe/ (runs/shadow<WIN_KB>_fe/, runs/wrap<WIN_KB>_fe/).
+# FE=1 builds stage 1 (docs/daria_fe/design.md 12.4): daria_fe (BUP/daria_fe*.sv)
+# on its own daria_mem beside the stage-0 reference, with fe_taps.svh.
+# FE_STAGE0=1 builds the reference alone (-DFE_STAGE0, no daria_fe sources):
+# obj..._fe_s0, runs/..._fe_s0/. FE_POISON=1 adds -DDARIA_RAM_POISON (the
+# poisoned daria_ram model): obj..._fe_poison, runs/..._fe_poison/.
+# MODE_B=1 builds mode B of the front-end shadow (docs/daria_fe/spec/bench.md
+# 7.1; design.md 12.2 step 8; -DFE_MODE_B): daria_fe posts the calls to DARIA's
+# own CPU (dcall) and shares DARIA's cart RAM (dmem), clk_d is on the PLL's
+# lattice (+d_ofs=PS; +d_div=N, VCO/N, 18 or 19: at VCO/19, the shipped
+# divider, the guard must never lock and port B's coincidences with DARIA are
+# counted, docs/daria_step7/plan.md 5.2), the 6507 is held for daria_fe's
+# calls too. The divider is D_DIV, by default the tree's own (pll_core.v's
+# DARIA counter 3, as step7_prep.py --tree-div reads it): this script adds
+# +d_div=D_DIV, refuses a +d_div=N among the plusargs that differs from it,
+# and notes the divider at the end of run.log (the shadow's own default,
+# VCO/18, is reached only by running the binary by hand). It
+# sets SHADOW=1 and FE=1 itself, and refuses FE_STAGE0=1:
+# obj_shadow<WIN_KB>_fe_modeB, runs/shadow<WIN_KB>_fe_modeB/ (with FE_POISON=1
+# _fe_modeB_poison). MODE_B=1 WRAPPER=1 runs daria_fe on the whole wrapper's
+# ports (bupchip_pocket.sv), wired as atari7800_pocket.sv wires them (plan
+# 3.6 I4b; daria_shadow.svh): obj_wrap<WIN_KB>_fe_modeB,
+# runs/wrap<WIN_KB>_fe_modeB/; pass WIN_KB=64, the shipped window (the default
+# is 128). Every other build is as before.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ "${MODE_B:-0}" != 0 ]; then
+	[ "${FE_STAGE0:-0}" = 0 ] || { echo "run_daria.sh: MODE_B=1 does not combine with FE_STAGE0=1" >&2; exit 1; }
+	SHADOW=1
+	FE=1
+fi
 FPGA="$(cd "$HERE/../../../src/fpga" && pwd)"
 RTL="$FPGA/mister/rtl"
 WORK="${WORK:-$HERE/../../work/bupchip/daria}"
@@ -23,6 +66,18 @@ if [ "$1" = --build-only ]; then BUILD_ONLY=1; else
 	ROM="$(realpath "${1:?usage: run_daria.sh ROM.bin|--build-only [+plusargs...]}")"
 fi
 shift
+# Mode B's clk_d lattice (the D fix round's review): the tree's divider unless
+# D_DIV says otherwise, so that a rerun cannot fall back to the shadow's own
+# default unnoticed
+if [ "${MODE_B:-0}" != 0 ] && [ -z "$BUILD_ONLY" ]; then
+	TREE_DIV="$(python3 "$HERE/../quartus_probe/step7/step7_prep.py" "$FPGA" --tree-div)"
+	D_DIV="${D_DIV:-$TREE_DIV}"
+	case "$D_DIV" in 18|19) ;; *) echo "run_daria.sh: MODE_B=1 runs at VCO/18 or VCO/19; D_DIV is $D_DIV (the tree's divider: VCO/$TREE_DIV)" >&2; exit 1 ;; esac
+	for a in "$@"; do
+		case "$a" in +d_div=*) [ "${a#+d_div=}" = "$D_DIV" ] || { echo "run_daria.sh: $a differs from D_DIV=$D_DIV (default: the tree's VCO/$TREE_DIV); set D_DIV instead" >&2; exit 1; } ;; esac
+	done
+	set -- "$@" "+d_div=$D_DIV"
+fi
 mkdir -p "$WORK/rtl"
 WORK="$(cd "$WORK" && pwd)"
 
@@ -57,19 +112,71 @@ SRCS=(
 	"$RTL/top.sv" "$RTL/EEPROM_24LC256.sv" "$RTL/lightgun.sv"
 	"$HERE/tb_daria.sv"
 )
+OBJ="$WORK/obj"
+DEFS=()
+if [ "${SHADOW:-0}" != 0 ]; then
+	BUP="$FPGA/core/bupchip"
+	SRCS+=("$BUP/bup_cpu.sv" "$BUP/daria_mem.sv" "$BUP/daria_call.sv" "$BUP/daria_mmio.sv")
+	OBJ="$WORK/obj_shadow${WIN_KB:-128}"
+	DEFS=(-DDARIA_SHADOW "-DDARIA_WIN_KB=${WIN_KB:-128}" "-I$HERE")
+	if [ "${WRAPPER:-0}" != 0 ]; then
+		S4="$HERE/../s4"
+		SRCS+=("$RTL/bupchip_peripheral.sv" "$BUP/bup_tick48k.sv" "$BUP/bup_capture.sv" "$BUP/bup_asset_wr.sv"
+			"$BUP/bup_asset_cache.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv"
+			"$BUP/daria_smp.sv")
+		# lane I3's snapshot (plan P15), instantiated only under BUP_DEBUG; it
+		# arrives with commit D, so it is compiled once it exists
+		[ -f "$BUP/bup_dbg_snap.sv" ] && SRCS+=("$BUP/bup_dbg_snap.sv")
+		OBJ="$WORK/obj_wrap${WIN_KB:-128}"
+		DEFS+=(-DDARIA_WRAPPER -DPOCKET_DARIA)
+	fi
+fi
 
-BIN="$WORK/obj/vtb"
-if [ ! -x "$BIN" ] || [ -n "$(find "$HERE/tb_daria.sv" "$RTL" -newer "$BIN" -name '*.sv' 2>/dev/null | head -1)" ]; then
+INCS=("$HERE/daria_shadow.svh")
+FE_SUF=""
+if [ "${FE:-0}" != 0 ]; then
+	OBJ="${OBJ}_fe"
+	DEFS+=(-DFE_SHADOW "-I$HERE")
+	INCS+=("$HERE/fe_shadow.svh")
+	if [ "${FE_STAGE0:-0}" != 0 ]; then
+		FE_SUF="_s0"
+		DEFS+=(-DFE_STAGE0)
+	else
+		# Stage 1: daria_fe's sources (the package first) and its daria_mem (fe_mem)
+		BUP="$FPGA/core/bupchip"
+		SRCS+=("$BUP/daria_fe_pkg.sv" "$BUP"/daria_fe_{seq,dec,core,audio,call,copy,arb,guard}.sv "$BUP/daria_fe.sv")
+		[ "${SHADOW:-0}" != 0 ] || SRCS+=("$BUP/daria_mem.sv")
+		INCS+=("$HERE/fe_taps.svh")
+		if [ "${FE_POISON:-0}" != 0 ]; then
+			FE_SUF="_poison"
+			DEFS+=(-DDARIA_RAM_POISON)
+		fi
+	fi
+	if [ "${MODE_B:-0}" != 0 ]; then
+		FE_SUF="_modeB${FE_SUF}"
+		DEFS+=(-DFE_MODE_B)
+	fi
+	OBJ="${OBJ}${FE_SUF}"
+fi
+
+BIN="$OBJ/vtb"
+if [ ! -x "$BIN" ] || { [ "${NOBUILD:-0}" = 0 ] && \
+		[ -n "$(find "${SRCS[@]}" "${INCS[@]}" -newer "$BIN" 2>/dev/null | head -1)" ]; }; then
 	echo "building $BIN ..." >&2
 	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
-		-DNO_BUPCHIP -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ \
-		--top-module tb_daria -Mdir "$WORK/obj" -o vtb "${SRCS[@]}" > "$WORK/build.log" 2>&1 \
-		|| { grep -m20 "%Error" "$WORK/build.log"; exit 1; }
+		-DNO_BUPCHIP -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ "${DEFS[@]}" \
+		--top-module tb_daria -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \
+		|| { grep -m20 "^%Error" "$OBJ.log" | cut -c1-300; exit 1; }
+	find "$OBJ" -name '*.gch' -delete
 fi
 
 [ -n "$BUILD_ONLY" ] && exit 0
-NAME="${NAME:-$(basename "$ROM" .bin)}"
+PREFIX=""
+[ "${SHADOW:-0}" = 0 ] || PREFIX="shadow${WIN_KB:-128}/"
+[ "${SHADOW:-0}" = 0 ] || [ "${WRAPPER:-0}" = 0 ] || PREFIX="wrap${WIN_KB:-128}/"
+[ "${FE:-0}" = 0 ] || { PREFIX="${PREFIX%/}"; PREFIX="${PREFIX:+${PREFIX}_}fe${FE_SUF}/"; }
+NAME="${NAME:-$PREFIX$(basename "$ROM" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"
 rm -f "$OUT"/snap_*.ppm "$OUT"/snap_*.png
@@ -77,6 +184,7 @@ cd "$WORK"
 start=$(date +%s)
 nice -n 10 "$BIN" +rom="$ROM" +out="$OUT/" +dtrace="${DTRACE:-1}" "$@" > "$OUT/run.log" 2>&1
 echo "wall $(( $(date +%s) - start )) s" >> "$OUT/run.log"
+[ "${MODE_B:-0}" = 0 ] || echo "run_daria.sh: mode B's clk_d at VCO/$D_DIV (+d_div=$D_DIV; the tree's pll_core.v: VCO/$TREE_DIV)" >> "$OUT/run.log"
 python3 "$HERE/ppm2png.py" "$OUT"/snap_*.ppm 2>/dev/null && rm -f "$OUT"/snap_*.ppm || true
 gzip -f "$OUT/calls.csv" "$OUT/pcs.txt"
 [ ! -f "$OUT/dtrace.txt" ] || gzip -f "$OUT/dtrace.txt"

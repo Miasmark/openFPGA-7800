@@ -339,7 +339,7 @@ to them.
 | FPGA block RAM | Cyclone V M10K | 308 blocks, 1 KB each at ×8/×16/×32 | 1 clock | 46 of 308 since 2.0.21 (all 308 before) |
 | SRAM (`sram_*`) | AS6C2016-55 | 256 KB (128K × 16) | 55 ns asynchronous | All but the last 16 KiB since 2.0.21 |
 | PSRAM (`cram0_*`, `cram1_*`) | AS1C8M16PL-70 | 16 MB (8M × 16) each, address/data multiplexed on the Pocket (`cram*_a[21:16]` plus `dq`) | 70 ns asynchronous; page and synchronous burst modes | No |
-| SDRAM (`dram_*`) | — | 64 MB, 16-bit | Fast bursts; each row change and refresh costs several clocks | The cartridge |
+| SDRAM (`dram_*`) | AS4C32M16MSA-6BIN, mobile SDRAM, 1.8 V (Analogue's spec: latency average, bandwidth high) | 64 MB (32M × 16) | Rated 166 MHz (−6 grade, 5.5 ns access), CAS latency 2 or 3 [distributor listings; datasheet tables not read]. Fast bursts; each row change and refresh costs several clocks | The cartridge |
 
 **No external memory can feed the CPU directly.** A 25–30 MHz CPU wants a
 32-bit word every 33–40 ns:

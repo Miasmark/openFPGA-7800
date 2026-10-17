@@ -219,6 +219,9 @@ module tb_slotswitch;
 	endfunction
 	function automatic logic [7:0] cart_byte(input int i);
 		logic [31:0] h;
+		// An A78 header: "ATARI" at bytes 1-5, or bup_capture takes the file
+		// as a 2600 image.
+		if (i >= 1 && i <= 5) return 8'(40'("ATARI") >> (8 * (5 - i)));
 		if (i >= 49 && i <= 52) return 8'((ROMSZ >> (8 * (52 - i))));
 		h = (i * 32'h85EBCA6B) ^ 32'h1234ABCD;
 		h ^= h >> 15;
