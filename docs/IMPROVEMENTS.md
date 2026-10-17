@@ -106,3 +106,14 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - A suggestion, untested: start the TIA's `pal_mode` after the reset from the wrapper's `tia_pal_seen` latch. That changes upstream's `TIA.sv`.
 - **A Sega Genesis pad for 2600 games.** The Pocket reads a 2600 image's paddle inputs as 0 with a joystick, as a real 2600 does, so Genesis-aware games (Galagon, SF2fix, Turbo) start in single-button mode. A "Genesis pad" Port Input option would let them offer their second-button functions. It would present INPT1 (port 1) and INPT3 (port 2) high while a mapped second button is released, and low while it is pressed. It would change every 2600 game that reads those inputs (`docs/daria_step7/progress.md`, "Frame runs on D against R1").
 - **An A78 image the BIOS drops into 2600 mode** is not covered by the region hold, and could loop between regions if its 2600-mode video measured PAL against an NTSC header. It is not simulated, and main's 2.1.3 has the same exposure (`docs/daria_step7/progress.md`, "Fit Q1' and commit P").
+- **FA2 saves: Star Castle Arcade's high scores.** *Added 2026-10-17, from the owner's finding on the Pocket, for a release after 2.2.1.*
+  - **What it would fix.** Star Castle Arcade, an FA2 game, does not keep its high-score saves on the Pocket.
+    - The FA2 mapper (`mapper_fa2.sv`) copies its 256-byte work RAM to and from the cartridge's flash through the `fa2_nvram_*` port.
+    - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1233-1239`). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.
+    - On MiSTer, upstream's `fa2_nvram_bridge.sv` connects the port to the core's save RAM. The Pocket build does not use it.
+    - The stub dates from the port's first commit (`3043d50`), so every release of this port has it. It is not DARIA's.
+  - **Cost.** A 256-byte nonvolatile save slot behind the FA2 port, like `hsc.sav`.
+    - `docs/DEVELOPING.md`, "Add a save slot", is the recipe: `save_ram_dp` with its APF read latch, a constant size in the data slot table, the next bridge region (`0x40000000`), a `data.json` slot appended after the others, a new file blank as $FF, and a round trip in `tb_load`.
+    - It changes `src/` in both builds. By `docs/daria_step7/plan.md` 7.6 it re-runs `run_sim.sh`, `extra_tests.sh`, `s4/check.sh` and `pp_equiv.py`, and needs a new Q2.
+  - **Evidence.** The owner's finding on the Pocket. The step-8 checklist lists it as outside DARIA (`release/daria-test1_checklist.md`, section 4, gitignored).
+  - **When.** After 2.2.1, with the first `src/` change.

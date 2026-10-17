@@ -521,6 +521,9 @@ request, which leaves the 7800's in that cone. The release gate is +1.5 ns
 on each of seeds 1, 2 and 3. The 2.2.1 tree, with Fix B and DARIA, gives
 +2.462, +2.683 and +2.919 ns on seeds 1-3 (seed 2 ships), and its worst
 `clk_sdram` paths are Flicker Blend's half-period paths in `sram_ctrl`.
+The 2.2.1 release is seed 2's hardware-tested bitstream (daria-test1):
+`clk_sdram` +2.683 ns, `clk_arm` +1.077 ns, the guard pair +0.397 ns and
+worst hold +0.098 ns, the same figures as step 7's seed-2 fit.
 
 ## Resource budget
 

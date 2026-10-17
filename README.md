@@ -132,6 +132,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 | Feature | Why |
 |---|---|
 | 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
+| 2600 FA2 saves (Star Castle Arcade) | Star Castle Arcade does not keep its high scores on the Pocket. The FA2 scheme saves 256 bytes to the cartridge's flash, and the Pocket wrapper has never connected that port (`atari7800_pocket.sv`, the `fa2_nvram_*` lines): the game always reads a blank flash, and what it saves is lost. A 256-byte save file, like `hsc.sav`, is planned after 2.2.1 ([docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md)). |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
@@ -222,6 +223,8 @@ on the one 6 ns path of DARIA's front end (its phase detector). Worst hold
 slack +0.098 ns. It uses 15,625 of 18,480 ALMs (85%), 195 of 308 M10K
 blocks and 12 DSP blocks. Seeds 1 and 3 give clk_sdram +2.462 and +2.919
 ns ([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
+2.2.1 ships the bitstream that was tested on hardware (daria-test1, below)
+unchanged; its fit gives the figures above.
 2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
@@ -241,7 +244,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to the 2.2.1 candidate, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.1, Analogue Pocket)
 
 | Test | Result |
 |---|---|
