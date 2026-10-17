@@ -503,8 +503,8 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - dasm, 7800basic and MiSTer's high score and Supercharger firmware for `extra_tests`: the D worktree's gitignored `sim/work/step7/gates/extra_cache/` (deviation 5);
   - the hygiene name list, kept outside the repository (plan 7.7);
   - `AR_TAPE=1` and `S4_JOBS=1`, with `FP_REF` and `RUN_SIM_REF` unset, as in c76.
-- **How it ran.** Verilator 5.040, the benches at VCO/19, and at most three simulations at once through the simulation slots. Each gate wrote to a fresh output directory off `/`, and each piece's text results were copied to disk as it ended. Every binary was built in c78. The builds shared the machine's ccache; a hit needs identical compiler input, so it cannot change a result.
-- **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the 56 `s4` jobs 16.3 h, and `extra_tests`' two halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So the gates ran as 45 resumable pieces, and four of them were split further (deviations 2, 3, 4 and 6, below).
+- **How it ran.** Verilator 5.040, the benches at VCO/19, and at most three simulations at once through the simulation slots. Each gate wrote to a fresh output directory on tmpfs, not on `/`, and each piece's text results were copied to disk as it ended. Every simulation binary was built in c78; dasm and 7800basic came built from a cache (deviation 5). The builds shared the machine's ccache; a hit needs identical compiler input, so it cannot change a result.
+- **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the 56 `s4` jobs 16.3 h, and `extra_tests`' two halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So the gates ran as 45 resumable pieces; four gates were split into several pieces or calls each (deviations 2, 3, 4 and 6, below).
 - **Result: every gate passes.** 29 pieces exit 0, and the 16 frame pieces exit 3, PARTIAL alone, with 16 of 16 images passing together. By the lead's rule for this run, a gate run in pieces passes when its pieces cover it and each passes. A second reader re-derived every verdict from the logs and confirmed all 15.
 
 **The gates** (`DARIA_CORE.md` has a short form of this table):
@@ -522,7 +522,7 @@ This is the single `wire` gate run at the head that c76's record found missing.
 | `extra_tests`, `AR_TAPE=1` | two halves in parallel, then the gate's checks | PASS: each half exits 0 and passes `extra_tests_check.py --ar-tape`; the tape's full load differs in 0 bytes, and the multiload loads 0, then 1; 37 fingerprints identical (16 `extra_*`, 21 `cartram_*`) | the DARIA `.out` equals c76's but paths and md5; the plain one also has the two lines of its own `tb_cartram` build, which c76's plain half reused from its cut first attempt |
 | `selftest` | its own call | PASS: 268 of 268, no group left out | 268 of 268 in the nits round's re-run on c76's inputs |
 | `s4_check` | 56 jobs, one per call | PASS: 28 of 28 in each set; 19 `tb_s4` runs per set with 0 PSRAM model violations; "snap: ok" in all 19 DARIA runs and "snap: na" in all 19 plain ones; DARIA clocks 36.172 MHz (16 runs), 35.842 (1) and 21.281 (2) | all 56 `.out` files equal c76's after paths, times and md5 |
-| `wire` | 1 build, 8 scenario groups, 7 mutant pieces | PASS: 97 of 97 scenarios; 7 of 7 mutants CAUGHT on their named keys; `f6_pend` and `rgn_bad` 0 in all 16 `+wire_pll` scenarios; Turbo 138 calls, 138 returns, 20 cache misses, 0 PSRAM violations; `pal2600_a78` with open item 20's retunes and releases, to the µs | c77's 96 scenarios: all 26 counters and the notes equal; the mutants' FAIL, PASS and MUTANT lines equal c77's |
+| `wire` | 1 build, 8 scenario groups, 7 mutant pieces | PASS: 97 of 97 scenarios; 7 of 7 mutants CAUGHT on their named keys; `f6_pend` and `rgn_bad` 0 in all 16 `+wire_pll` scenarios; Turbo 138 calls, 138 returns, 20 cache misses, 0 PSRAM violations; `pal2600_a78` with open item 20's retunes and releases, to the µs | c77's 96 scenarios: all 26 counters and the notes equal; the mutants' FAIL and MUTANT lines equal c77's |
 | `daria_smp` | the unit call | PASS: 18 clean runs, 8 of 8 mutants caught | the result lines equal c76's |
 | `dbg_snap` | the unit call | PASS: 32 runs, 7 of 7 mutations caught | the result lines equal c76's |
 | `frames` | 16 calls, one image each | PASS, the union: below | all 80 CSVs (5 per run) byte-equal to c76's; the report lines equal |
@@ -533,7 +533,7 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - Frame 1's video was excused on Wizard of Wor, Zaxxon and Zoo Keeper, as in c76.
   - Audio differs on 8,928 frames, as in `DARIA_CORE.md`'s frame-gate table for c76. It is counted, not gated.
   - The second reader re-ran `frame_gate.py` on Spiders and on Wizard of Wor with the gate's arguments: both exit 0, with output byte-equal to the piece logs.
-- **The binaries** differ in md5 from c76's and c77's: each was built in c78, and a build embeds its source path. `tb_frames` is `398f0f36…` in all 16 frame pieces (c76: `9a6b65a6…`), and `tb_wire` is `b5254e16…` (DARIA) and `22c997d4…` (plain), against c77's `8a3f6a62…` and `19fe82b7…`.
+- **The simulation binaries** differ in md5 from c76's and c77's: each was built in c78, and a build embeds its source path. `tb_frames` is `398f0f36…` in all 16 frame pieces (c76: `9a6b65a6…`), and `tb_wire` is `b5254e16…` (DARIA) and `22c997d4…` (plain), against c77's `8a3f6a62…` and `19fe82b7…`.
 - **Free space on `/`:** the lowest value recorded was 2,235 MB (c78's `free.log`). The monitor trimmed the shared ccache 5 times, each time free space fell under 2,240 MB.
 
 **Deviations from plan 7.7:**
@@ -549,9 +549,10 @@ This is the single `wire` gate run at the head that c76's record found missing.
 5. **`extra_tests` took its tools from a cache,** as in c76. dasm, 7800basic and MiSTer's high score and Supercharger firmware were copied from the D worktree's gitignored `sim/work/step7/gates/extra_cache/` into each half's `WORK`, so `extra_tests.sh` cloned and fetched nothing. Without them it clones dasm and 7800basic at their current heads and fetches the two firmware files (`sim/extra_tests.sh:47,78,82,166`).
 6. **The frames gate ran one image per piece** (`FRAMES_LIST` with one name). Each piece alone is PARTIAL; the 16 together are the gate.
 7. **`GAMES` differed by gate:** Turbo's directory for `wire`, and each image's own directory for the frames, where one call takes a single `GAMES`. Each of the 16 images has one content under `sim/work/bupchip/` (Stratovox's three copies are identical), so this changes nothing.
-8. **Restarts.** The machine stopped at 09:16 and 12:28 UTC on 10-16 (`docs/AGENT_RUNS.md` section 2), and the workers were stopped at 09:28 to change the driver.
+8. **Restarts.** The machine stopped at 09:16 and 12:28 UTC on 10-16, stops of the kind `docs/AGENT_RUNS.md` section 2 describes, and the workers were stopped by PID at 09:28 to change the driver.
    - Each time, the chain (`run_sim`, `cartram`, `extra_tests` and `selftest`, which share one output directory) restarted from its beginning. After 12:29 it also kept its state on disk; it never had to restore from it.
-   - `run_sim` ran 4 times in all, and each cut run's log is kept (`logs/*.lost*.log`).
+   - `run_sim` ran 4 times in all: two runs were cut (09:16 and 09:28), and one finished with exit 0 at 10:45 but was lost with its chain at 12:28. Their logs are kept (`logs/ch_run_sim.lost*.log`).
+   - Worker 2 alone was stopped by PID at 10:45, to restart it on the driver's third version. That cut `s4d`'s job `cache`, which reran; the chain ran on.
    - No piece was cut after 12:48 on 10-16, and the machine did not stop again.
 
 `lint` writes into the tree's gitignored `sim/work/step7/lint` rather than under the gate's output directory (`sim/lint_step7.sh:22`). A single call does the same, so this is no deviation; the status stays clean.
@@ -565,8 +566,8 @@ This is the single `wire` gate run at the head that c76's record found missing.
 - That the gates need only the firmware and the game images: `extra_tests` also needs network access, or the cache of deviation 5.
 
 - **The second reader corrected the run's own notes** (c78's `NOTES.txt`, its final judgement):
-  - The last piece cut was the whole `wire` run, at 12:48 on 10-16; nothing happened at 01:24 on 10-17, which the notes gave.
-  - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. It was not running from 09:09 to 09:24 or from 12:24 to 12:40 on 10-16.
+  - The last piece cut was the whole `wire` run, at 12:48 on 10-16. The notes said only that none was cut after 01:24 on 10-17.
+  - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. The monitor died with the stops at 09:16 and 12:28 on 10-16 and was restarted at 09:24 and 12:40, so free space went unrecorded while pieces ran from 09:17 and 12:29, about 6 and 10 minutes.
   - `extra_tests` took dasm, 7800basic and MiSTer's two firmware files from a cache, as c76 did, which the notes' list of deviations left out. So the run does not show that the gates need only the firmware and the game images.
   - `lint`'s writing into the tree's gitignored `sim/work/step7/lint` is the script's own behaviour (`sim/lint_step7.sh:22`), not a deviation.
 - **Step 7 is done for V1.** `DARIA_CORE.md`, "Step 7 work", "Plan 7.7's fresh-clone run: c78", records c78 in short, and its status line, done-when and hand-over now say so. What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.
