@@ -600,14 +600,14 @@ This is the single `wire` gate run at the head that c76's record found missing.
 **What it shows:**
 
 - **The library plays.** The owner tested the library and played the games, and everything looks good. The report is a verdict on the whole list. It gives no result per checklist item, and it does not say which zip was used.
-- **The owner sees Spiders' late calls, and they do not affect play.**
+- **The owner sees Spiders' late calls, and they do not seem to affect play.**
   - On the Pocket the whole picture shifts down for a couple of frames before a level loads.
   - The owner ties the shift to the late calls. In simulation those are 16 calls in the overrun frames 557-572, the same calls that upstream's core misses (`record.md`, "The frame gate, V1 rule"; `DARIA_CORE.md`, "Step 3 work"). The hardware cannot count them until the overlay exists.
   - In c76's frame run those 16 frames are 354 lines long instead of 262 (322,848 `clk_sys` against 238,944). R1's, from upstream's core, are the same length: the frame gate found `len_sys` equal on every frame, none excused. The run and its gate report are in the D worktree's gitignored `sim/work/step7/fix/fix/c76/frames/`.
   - The frame runs stop at 1,500 frames, about 25 s, so they hold only the first such overrun, about 9 s in.
-  - Play is unaffected: the owner beat a couple of levels, and the game kept working. The checklist expected this (section 4 and item A9).
+  - Play does not seem to be affected: the owner beat a couple of levels, and the game kept working. The checklist expected this (section 4 and item A9).
 - **The audio is not too noisy.** The owner judged the sound against YouTube captures of the games, and found it not too noisy. The report gives no click count for Galagon and Mappy (item G4).
-- **The PAL region items were not run.** These are the checklist's D1, a PAL 2600 ARM image on Region Auto, and D2, a PAL A78 after it (RTL-1).
+- **The PAL region items could not be completed.** These are the checklist's D1, a PAL 2600 ARM image on Region Auto, and D2, a PAL A78 after it (RTL-1).
   - The PAL versions the owner has all seem to be PAL60 builds ("all the pal versions seem pal 60"). A PAL60 build draws 262-line frames, which Region Auto treats as NTSC. Stay Frosty 2's PAL build was already recorded as one (`DARIA_CORE.md`, "The added images").
   - So both items stay covered by simulation only, by these `tb_wire` scenarios (`sim/bupchip/daria/wire/wire.py`):
     - `pal_dpc`: a synthetic PAL DPC+ image on Auto. One retune, to PAL, then the game restarts in PAL (D1).

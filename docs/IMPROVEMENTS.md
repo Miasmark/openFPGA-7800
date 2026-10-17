@@ -35,7 +35,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 - **What it would show.** On the debug build, while a 2600 ARM game runs: DARIA's calls and late calls, the guard's lock state and unlock count, and the halt flag, halt code and fault code. Today the debug build's cells appear only for a Souper cartridge, and show only the BupChip.
 - **Why.**
-  - In step 8's hardware tests the owner could only see Spiders' late calls, as the picture shifting down. The overlay would count them: 16 are expected at the start of play.
+  - In step 8's hardware tests the owner could only see Spiders' late calls, as the picture shifting down. The overlay would count them: 16 are expected in the first overrun, about 9 s in. The frame runs do not reach later level loads, which may add more.
   - It would show on silicon that the guard stays unlocked at ÷19, with 0 unlocks after power-up and after every retune. Today only simulation shows it, in mode B at ÷19.
   - A halted ARM game just stops today. The overlay would show why.
 - **Cost.** `BUP_DEBUG` code only, so by plan 7.6 it re-runs only Q5 and `s4/check.sh`. Step 7 prepared it (`docs/daria_step7/plan.md` P15, P16 and P22):
@@ -53,7 +53,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **What it would show.** Step 8's checklist items D1 and D2 on a Pocket:
   - D1: a PAL 2600 ARM image on Region Auto restarts once, about 1 s after loading, then runs in PAL at 50 Hz;
   - D2: a PAL A78 loaded after a PAL 2600 image ends in PAL, with RTL-1's two extra retunes (`docs/DARIA_CORE.md`, open item 20).
-- **Why it is not done.** The PAL versions the owner has all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one (`docs/DARIA_CORE.md`, "The added images"). So step 8 could not run either item (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
+- **Why it is not done.** The PAL versions the owner has all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one (`docs/DARIA_CORE.md`, "The added images"). So neither item could be completed in step 8 (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
 - **What covers them today.** Simulation only: `tb_wire`'s `pal_dpc`, `pal2600`, `pal2600_a78` and `seq_*` scenarios (`sim/bupchip/daria/wire/wire.py`). All pass in c78's `wire` gate (`docs/daria_step7/record.md`, "Plan 7.7's fresh-clone run: c78").
 - **What it needs.**
   - For D1, a 2600 ARM image that draws 50 Hz PAL frames (312 lines). A synthetic one made by the project's own scripts would do, as `pal_dpc` is. Like every generated image, it stays out of git.
@@ -63,7 +63,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 ### Smaller items
 
-- **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. On hardware the owner sees them as the picture shifting down for a couple of frames before a level loads, and they do not affect play (step 8, 2026-10-17). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
+- **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. On hardware the owner sees Spiders' late calls as the picture shifting down for a couple of frames before a level loads, and they do not seem to affect play (step 8, 2026-10-17). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
 - **The C flag after a Thumb MUL** is marked unknown and halts with code 8 if read. Revisit if a game ever halts with code 8 (`docs/DARIA_CORE.md`, open item 4).
 - **Code or LDM above the 64 KB window** halts (codes 4 and 7). A fetch stall in front of `rom_q` would run it, if a larger CDFJ+ game needs it (`docs/DARIA_CORE.md`, open item 5).
 - **A cartridge EEPROM, and the ARM chip's other peripherals.**

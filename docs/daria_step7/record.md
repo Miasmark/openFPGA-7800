@@ -285,7 +285,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16 (c76 and c78). Audio is documented per image above.
 4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
 
-**Step 7 is done for V1** (2026-10-17). Every item above holds on the tree that ships (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). What remains for 2.2.1 is step 8, the hardware tests of plan section 9 (below), and the release.
+**Step 7 is done for V1** (2026-10-17). Every item above holds on the tree that ships (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). At step 7's close, what remained for 2.2.1 was step 8, the hardware tests of plan section 9 (below), and the release. Step 8 has since run ("Hand-over to step 8").
 
 ## Hand-over to step 8
 
@@ -296,7 +296,7 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
 - **Fix B on hardware:**
   - Fix A's list, plus a Superchip game, an E7, a 3E and a CV title;
   - a Supercharger multiload end to end, and the tape path (`AR_TAPE`).
-  - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report names no title or scheme.
+  - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report names none of these titles or schemes.
 - **PSRAM at 36.17 MHz with `CLOCK_SPEED` 50.0** (`DARIA_CORE.md`, open item 10):
   - the BupChip's ARSC readback;
   - Turbo, which reads beyond the 64 KB window through the cache;
@@ -310,16 +310,17 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
   - The plan's ÷18 expectation ("locked after power-up and after every retune") no longer applies. At ÷19 the guard cannot confirm that C0 and C3 rise together on silicon; that stays an STA assumption.
   - *2026-10-17, step 8:* **not tested.** The overlay was not built (P16, P22).
 - **A PAL 2600 ARM image on Auto region** (Stay Frosty 2's PAL build, for one): one retune soon after the start, one F6 after it, and the game restarting in PAL. No retune residual is left to look for: a manual region change within 0.6 ms of a load is closed by `f2c305e`.
-  - *2026-10-17, step 8:* **not run** (checklist D1). The PAL versions the owner has all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one. Covered by simulation only: `tb_wire`'s `pal_dpc` and the `seq_*` scenarios, `seq_tia_dpc` with `pal_dpc`'s image.
+  - *2026-10-17, step 8:* **not completed** (checklist D1). The PAL versions the owner has all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one. Covered by simulation only: `tb_wire`'s `pal_dpc` and the `seq_*` scenarios, `seq_tia_dpc` with `pal_dpc`'s image.
 - **A PAL A78 after a PAL 2600 image on Auto region** (`DARIA_CORE.md`, open item 20): two more retunes than the plain build, ending in PAL.
-  - *2026-10-17, step 8:* **not run** (checklist D2, which used D1's image). Covered by simulation only: `pal2600_a78`. It needs no ARM image: that scenario's first image is a plain PAL 2600 program.
+  - *2026-10-17, step 8:* **not completed** (checklist D2, which used D1's image). Covered by simulation only: `pal2600_a78`. It needs no ARM image: that scenario's first image is a plain PAL 2600 program.
 - **The counted classes expected on hardware:**
   - the per-image audio differences above;
   - `merge_race`, and design 9.5's classes;
   - Spiders' 16 late calls in its overrun frames;
   - the rare audio-read coincidences of `DARIA_CORE.md`'s open item 7.
-  - *2026-10-17, step 8:* the owner sees Spiders' late calls as the whole picture shifting down for a couple of frames before a level loads. Play is unaffected: the owner beat a couple of levels, and the game kept working. The owner judged the audio against YouTube captures of the games and found it not too noisy. The report gives no click count (checklist G4). `merge_race` and design 9.5's classes cannot be seen on hardware.
+  - *2026-10-17, step 8:* the owner sees Spiders' late calls as the whole picture shifting down for a couple of frames before a level loads. Play does not seem to be affected: the owner beat a couple of levels, and the game kept working. The owner judged the audio against YouTube captures of the games and found it not too noisy. The report gives no click count (checklist G4). `merge_race` and design 9.5's classes cannot be seen on hardware.
 - **`daria_smp`'s upset exposure:** `pend` and `fl` are never reset, so an upset that leaves `fl` at 1 with no read in flight would hold the asset read port until power-down. This is recorded, not hardened.
+  - *2026-10-17, step 8:* nothing to test on hardware, and the report says nothing on it. It stays recorded, not hardened.
 - **The late-call source** (plan 6.2 question 5) and the call counter from `call_tog`, both under `BUP_DEBUG` only. A change seen only under `BUP_DEBUG` re-runs only Q5 and `s4/check.sh` (plan 7.6).
   - *2026-10-17, step 8:* **not tested.** The overlay was not built (P16, P22).
 
