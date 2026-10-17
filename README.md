@@ -67,7 +67,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 - **AtariVox voice** (the SpeakJet speech chip on port 2), with the SaveKey
   that is the AtariVox's other half: the voice is there whenever the SaveKey
   is on (so 2600 AtariVox games need *SaveKey (port 2)* set to On), and
-  *AtariVox Voice* sets its level in the mix (Off, Quiet, Normal, Loud). It
+  *AtariVox Voice* sets its level in the mix (Off, Quiet, Normal, Loud: x4, x8 and x16, Normal about level with the game's sound). It
   is mixed into the core's output, where a real AtariVox has a jack of its
   own. The SpeakJet's sound tables are not published, so the voice is our
   own: a speech engine of our own design built from recordings of the real

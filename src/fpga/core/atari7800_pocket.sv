@@ -1077,13 +1077,16 @@ atarivox atarivox (
 	.sample (vox_sample)
 );
 
-// Mixed into both channels: x1 (Quiet), x2 (Normal), x4 (Loud), limited to
-// +-16383, on a +16384 bias (the output filter removes the DC) while on.
-wire signed [17:0] vox_gain = (atarivox_setting == 2'd3) ? (18'(vox_sample) <<< 2) :
-                              (atarivox_setting == 2'd2) ? (18'(vox_sample) <<< 1) : 18'(vox_sample);
-wire signed [15:0] vox_lim  = (vox_gain > 18'sd16383) ? 16'sd16383 :
-                              (vox_gain < -18'sd16383) ? -16'sd16383 : vox_gain[15:0];
-wire        [17:0] vox_add  = vox_on ? 18'(17'(vox_lim) + 17'sd16384) : 18'd0;
+// Mixed into both channels: x4 (Quiet), x8 (Normal), x16 (Loud). The voice
+// peaks near +-2,000 at the chip's full volume, against a TIA channel's
+// 0-21,844 square wave, so x4 sits well under the game and x8 about level
+// with it on hardware. Limited to +-32,767 on a +32,768 bias (the output
+// filter removes the DC) while on; the sum saturates.
+wire signed [19:0] vox_gain = (atarivox_setting == 2'd3) ? (20'(vox_sample) <<< 4) :
+                              (atarivox_setting == 2'd2) ? (20'(vox_sample) <<< 3) : (20'(vox_sample) <<< 2);
+wire signed [15:0] vox_lim  = (vox_gain > 20'sd32767) ? 16'sd32767 :
+                              (vox_gain < -20'sd32767) ? -16'sd32767 : vox_gain[15:0];
+wire        [17:0] vox_add  = vox_on ? 18'(18'(vox_lim) + 18'sd32768) : 18'd0;
 wire        [15:0] core_audio_l, core_audio_r;
 wire        [17:0] mix_l = 18'(core_audio_l) + vox_add;
 wire        [17:0] mix_r = 18'(core_audio_r) + vox_add;

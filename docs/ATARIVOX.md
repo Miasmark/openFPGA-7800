@@ -342,8 +342,11 @@ speed factor x FAST/SLOW, from the same tables as the model.
 - The alarms' step counts are fixed from the default speed.
 
 **Mixing.** A real AtariVox has its own audio jack. Here the voice is mixed
-into both channels: x1, x2 or x4 (*AtariVox Voice*: Quiet, Normal, Loud),
-limited to +-16,383 on top of the core's output.
+into both channels: x4, x8 or x16 (*AtariVox Voice*: Quiet, Normal, Loud),
+limited to +-32,767 on top of the core's output. The voice peaks near
++-2,000 at the chip's full volume, and a TIA channel swings 0-21,844 as a
+square wave: the first test build's x1, x2 and x4 left it hard to hear
+even on Loud (owner's hardware test), so each level moved up two steps.
 
 ## The plan
 
