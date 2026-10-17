@@ -507,7 +507,7 @@ This is the single `wire` gate run at the head that c76's record found missing.
 - **Why in pieces.** One call runs the gates in turn, and c78's pieces took about 70 h of run time: the 16 frame runs 2.1-2.2 h each, the 56 `s4` jobs 16.3 h, and `extra_tests`' two halves 6.8 and 5.0 h. Sessions end after 2-13 h (`docs/AGENT_RUNS.md` section 2). So the gates ran as 45 resumable pieces; four gates were split into several pieces or calls each (deviations 2, 3, 4 and 6, below).
 - **Result: every gate passes.** 29 pieces exit 0, and the 16 frame pieces exit 3, PARTIAL alone, with 16 of 16 images passing together. By the lead's rule for this run (2026-10-16, set when the machine's stops cut the whole `s4_check` and `wire` runs), a gate run in pieces passes when its pieces cover it and each passes. A second reader re-derived every verdict from the logs and confirmed all 15.
 
-**The gates** (`DARIA_CORE.md` has a short form of this table):
+**The gates** (`record.md`, "Plan 7.7's fresh-clone run: c78", has a short form of this table):
 
 | Gate | Ran as | Result | Against c76 and c77 |
 |---|---|---|---|
