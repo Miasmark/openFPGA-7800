@@ -316,6 +316,19 @@ speed factor x FAST/SLOW, from the same tables as the model.
   no difference, no tick missed.
 - **On its own in Quartus** (5CEBA4F23C8): 420 ALMs, 17 M10K, 1 DSP, +55 ns
   of setup slack at clk_sys.
+- **In the whole core** (`tb_load +voxlog +voxpcm +sk_on`, DARIA in):
+  - **Juno First (retail):** a press of fire at 6 s starts a game, and it
+    sends its title phrase and "wave one" as before. The voice plays them
+    from the core (6.25-7.81 s, 8.74-9.40 s), and the emulator, given the
+    game's own byte timing, gives the same loudness frame by frame.
+  - **Stratovox (retail, DPC+, under DARIA):** at 6.37 s, as play starts,
+    it sends `\0RVX`; the voice clears and says the built-in "Ready" from
+    6.48 s, 0.32 s at 68.8 Hz (the real chip's: 0.37 s at a flat 69 Hz).
+- **The full build** (2.2.1 with DARIA and the AtariVox): 15,880 ALMs (86%;
+  2.2.1 without the AtariVox 15,625), 212 M10K, 13 DSP. The tightest path is
+  DARIA's guard pair (6 ns): seeds 1, 2 and 3 gave +0.391, -0.162 and
+  +0.067 ns, so the qsf now uses seed 1 (clk_arm +1.674, clk_sdram +2.445,
+  worst hold +0.114).
 
 **Differences from `sjsynth.py`,** all small:
 
@@ -340,7 +353,7 @@ limited to +-16,383 on top of the core's output.
 | 2 | Prototype the synthesizer and sound tables in Python (`sjsynth.py`), tuned against recordings | Done; tuning goes on |
 | 3 | Test cartridge (`sim/vox_test.py`) | Done |
 | 4 | The FPGA engine, its program and ROM (above) | Done, in simulation |
-| 5 | Into the core (`POCKET_ATARIVOX`), with the menu setting | Done, in simulation; hardware test next |
+| 5 | Into the core (`POCKET_ATARIVOX`), with the menu setting | Done; whole-core simulation with Juno First and Stratovox; hardware test next |
 
 ## Tools
 
