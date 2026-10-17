@@ -241,7 +241,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.0.21, Analogue Pocket)
+### Hardware testing (2.0.2 to the 2.2.1 candidate, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -273,6 +273,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
+| The 2.2.1 candidate with DARIA (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The sound, checked against video captures of the games, is not too noisy. Not tested: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because every PAL ARM image at hand is a PAL60 build (262-line frames, which Auto runs as NTSC); simulation covers both. The DARIA status overlay is not built yet ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1") |
+| DARIA's known differences seen on hardware (2.2.1 candidate) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. These are the 16 calls that run late at the start of play in simulation, on MiSTer's core too. Play is unaffected: a couple of levels beaten |
 
 ### Changes to the MiSTer sources
 

@@ -27,10 +27,43 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - **The second catch: drift.** The pattern changes whenever the effective delay crosses a whole VCO period. It crosses 3-4 such boundaries between corners, so as the chip warms the marker jumps, and near a boundary one sample in 19 is unreliable. Today's lock rule (unlock on the first mismatch, relock after 12 matches) would drop out at each crossing. A ÷19 guard needs a lock rule that tolerates this, and a way to re-place the mask when the marker moves.
 - **Cost** (an estimate). A design study with a lattice simulation like the hardware judge's scratch `det.py` (`docs/daria_fe/design.md` 8.1; not kept in the repository). New guard and arbiter RTL with its unit bench. Mode B at ÷19, expecting no near pairs. Then `docs/daria_step7/plan.md` 7.6's reruns, including seven fits (Q2 and Q5 on seeds 1-3, and Q-mut): about a day of fits, plus the simulation gates.
 - **When.** After hardware tests, especially if Galagon or Mappy show audio clicks.
+  - *2026-10-17:* step 8's hardware tests found the audio not too noisy, judged against video captures of the games. The report gave no click count (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
+
+### The step-8 DARIA status overlay
+
+*Added 2026-10-17, after step 8's hardware tests. Debug-only. It was planned for step 8 but not built, and `src/` is frozen for 2.2.1.*
+
+- **What it would show.** On the debug build, while a 2600 ARM game runs: DARIA's calls and late calls, the guard's lock state and unlock count, and the halt flag, halt code and fault code. Today the debug build's cells appear only for a Souper cartridge, and show only the BupChip.
+- **Why.**
+  - Step 8's hardware tests could only see Spiders' late calls, as the picture shifting down. The overlay would count them: 16 are expected at the start of play.
+  - It would show on silicon that the guard stays unlocked at ÷19, with 0 unlocks after power-up and after every retune. Today only simulation shows it, in mode B at ÷19.
+  - A halted ARM game just stops today. The overlay would show why.
+- **Cost.** `BUP_DEBUG` code only, so by plan 7.6 it re-runs only Q5 and `s4/check.sh`. Step 7 prepared it (`docs/daria_step7/plan.md` P15, P16 and P22):
+  - `daria_fe` exports `dbg_locked` and `dbg_unlock`, which drive nothing in the release build;
+  - calls are counted from `call_tog` in the wrapper, and the late-call source is a bus decode (plan 6.2 question 5);
+  - the halt status already reaches `clk_sys` through two flops (`docs/DARIA_CORE.md`, 7.2, "New DARIA crossings");
+  - `bup_dbg_snap.sv`, the snapshot of open item 11, is meant to carry it.
+- **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"; section 7 of the step-8 checklist (`release/daria-test1_checklist.md`, gitignored).
+- **When.** After 2.2.1, with the next debug build.
+
+### The PAL region items on hardware, with a 50 Hz PAL image
+
+*Added 2026-10-17, after step 8's hardware tests.*
+
+- **What it would show.** Step 8's checklist items D1 and D2 on a Pocket:
+  - D1: a PAL 2600 ARM image on Region Auto restarts once, about 1 s after loading, then runs in PAL at 50 Hz;
+  - D2: a PAL A78 loaded after a PAL 2600 image ends in PAL, with RTL-1's two extra retunes (`docs/DARIA_CORE.md`, open item 20).
+- **Why it is not done.** Every PAL ARM image the owner has is PAL60. It draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one (`docs/DARIA_CORE.md`, "The added images"). So step 8 could not run either item (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
+- **What covers them today.** Simulation only: `tb_wire`'s `pal_dpc`, `pal2600`, `pal2600_a78` and `seq_*` scenarios (`sim/bupchip/daria/wire/wire.py`). All pass in c78's `wire` gate (`docs/daria_step7/record.md`, "Plan 7.7's fresh-clone run: c78").
+- **What it needs.**
+  - For D1, a 2600 ARM image that draws 50 Hz PAL frames (312 lines). A synthetic one made by the project's own scripts would do, as `pal_dpc` is. Like every generated image, it stays out of git.
+  - D2 needs no ARM image. `pal2600_a78`'s first image is a plain PAL 2600 program, so any 50 Hz PAL 2600 game followed by a PAL A78 runs it.
+- **Cost.** One test session on the build under test. No RTL change.
+- **When.** When such an image is at hand.
 
 ### Smaller items
 
-- **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
+- **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. On hardware they show as the picture shifting down for a couple of frames before a level loads, and do not affect play (step 8, 2026-10-17). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
 - **The C flag after a Thumb MUL** is marked unknown and halts with code 8 if read. Revisit if a game ever halts with code 8 (`docs/DARIA_CORE.md`, open item 4).
 - **Code or LDM above the 64 KB window** halts (codes 4 and 7). A fetch stall in front of `rom_q` would run it, if a larger CDFJ+ game needs it (`docs/DARIA_CORE.md`, open item 5).
 - **A cartridge EEPROM, and the ARM chip's other peripherals.**

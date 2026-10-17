@@ -291,27 +291,37 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 
 Plan section 9, corrected for ÷19 at the final review. Step 7 is done for V1 (2026-10-17), so step 8 (its done-when, `DARIA_CORE.md`'s "Steps" item 8, and this list) and the release remain for 2.2.1.
 
+**Step 8's results (2026-10-17).** The owner tested daria-test1 on a Pocket. The report is a verdict on the whole checklist, not per item: "everything looks good, tested the library and played the games" (`progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"). A dated note under each item below gives what the report says on it.
+
 - **Fix B on hardware:**
   - Fix A's list, plus a Superchip game, an E7, a 3E and a CV title;
   - a Supercharger multiload end to end, and the tape path (`AR_TAPE`).
+  - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report names no title or scheme.
 - **PSRAM at 36.17 MHz with `CLOCK_SPEED` 50.0** (`DARIA_CORE.md`, open item 10):
   - the BupChip's ARSC readback;
   - Turbo, which reads beyond the 64 KB window through the cache;
   - plan 5.4 (o)'s I/O figures for reference.
+  - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report does not name Turbo or the BupChip.
 - **The shipped `SEED` 2** and its Q2 reports. Test builds with `BUP_DEBUG` use Q5's seeds (all three pass).
+  - *2026-10-17, step 8:* daria-test1's plain zip is `SEED` 2 on the qsf as committed, its fit equal to c76's Q2 seed 2. The debug zip is Q5 seed 2, equal to c76's. The report does not say which zip was used.
 - **The guard on real clocks:** the overlay shows `dbg_locked` and an unlock count (P22).
   - Expected at ÷19: `dbg_locked` 0 and 0 unlocks at all times, after power-up and after every retune. That confirms the guard is inert, as in every mode-B run at ÷19.
   - Any lock is a finding to investigate.
   - The plan's ÷18 expectation ("locked after power-up and after every retune") no longer applies. At ÷19 the guard cannot confirm that C0 and C3 rise together on silicon; that stays an STA assumption.
+  - *2026-10-17, step 8:* **not tested.** The overlay was not built (P16, P22).
 - **A PAL 2600 ARM image on Auto region** (Stay Frosty 2's PAL build, for one): one retune soon after the start, one F6 after it, and the game restarting in PAL. No retune residual is left to look for: a manual region change within 0.6 ms of a load is closed by `f2c305e`.
+  - *2026-10-17, step 8:* **not run** (checklist D1). Every PAL ARM image the owner has is PAL60: 262-line frames, which Region Auto treats as NTSC. Stay Frosty 2's PAL build is one. Covered by simulation only: `tb_wire`'s `pal_dpc` and the `seq_*` scenarios, `seq_tia_dpc` with `pal_dpc`'s image.
 - **A PAL A78 after a PAL 2600 image on Auto region** (`DARIA_CORE.md`, open item 20): two more retunes than the plain build, ending in PAL.
+  - *2026-10-17, step 8:* **not run** (checklist D2, which used D1's image). Covered by simulation only: `pal2600_a78`. It needs no ARM image: that scenario's first image is a plain PAL 2600 program.
 - **The counted classes expected on hardware:**
   - the per-image audio differences above;
   - `merge_race`, and design 9.5's classes;
   - Spiders' 16 late calls in its overrun frames;
   - the rare audio-read coincidences of `DARIA_CORE.md`'s open item 7.
+  - *2026-10-17, step 8:* Spiders' late calls show as the whole picture shifting down for a couple of frames before a level loads. Play is unaffected: the owner beat a couple of levels, and the game kept working. The owner judged the audio against YouTube captures of the games and found it not too noisy. The report gives no click count (checklist G4). `merge_race` and design 9.5's classes cannot be seen on hardware.
 - **`daria_smp`'s upset exposure:** `pend` and `fl` are never reset, so an upset that leaves `fl` at 1 with no read in flight would hold the asset read port until power-down. This is recorded, not hardened.
 - **The late-call source** (plan 6.2 question 5) and the call counter from `call_tog`, both under `BUP_DEBUG` only. A change seen only under `BUP_DEBUG` re-runs only Q5 and `s4/check.sh` (plan 7.6).
+  - *2026-10-17, step 8:* **not tested.** The overlay was not built (P16, P22).
 
 ## After 2.2.1: `src/` clean-ups
 

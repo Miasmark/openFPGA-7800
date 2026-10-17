@@ -572,3 +572,52 @@ This is the single `wire` gate run at the head that c76's record found missing.
   - The lowest free space on `/`, 2,235 MB, is the lowest the monitor recorded. The monitor started at 08:20, about 5 minutes after the first pieces, and died with the stops at 09:16 and 12:28 on 10-16; it was restarted at 09:24 and 12:40. So free space went unrecorded while pieces ran for about 5, 6 and 10 minutes, from 08:15, 09:17 and 12:29.
   - `extra_tests` took dasm, 7800basic and MiSTer's two firmware files from a cache, as c76 did, which the notes' list of deviations left out. So the run does not show that the gates need only the firmware and the game images.
 - **Step 7 is done for V1.** `record.md`, "Plan 7.7's fresh-clone run: c78", records c78 in short, and `DARIA_CORE.md`'s status line and done-when and the record's hand-over now say so. What remains for 2.2.1 is step 8, the hardware tests of plan section 9, and the release.
+
+### Step 8: hardware tests of daria-test1 (2026-10-17)
+
+**The builds.** Two test zips, both built from DARIA-dev at `d9b2cb6`. Their `src/` is `317eaa8`'s tree, the one c76 verified and 2.2.1 ships. Both show version 2.1.3 on the Pocket, because test builds keep the version they were built from. Neither holds game data, a BIOS or the BupChip firmware. Both are in the gitignored `release/`.
+
+| Zip | What it is | md5 of the zip | `ap_core.rbf` md5 | `atari7800.rbf_r` md5 |
+|---|---|---|---|---|
+| `Atari7800_Pocket_2.1.3-daria-test1.zip` | plain: the qsf as committed, `SEED` 2; the core as 2.2.1 ships it | `98ae7b8d1e9bd9f342f401c5bfa29ba6` | `9da7c66604b41e85ceb72722146400f6` | `29965cccdf27d132fd58bcd6bc49e7d6` |
+| `Atari7800_Pocket_2.1.3-daria-test1-debug.zip` | debug: the same plus `BUP_DEBUG` (c76's Q5 edit to the qsf), `SEED` 2 | `0b9825361cab90ec685ce480f532e8df` | `058896522c39fde0da91e382a1a4563b` | `ee8a2c58501d68f7e03a35246fccfc9c` |
+
+- **The fits equal c76's.** The plain fit's figures are those of c76's Q2 seed 2, and the debug fit's those of Q5 seed 2. The timing report, the summary's timing and ALMs-by-entity sections, and the qsf copy are byte-equal. The plain `.rbf` differs from c76's only through `apf/build_id.mif`'s date, time and random word.
+  - Plain: `clk_sdram` +2.683 ns, `clk_arm` +1.077 ns, the guard pair +0.397 ns, worst hold +0.098 ns; 15,625 ALMs (85%), 195 M10K.
+  - Debug: `clk_sdram` +2.265 ns, `clk_arm` +0.636 ns, the guard pair +0.131 ns, worst hold +0.121 ns; 15,802 ALMs (86%), 195 M10K.
+  - Both pass the step-7 fit checks: `run_step7.sh` exits 0 with the verdict PASS. The debug fit's (c.cells) passes by the tracked table.
+- **The build records** are kept outside the repository (`rel221/results.txt`, and each fit's driver log).
+- **The checklist** is `release/daria-test1_checklist.md` (gitignored, 2026-10-17). Its items: A1-A21, the 15 demos and the six added images; B, the Champ Games Presents batch; C, the PSRAM at 36.17 MHz (Turbo and the BupChip); D, region; E, Fix B, DPC and the Supercharger; F, 7800 games; G, switching games and long play; H, the debug zip's baseline reading. Its section 4 lists the expected differences, and its section 7 the items these builds cannot test.
+
+**The owner's report** (2026-10-17), as written:
+
+> everything looks good, tested the library and played the games, I can even see where the spider arcade game gets the late calls since the whole screen shifts down for a couple of frames before the level loads. fortunately it does not seem to interfere during the actual game play as I was able to beat a couple of levels of that and it kept working.
+>
+> had to refer back to youtube captures to ensure that what I was hearing was not too noisy.
+>
+> unfortunately all the pal versions seem pal 60 so that part of the test was not able to be completed.
+
+**What it shows:**
+
+- **The library plays.** The owner tested the library and played the games, and everything looks good. The report is a verdict on the whole list. It gives no result per checklist item, and it does not say which zip was used.
+- **Spiders' late calls are visible, and they do not affect play.**
+  - On the Pocket the whole picture shifts down for a couple of frames before a level loads.
+  - That matches the 16 late calls in Spiders' overrun frames: frames 557-572 in simulation, the same calls that upstream's core misses (`record.md`, "The frame gate, V1 rule"; `DARIA_CORE.md`, "Step 3 work").
+  - In c76's frame run those 16 frames are 354 lines long instead of 262 (322,848 `clk_sys` against 238,944). R1's, from upstream's core, are the same length: the frame gate found `len_sys` equal on every frame, none excused. The run and its gate report are in the D worktree's gitignored `sim/work/step7/fix/fix/c76/frames/`.
+  - The frame runs stop at 1,500 frames, about 25 s, so they hold only the first such overrun.
+  - Play is unaffected: the owner beat a couple of levels, and the game kept working. The checklist expected this (section 4 and item A9).
+- **The audio is not too noisy.** The owner judged the sound against YouTube captures of the games, and found it not too noisy. The report gives no click count for Galagon and Mappy (item G4).
+- **The PAL region items were not run.** These are the checklist's D1, a PAL 2600 ARM image on Region Auto, and D2, a PAL A78 after it (RTL-1).
+  - Every PAL ARM image the owner has is PAL60. It draws 262-line frames, which Region Auto treats as NTSC. Stay Frosty 2's PAL build was already recorded as one (`DARIA_CORE.md`, "The added images").
+  - So both items stay covered by simulation only, by these `tb_wire` scenarios (`sim/bupchip/daria/wire/wire.py`):
+    - `pal_dpc`: a synthetic PAL DPC+ image on Auto. One retune, to PAL, then the game restarts in PAL (D1).
+    - `pal2600`: a PAL 2600 tone program on Auto. One retune, to PAL.
+    - `pal2600_a78`: a PAL 2600 image, then a PAL A78. The DARIA build's two extra retunes, ending in PAL (D2; `DARIA_CORE.md`, open item 20).
+    - the eight `seq_*` scenarios: region changes inside load sequences. `seq_tia_dpc` runs `pal_dpc`'s image.
+  - All of them pass in c78's `wire` gate, 97 of 97 scenarios (`record.md`, "Plan 7.7's fresh-clone run: c78").
+  - D2 needs no ARM image. `pal2600_a78`'s first image is a plain PAL 2600 program, so any 50 Hz PAL 2600 game followed by a PAL A78 would run it. `docs/IMPROVEMENTS.md` lists the hardware test of both items.
+
+**What this round did not test:**
+
+- **The DARIA status overlay items.** The overlay is not built (plan P16 and P22). So neither zip shows the guard's lock state and unlock count, DARIA's call and late-call counts, the late-call source, or the halt flag, halt code and fault code. The debug zip's cells show only the BupChip. `docs/IMPROVEMENTS.md` lists the overlay as a later item.
+- **The assumption that DARIA's clock and the console clock rise together** stays a timing-analysis assumption at this clock, as the checklist's section 7 says.
