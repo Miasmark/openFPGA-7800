@@ -327,8 +327,9 @@ speed factor x FAST/SLOW, from the same tables as the model.
 - **The full build** (2.2.1 with DARIA and the AtariVox): 15,880 ALMs (86%;
   2.2.1 without the AtariVox 15,625), 212 M10K, 13 DSP. The tightest path is
   DARIA's guard pair (6 ns): seeds 1, 2 and 3 gave +0.391, -0.162 and
-  +0.067 ns, so the qsf now uses seed 1 (clk_arm +1.674, clk_sdram +2.445,
-  worst hold +0.114).
+  +0.067 ns, so the qsf used seed 1. With the voice made louder (a few
+  ALMs in the mix) they gave +0.084, +0.193 and -0.262 ns, so it uses
+  seed 2 (clk_arm +1.474, clk_sdram +2.433, worst hold +0.082).
 
 **Differences from `sjsynth.py`,** all small:
 
