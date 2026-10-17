@@ -27,7 +27,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - **The second catch: drift.** The pattern changes whenever the effective delay crosses a whole VCO period. It crosses 3-4 such boundaries between corners, so as the chip warms the marker jumps, and near a boundary one sample in 19 is unreliable. Today's lock rule (unlock on the first mismatch, relock after 12 matches) would drop out at each crossing. A ÷19 guard needs a lock rule that tolerates this, and a way to re-place the mask when the marker moves.
 - **Cost** (an estimate). A design study with a lattice simulation like the hardware judge's scratch `det.py` (`docs/daria_fe/design.md` 8.1; not kept in the repository). New guard and arbiter RTL with its unit bench. Mode B at ÷19, expecting no near pairs. Then `docs/daria_step7/plan.md` 7.6's reruns, including seven fits (Q2 and Q5 on seeds 1-3, and Q-mut): about a day of fits, plus the simulation gates.
 - **When.** After hardware tests, especially if Galagon or Mappy show audio clicks.
-  - *2026-10-17:* step 8's hardware tests found the audio not too noisy, judged against video captures of the games. The report gave no click count (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
+  - *2026-10-17:* in step 8's hardware tests the owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. The report gave no click count (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
 
 ### The step-8 DARIA status overlay
 

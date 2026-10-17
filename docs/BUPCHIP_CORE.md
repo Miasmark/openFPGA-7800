@@ -1036,7 +1036,7 @@ Every slack gate below is the worst setup slack over the four corners in `sta.su
 
 Once the BupChip is complete and proven on hardware, the same CPU may also run the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+), which upstream runs on the shared ARM7TDMI and the Pocket build leaves out (`NO_ARM_MAPPER`). The two never run at once, so they can share the CPU, its block RAM and the PSRAM path. The main new work is a clean-room Thumb front end: these drivers are game code, so all of Thumb has to be exact, with the same exact-or-halt rule. lroby74's MiSTer Thumb core is CC BY-NC 4.0 and may be used only as a behavioural reference. With Thumb added and the 2600 cartridges running, ARIA becomes **DARIA**: the Dual-use Atari RISC Interface Accelerator.
 
-**Version:** the first release with DARIA will be 2.2.1 (2.1.1 is the first with ARIA; "Implementation steps", "Versions").
+**Version:** the first release with DARIA is 2.2.1 (2.1.1 is the first with ARIA; "Implementation steps", "Versions").
 
 Test set: Champ Games' NTSC demos, supplied by the owner and kept in `sim/work/` (never committed):
 
