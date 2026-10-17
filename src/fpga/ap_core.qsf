@@ -768,7 +768,11 @@ set_global_assignment -name VERILOG_MACRO "POCKET_ATARIVOX=1"
 # builds had +0.65 to +1.26). A structural fix belongs in sram_ctrl
 # (docs/BUPCHIP_CORE.md, step 5). Check it again whenever the design
 # changes; another seed may then do better.
-set_global_assignment -name SEED 2
+# With the AtariVox (86% of ALMs, 96% of LABs) the tightest path is DARIA's
+# guard pair (daria_constraints.sdc, 6 ns): seeds 1, 2 and 3 gave +0.391,
+# -0.162 and +0.067 ns on it; seed 1's clk_arm +1.674, clk_sdram +2.445,
+# worst hold +0.114.
+set_global_assignment -name SEED 1
 
 # Memory initialisation files are referenced both as "rtl/..." and bare.
 set_global_assignment -name SEARCH_PATH mister
