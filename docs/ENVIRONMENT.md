@@ -4,6 +4,8 @@ This file is for a Claude session in a new Claude Code cloud container that has 
 
 [docs/DEVELOPING.md](DEVELOPING.md) is still the reference for the core itself: its layout, build macros, the Quartus build, PLL regeneration and releases. This file does not repeat that material. Section 9 lists what this file adds and which statements in DEVELOPING.md are out of date.
 
+**On the self-hosted VM, read section 11 first:** it lists where that machine differs from the container this file describes.
+
 Markers:
 
 - **[untested]**: worked out from the history and the scripts, but never run in a fresh container.
@@ -570,3 +572,68 @@ Corrections to DEVELOPING.md. None of these have been applied there yet:
 4. Should the image be pinned by digest in the docs and in CI? A `docker pull` in a fresh container has not been tested this session.
 5. The exact disk quota is unknown; about 39 GB is an estimate [E]. Confirm it before planning work that needs the Quartus image plus large simulation outputs.
 6. Should `s4/check.sh` default to `JOBS=2`? And should `run_study.sh` take the Quartus lock and run fewer builds at once, to match the machine rules?
+7. What job limits apply on the self-hosted VM (section 11.6), with 5 cores (10 threads) and 30 GiB RAM? Section 7.4's were set for the container's 4 CPUs and 15 GiB.
+
+## 11. The self-hosted VM
+
+Since 2026-10-18 the project also runs on the owner's own VM. Sections 1-10 describe the cloud container; this section lists where the VM differs. It is based on an inventory of the VM taken on 2026-10-18, on `Mister-Pocket-Port` at `6e2e880`. Where this section and an earlier one disagree, this section is right for the VM.
+
+### 11.1 Machine
+
+- **System:** Ubuntu 26.04.1 LTS, x86_64, a KVM guest with systemd. Daemons start at boot.
+- **Resources:** 10 vCPUs, 30 GiB RAM. The host is an Intel Core i7-8700K (6 cores, 12 threads, 12 MiB L3). The VM has 5 of its cores with 2 threads each, so `nproc` reports 10, but the compute is 5 cores': a second thread adds far less than a core for builds and simulations. Size parallel work by the 5 cores.
+- **Disk:** `/` is a 735 GB LVM volume, with 674 GB available at inventory. The roughly 39 GB budget of section 8.3 does not apply, and the Quartus image's 18.6 GB is a small part of it.
+- **Users and paths:** the user is `miasmark`, in the `sudo` and `docker` groups; sudo asks for a password. `/home/user` is a symlink to `/home/miasmark`, so the `/home/user/...` paths in this file work unchanged. The repo is `~/openFPGA-7800`.
+- **Provisioning:** the scripts that built the VM are in `~/provision` (outside the repo): `01_system.sh` (apt, Docker, `/etc/environment`, the symlink), `02_user.sh` (Claude Code, the clone, Verilator 5.040, the venv, the image pull, the OpenBIOS), `03_seal.sh` (template sealing) and `04_ramscratch.sh` (11.4). Their logs are beside them.
+- **Remotes:** `origin` is the owner's fork, `upstream` is spiritualized1997/openFPGA-7800.
+
+### 11.2 Tools
+
+All the tools of section 2.2 are present except those the project does not use: cmake, clang, node, npm, Playwright and a `yosys` on PATH. The versions differ:
+
+| Tool | Version on the VM | Note |
+|---|---|---|
+| Verilator | 5.040 in `/opt/verilator-5.040`; apt's is 5.032 | `/etc/environment` sets `VERILATOR=/opt/verilator-5.040/bin/verilator`, so `sim/run_sim.sh` picks 5.040 without the prefix (section 8.5 does not apply to login shells) |
+| Icarus Verilog | 12.0 | |
+| GHDL | 5.0.1 | |
+| arm-none-eabi-gcc | 14.2.1, binutils 2.45.50 | |
+| gcc / g++ | 15.2.0 | |
+| dasm | 2.20.14.1 | |
+| ccache | 4.12.3 | |
+| Python | 3.14.4 | refuses a system-wide `pip install` (PEP 668), so quick start step 3's `pip install pillow` fails: Pillow 12.1.1 comes from apt's `python3-pil` |
+| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259 | `sim/work/bupchip/venv`, as section 4 |
+| Docker | 29.9.1 | 11.3 |
+| git, gh | 2.53.0; gh 2.102.0 in `~/.local/bin` | gh is logged in as the owner, and is git's credential helper |
+
+### 11.3 Docker and Quartus
+
+- **dockerd is a systemd service** (`systemctl is-active docker`), enabled at boot. Sections 3.3 and 8.4 (starting dockerd by hand, the stale containerd pid) do not apply.
+- **The image** `raetro/quartus:21.1` is pulled (18.6 GB) and reports `Version 21.1.1 Build 850 06/23/2022 SJ Lite Edition`.
+- **The lock.** `/tmp` is a tmpfs, so the Quartus lock file (section 3.5) does not survive a reboot. `flock` creates it again, owned by `miasmark` rather than root. Keep using the lock as section 3.5 says.
+
+### 11.4 RAM scratch
+
+Two tmpfs mounts, each capped at 40% of RAM (13 GB), are set in `/etc/fstab`. Their contents are lost at every reboot. `/etc/profile.d/ramscratch.sh` exports their variables, and `~/RAM_SCRATCH.md` describes them.
+
+| Path | Variable | Use |
+|---|---|---|
+| `/scratch` | `$RAM_SCRATCH` | general scratch |
+| `sim/work_ram` | `$RAM_WORK` | inside the repo and gitignored, so the Docker wrappers accept it as `WORK`, for example `WORK=$RAM_WORK/qprobe` |
+
+The venv, the OpenBIOS and the game files stay on disk under `sim/work`, because they must survive a reboot.
+
+### 11.5 Inputs
+
+- **OpenBIOS:** built by `02_user.sh` from `~/7800-devtools/7800openbios` at `b8bc745`. On the VM, `sim/work/bupchip/bios/7800openbios.bin` has md5 `659607f14d1a0743c004d2b0bc0807fc`. Section 5.3 refers to an md5 that it does not give; whether this one matches the container's is not recorded.
+- **Firmware and game images:** absent at inventory. Ask the owner for them (sections 5.2 and 5.4). Until then, the benches skip as section 8.6 says.
+- **Reference clones:** the clones of section 5.6 (lroby74, the Jaguar repo, retrobios, cdfjplus-template) are absent. No script needs them.
+
+### 11.6 Sessions and long runs
+
+The VM does not stop when a session goes idle, and has no 13-hour limit (sections 8.1 and 8.4). Work is still lost when the Claude session itself ends. That happens when the terminal or SSH connection closes, when the login expires, or when the VM reboots.
+
+- **tmux:** run Claude Code inside tmux (`tmux new -s claude`, then `claude`), and come back with `tmux attach -t claude` after a disconnect.
+- **Login:** the normal login expires. `claude setup-token` makes a long-lived token. Put it in `CLAUDE_CODE_OAUTH_TOKEN`, in a file only the user can read, so a long workflow is not stopped by an expired login.
+- **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
+- **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
+- **Load:** section 7.4's limits (3 simulations, 2 while Quartus runs) were set for the container's 4 CPUs; the VM has 5 cores (10 threads, 11.1). Limits for this VM are an open question (section 10, item 7). Until the owner sets them, keep section 7.4's.
