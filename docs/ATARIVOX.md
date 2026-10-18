@@ -1,8 +1,10 @@
 # AtariVox: notes and plan
 
-Status: research and prototype. Nothing is in the core yet. The SaveKey
-half of the AtariVox (the 24LC256 EEPROM) has been in the core since 2.0.8;
-this is about the voice.
+Status: in the core from 2.2.1, behind `POCKET_ATARIVOX` (`src/fpga/core/atarivox/`),
+on whenever the SaveKey is and *AtariVox Voice* is not Off. The SaveKey half
+of the AtariVox (the 24LC256 EEPROM) has been in the core since 2.0.8. The
+voice is a speech engine of our own design ("The engine", below), playing
+our own sound tables, since the SpeakJet's are not published.
 
 ## The device
 
@@ -275,19 +277,98 @@ can't be logged in simulation until DARIA. So the AtariVox's usefulness on
 the Pocket depends on DARIA too, beyond homebrews on plain bank switching
 (Juno First, the speech testers).
 
+## The engine
+
+The FPGA was short of logic and long on block RAM and multipliers after
+DARIA (2,855 ALMs and 113 M10K free), so the voice is a small processor
+built for the job rather than hand-wired logic. It spends block RAM and one
+multiplier. One program does both of the SpeakJet's jobs: it reads codes,
+and it computes the sound.
+
+| Part | What |
+|---|---|
+| `avox_rx.sv` | The serial input: 8N1, a bit every 744 clk_sys; serial control mode (`\` ... `X`: R clears and stops, V says "Ready", the rest is swallowed); the 64-byte buffer, with DOWN low from 32 bytes |
+| `avox_engine.sv` | 4 clocks an instruction (3.6 million a second); 64 registers and 192 words of data memory in two block RAM copies; one 27x27 multiplier; a 4,096 x 20-bit data ROM; a 1,024 x 40-bit program ROM |
+| `atarivox.sv` | The 16,384 Hz tick (874 clk_sys, 866 on the PAL clock) and the two above |
+| `tools/atarivox/voxprog.py` | The program: the synthesizer (every other tick: the voice's envelope oscillator, five tone oscillators, noise on 4 and 5, the envelope and master volume, 8,192 samples a second), the output low-pass (every tick: two poles at 2.2 kHz) and the interpreter (on the other ticks, as a coroutine) |
+| `tools/atarivox/vox_rom.py` | The data ROM: half a sine period, the speed, bend and length tables, and 264 segment records, which are `sjsynth.py`'s allophones and effects written out as data |
+| `tools/atarivox/voxeng.py` | The instruction set, an assembler, and an emulator that matches the RTL clock for clock |
+
+The interpreter turns each sound into segments (an allophone is 1 to 3:
+a vowel 1, a diphthong 2, a stop 3 for closure, burst and aspiration) and
+hands them to the synthesizer one at a time. The synthesizer starts each
+segment from wherever the last one's glide had got to, as `sjsynth.py`
+does. A sound's length is the manual's length x its type's factor x the
+speed factor x FAST/SLOW, from the same tables as the model.
+
+**Checks.**
+
+- **The program against the model** (`sjhw.py` against `sjsynth.py`): on
+  Juno First's title, "Foolish human" and the test cartridge's eight
+  phrases (all 72 allophones, all effects, pitch, speed and bend steps), the
+  same lengths to within 10 ms, loudness envelopes matching, and spectral
+  frame correlation 0.93-0.97.
+- **The RTL against the program** (`sim/atarivox/run.sh`): bytes sent over
+  the serial line as a game sends them; every output sample equal, at the
+  same clock, to the emulator's. Juno First's title, the allophones, the
+  effects, the speed and bend steps and a serial-control sequence (clear
+  before each phrase, a phrase cut off, "Ready"): about 357,000 samples,
+  no difference, no tick missed.
+- **On its own in Quartus** (5CEBA4F23C8): 420 ALMs, 17 M10K, 1 DSP, +55 ns
+  of setup slack at clk_sys.
+- **In the whole core** (`tb_load +voxlog +voxpcm +sk_on`, DARIA in):
+  - **Juno First (retail):** a press of fire at 6 s starts a game, and it
+    sends its title phrase and "wave one" as before. The voice plays them
+    from the core (6.25-7.81 s, 8.74-9.40 s), and the emulator, given the
+    game's own byte timing, gives the same loudness frame by frame.
+  - **Stratovox (retail, DPC+, under DARIA):** at 6.37 s, as play starts,
+    it sends `\0RVX`; the voice clears and says the built-in "Ready" from
+    6.48 s, 0.32 s at 68.8 Hz (the real chip's: 0.37 s at a flat 69 Hz).
+- **The full build** (2.2.1 with DARIA and the AtariVox): 15,880 ALMs (86%;
+  2.2.1 without the AtariVox 15,625), 212 M10K, 13 DSP. The tightest path is
+  DARIA's guard pair (6 ns): seeds 1, 2 and 3 gave +0.391, -0.162 and
+  +0.067 ns, so the qsf used seed 1. With the voice made louder (a few
+  ALMs in the mix) they gave +0.084, +0.193 and -0.262 ns, so it uses
+  seed 2 (clk_arm +1.474, clk_sdram +2.433, worst hold +0.082).
+
+**Differences from `sjsynth.py`,** all small:
+
+- The output low-pass runs at 16,384 Hz on the held 8,192 Hz samples, as
+  the board's analog filter does on the chip's PWM. This takes off more of
+  the images above 4 kHz.
+- A repeat (`26, X`) plays the code X times back to back. The model also
+  added a 10 ms fade after each one.
+- When the buffer and the queued sound run out, the voice fades out over
+  10 ms (the model's closing pause), and starts again with the next byte.
+- The alarms' step counts are fixed from the default speed.
+
+**Mixing.** A real AtariVox has its own audio jack. Here the voice is mixed
+into both channels: x4, x8 or x16 (*AtariVox Voice*: Quiet, Normal, Loud),
+limited to +-32,767 on top of the core's output. The voice peaks near
++-2,000 at the chip's full volume, and a TIA channel swings 0-21,844 as a
+square wave: the first test build's x1, x2 and x4 left it hard to hear
+even on Loud (owner's hardware test), so each level moved up two steps.
+
 ## The plan
 
-| Step | What | FPGA cost |
+| Step | What | Status |
 |---|---|---|
-| 1 | Log what games send (`+voxlog`, or Stella with `stella_voxlog.py`): done for the speech tester and Juno First | None |
-| 2 | Prototype the synthesizer and our sound tables in Python (`tools/atarivox/sjsynth.py`), tuned by ear against videos | None |
-| 3 | Test cartridge of our own (`sim/vox_test.py`) | None |
-| 4 | FPGA: serial receiver, 64-byte buffer and DOWN pin; code interpreter; the synthesizer, time-shared; tables in block RAM; behind its own macro and a menu setting | Estimated 600-1,000 ALMs, 4-7 M10K, 1-3 DSP |
-
-Step 4 waits for DARIA, so it can be sized against DARIA's real figures
-(estimated 2,700-3,100 ALMs and 113 memory blocks free).
+| 1 | Log what games send (`+voxlog`, or Stella with `stella_voxlog.py`) | Done: the speech tester, Juno First |
+| 2 | Prototype the synthesizer and sound tables in Python (`sjsynth.py`), tuned against recordings | Done; tuning goes on |
+| 3 | Test cartridge (`sim/vox_test.py`) | Done |
+| 4 | The FPGA engine, its program and ROM (above) | Done, in simulation |
+| 5 | Into the core (`POCKET_ATARIVOX`), with the menu setting | Done; whole-core simulation with Juno First and Stratovox; on hardware it says its words clearly at every level (second test build) |
 
 ## Tools
+
+- `tools/atarivox/sjhw.py OUT.wav CODES...` or `--log tb.log`: the same
+  codes through the engine's program in the emulator, as the FPGA plays
+  them (16,384 Hz). `--build DIR` writes the engine's ROM images
+  (`src/fpga/core/atarivox/vox_*rom.{hex,mif}`); rerun it after changing
+  `voxprog.py` or `vox_rom.py`.
+- `sim/atarivox/run.sh BYTES` (hex bytes, `gap MS`): the unit test, RTL
+  against the emulator. `tb_load +voxpcm` writes the voice inside the whole
+  core to `vox.pcm`.
 
 - `tools/atarivox/sjsynth.py OUT.wav CODES...` or `--log tb.log`: renders
   SpeakJet codes to an 8,192 Hz WAV through a model of the manual's

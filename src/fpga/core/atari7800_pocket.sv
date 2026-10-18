@@ -109,6 +109,7 @@ module atari7800_pocket
 
 	// SaveKey EEPROM (24LC256) RAM, second port for its save slot (clk_74a)
 	input  wire  [1:0] savekey_setting, // 0 auto (A78 header), 1 on, 2 off
+	input  wire  [1:0] atarivox_setting, // AtariVox voice: 0 off, 1 quiet, 2 normal, 3 loud
 	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
 	input  wire        sk_bridge_wr,
 	input  wire        sk_bridge_rd,    // APF read strobe for this region
@@ -944,7 +945,16 @@ end
 
 // With the SaveKey on, PA2 reads the EEPROM's SDA (the RIOT ANDs it with its
 // own output, so a released pin reads the EEPROM).
-assign PAin = use_sk ? {pa_in_r[7:3], sk_sda, pa_in_r[1:0]} : pa_in_r;
+// With the AtariVox's voice on, PA1 (port 2 DOWN) also reads its "buffer
+// half full" line, low while it holds 32 bytes or more.
+`ifdef POCKET_ATARIVOX
+wire vox_down_n;
+wire pa1_in = pa_in_r[1] & vox_down_n;
+`else
+wire pa1_in = pa_in_r[1];
+`endif
+assign PAin = use_sk ? {pa_in_r[7:3], sk_sda, pa1_in, pa_in_r[0]} : pa_in_r;
+
 
 assign PBin[7] = ~diff_right_b;           // Right difficulty: 1 = A
 assign PBin[6] = ~diff_left_b;            // Left difficulty
@@ -1048,6 +1058,40 @@ wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11) | daria_rt_pen
 always @(posedge clk_sys)
 	if (!region_pll_hold)
 		region_pll <= region_select;
+`endif
+
+`ifdef POCKET_ATARIVOX
+// The AtariVox's voice (docs/ATARIVOX.md): the SpeakJet's serial input on
+// PA0 (port 2 UP) and our speech engine. It is part of the AtariVox, so it
+// is there whenever the SaveKey is (use_sk) and the voice setting is not
+// Off. A console reset leaves it running, as the real one, powered from the
+// port; a cart load resets it.
+wire vox_on = use_sk && (atarivox_setting != 2'd0);
+wire signed [15:0] vox_sample;
+atarivox atarivox (
+	.clk    (clk_sys),
+	.reset  (reset_in | cart_download | ~vox_on),
+	.pal    (region_pll),
+	.line   (PAout[0]),
+	.down_n (vox_down_n),
+	.sample (vox_sample)
+);
+
+// Mixed into both channels: x4 (Quiet), x8 (Normal), x16 (Loud). The voice
+// peaks near +-2,000 at the chip's full volume, against a TIA channel's
+// 0-21,844 square wave, so x4 sits well under the game and x8 about level
+// with it on hardware. Limited to +-32,767 on a +32,768 bias (the output
+// filter removes the DC) while on; the sum saturates.
+wire signed [19:0] vox_gain = (atarivox_setting == 2'd3) ? (20'(vox_sample) <<< 4) :
+                              (atarivox_setting == 2'd2) ? (20'(vox_sample) <<< 3) : (20'(vox_sample) <<< 2);
+wire signed [15:0] vox_lim  = (vox_gain > 20'sd32767) ? 16'sd32767 :
+                              (vox_gain < -20'sd32767) ? -16'sd32767 : vox_gain[15:0];
+wire        [17:0] vox_add  = vox_on ? 18'(18'(vox_lim) + 18'sd32768) : 18'd0;
+wire        [15:0] core_audio_l, core_audio_r;
+wire        [17:0] mix_l = 18'(core_audio_l) + vox_add;
+wire        [17:0] mix_r = 18'(core_audio_r) + vox_add;
+assign AUDIO_L = |mix_l[17:16] ? 16'hFFFF : mix_l[15:0];
+assign AUDIO_R = |mix_r[17:16] ? 16'hFFFF : mix_r[15:0];
 `endif
 
 reg [15:0] rnd = 16'h5A5A;
@@ -1155,8 +1199,13 @@ Atari7800 main
 `endif
 
 	// Audio
+`ifdef POCKET_ATARIVOX
+	.AUDIO_R      (core_audio_r),
+	.AUDIO_L      (core_audio_l),
+`else
 	.AUDIO_R      (AUDIO_R),
 	.AUDIO_L      (AUDIO_L),
+`endif
 
 	// Cart interface
 	.cart_out     (cart_download ? ioctl_dout : (cart_loaded ? cart_data_sd : cart_data_rom)),

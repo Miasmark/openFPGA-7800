@@ -90,7 +90,7 @@ module tb_system;
 
 	logic reset_in = 1'b1;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
-	logic [1:0] sk_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
+	logic [1:0] sk_setting = 2'd2; logic [1:0] vox_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
 	logic hide_border = 1'b0;
 	logic [1:0] region = 2'd1;   // NTSC; +pal for PAL
@@ -143,7 +143,7 @@ module tb_system;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
-		.savekey_setting(sk_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
+		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),

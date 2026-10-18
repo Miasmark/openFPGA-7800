@@ -48,6 +48,8 @@ for f in palettes Minnie ooo.hex; do
 	ln -sfn "$RTL/$f" "$WORK/rtl/$f"
 done
 ln -sfn "$FPGA/core/ar_stub.hex" "$WORK/rtl/ar_stub.hex"
+# The AtariVox engine's ROM images (tools/atarivox/sjhw.py --build)
+for f in vox_irom.hex vox_drom.hex; do ln -sfn "$FPGA/core/atarivox/$f" "$WORK/rtl/$f"; done
 
 # Verilator (5.040) rejects initialised unpacked `wire` arrays, which
 # upstream uses for constant tables and Quartus accepts. Simulate copies with
@@ -98,6 +100,7 @@ SRCS=(
 	"$RTL/detect2600.sv" "$RTL/a78_cart_extent.sv" "$PATCHED/RIOT/M6532.sv"
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
+	"$FPGA/core/atarivox/avox_rx.sv" "$FPGA/core/atarivox/avox_engine.sv" "$FPGA/core/atarivox/atarivox.sv"
 	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
@@ -170,7 +173,7 @@ build() {   # build <top> <objdir> [more bench sources]
 	local top="$1" obj="$2"; shift 2
 	"${VERILATOR:-verilator}" --binary --timing -j "${VL_JOBS:-4}" "${VL_OPT[@]}" -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN \
 		-Wno-TIMESCALEMOD \
-		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ -DPOCKET_SUPERCHARGER \
+		-DNO_ARM_MAPPER -DNO_BUPCHIP -DNO_DDRAM -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ -DPOCKET_SUPERCHARGER -DPOCKET_ATARIVOX \
 		$SRAM_DEFS $BUP_DEFS $SIM_DEFS \
 		--top-module "$top" -Mdir "$WORK/$obj" -o vtb "${SRCS[@]}" "$@" "$HERE/$top.sv" > "$WORK/$obj.log" 2>&1 \
 		|| { grep -m20 "%Error" "$WORK/$obj.log"; exit 1; }
