@@ -16,7 +16,7 @@ This is the record of DARIA's step 7, integration and Fix B. It was the section 
 - **Commit P** (`b1e57ef`), in both builds: the shipped core's PAL 2600 loop on Auto region is fixed. `is_pal_o` is now `region_pll`, which is held while a 2600 image's region is not known. Before the fix, a PAL 2600 game made 41,293 retunes in 1.3 simulated seconds and ended in NTSC; after it, one retune, to PAL, at 955 ms.
 - **The clock:** ÷19, 36.17 MHz (`DARIA_CORE.md`, decision 7; `b177e64`). `daria_sync.tcl` turns the router's register duplication off (`3201313`). `daria_constraints.sdc`'s fitter-only block asks for 5.5 ns on the guard pair (`618b5c3`).
 - **The retune-inside-F6 race, fixed** (`f2c305e`). The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune, and a retune is pending while `region_pll` differs from it. `region_pll` is frozen while a retune is pending or under way, and while an ARM image's console is in reset. During a 2600 download it is set back to `daria_rgn`. While a retune is pending, F6 cannot start, so F6 runs once, after the retune. DARIA's timer prescale takes `daria_rgn` (`c5fb23f`).
-- **The shipped seed:** `SEED` 2, `ap_core.qsf`'s already. It is the only seed that passed every check as first written. The seed comment above it still gives 2.1.1's margins (open: "After 2.2.1", below).
+- **The kept seed:** `SEED` 2, `ap_core.qsf`'s already. It is the only seed that passed every check as first written. 2.2.1 ships the AtariVox build's own seed-2 fit (`docs/DARIA_CORE.md`, "Steps", item 9). The seed comment above it still gives 2.1.1's margins (open: "After 2.2.1", below).
 
 ## Decisions taken in step 7
 
