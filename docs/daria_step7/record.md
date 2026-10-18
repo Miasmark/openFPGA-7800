@@ -2,7 +2,7 @@
 
 This is the record of DARIA's step 7, integration and Fix B. It was the section "Step 7 work" of [`DARIA_CORE.md`](../DARIA_CORE.md) until 2026-10-17, when it moved here to keep that file under the hygiene check's size limit of 262,144 bytes (`sim/check/hygiene.sh`). The text is as it was, with its headings one level up. Its pointers are fixed for the new place: `plan.md` and `progress.md` are beside it, and where it names a part of `DARIA_CORE.md`, such as an open item or a decision, it now names the file too. `DARIA_CORE.md` keeps a short summary under the old heading, so references to "Step 7 work" still land.
 
-`plan.md` is the plan, with every amendment marked in place, and `progress.md` records the runs as they landed. This file records the result. **The tree that ships in 2.2.1 is `317eaa8`'s `src/`.** `src/` has not changed since: at the final review's head it is byte-identical, and the owner froze it as verified (2026-10-16). The verification campaign on that tree, c76, ran from 2026-10-14 09:13 to 2026-10-16 00:58 UTC. Every piece exits 0, and every gate passes under the amended rules. Plan 7.7's fresh-clone run, c78 (2026-10-16 to 10-17), passes every gate, as the union of its pieces, on DARIA-dev at `843830e`, with the same `src/` (below).
+`plan.md` is the plan, with every amendment marked in place, and `progress.md` records the runs as they landed. This file records the result. **The tree verified for 2.2.1 is `317eaa8`'s `src/`,** and 2.2.1 ships its DARIA RTL unchanged (`DARIA_CORE.md`, "Steps" item 9). At the final review's head `src/` is byte-identical to it, and the owner froze it as verified (2026-10-16). The verification campaign on that tree, c76, ran from 2026-10-14 09:13 to 2026-10-16 00:58 UTC. Every piece exits 0, and every gate passes under the amended rules. Plan 7.7's fresh-clone run, c78 (2026-10-16 to 10-17), passes every gate, as the union of its pieces, on DARIA-dev at `843830e`, with the same `src/` (below).
 
 ## What was built
 
@@ -16,7 +16,7 @@ This is the record of DARIA's step 7, integration and Fix B. It was the section 
 - **Commit P** (`b1e57ef`), in both builds: the shipped core's PAL 2600 loop on Auto region is fixed. `is_pal_o` is now `region_pll`, which is held while a 2600 image's region is not known. Before the fix, a PAL 2600 game made 41,293 retunes in 1.3 simulated seconds and ended in NTSC; after it, one retune, to PAL, at 955 ms.
 - **The clock:** ÷19, 36.17 MHz (`DARIA_CORE.md`, decision 7; `b177e64`). `daria_sync.tcl` turns the router's register duplication off (`3201313`). `daria_constraints.sdc`'s fitter-only block asks for 5.5 ns on the guard pair (`618b5c3`).
 - **The retune-inside-F6 race, fixed** (`f2c305e`). The wrapper keeps `daria_rgn`, the region of the PLL's last completed retune, and a retune is pending while `region_pll` differs from it. `region_pll` is frozen while a retune is pending or under way, and while an ARM image's console is in reset. During a 2600 download it is set back to `daria_rgn`. While a retune is pending, F6 cannot start, so F6 runs once, after the retune. DARIA's timer prescale takes `daria_rgn` (`c5fb23f`).
-- **The shipped seed:** `SEED` 2, `ap_core.qsf`'s already. It is the only seed that passed every check as first written. The seed comment above it still gives 2.1.1's margins (open: "After 2.2.1", below).
+- **The kept seed:** `SEED` 2, `ap_core.qsf`'s already. It is the only seed that passed every check as first written. 2.2.1 ships the AtariVox build's own seed-2 fit (`docs/DARIA_CORE.md`, "Steps", item 9). The seed comment above it still gives 2.1.1's margins (open: "After 2.2.1", below).
 
 ## Decisions taken in step 7
 
@@ -115,7 +115,7 @@ Figures are in ns. Setup is at the worse slow corner, and the guard pair's slack
 | Fit | `clk_arm` | `clk_sdram` | Worst hold | Guard pair | (h) | ALMs needed | Verdict as amended (as first written) |
 |---|---|---|---|---|---|---|---|
 | Q2 seed 1 | +1.241 | +2.462 | +0.120 | +0.217 | +4.298 | 15,602 | PASS (FAIL (h)) |
-| **Q2 seed 2, shipped** | +1.077 | +2.683 | +0.098 | +0.397 | +6.697 | 15,625 | PASS (PASS) |
+| **Q2 seed 2, kept** | +1.077 | +2.683 | +0.098 | +0.397 | +6.697 | 15,625 | PASS (PASS) |
 | Q2 seed 3 | +1.765 | +2.919 | +0.119 | −0.046 | +6.338 | 15,600 | PASS (FAIL (a), (l)) |
 | Q2 seed 3, `KEEP_DB=1` | the same figures as seed 3 | | | | | | PASS |
 | Q4 (no DARIA, `PIN_ID=1`) | — | +2.380 | +0.100 | — | +6.423 | 12,990 | PASS; `.rbf` md5 `8569ab1e…`, equal to Q1''s |
@@ -285,13 +285,13 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16 (c76 and c78). Audio is documented per image above.
 4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
 
-**Step 7 is done for V1** (2026-10-17). Every item above holds on the tree that ships (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). At step 7's close, what remained for 2.2.1 was step 8, the hardware tests of plan section 9 (below), and the release. Step 8 has since run, and is closed for 2.2.1 ("Hand-over to step 8").
+**Step 7 is done for V1** (2026-10-17). Every item above holds on the verified tree, `317eaa8`'s `src/` (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). At step 7's close, what remained for 2.2.1 was step 8, the hardware tests of plan section 9 (below), and the release. Step 8 has since run, and is closed for 2.2.1 ("Hand-over to step 8").
 
 ## Hand-over to step 8
 
 Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-10-17), step 8 (its done-when, `DARIA_CORE.md`'s "Steps" item 8, and this list) and the release remained for 2.2.1. Step 8 has since run and is closed for 2.2.1; its results follow.
 
-**Step 8's results (2026-10-17).** The owner tested daria-test1 on a Pocket. The report is a verdict on the whole checklist, not per item: "everything looks good, tested the library and played the games" (`progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"). On that verdict step 8's done-when holds. The owner's call, the same day: "package the core unchanged and then do the pull request. prepare the release notes as well". So step 8 is closed for 2.2.1 without the PAL region items and the overlay, which are deferred to `docs/IMPROVEMENTS.md`, and 2.2.1 ships daria-test1's plain bitstream unchanged (`DARIA_CORE.md`, "Steps" items 8 and 9). A dated note under each item below gives what the report says on it.
+**Step 8's results (2026-10-17).** The owner tested daria-test1 on a Pocket. The report is a verdict on the whole checklist, not per item: "everything looks good, tested the library and played the games" (`progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"). On that verdict step 8's done-when holds. The owner's call, the same day: "package the core unchanged and then do the pull request. prepare the release notes as well". So step 8 is closed for 2.2.1 without the PAL region items and the overlay, which are deferred to `docs/IMPROVEMENTS.md` (`DARIA_CORE.md`, "Steps" item 8). A dated note under each item below gives what the report says on it.
 
 - **Fix B on hardware:**
   - Fix A's list, plus a Superchip game, an E7, a 3E and a CV title;
@@ -303,7 +303,7 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
   - plan 5.4 (o)'s I/O figures for reference.
   - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report does not name Turbo or the BupChip.
 - **The shipped `SEED` 2** and its Q2 reports. Test builds with `BUP_DEBUG` use Q5's seeds (all three pass).
-  - *2026-10-17, step 8:* daria-test1's plain zip is `SEED` 2 on the qsf as committed, its fit equal to c76's Q2 seed 2. The debug zip is Q5 seed 2, equal to c76's. The report does not say which zip was used.
+  - *2026-10-17, step 8:* the test builds were `SEED` 2. The report does not say which one was used. 2.2.1 ships a new fit, the AtariVox build's own `SEED` 2, not Q2's (`DARIA_CORE.md`, "Steps" item 9).
 - **The guard on real clocks:** the overlay shows `dbg_locked` and an unlock count (P22).
   - Expected at ÷19: `dbg_locked` 0 and 0 unlocks at all times, after power-up and after every retune. That confirms the guard is inert, as in every mode-B run at ÷19.
   - Any lock is a finding to investigate.
@@ -326,7 +326,7 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
 
 ## After 2.2.1: `src/` clean-ups
 
-The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md`, "After 2.2.1: RTL-1 and the `src/` clean-ups", mirrors this list in short.
+The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md`, "After 2.2.1: RTL-1 and the `src/` clean-ups", mirrors this list in short. The line numbers below are `317eaa8`'s. In 2.2.1 the AtariVox voice adds lines above them: 10 in `atari7800_pocket.sv`, 4 in `ap_core.qsf` and 3 in `core_top.v`.
 
 1. **RTL-1** (`DARIA_CORE.md`, open item 20): the freeze of `region_pll` in `atari7800_pocket.sv:1037`. The fix is sketched there; `pal2600_a78`'s expected DARIA count then drops to 0.
 2. **RTL-2:** in the withdrawal branch (`atari7800_pocket.sv:1032-1036`), `region_pll <= daria_rgn` uses `daria_rgn`'s old value on the clock where `daria_rgn` updates. `region_pll` then holds the previous region for one `clk_sys`.
@@ -337,6 +337,7 @@ The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change
    - Q2's seeds on the shipping tree: `clk_sdram` +2.462 / +2.683 / +2.919 ns, 15,600-15,625 ALMs (about 85%);
    - the +1.5 ns release gate;
    - why `SEED` 2: the only seed that passed every check as first written.
+   - *2.2.1:* the AtariVox voice added its build's seeds after the comment. The 2.1.1 figures and the call for a fix in `sram_ctrl` are still there. The figures to give are now the AtariVox build's, not Q2's.
 5. **C2:** `daria_sync.tcl:49`, the FORCED mark on `cap_err_a[0]`, matches no build, and Quartus lists it as ignored. Its comment at `:31-34` says the BUP_DEBUG build has the chain; Q5 does not. The fix deletes `:49` and corrects `:31-34`. As a non-comment change to an assignment file, it needs a new Q2 and the smoke test.
 6. **`core_top.v:1040`:** the audio comment says the mix is "box filtered down to ~48 kHz (298 clk_sys samples per output)". `core/audio_filter.sv` averages 256 samples, about 55.9 kHz.
 7. **`pll_core.v:39-41`:** the comment says the C3 = 19 display strings are "one digit lower". Only C0 and C2's differ by one in the last digit; C1's differs by 2 and the VCO's by 43 (DOC-15).

@@ -171,7 +171,7 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
 1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
-the whole core used 79% of the FPGA in 2.1.1 (85% in 2.2.1, with DARIA).
+the whole core used 79% of the FPGA in 2.1.1 (86% in 2.2.1, with DARIA and the AtariVox voice).
 From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges, at 36.17 MHz. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
@@ -232,9 +232,7 @@ path of DARIA's front end (its phase detector), which moves with any change
 to the design: seeds 1 and 3 gave +0.084 and -0.262 ns there. Worst hold
 slack +0.082 ns. It uses 15,839 of 18,480 ALMs (86%), 212 of 308 M10K blocks
 and 13 DSP blocks; the AtariVox voice is about 230 ALMs, 17 M10K and one DSP
-of that. DARIA's hardware test build (daria-test1) without the voice had
-15,625 ALMs and +0.397 ns on the phase detector
-([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
+of that.
 2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
@@ -286,8 +284,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
-| The 2.2.1 candidate with DARIA (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay is not built yet ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
-| DARIA's known differences seen on hardware (2.2.1 candidate) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware cannot count them until the DARIA status overlay exists. Play does not seem affected: a couple of levels beaten |
+| DARIA's test build (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay is not built yet ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
+| DARIA's known differences seen on hardware (daria-test1) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware cannot count them until the DARIA status overlay exists. Play does not seem affected: a couple of levels beaten |
 | AtariVox voice (2.2.1 test builds) | Clearly says its words at every *AtariVox Voice* level. The first test build mixed it at x1/x2/x4 and it was hard to hear against the TIA even on Loud; from the second, x4/x8/x16 |
 
 ### Changes to the MiSTer sources

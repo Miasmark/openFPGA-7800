@@ -43,7 +43,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - calls can be counted from `call_tog` in the wrapper, and plan 6.2 question 5 recommends a bus decode for the late-call source (not yet decided or built); neither needs a `daria_fe` port (P22);
   - the halt status already reaches `clk_sys` through two flops (`docs/DARIA_CORE.md`, 7.2, "New DARIA crossings");
   - `bup_dbg_snap.sv`, the snapshot of open item 11, is meant to carry it.
-- **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"; section 7 of the step-8 checklist (`release/daria-test1_checklist.md`, gitignored).
+- **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)".
 - **When.** After 2.2.1, with the next debug build.
 
 ### The PAL region items on hardware, with a 50 Hz PAL image
@@ -90,7 +90,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
    - **When.** The next revision after 2.2.1.
 2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1.
 3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`.
-4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, not Q2's on the shipping tree, and still asks for a fix in `sram_ctrl` that Fix B made.
+4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, before the AtariVox build's seeds that 2.2.1 added, and still asks for a fix in `sram_ctrl` that Fix B made.
 5. **`daria_sync.tcl`'s FORCED mark on `cap_err_a[0]`** matches no build, and Quartus lists it as ignored.
 6. **`core_top.v`'s audio comment** says 298 samples per output, about 48 kHz. `audio_filter.sv` averages 256, about 55.9 kHz.
 7. **`pll_core.v`'s comment** says the VCO/19 display strings are "one digit lower". Only two of the four are.
@@ -109,11 +109,11 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **FA2 saves: Star Castle Arcade's high scores.** *Added 2026-10-17, from the owner's finding on the Pocket, for a release after 2.2.1.*
   - **What it would fix.** Star Castle Arcade, an FA2 game, does not keep its high-score saves on the Pocket.
     - The FA2 mapper (`mapper_fa2.sv`) copies its 256-byte work RAM to and from the cartridge's flash through the `fa2_nvram_*` port.
-    - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1233-1239`). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.
+    - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1282-1288` in 2.2.1). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.
     - On MiSTer, upstream's `fa2_nvram_bridge.sv` connects the port to the core's save RAM. The Pocket build does not use it.
     - The stub dates from the port's first commit (`3043d50`), so every release of this port has it. It is not DARIA's.
   - **Cost.** A 256-byte nonvolatile save slot behind the FA2 port, like `hsc.sav`.
     - `docs/DEVELOPING.md`, "Add a save slot", is the recipe: `save_ram_dp` with its APF read latch, a constant size in the data slot table, the next bridge region (`0x40000000`), a `data.json` slot appended after the others, a new file blank as $FF, and a round trip in `tb_load`.
     - It changes `src/` in both builds. By `docs/daria_step7/plan.md` 7.6 it re-runs `run_sim.sh`, `extra_tests.sh`, `s4/check.sh` and `pp_equiv.py`, and needs a new Q2.
-  - **Evidence.** The owner's finding on the Pocket. The step-8 checklist lists it as outside DARIA (`release/daria-test1_checklist.md`, section 4, gitignored).
+  - **Evidence.** The owner's finding on the Pocket.
   - **When.** After 2.2.1, with the first `src/` change.
