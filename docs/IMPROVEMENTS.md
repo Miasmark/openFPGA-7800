@@ -90,7 +90,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
    - **When.** The next revision after 2.2.1.
 2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1.
 3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`.
-4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, not Q2's on the shipping tree, and still asks for a fix in `sram_ctrl` that Fix B made.
+4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, before the AtariVox build's seeds that 2.2.1 added, and still asks for a fix in `sram_ctrl` that Fix B made.
 5. **`daria_sync.tcl`'s FORCED mark on `cap_err_a[0]`** matches no build, and Quartus lists it as ignored.
 6. **`core_top.v`'s audio comment** says 298 samples per output, about 48 kHz. `audio_filter.sv` averages 256, about 55.9 kHz.
 7. **`pll_core.v`'s comment** says the VCO/19 display strings are "one digit lower". Only two of the four are.

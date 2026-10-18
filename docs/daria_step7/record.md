@@ -337,6 +337,7 @@ The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change
    - Q2's seeds on the shipping tree: `clk_sdram` +2.462 / +2.683 / +2.919 ns, 15,600-15,625 ALMs (about 85%);
    - the +1.5 ns release gate;
    - why `SEED` 2: the only seed that passed every check as first written.
+   - *2.2.1:* the AtariVox voice added its build's seeds after the comment. The 2.1.1 figures and the call for a fix in `sram_ctrl` are still there. The figures to give are now the AtariVox build's, not Q2's.
 5. **C2:** `daria_sync.tcl:49`, the FORCED mark on `cap_err_a[0]`, matches no build, and Quartus lists it as ignored. Its comment at `:31-34` says the BUP_DEBUG build has the chain; Q5 does not. The fix deletes `:49` and corrects `:31-34`. As a non-comment change to an assignment file, it needs a new Q2 and the smoke test.
 6. **`core_top.v:1040`:** the audio comment says the mix is "box filtered down to ~48 kHz (298 clk_sys samples per output)". `core/audio_filter.sv` averages 256 samples, about 55.9 kHz.
 7. **`pll_core.v:39-41`:** the comment says the C3 = 19 display strings are "one digit lower". Only C0 and C2's differ by one in the last digit; C1's differs by 2 and the VCO's by 43 (DOC-15).

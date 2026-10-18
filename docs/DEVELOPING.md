@@ -541,9 +541,9 @@ not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 
 Current use (2.2.1, with DARIA and the AtariVox voice, fitter seed 2) is
 15,839 of 18,480 ALMs (86%) and 212 of 308 M10K blocks (README,
-"Verification"). DARIA's verified tree, without the voice, used 15,625
-ALMs (85%), 195 M10K blocks and 1,767-1,770 of 1,848 LABs over seeds
-1-3, with a peak interconnect use of 60.4-60.8%. Its ALM count is
+"Verification"). DARIA's verified tree, without the voice, used
+15,600-15,625 ALMs (85%), 195 M10K blocks and 1,767-1,770 of 1,848 LABs
+over seeds 1-3, with a peak interconnect use of 60.4-60.8%. Its ALM count is
 77-102 ALMs over the 84% that DARIA's design took as a guide, which
 triggers nothing ([daria_step7/record.md](daria_step7/record.md),
 "The fits").
@@ -559,7 +559,8 @@ paths in `sram_ctrl` (into `fbn_*` on seeds 1 and 2 of DARIA's verified tree,
 from `fbn_addr` on seed 3). They still depend on placement: `core_constraints.sdc` asks the
 fitter alone for 1.5 ns of extra setup margin there, and `ap_core.qsf` sets
 the fitter seed, one already fitted on the release tree. Its comment still
-gives 2.1.1's seeds and margins (+0.26, +0.44 and +0.28 ns at 79%); it is
+gives 2.1.1's seeds and margins (+0.26, +0.44 and +0.28 ns at 79%), with
+the AtariVox build's seeds after them since 2.2.1; the 2.1.1 part is
 corrected after 2.2.1. The verified tree's seeds 1, 2 and 3 gave `clk_sdram`
 +2.462, +2.683 and +2.919 ns, and seed 2 was kept as the only one that
 passed every step-7 check as first written
