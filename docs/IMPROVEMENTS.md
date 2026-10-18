@@ -43,7 +43,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - calls can be counted from `call_tog` in the wrapper, and plan 6.2 question 5 recommends a bus decode for the late-call source (not yet decided or built); neither needs a `daria_fe` port (P22);
   - the halt status already reaches `clk_sys` through two flops (`docs/DARIA_CORE.md`, 7.2, "New DARIA crossings");
   - `bup_dbg_snap.sv`, the snapshot of open item 11, is meant to carry it.
-- **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)"; section 7 of the step-8 checklist (`release/daria-test1_checklist.md`, gitignored).
+- **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)".
 - **When.** After 2.2.1, with the next debug build.
 
 ### The PAL region items on hardware, with a 50 Hz PAL image
@@ -115,5 +115,5 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - **Cost.** A 256-byte nonvolatile save slot behind the FA2 port, like `hsc.sav`.
     - `docs/DEVELOPING.md`, "Add a save slot", is the recipe: `save_ram_dp` with its APF read latch, a constant size in the data slot table, the next bridge region (`0x40000000`), a `data.json` slot appended after the others, a new file blank as $FF, and a round trip in `tb_load`.
     - It changes `src/` in both builds. By `docs/daria_step7/plan.md` 7.6 it re-runs `run_sim.sh`, `extra_tests.sh`, `s4/check.sh` and `pp_equiv.py`, and needs a new Q2.
-  - **Evidence.** The owner's finding on the Pocket. The step-8 checklist lists it as outside DARIA (`release/daria-test1_checklist.md`, section 4, gitignored).
+  - **Evidence.** The owner's finding on the Pocket.
   - **When.** After 2.2.1, with the first `src/` change.

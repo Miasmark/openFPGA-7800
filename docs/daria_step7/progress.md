@@ -575,19 +575,13 @@ This is the single `wire` gate run at the head that c76's record found missing.
 
 ### Step 8: hardware tests of daria-test1 (2026-10-17)
 
-**The builds.** Two test zips, both built from DARIA-dev at `d9b2cb6`. Their `src/` is `317eaa8`'s tree, the one c76 verified and 2.2.1 ships. Both show version 2.1.3 on the Pocket, because test builds keep the version they were built from. Neither holds game data, a BIOS or the BupChip firmware. Both are in the gitignored `release/`.
-
-| Zip | What it is | md5 of the zip | `ap_core.rbf` md5 | `atari7800.rbf_r` md5 |
-|---|---|---|---|---|
-| `Atari7800_Pocket_2.1.3-daria-test1.zip` | plain: the qsf as committed, `SEED` 2; the core as 2.2.1 ships it | `98ae7b8d1e9bd9f342f401c5bfa29ba6` | `9da7c66604b41e85ceb72722146400f6` | `29965cccdf27d132fd58bcd6bc49e7d6` |
-| `Atari7800_Pocket_2.1.3-daria-test1-debug.zip` | debug: the same plus `BUP_DEBUG` (c76's Q5 edit to the qsf), `SEED` 2 | `0b9825361cab90ec685ce480f532e8df` | `058896522c39fde0da91e382a1a4563b` | `ee8a2c58501d68f7e03a35246fccfc9c` |
+**The builds.** Two test zips of the verified tree, `317eaa8`'s `src/`, both `SEED` 2: plain, with the qsf as committed, and debug, with `BUP_DEBUG` added (c76's Q5 edit to the qsf).
 
 - **The fits equal c76's.** The plain fit's figures are those of c76's Q2 seed 2, and the debug fit's those of Q5 seed 2. The timing report, the summary's timing and ALMs-by-entity sections, and the qsf copy are byte-equal. The plain `.rbf` differs from c76's only through `apf/build_id.mif`'s date, time and random word.
   - Plain: `clk_sdram` +2.683 ns, `clk_arm` +1.077 ns, the guard pair +0.397 ns, worst hold +0.098 ns; 15,625 ALMs (85%), 195 M10K.
   - Debug: `clk_sdram` +2.265 ns, `clk_arm` +0.636 ns, the guard pair +0.131 ns, worst hold +0.121 ns; 15,802 ALMs (86%), 195 M10K.
   - Both pass the step-7 fit checks: `run_step7.sh` exits 0 with the verdict PASS. The debug fit's (c.cells) passes by the tracked table.
-- **The build records** are kept outside the repository (`rel221/results.txt`, and each fit's driver log).
-- **The checklist** is `release/daria-test1_checklist.md` (gitignored, 2026-10-17). Its items: A1-A21, the 15 demos and the six added images; B, the Champ Games Presents batch; C, the PSRAM at 36.17 MHz (Turbo and the BupChip); D, region; E, Fix B, DPC and the Supercharger; F, 7800 games; G, switching games and long play; H, the debug zip's baseline reading. Its section 4 lists the expected differences, and its section 7 the items these builds cannot test.
+- **The checklist** was written for these builds (2026-10-17). Its items: A1-A21, the 15 demos and the six added images; B, the Champ Games Presents batch; C, the PSRAM at 36.17 MHz (Turbo and the BupChip); D, region; E, Fix B, DPC and the Supercharger; F, 7800 games; G, switching games and long play; H, the debug zip's baseline reading. Its section 4 lists the expected differences, and its section 7 the items these builds cannot test.
 
 **The owner's report** (2026-10-17), as written:
 
@@ -622,4 +616,6 @@ This is the single `wire` gate run at the head that c76's record found missing.
 - **The DARIA status overlay items.** The overlay is not built (plan P16 and P22). So neither zip shows the guard's lock state and unlock count, DARIA's call and late-call counts, the late-call source, or the halt flag, halt code and fault code. The debug zip's cells show only the BupChip. `docs/IMPROVEMENTS.md` lists the overlay as a later item.
 - **The assumption that DARIA's clock and the console clock rise together** stays a timing-analysis assumption at this clock, as the checklist's section 7 says.
 
-**The owner's call** (2026-10-17), as written: "package the core unchanged and then do the pull request. prepare the release notes as well". So step 8 is closed for 2.2.1. The PAL region items and the overlay are deferred to `docs/IMPROVEMENTS.md`. 2.2.1 ships daria-test1's plain bitstream unchanged (`DARIA_CORE.md`, "Steps" items 8 and 9).
+**The owner's call** (2026-10-17), as written: "package the core unchanged and then do the pull request. prepare the release notes as well". So step 8 is closed for 2.2.1. The PAL region items and the overlay are deferred to `docs/IMPROVEMENTS.md` (`DARIA_CORE.md`, "Steps" item 8).
+
+**The release** (2026-10-17). 2.2.1 was released with the AtariVox voice (PR #6), as a new fit: the AtariVox build's own, `SEED` 2. Its DARIA RTL is the verified tree's, unchanged. Its figures are in the README and `docs/ATARIVOX.md` (`DARIA_CORE.md`, "Steps" item 9).
