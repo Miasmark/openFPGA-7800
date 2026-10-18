@@ -109,7 +109,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **FA2 saves: Star Castle Arcade's high scores.** *Added 2026-10-17, from the owner's finding on the Pocket, for a release after 2.2.1.*
   - **What it would fix.** Star Castle Arcade, an FA2 game, does not keep its high-score saves on the Pocket.
     - The FA2 mapper (`mapper_fa2.sv`) copies its 256-byte work RAM to and from the cartridge's flash through the `fa2_nvram_*` port.
-    - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1233-1239`). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.
+    - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1282-1288` in 2.2.1). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.
     - On MiSTer, upstream's `fa2_nvram_bridge.sv` connects the port to the core's save RAM. The Pocket build does not use it.
     - The stub dates from the port's first commit (`3043d50`), so every release of this port has it. It is not DARIA's.
   - **Cost.** A 256-byte nonvolatile save slot behind the FA2 port, like `hsc.sav`.
