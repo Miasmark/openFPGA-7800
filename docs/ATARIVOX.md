@@ -1,6 +1,6 @@
 # AtariVox: notes and plan
 
-Status: in the core behind `POCKET_ATARIVOX` (`src/fpga/core/atarivox/`),
+Status: in the core from 2.2.1, behind `POCKET_ATARIVOX` (`src/fpga/core/atarivox/`),
 on whenever the SaveKey is and *AtariVox Voice* is not Off. The SaveKey half
 of the AtariVox (the 24LC256 EEPROM) has been in the core since 2.0.8. The
 voice is a speech engine of our own design ("The engine", below), playing
@@ -357,7 +357,7 @@ even on Loud (owner's hardware test), so each level moved up two steps.
 | 2 | Prototype the synthesizer and sound tables in Python (`sjsynth.py`), tuned against recordings | Done; tuning goes on |
 | 3 | Test cartridge (`sim/vox_test.py`) | Done |
 | 4 | The FPGA engine, its program and ROM (above) | Done, in simulation |
-| 5 | Into the core (`POCKET_ATARIVOX`), with the menu setting | Done; whole-core simulation with Juno First and Stratovox; hardware test next |
+| 5 | Into the core (`POCKET_ATARIVOX`), with the menu setting | Done; whole-core simulation with Juno First and Stratovox; on hardware it says its words clearly at every level (second test build) |
 
 ## Tools
 

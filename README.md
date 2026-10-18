@@ -220,20 +220,21 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | DARIA's CPU and front end against MiSTer's | Every call of 21 images compared with MiSTer's ARM: registers at return, every RAM write, the audio values. The front end clock by clock beside MiSTer's on 30 images, 1,500 frames each. With DARIA's own CPU at its real clock ratio, 19 runs: every call equal to MiSTer's |
 | Everything else unchanged by DARIA (2.2.1) | `run_sim.sh`, `extra_tests.sh` and the 2600 cartridge-RAM matrix give the same frame-by-frame fingerprints with and without DARIA; the BupChip's songs are identical by PCM |
 | PAL 2600 game, Region on Auto (2.2.1) | One retune, to PAL, at 955 ms, then the game runs in PAL. With the region logic of 2.1.3 and earlier, the same simulation retuned 41,293 times in 1.3 s and ended in NTSC |
+| AtariVox voice (2.2.1) | `sim/atarivox/run.sh`: bytes sent over the serial line as a game does; every output sample equals the engine emulator's, at the same clock (Juno First's title, all 72 allophones, all effects, speed/bend/pitch steps, serial control's clear and "Ready": about 357,000 samples). Whole core: the retail Juno First speaks its title and "wave one"; the retail Stratovox, under DARIA, clears and says "Ready" as play starts ([docs/ATARIVOX.md](docs/ATARIVOX.md)) |
 
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build (2.2.1, fitter seed 2) meets timing on all four corners.
-Worst setup slack: +2.683 ns on clk_sdram (Flicker Blend's half-period
-capture of the TIA's colour into the SRAM controller, against a release
-gate of +1.5 ns), +1.077 ns on DARIA's CPU clock, and +0.397 ns
-on the one 6 ns path of DARIA's front end (its phase detector). Worst hold
-slack +0.098 ns. It uses 15,625 of 18,480 ALMs (85%), 195 of 308 M10K
-blocks and 12 DSP blocks. Seeds 1 and 3 give clk_sdram +2.462 and +2.919
-ns ([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
-2.2.1 ships, unchanged, the plain bitstream of daria-test1, the hardware
-test build below; its fit gives the figures above.
+Worst setup slack: +2.433 ns on clk_sdram (against a release gate of
++1.5 ns), +1.474 ns on DARIA's CPU clock, and +0.193 ns on the one 6 ns
+path of DARIA's front end (its phase detector), which moves with any change
+to the design: seeds 1 and 3 gave +0.084 and -0.262 ns there. Worst hold
+slack +0.082 ns. It uses 15,839 of 18,480 ALMs (86%), 212 of 308 M10K blocks
+and 13 DSP blocks; the AtariVox voice is about 230 ALMs, 17 M10K and one DSP
+of that. DARIA's hardware test build (daria-test1) without the voice had
+15,625 ALMs and +0.397 ns on the phase detector
+([docs/daria_step7/record.md](docs/daria_step7/record.md), "The fits").
 2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
@@ -287,6 +288,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 | The 2.2.1 candidate with DARIA (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay is not built yet ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
 | DARIA's known differences seen on hardware (2.2.1 candidate) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware cannot count them until the DARIA status overlay exists. Play does not seem affected: a couple of levels beaten |
+| AtariVox voice (2.2.1 test builds) | Clearly says its words at every *AtariVox Voice* level. The first test build mixed it at x1/x2/x4 and it was hard to hear against the TIA even on Loud; from the second, x4/x8/x16 |
 
 ### Changes to the MiSTer sources
 
