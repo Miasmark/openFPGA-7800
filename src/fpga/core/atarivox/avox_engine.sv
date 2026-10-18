@@ -38,11 +38,15 @@ module avox_engine (
 		OP_STM = 5'd15, OP_BEQ = 5'd16, OP_BNE = 5'd17, OP_BLT = 5'd18, OP_BGE = 5'd19,
 		OP_BLTU = 5'd20, OP_JAL = 5'd21, OP_JR = 5'd22, OP_IN = 5'd23, OP_OUT = 5'd24;
 
+	/* verilator lint_off PROCASSINIT */  // power-up values (DEVELOPING.md, "Power-up values")
 	logic [1:0] st = 2'd0;
 	logic [9:0] pc = 10'd0;
+	/* verilator lint_on PROCASSINIT */
 
 	// ---------------------------------------------------------------- ROMs
-	logic [39:0] ir;
+	/* verilator lint_off UNUSEDSIGNAL */
+	logic [39:0] ir;                  // ir[16] is a spare bit of the encoding
+	/* verilator lint_on UNUSEDSIGNAL */
 	cache_ram #(
 		.ADDR_WIDTH    (10),
 		.DATA_WIDTH    (40),
@@ -99,7 +103,9 @@ module avox_engine (
 		.clk_i(clk), .addr_i(rfb_addr), .wren_i(rf_we), .wdata_i(wr_data), .q_o(rb));
 
 	// ---------------------------------------------------------------- ALU (cycle 2)
-	wire signed [53:0] prod = $signed(ra[26:0]) * $signed(rb[26:0]);
+	/* verilator lint_off UNUSEDSIGNAL */
+	wire signed [53:0] prod = $signed(ra[26:0]) * $signed(rb[26:0]);  // no shift selects [53:48]
+	/* verilator lint_on UNUSEDSIGNAL */
 	logic [31:0] alu;
 	always_comb begin
 		case (op)
@@ -146,8 +152,10 @@ module avox_engine (
 	logic [31:0] b_hold;               // stm data
 
 	// ---------------------------------------------------------------- I/O
+	/* verilator lint_off PROCASSINIT */
 	logic        f_tick = 1'b0, f_abort = 1'b0, f_ready = 1'b0;
 	logic [15:0] lfsr = 16'hACE1;
+	/* verilator lint_on PROCASSINIT */
 	wire         is_in  = (st == 2'd3) && (op == OP_IN);
 	wire         rd_st  = is_in && (imm[1:0] == 2'd0);
 	wire         rd_lf  = is_in && (imm[1:0] == 2'd2);

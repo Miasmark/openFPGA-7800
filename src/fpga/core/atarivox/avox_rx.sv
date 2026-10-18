@@ -32,12 +32,14 @@ module avox_rx #(
 );
 
 	// ---------------------------------------------------------------- UART
+	/* verilator lint_off PROCASSINIT */  // power-up values (DEVELOPING.md, "Power-up values")
 	logic [1:0]  sync = 2'b11;
 	logic [10:0] cnt = 11'd0;
 	logic [3:0]  bitn = 4'd0;           // 0 idle, 1 start, 2-9 data, 10 stop
 	logic [7:0]  sh = 8'd0;
 	logic        got = 1'b0;
 	logic [7:0]  got_byte = 8'd0;
+	/* verilator lint_on PROCASSINIT */
 
 	always_ff @(posedge clk) begin
 		sync <= {sync[0], line};
@@ -71,7 +73,9 @@ module avox_rx #(
 	end
 
 	// ---------------------------------------------------------------- serial control mode
+	/* verilator lint_off PROCASSINIT */
 	logic scp = 1'b0;
+	/* verilator lint_on PROCASSINIT */
 	logic push;
 	always_comb push = got && !scp && (got_byte != 8'h5C);
 	always_ff @(posedge clk) begin
@@ -96,8 +100,10 @@ module avox_rx #(
 	// ---------------------------------------------------------------- FIFO
 	// A byte pushed on clock c (with an abort it is already counted from
 	// c + 1) is readable from c + 2, which the engine never reaches sooner.
+	/* verilator lint_off PROCASSINIT */
 	logic [5:0] wp = 6'd0, rp = 6'd0;
 	logic [6:0] count = 7'd0;
+	/* verilator lint_on PROCASSINIT */
 	(* ramstyle = "M10K, no_rw_check" *) logic [7:0] mem [0:63];
 	always_ff @(posedge clk) begin
 		if (push && count != 7'd64)
