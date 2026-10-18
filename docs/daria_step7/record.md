@@ -285,7 +285,7 @@ c78 ran `sim/step7_gates.sh`'s 15 gates on a new clone of DARIA-dev at `843830e`
 3. **The 15 demos, and Stratovox, under the V1 rule:** yes, 16 of 16 (c76 and c78). Audio is documented per image above.
 4. **`clk_sdram` ≥ +1.5 ns on three seeds:** yes: +2.462 / +2.683 / +2.919 ns, and hold positive at every corner.
 
-**Step 7 is done for V1** (2026-10-17). Every item above holds on the tree that ships (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). At step 7's close, what remained for 2.2.1 was step 8, the hardware tests of plan section 9 (below), and the release. Step 8 has since run, and is closed for 2.2.1 ("Hand-over to step 8").
+**Step 7 is done for V1** (2026-10-17). Every item above holds on the verified tree, `317eaa8`'s `src/` (c76). On 2026-10-16 c77 ran plan 7.3's and 7.4's items under "What c76 does not cover", and one `wire` gate at `356cea9` (96 scenarios, before `pal2600_a78` was added); all pass (`progress.md`, "The final review and c77 (2026-10-16)"). c78, plan 7.7's fresh-clone run, passes every gate as the union of its pieces (above). At step 7's close, what remained for 2.2.1 was step 8, the hardware tests of plan section 9 (below), and the release. Step 8 has since run, and is closed for 2.2.1 ("Hand-over to step 8").
 
 ## Hand-over to step 8
 
@@ -303,7 +303,7 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
   - plan 5.4 (o)'s I/O figures for reference.
   - *2026-10-17, step 8:* covered only by the owner's whole verdict. The report does not name Turbo or the BupChip.
 - **The shipped `SEED` 2** and its Q2 reports. Test builds with `BUP_DEBUG` use Q5's seeds (all three pass).
-  - *2026-10-17, step 8:* the test builds were `SEED` 2. The report does not say which one was used.
+  - *2026-10-17, step 8:* the test builds were `SEED` 2. The report does not say which one was used. 2.2.1 ships a new fit, the AtariVox build's own `SEED` 2, not Q2's (`DARIA_CORE.md`, "Steps" item 9).
 - **The guard on real clocks:** the overlay shows `dbg_locked` and an unlock count (P22).
   - Expected at ÷19: `dbg_locked` 0 and 0 unlocks at all times, after power-up and after every retune. That confirms the guard is inert, as in every mode-B run at ÷19.
   - Any lock is a finding to investigate.
