@@ -16,6 +16,10 @@ Related documents:
 - [IMPROVEMENTS.md](IMPROVEMENTS.md): improvements found but left for a
   later release (a guard that works at ÷19, S3, a cartridge EEPROM, the
   `src/` clean-ups after 2.2.1), each with what it would fix and its cost.
+- [HARMONY_MODEL.md](HARMONY_MODEL.md): the bench's model of a real Harmony
+  cartridge's chip (LPC2103), a second timing reference for the 2600 ARM
+  calls beside MiSTer's core: the settings per game, its limits, and the
+  owner's rule for using it.
 - [README.md](../README.md): features, installing, credits, test results.
 - [src/fpga/mister/POCKET_CHANGES.md](../src/fpga/mister/POCKET_CHANGES.md):
   every change made to the vendored MiSTer sources, and how to update them.

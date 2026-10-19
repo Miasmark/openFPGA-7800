@@ -55,7 +55,8 @@ def load(run):
     with gzip.open(os.path.join(run, "calls.csv.gz"), "rt") as f:
         for r in csv.DictReader(f):
             for k in r:
-                if k != "first_bl":
+                # first_bl and +mam's cfn (the CALLFUNCTION value) are hex
+                if k not in ("first_bl", "cfn"):
                     r[k] = int(r[k])
             r["instr"] = r["thumb"] + r["arm"]
             rows.append(r)
