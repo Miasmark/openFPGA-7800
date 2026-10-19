@@ -24,7 +24,8 @@
 #                the raw endpoint; (f) FAILs on exactly ftog_s[0]
 #   q5_g1        q5_clean with the copy of daria_constraints.sdc set to G1
 #                (the guard pair at [0.500, 8.000] ns, fitter 7.500; plan 5.4
-#                as amended for G1, 2026-10-19), whatever the tree's SDC says:
+#                as amended for G1, 2026-10-19, in docs/daria_step10/plan.md
+#                section 10), whatever the tree's SDC says:
 #                the report script reads G1's bounds from sdc.rpt, (a) and (b)
 #                list one path at 8.000 / 0.500 ns at every corner, (k) PASSes
 #                at G1's bounds, (e) lists G1's pair Complete and the fitter's
@@ -44,7 +45,8 @@
 # and the assertions again on WORK's last results), REPORT_ONLY=1 (no compile:
 # quartus_sta -t step7_report.tcl again on WORK's fitted projects, then the
 # checks; under the lock), QUARTUS_LOCK.
-# About 3 minutes a fitted project, 1 a quartus_sta run. The log starts with the tree's HEAD and status,
+# About 35 s a fitted project and 3 s a quartus_sta run, about 3 minutes for all seven [measured
+# 2026-10-19 at b55b4b3]. The log starts with the tree's HEAD and status,
 # the tool and the md5 of every script (plan P23). Exit 0 when every
 # assertion holds.
 set -e

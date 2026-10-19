@@ -3,7 +3,7 @@
 # (docs/daria_step7/plan.md 3.5 "Fit scripts", 5.4): step7_prep.py's DARIA
 # lines, step7_checks.py's verdict and its (k') rule on made-up report files,
 # among them the guard pair's bounds read from sdc.rpt (plan 5.4 as amended
-# for G1, 2026-10-19: G1 fits, older reports, unknown or missing pairs,
+# for G1, 2026-10-19, in docs/daria_step10/plan.md section 10: G1 fits, older reports, unknown or missing pairs,
 # misreads), the two copies of plan 2.7's table (step7_report.tcl's ff_table
 # and f3_crossings.txt) against each other,
 # and run_step7.sh's refusals, with a stand-in docker and a lock file of its
@@ -156,7 +156,7 @@ W = lambda p, s: open(p, "w").write(s)
 # clk_sdram setup), t:nosta (no Timing Analyzer summary), t:stas (its clk_sys Slack at the slow 85C corner, as
 # if from another analysis), t:tcl_a/l/h/cells (the report script's verdict, forced), t:hhold (t_*_q ->
 # clk_sdram's worst hold over the corners), t:anocorner=N (no setup line for pd_tog -> pd_rx at corner N)
-# The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19): t:gb=S,H (sdc.rpt's set_max_delay and
+# The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19; docs/daria_step10/plan.md section 10): t:gb=S,H (sdc.rpt's set_max_delay and
 # set_min_delay on pd_tog -> pd_rx, also in exceptions.rpt; "none": no such line, as without DARIA), t:gb2=V
 # (another set_max_delay on the pair, listed before it), t:nosdc (no sdc.rpt), t:tclb=S,H|old|none (the report
 # script's "# guard bounds:" line; old: no such line, a report from before the bounds were read, which held the
@@ -510,7 +510,7 @@ checker "FAIL: c.cells" daria "Build B with no firstflops.tsv" noff
 has c.cells "firstflops.tsv missing"
 checker "FAIL: c.cells" daria "firstflops.tsv without ready_s[0]'s row" "ffdrop:ready_s[0]"
 has c.cells "in the tree's table but not counted"
-echo "   (a), (b), (k), (e) by the guard pair's bounds from sdc.rpt (plan 5.4 as amended for G1, 2026-10-19)"
+echo "   (a), (b), (k), (e) by the guard pair's bounds from sdc.rpt (plan 5.4 as amended for G1, 2026-10-19; docs/daria_step10/plan.md section 10)"
 G1="t:gb=8.000,0.500"
 checker PASS daria "G1 ([0.500, 8.000] ns) at VCO/18, every figure positive (a candidate fit)" t:div=18 $G1
 has a "relationship 8.000 ns"

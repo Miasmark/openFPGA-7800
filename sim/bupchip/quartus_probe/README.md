@@ -207,7 +207,8 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
 - The guard pair `pd_tog` -> `pd_rx` is held to the bounds of the SDC the
   fit was made with, as the Timing Analyzer read it (`sdc.rpt`), and they
   must be one of the known pairs in `step7_report.tcl`'s `guard_pairs`:
-  [1.000, 6.000] ns as first written, or G1's [0.500, 8.000] ns (2026-10-19).
+  [1.000, 6.000] ns as first written, or G1's [0.500, 8.000] ns (2026-10-19;
+  plan 5.4's amendment for G1 is `docs/daria_step10/plan.md` section 10).
   Neither pair belongs to a divider. A G1 fit judged by the older report
   script, which held the pair to 6 / 1 ns, is judged again correctly from
   its own files.
@@ -217,8 +218,9 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
   100 MB free on `/`; with less it skips the cases that copy `src/fpga` and
   exits 3 (PARTIAL). `sim/step7_gates.sh`'s `fit_selftest` gate runs it.
 - `step7/smoke/run_smoke.sh` fits a small design whose register names are
-  the core's (`smoke.sv`, five projects of about 3 minutes each, and two
-  `quartus_sta` runs on one of them with the guard pair's SDC lines edited)
+  the core's (`smoke.sv`, five projects of about 35 s each, and two
+  `quartus_sta` runs of about 3 s on one of them with the guard pair's SDC
+  lines edited; about 3 minutes in all [measured 2026-10-19 at `b55b4b3`])
   to test `core/daria.qip`'s synchroniser marks, `step7_report.tcl` and
   `step7_checks.py` against real Quartus output, the guard pair at the
   tree's bounds and at G1's. It needs the lock too.

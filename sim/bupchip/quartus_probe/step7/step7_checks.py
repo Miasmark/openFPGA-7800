@@ -38,7 +38,8 @@ Reads checks.txt (step7_report.tcl's STA checks) and adds:
   (report) step7_report.tcl ran to its end ("# step7_report.tcl: end" in
       checks.txt) and quartus_sta exited 0 (fpga/report_rc.txt, written by
       run_step7.sh)
-The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19): what
+The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19, in
+docs/daria_step10/plan.md section 10): what
 (a), (b), (k) and (e) hold pd_tog -> pd_rx to is the SDC's, as the Timing
 Analyzer read it for this fit (sdc.rpt: its one set_max_delay and one
 set_min_delay from pd_tog to pd_rx), and must be a row of the tree's table of
@@ -224,7 +225,7 @@ else:
         check("h.retime", "FAIL" if tbad else "PASS",
               "sram|t_*_q " + ("retimed: " + "; ".join(tbad) if tbad else "not retimed by the fitter"))
 
-# ---- the guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19) ---------------------------------------
+# ---- the guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19: docs/daria_step10/plan.md section 10) --
 # What (a), (b), (k) and (e) hold pd_tog -> pd_rx to is the SDC's, as the Timing Analyzer read it for this fit:
 # sdc.rpt's one set_max_delay and one set_min_delay from pd_tog to pd_rx. The pair must be a row of the tree's
 # table of known pairs (step7_report.tcl's guard_pairs): design.md 8.2's [1.000, 6.000] ns as first written, or

@@ -35,7 +35,8 @@
 # The guard pair's bounds ((a), (b), (k); step7_checks.py's (e)) are not
 # fixed here: they are read from the SDC the fit was made with, as the
 # Timing Analyzer read it (report_sdc, sdc.rpt), and must be one of the
-# known pairs of guard_pairs below (plan 5.4 as amended for G1, 2026-10-19).
+# known pairs of guard_pairs below (plan 5.4 as amended for G1, 2026-10-19;
+# the amendment is docs/daria_step10/plan.md section 10).
 # The bounds used are written to checks.txt ("# guard bounds: ..."), and
 # step7_checks.py judges (a), (b) and (k) again by sdc.rpt's bounds from the
 # per-corner pd_tog -> pd_rx lines and crossings.tsv. A report written before
@@ -152,8 +153,8 @@ set ff_table {
 #   first  design.md 8.2 as first written: 6 ns (a toggle launched 8.73 ns
 #          before a clk_sys edge is caught there), 1 ns (the toggle launched
 #          on the shared edge is never caught on it); fitter 5.5 (618b5c3).
-#   G1     [0.5, 8.0] ns, fitter 7.5 (the DARIA design study, 4.6; Rev 0,
-#          2026-10-19): 6 ns counted the skew and setup twice, since the
+#   G1     [0.5, 8.0] ns, fitter 7.5 (docs/daria_step10/plan.md: G1 in its
+#          summary, and section 10; Rev 0, 2026-10-19): 6 ns counted the skew and setup twice, since the
 #          Timing Analyzer's check already holds them, so 8.0 keeps 0.73 ns
 #          and 0.5 keeps 0.5 ns of margin beyond the corner models at VCO/18.
 # The bounds are absolute: neither pair belongs to a divider. A pair not in
