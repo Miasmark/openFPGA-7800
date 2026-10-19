@@ -16,10 +16,10 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - Spiders in simulation on the ÷18 debug build (0 late calls on the overlay's counter, the guard locked, 0 unlocks);
   - `s4/check.sh`'s DARIA set at 38.18 MHz;
   - `THUMB=1 s1/check.sh` with the firmware: PCM identical to MiSTer's on songs 13, 14, 9 and 30; song 13's CPI 1.4208, +2.73% over the 1.383 gate (information for decision 10).
-  The two test builds and the owner's session checklist are packaged, but not yet given to the owner.
+  The two test builds and the owner's session checklist were given to the owner on 2026-10-19.
 - **Open when work resumes:**
-  - the review's remaining findings: the session checklist says Start clears the overlay's counters, but on this core Start is the console's Reset switch, which the game reads, so it does not (fix before the session); the whole-core overlay check can pass while checking no cell; three nits in `docs/HARMONY_MODEL.md` (the m2t3 range, the MUL figures' sources, the two images without established settings); and smaller notes;
-  - Rev 0's merge of its three branches and this record into `DARIA-dev`, if not done with this record;
+  - the review's remaining findings, none of them in the repository's commits: the whole-core overlay check can pass while checking no cell (the overlay is still in scratch; fix it before it lands in `src/`), and a few notes on scratch records. The checklist's Start/Reset wording and the three `docs/HARMONY_MODEL.md` nits were fixed before the pause (the nits in `dc1e882`);
+  - Rev 0's three branches and this record are merged into `DARIA-dev`;
   - the hold fix trial of section 4 (decision 11), started and stopped before it ran;
   - the owner's session (3.0 item 5).
 
