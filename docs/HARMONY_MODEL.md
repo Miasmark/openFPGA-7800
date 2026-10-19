@@ -36,10 +36,12 @@ The project applies it as two cases:
   Spiders' settings (70 MHz, mode 2, MAMTIM 4) the modelled chip takes 91.6-92.0%
   of each call's safe budget. MiSTer's core holds the 6507 for 109.8%. 2.2.1 at
   ÷19 is late on the same 16 calls, as MiSTer is (progress.md, c77).
-- **The second case: nowhere found.** Seven images were modelled at their
-  settings in force (Spiders, Qyx, Gorf, Lady Bug, Zoo Keeper, Elevator Agent and
-  Zaxxon: 20,984 calls with a budget). None has a call the modelled chip misses.
-  MiSTer misses no call outside Spiders' 16.
+- **The second case: nowhere found.** Seven images were modelled, 20,984 calls
+  with a budget. Five ran at their settings in force (Spiders, Qyx, Gorf, Lady
+  Bug and Zoo Keeper). Elevator Agent and Zaxxon have no settings in force (no
+  Harmony runs them, below), so they ran at 60 MHz, mode 2, at both MAMTIM 3
+  and MAMTIM 4 (`m2t3` and `m2t4`). None has a call the modelled chip misses;
+  the closest is Zaxxon at 96.5% in `m2t4`. MiSTer misses no call outside Spiders' 16.
 - The other 14 traced images were not simulated. An estimate puts none of them
   above 82% on the chip [estimated: the worst call's zero-wait share times a
   margin above the largest MAM factor seen].
@@ -118,13 +120,15 @@ runs the PLL at 70 MHz.
   Ten readings of the manual in mode 2 at MAMTIM 4 (the bench's configurations
   and `variants.py`'s) give 90.3-93.2%.
 - **MUL is charged m = 2** (one S and two I cycles, as `est_arm7`). Each of
-  Spiders' late calls has 723-729 MULs. m = 1 would move the chip's share by
-  -0.57 points, m = 4 by +1.14 to +1.15 points [measured: model].
+  Spiders' late calls has 723-729 MULs [measured: the follow-up's profiler,
+  per call]. m = 1 would move the chip's share by about -0.57 points, m = 4 by
+  about +1.14 to +1.15 points [estimated: one I cycle less, or two more, per
+  MUL at 70 MHz, against each call's safe budget; not a model run].
 - **The settings rest on an inference:** that BIOS 1.06 jumps to the entry in
   the image header, past the game's own start-up. This was read from the BIOS,
   not seen on a cartridge.
   - It matters most for Spiders. If its own start-up ran (70 MHz, MAMTIM 3), the
-    chip would take 86.1-86.4% on the 16 calls: still on time.
+    chip would take 86.0-86.4% on the 16 calls: still on time.
   - At 60 MHz, or in partial mode, the chip would miss them (106.8-108.6%).
     Neither setting is in force for Spiders.
 - **The driver is not modelled:** its entry, its exit and the NOP/JMP hand-back
