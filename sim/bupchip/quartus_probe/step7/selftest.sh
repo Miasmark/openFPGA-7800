@@ -2,8 +2,10 @@
 # Self-test of the step-7 fit driver's parts that need no Quartus
 # (docs/daria_step7/plan.md 3.5 "Fit scripts", 5.4): step7_prep.py's DARIA
 # lines, step7_checks.py's verdict and its (k') rule on made-up report files,
-# the two copies of plan 2.7's table (step7_report.tcl's ff_table and
-# f3_crossings.txt) against each other,
+# among them the guard pair's bounds read from sdc.rpt (plan 5.4 as amended
+# for G1, 2026-10-19: G1 fits, older reports, unknown or missing pairs,
+# misreads), the two copies of plan 2.7's table (step7_report.tcl's ff_table
+# and f3_crossings.txt) against each other,
 # and run_step7.sh's refusals, with a stand-in docker and a lock file of its
 # own (never the machine's Quartus lock). Every directory it makes is under
 # one mktemp -d, removed at the end; nothing in the tree is written.
@@ -154,11 +156,31 @@ W = lambda p, s: open(p, "w").write(s)
 # clk_sdram setup), t:nosta (no Timing Analyzer summary), t:stas (its clk_sys Slack at the slow 85C corner, as
 # if from another analysis), t:tcl_a/l/h/cells (the report script's verdict, forced), t:hhold (t_*_q ->
 # clk_sdram's worst hold over the corners), t:anocorner=N (no setup line for pd_tog -> pd_rx at corner N)
-tv = dict(div="18", gs="0.217", sys="1.000", syshold="0.291", gpaths="1", grel="6.000", h="6.697", hhold="0.300")
+# The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19): t:gb=S,H (sdc.rpt's set_max_delay and
+# set_min_delay on pd_tog -> pd_rx, also in exceptions.rpt; "none": no such line, as without DARIA), t:gb2=V
+# (another set_max_delay on the pair, listed before it), t:nosdc (no sdc.rpt), t:tclb=S,H|old|none (the report
+# script's "# guard bounds:" line; old: no such line, a report from before the bounds were read, which held the
+# pair to 6 / 1; by default sdc.rpt's pair when it is a known one, else none), t:ghrel, t:ghs, t:ghpaths (the
+# pair's hold relationship, its slack and its paths at the slow 85C corner), t:krel=S,H (the pair's row in
+# crossings.tsv), t:kother=S,H (one other crossing row's relationship), t:khold=- (that row with no hold path),
+# t:kdup (the pair again as ~DUPLICATE registers), t:fitsdc=V (a copy of daria_constraints.sdc whose
+# quartus_fit block asks V of the pair), t:tcl_b, t:tcl_k (the report script's (b), (k), forced). The
+# defaults: the pair's relationships follow sdc.rpt's bounds (20 / -20 ns without them).
+tv = dict(div="18", gs="0.217", sys="1.000", syshold="0.291", gpaths="1", h="6.697", hhold="0.300")
 for c in changes:
     m = re.match(r"t:(\w+)(?:=(.*))?$", c)
     if m:
         tv[m.group(1)] = m.group(2) if m.group(2) is not None else "1"
+KNOWN = {("6.000", "1.000"): "first", ("8.000", "0.500"): "G1"}
+daria_k = kind in ("daria", "q5")
+gb = tv.get("gb", "6.000,1.000" if daria_k else "none")
+GB = None if gb == "none" else tuple(f"{float(x):.3f}" for x in gb.split(","))
+known = GB in KNOWN and "gb2" not in tv and "nosdc" not in tv
+tclb = tv.get("tclb", ",".join(GB) if known else "none")
+TB = None if tclb == "none" else ((6.0, 1.0) if tclb == "old" else tuple(float(x) for x in tclb.split(",")))
+tv.setdefault("grel", GB[0] if GB else "20.000")
+tv.setdefault("ghrel", GB[1] if GB else "-20.000")
+KREL = tuple(tv["krel"].split(",")) if "krel" in tv else (GB if GB else ("20.000", "-20.000"))
 W(os.path.join(fpga, "step7_prep.txt"), f"kind {kind}\ndaria {int(kind in ('daria', 'q5'))}\nbup_debug {int(kind == 'q5')}\n"
   f"fixb {int(kind != 'base')}\ndiv {tv['div']}\nseed 2\npin_id 0\noldpad 0\n")
 CORNERS = [("8_slow_1100mv_85c", "Slow 1100mV 85C"), ("8_slow_1100mv_0c", "Slow 1100mV 0C"),
@@ -166,11 +188,17 @@ CORNERS = [("8_slow_1100mv_85c", "Slow 1100mV 85C"), ("8_slow_1100mv_0c", "Slow 
 gs = {c: float(tv["gs"]) if n == 0 else 0.45 + n for n, (c, _) in enumerate(CORNERS)}
 osys = {c: float(tv["sys"]) if n == 0 else 1.0 + n for n, (c, _) in enumerate(CORNERS)}
 fig = [f"# corners: {' '.join(c for c, _ in CORNERS)}", "## (a) (b) (d) the guard pair pd_tog -> pd_rx (made up)"]
+if tclb != "old":
+    fig.insert(1, f"# guard bounds: setup {TB[0]:.3f} hold {TB[1]:.3f} "
+               f"({KNOWN.get((f'{TB[0]:.3f}', f'{TB[1]:.3f}'), 'x')}; made up)" if TB else "# guard bounds: none (made up)")
+ghs = float(tv.get("ghs", "2.000"))
 for n, (c, _) in enumerate(CORNERS):
     k = int(tv["gpaths"]) if n == 0 else 1
     if str(n) != tv.get("anocorner"):
         fig.append(f"  {c} setup: {k} path(s);" + f" rel {float(tv['grel']):.3f} slack {gs[c]:.3f} skew -1.000 data 4.000;" * k)
-    fig.append(f"  {c} hold: 1 path(s); rel 1.000 slack 2.000 skew 0.000 data 3.000;")
+    hk = int(tv.get("ghpaths", "1")) if n == 0 else 1
+    fig.append(f"  {c} hold: {hk} path(s);"
+               + f" rel {float(tv['ghrel']):.3f} slack {ghs if n == 0 else 2.0:.3f} skew 0.000 data 3.000;" * hk)
 fig += ["## (h) Fix B checks 2-4: t_*_q (made up)",
         f"  t_*_q -> clk_sdram: worst setup {float(tv['h']):.3f} ns (6 levels, >= +4.5), worst hold over corners "
         f"{float(tv['hhold']):.3f} ns (>= 0)",
@@ -192,7 +220,8 @@ W(os.path.join(fpga, "timing.txt"), "\n".join(tim) + "\n")
 if "nosta" not in tv:
     W(os.path.join(out, "ap_core.sta.rpt"), "".join(summ))
 # The report script's verdicts by the rules as first written, unless forced.
-first = dict(a=int(tv["gpaths"]) == 1 and abs(float(tv["grel"]) - 6.0) < 0.0005 and min(gs.values()) >= 0,
+first = dict(a=TB is not None and int(tv["gpaths"]) == 1 and abs(float(tv["grel"]) - TB[0]) < 0.0005 and min(gs.values()) >= 0,
+             b=TB is not None and int(tv.get("ghpaths", "1")) == 1 and abs(float(tv["ghrel"]) - TB[1]) < 0.0005 and ghs >= 0,
              l=all(not (l.split()[2] != "-" and float(l.split()[2]) < 0) and not (l.split()[4] != "-" and float(l.split()[4]) < 0)
                    for l in tim if not l.startswith("==")),
              h=float(tv["h"]) >= 4.5 and float(tv["hhold"]) >= 0)
@@ -232,6 +261,9 @@ info = {"d", "e.files", "f.files", "i", "k'.files", "k'.fanin", "sdram.files", "
 checks = [f"CHECK {i} {'INFO' if i in info else first.get(i, 'PASS')}: made up" for i in ids]
 if kind == "base":
     checks = [c.replace("CHECK g PASS", "CHECK g FAIL") for c in checks]
+if not daria_k:         # as step7_report.tcl reports a build without DARIA
+    checks = [f"CHECK {c.split()[1]} FAIL: no such cell: pd_tog or pd_rx" if c.split()[1] in ("a", "b", "d") else c
+              for c in checks]
 for c in changes:
     if c.startswith("drop="):
         gone = c[5:].split(",")
@@ -239,8 +271,6 @@ for c in changes:
     if c == "ab_error":
         checks = [x for x in checks if x.split()[1] not in ("a", "b", "d")] + ["CHECK ab FAIL: Tcl error in the report script: made up"]
 end = "noend" not in changes
-W(os.path.join(fpga, "checks.txt"), "# step7_report.tcl: kind made up\n" + "\n".join(fig + checks) + "\n"
-  + ("# step7_report.tcl: end\n" if end else ""))
 W(os.path.join(fpga, "report_rc.txt"), "1\n" if "rc1" in changes else "0\n")
 if "nofit" not in changes:
     # notable: a fit report without its Fitter Netlist Optimizations table
@@ -255,14 +285,32 @@ W(os.path.join(out, "ap_core.map.rpt"), "; Parameter Settings for User Entity In
 W(os.path.join(d, "quartus.log"), "Info (332104): Reading SDC File: 'core/daria_constraints.sdc'\n" if kind in ("daria", "q5") else "")
 W(os.path.join(d, "report.log"), "")
 ex = []
-for cmd, fr, to, v, st in (("set_max_delay", "counter[0]", "counter[3]", "20.000", "Complete"),
-                           ("set_max_delay", "counter[3]", "counter[0]", "20.000", "Partially overridden"),
-                           ("set_min_delay", "counter[0]", "counter[3]", "-20.000", "Complete"),
-                           ("set_min_delay", "counter[3]", "counter[0]", "-20.000", "Partially overridden"),
-                           ("set_max_delay", "pd_tog", "pd_rx", "6.000", "Complete"),
-                           ("set_min_delay", "pd_tog", "pd_rx", "1.000", "Complete")):
+gl = ([("set_max_delay", "pd_tog", "pd_rx", tv["gb2"], "Fully overridden", 45)] if "gb2" in tv and GB else []) \
+    + ([("set_max_delay", "pd_tog", "pd_rx", GB[0], "Complete", 46), ("set_min_delay", "pd_tog", "pd_rx", GB[1], "Complete", 48)]
+       if GB else [])
+for cmd, fr, to, v, st, _ in [("set_max_delay", "counter[0]", "counter[3]", "20.000", "Complete", 32),
+                              ("set_max_delay", "counter[3]", "counter[0]", "20.000", "Partially overridden", 33),
+                              ("set_min_delay", "counter[0]", "counter[3]", "-20.000", "Complete", 34),
+                              ("set_min_delay", "counter[3]", "counter[0]", "-20.000", "Partially overridden", 35)] + gl:
     ex.append(f"; {st} ; {cmd} ; x ; x ; {{{fr}}} ; x ; x ; {{{to}}} ; {v} ;")
 W(os.path.join(fpga, "exceptions.rpt"), "\n".join(ex) + "\n\n")
+# sdc.rpt: the SDC as the Timing Analyzer read it (report_sdc's delay tables), the DARIA lines with DARIA only
+REG = {"pd_tog": "[get_registers {*|daria_fe_guard:u_guard|pd_tog}]", "pd_rx": "[get_registers {*|daria_fe_guard:u_guard|pd_rx}]",
+       "counter[0]": "[get_clocks {" + SYS + "}]", "counter[3]": "[get_clocks {" + ARM + "}]"}
+if "nosdc" not in tv:
+    sd = ["; Set Maximum Delay ;", "; SDC Command ; From Flags ; From ; Through ; To Flags ; To ; Delay ; Location ; Comment ;"]
+    for cmd, fr, to, v, st, ln in ([("set_max_delay", "counter[0]", "counter[3]", "20.000", "", 32),
+                                    ("set_max_delay", "counter[3]", "counter[0]", "20.000", "", 33),
+                                    ("set_min_delay", "counter[0]", "counter[3]", "-20.000", "", 34),
+                                    ("set_min_delay", "counter[3]", "counter[0]", "-20.000", "", 35)] if daria_k else []) + gl:
+        sd.append(f"; {cmd} ; -from ; {REG[fr]} ; ; -to ; {REG[to]} ; {v} ; daria_constraints.sdc:{ln} ; ;")
+    W(os.path.join(fpga, "sdc.rpt"), "\n".join(sd) + "\n")
+if "fitsdc" in tv:
+    os.makedirs(os.path.join(fpga, "core"), exist_ok=True)
+    W(os.path.join(fpga, "core", "daria_constraints.sdc"), "# made up\n"
+      'if {$::TimeQuestInfo(nameofexecutable) eq "quartus_fit"} {\n'
+      "\tset_max_delay -from [get_registers -nowarn {*|daria_fe_guard:u_guard|pd_tog}] \\\n"
+      f"\t              -to   [get_registers -nowarn {{*|daria_fe_guard:u_guard|pd_rx}}] {tv['fitsdc']}\n}}\n")
 meta = []
 for n, r in enumerate([r for r in firsts if r["cls"] != "guard"]):
     meta.append(f"Synchronizer Chain #{n + 1}: Typical MTBF is made up\n; Synchronization Node ; {name(r['ep'])} ;\n"
@@ -271,10 +319,17 @@ W(os.path.join(fpga, "metastability.rpt"), "\n".join(meta))
 W(os.path.join(fpga, "datasheet.rpt"), "; cram0_a[0] ; clk ; 5.0 ; 5.0 ; Rise ; x ;\n")
 # crossings.tsv: one path into every expected endpoint
 cr = ["dir\tsetup_rel\tsetup_slack\thold_rel\thold_slack\tlevels\tfrom\tto"]
+odd = "kother" in tv or "khold" in tv      # one ordinary row still to change
 for r in here:
     src = name(r["src"]) if r["src"] != "-" else "core_top:ic|held_source[0]"
-    rel, hrel = ("6.000", "1.000") if r["cls"] == "guard" else ("20.000", "-20.000")
+    rel, hrel = KREL if r["cls"] == "guard" else ("20.000", "-20.000")
+    if r["cls"] != "guard" and odd:
+        odd = False
+        rel, hrel = tuple(tv["kother"].split(",")) if "kother" in tv else (rel, hrel)
+        hrel = tv.get("khold", hrel)
     cr.append(f"{r['dir']}\t{rel}\t5.000\t{hrel}\t25.000\t0\t{src}\t{name(r['ep'])}")
+    if r["cls"] == "guard" and "kdup" in tv:
+        cr.append(f"{r['dir']}\t{rel}\t5.000\t{hrel}\t25.000\t0\t{src}~DUPLICATE\t{name(r['ep'])}~DUPLICATE")
 # fanin.tsv: every first flop's fan-in, one register of the other clock
 fa = ["pattern\tto\tto_clock\tfrom\tfrom_clock\tlevels\tslack"]
 fan = {}
@@ -310,11 +365,26 @@ for k, e in fan.items():
     for fr, clk, lv in e["rows"]:
         fa.append(f"{k}\t{to}\t{e['own']}\t{fr}\t{clk}\t{lv}\t5.000")
         if clk != e["own"] and not any(x.endswith("\t" + to) and f"\t{fr}\t" in x for x in cr):
-            rel, hrel = ("6.000", "1.000") if e["r"]["cls"] == "guard" else ("20.000", "-20.000")
+            rel, hrel = KREL if e["r"]["cls"] == "guard" else ("20.000", "-20.000")
             cr.append(f"{e['r']['dir']}\t{rel}\t5.000\t{hrel}\t25.000\t{lv}\t{fr}\t{to}")
 if "nofanin" not in changes:
     W(os.path.join(fpga, "fanin.tsv"), "\n".join(fa) + "\n")
 W(os.path.join(fpga, "crossings.tsv"), "\n".join(cr) + "\n")
+# The report script's (k), by the bounds it used (TB), from these rows, unless forced; then checks.txt.
+def k_first():
+    rows = [x.split("\t") for x in cr[1:]]
+    if not rows or TB is None:
+        return False
+    for dirn, rel, _s, hrel, _h, _l, fr, to in rows:
+        g = re.sub(r"~DUPLICATE\S*$", "", fr).endswith("u_guard|pd_tog") and re.sub(r"~DUPLICATE\S*$", "", to).endswith("u_guard|pd_rx")
+        wr, wrh = TB if g else (20.0, -20.0)
+        if abs(float(rel) - wr) > 0.0005 or hrel == "-" or abs(float(hrel) - wrh) > 0.0005:
+            return False
+    return True
+kv = tv.get("tcl_k", "PASS" if k_first() else "FAIL")
+checks = [f"CHECK k {kv}: made up" if c.split()[1] == "k" else c for c in checks]
+W(os.path.join(fpga, "checks.txt"), "# step7_report.tcl: kind made up\n" + "\n".join(fig + checks) + "\n"
+  + ("# step7_report.tcl: end\n" if end else ""))
 PY
 case_n=0
 checker() {	# EXPECT(PASS or "FAIL: ids...") KIND DESCRIPTION CHANGES...
@@ -440,6 +510,75 @@ checker "FAIL: c.cells" daria "Build B with no firstflops.tsv" noff
 has c.cells "firstflops.tsv missing"
 checker "FAIL: c.cells" daria "firstflops.tsv without ready_s[0]'s row" "ffdrop:ready_s[0]"
 has c.cells "in the tree's table but not counted"
+echo "   (a), (b), (k), (e) by the guard pair's bounds from sdc.rpt (plan 5.4 as amended for G1, 2026-10-19)"
+G1="t:gb=8.000,0.500"
+checker PASS daria "G1 ([0.500, 8.000] ns) at VCO/18, every figure positive (a candidate fit)" t:div=18 $G1
+has a "relationship 8.000 ns"
+has b "relationship 0.500 ns"
+has k "pd_tog -> pd_rx at 8.000 / 0.500 ns"
+has e "set_max_delay pd_tog->pd_rx 8.000: Complete; set_min_delay pd_tog->pd_rx 0.500: Complete"
+fline PASS
+checker PASS q5 "Q5 with G1 at VCO/18" t:div=18 $G1
+checker PASS daria "the pair as first written ([1.000, 6.000] ns) at VCO/18, read from sdc.rpt" t:div=18
+has e "the guard pair's bounds 6.000 / 1.000 ns (first, the SDC's)"
+checker PASS daria "G1 at VCO/18 from a report made before the bounds were read (no '# guard bounds' line: it held the pair to 6 / 1 and failed (a), (b), (k))" \
+	t:div=18 $G1 t:tclb=old
+has k "the report script, with 6.000 / 1.000 ns, fixed in the report script"
+fline PASS
+checker PASS daria "the pair as first written at VCO/19 from such a report (Q2's figures: the pair at -0.046, t_*_q at +4.298)" \
+	t:div=19 t:gs=-0.046 t:h=4.298 t:tclb=old
+fline "FAIL: a l h"
+checker PASS daria "G1 at VCO/19 with the pair's setup at -0.046 (reported, not gated, as amended 2026-10-14)" t:div=19 $G1 t:gs=-0.046
+fline "FAIL: a l"
+checker "FAIL: a l" daria "G1 at VCO/18 with the pair's setup at -0.046 (gated at VCO/18)" t:div=18 $G1 t:gs=-0.046
+checker "FAIL: a b k" daria "G1 in sdc.rpt but the pair timed at 6 / 1 ns at VCO/19 (the relationship not the SDC's)" \
+	t:div=19 $G1 t:grel=6.000 t:ghrel=1.000 t:krel=6.000,1.000
+has a "relationship 8.000 ns, the constraint applied (NO)"
+checker "FAIL: a b e k" daria "a pair not in the table: [0.700, 7.300] ns" t:gb=7.300,0.700
+has a "is not one of the known pairs"
+has e "is not one of the known pairs"
+checker "FAIL: a b e k" daria "G1 half applied: [1.000, 8.000] ns (the setup bound changed, the hold bound not)" t:gb=8.000,1.000
+has b "is not one of the known pairs"
+checker "FAIL: a b e k" daria "Q-mut's guard pair removed, under G1 as before: no pd_tog -> pd_rx line, the path at the +-20 ns clock bound" t:gb=none
+has a "0 set_max_delay and 0 set_min_delay"
+has a "rel 20.000"
+checker "FAIL: a b e k" daria "the same from a report made before the bounds were read (as c76's stam_noguard)" t:gb=none t:tclb=old
+checker "FAIL: a b e k" daria "two set_max_delay lines on the pair (G1's 8.000 added after the 6.000 kept)" $G1 t:gb2=6.000
+has a "2 set_max_delay and 1 set_min_delay"
+checker "FAIL: a b e k" daria "no sdc.rpt" $G1 t:nosdc
+has e "sdc.rpt missing"
+checker "FAIL: a b k" daria "the report script judged with 6 / 1 (its line) where sdc.rpt says G1" $G1 t:tclb=6.000,1.000
+has k "but sdc.rpt gives 8.000 / 0.500 ns"
+checker "FAIL: a" daria "G1: the report script said (a) FAIL on figures that pass by its own bounds (a misread)" $G1 t:tcl_a=FAIL
+has a "misread"
+checker "FAIL: b" daria "G1: the report script said (b) FAIL on figures that pass by its own bounds (a misread)" $G1 t:tcl_b=FAIL
+has b "misread"
+checker "FAIL: k" daria "G1: the report script said (k) PASS with the pair's row at 6 / 1 (a misread)" $G1 t:krel=6.000,1.000 t:tcl_k=PASS
+has k "misread"
+checker "FAIL: b" daria "G1, the pair's hold slack -0.010 at the slow 85C corner" $G1 t:ghs=-0.010
+checker "FAIL: b" daria "G1, two hold paths pd_tog -> pd_rx at one corner" $G1 t:ghpaths=2
+checker "FAIL: k" daria "G1, an ordinary crossing pair at 8.000 / 0.500 ns" $G1 t:kother=8.000,0.500
+has k "1 not:"
+checker "FAIL: k" daria "G1, an ordinary crossing pair with no hold path" $G1 t:khold=-
+checker PASS daria "G1, the pair also as ~DUPLICATE registers in crossings.tsv: (k) holds them to the SDC's bounds ((c) is what fails a duplicate)" \
+	$G1 t:kdup
+has k "2 of them the guard pair"
+checker PASS daria "G1, the copy's SDC asking the fitter for 7.500 on the pair" $G1 t:fitsdc=7.500
+has e "fitter-only line: 7.500 ns (the pair's own)"
+checker PASS daria "G1, the fitter still asked for 5.500 (information, not gated)" $G1 t:fitsdc=5.500
+has e "NOT 7.500, the pair's own"
+# The table decides: a copy of the scripts whose guard_pairs has no G1 row fails a G1 fit on (a), (b), (e), (k).
+mkdir -p "$T/nog1"
+cp "$HERE/step7_checks.py" "$HERE/f3_crossings.txt" "$T/nog1/"
+grep -v '^\s*{8\.000 0\.500 7\.500 G1}$' "$HERE/step7_report.tcl" > "$T/nog1/step7_report.tcl"
+case_n=$((case_n + 1))
+python3 "$T/fixture.py" "$HERE/f3_crossings.txt" "$T/c/$case_n" daria $G1 t:tclb=old
+python3 "$T/nog1/step7_checks.py" "$T/c/$case_n" > "$T/c/$case_n.out" 2>&1
+got="$(sed -n 's/^verdict: //p' "$T/c/$case_n.out")"
+if cmp -s "$HERE/step7_report.tcl" "$T/nog1/step7_report.tcl"; then bad "guard_pairs: could not remove the G1 row from a copy of step7_report.tcl"
+elif [ "$(echo "${got#FAIL: }" | tr ' ' '\n' | sort | tr '\n' ' ')" = "a b e k " ] && grep -q "^  (a) .*is not one of the known pairs" "$T/c/$case_n.out"; then
+	ok "checks: G1 judged with a table without G1's row -> $got"
+else bad "checks: G1 judged with a table without G1's row -> '$got' (expected 'FAIL: a b e k'); $T/c/$case_n.out"; fi
 
 # ---- 2b. the two copies of plan 2.7's table -------------------------------------------------------------------
 echo "-- 2b. step7_report.tcl's ff_table and f3_crossings.txt: the same first flops, present in the same kinds"

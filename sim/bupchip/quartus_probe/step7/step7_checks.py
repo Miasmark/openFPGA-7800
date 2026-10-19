@@ -16,7 +16,9 @@ Reads checks.txt (step7_report.tcl's STA checks) and adds:
       the tree's plan 2.7 table (step7_report.tcl's ff_table), so that a
       corrected table re-judges a fit with no refit; a misread as for (a)
   (e) daria_constraints.sdc read without a warning, and the status of its
-      four +-20 ns lines and its 6 / 1 ns pair in report_exceptions
+      four +-20 ns lines and of the guard pair's two lines, at the SDC's
+      bounds (below), in report_exceptions; the fitter-only line on the pair
+      in the run directory's copy of the SDC is reported, not gated
   (f) report_metastability: every first flop present in this build heads a
       chain identified "Forced"; no other chain is forced
   (k') every clk_sys <-> clk_arm endpoint is in f3_crossings.txt for this
@@ -36,12 +38,26 @@ Reads checks.txt (step7_report.tcl's STA checks) and adds:
   (report) step7_report.tcl ran to its end ("# step7_report.tcl: end" in
       checks.txt) and quartus_sta exited 0 (fpga/report_rc.txt, written by
       run_step7.sh)
-and judges (a), (l) and (h) again by the build's divider (plan 5.4 as
+The guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19): what
+(a), (b), (k) and (e) hold pd_tog -> pd_rx to is the SDC's, as the Timing
+Analyzer read it for this fit (sdc.rpt: its one set_max_delay and one
+set_min_delay from pd_tog to pd_rx), and must be a row of the tree's table of
+known pairs (step7_report.tcl's guard_pairs): [1.000, 6.000] ns as first
+written (design.md 8.2, fitter 5.5) or G1's [0.500, 8.000] ns (fitter 7.5).
+Any other pair, a line missing or given twice, or no sdc.rpt fails (a), (b),
+(k) and (e). (a), (b) and (k) are judged again by those bounds from the
+report script's per-corner lines of the pair (checks.txt) and crossings.tsv;
+this script's reading of them by the bounds the report script used (its
+"# guard bounds:" line; 6.000 / 1.000 ns in a report written before that
+line existed) must give the report script's verdict, or the check fails as
+a misread. So a G1 fit judged by the older report script, which held the
+pair to 6 / 1, is judged again correctly from its own files.
+It also judges (a), (l) and (h) again by the build's divider (plan 5.4 as
 amended 2026-10-14, the lead's decision on Q2 at VCO/19), from the figures
 that step7_report.tcl wrote and judged by the rules as first written:
   (a) at VCO/19 the guard pair's setup slack is reported, not gated; there
       must still be exactly one setup path pd_tog -> pd_rx at every corner,
-      with the 6.000 ns relationship (the constraint applied, the pair single)
+      with the SDC's relationship (the constraint applied, the pair single)
   (l) at VCO/19 the guard pair's setup, and only it, is left out: a negative
       clk_sys setup slack at a corner passes when it is pd_tog -> pd_rx's
       slack there and the compile's Timing Analyzer summary (ap_core.sta.rpt)
@@ -58,12 +74,13 @@ checks with Fix B; on aeee6d2, kind base, (g) is the negative control and must
 FAIL). Every gating check must be present: one that never ran (quartus_sta
 stopped, a report file missing) fails as "not reported". Exit status 0 when
 every gating check passes. The line after it, "rules as first written: ...",
-gives the verdict with (a), (l) and (h) as step7_report.tcl judged them
-((c.cells) as re-judged by the tree's table in both lines).
+gives the verdict with (a), (l) and (h) by the rules as first written ((l)
+and (h) as step7_report.tcl judged them, (a) by the SDC's bounds); (b), (k),
+(e) and (c.cells), judged again as above, stand in both lines.
 A change to a check made in step7_report.tcl reaches an old fit only through
-the files it wrote; this script re-judges (a), (l), (h) and (c.cells) from
-them, and any other such check needs the fit's kept database (REPORT_ONLY=1
-in run_step7.sh) or a refit.
+the files it wrote; this script re-judges (a), (b), (k), (l), (h) and
+(c.cells) from them, and any other such check needs the fit's kept database
+(REPORT_ONLY=1 in run_step7.sh) or a refit.
 """
 import os
 import re
@@ -108,6 +125,21 @@ def glob_re(pat):
 
 def strip_suffix(name):
     return re.sub(r"~(DUPLICATE|feeder|_Duplicate|_emulated|_NEW_REG\d*|_OTERM\d*|RTM\d*)\S*$", "", name)
+
+
+def num(s):
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def fmt(x):
+    return "?" if x is None else f"{x:.3f}"
+
+
+def same(x, y):       # figures printed to 1 ps
+    return x is not None and y is not None and abs(x - y) < 0.0005
 
 
 # ---- checks.txt -----------------------------------------------------------------------
@@ -192,16 +224,109 @@ else:
         check("h.retime", "FAIL" if tbad else "PASS",
               "sram|t_*_q " + ("retimed: " + "; ".join(tbad) if tbad else "not retimed by the fitter"))
 
+# ---- the guard pair's bounds (plan 5.4 as amended for G1, 2026-10-19) ---------------------------------------
+# What (a), (b), (k) and (e) hold pd_tog -> pd_rx to is the SDC's, as the Timing Analyzer read it for this fit:
+# sdc.rpt's one set_max_delay and one set_min_delay from pd_tog to pd_rx. The pair must be a row of the tree's
+# table of known pairs (step7_report.tcl's guard_pairs): design.md 8.2's [1.000, 6.000] ns as first written, or
+# G1's [0.500, 8.000] ns. A pair not in the table, a line missing or given twice, or no sdc.rpt: (a), (b), (k) and
+# (e) fail. The bounds are absolute; they do not follow the divider. The report script writes the bounds it judged
+# (a), (b) and (k) with to checks.txt ("# guard bounds: ..."); a report written before that line existed held the
+# pair to 6.000 / 1.000 ns whatever the SDC said, which is how this script reads such a report's own verdicts.
+
+
+def guard_pairs():
+    """the tree's table of known pairs: [(setup, hold, fitter, name)]"""
+    m = re.search(r"(?ms)^set guard_pairs \{\n(.*?)^\}", rd(os.path.join(here, "step7_report.tcl")) or "")
+    out = []
+    for line in (m.group(1) if m else "").splitlines():
+        r = re.match(r"\s*\{(\S+) (\S+) (\S+) (\w+)\}\s*$", line)
+        if r and None not in (num(r.group(1)), num(r.group(2)), num(r.group(3))):
+            out.append((num(r.group(1)), num(r.group(2)), num(r.group(3)), r.group(4)))
+    return out
+
+
+PAIRS = guard_pairs()
+PAIRS_TXT = ", ".join(f"{n} [{h:.3f}, {s:.3f}]" for s, h, _, n in PAIRS)
+
+
+def read_guard():
+    """((setup, hold, fitter, name) or None, text): the fit's bounds from sdc.rpt, by the tree's table"""
+    if not PAIRS:
+        return None, "no guard_pairs table in " + os.path.join(here, "step7_report.tcl")
+    txt = rd(os.path.join(fpga, "sdc.rpt"))
+    if txt is None:
+        return None, "sdc.rpt missing: the SDC the fit was made with is not known"
+    mx, mn = [], []
+    for line in txt.splitlines():
+        cols = [c.strip() for c in line.strip().strip(";").split(";")]
+        if cols[0] not in ("set_max_delay", "set_min_delay") or "-to" not in cols[1:]:
+            continue
+        ti = cols.index("-to")
+        if ti < 1 or ti + 2 >= len(cols) or "u_guard|pd_tog" not in " ".join(cols[1:ti]) or "u_guard|pd_rx" not in cols[ti + 1]:
+            continue
+        (mx if cols[0] == "set_max_delay" else mn).append((cols[ti + 2], cols[ti + 3] if ti + 3 < len(cols) else "?"))
+    seen = (f"set_max_delay {', '.join(f'{v} at {at}' for v, at in mx) or 'none'}; "
+            f"set_min_delay {', '.join(f'{v} at {at}' for v, at in mn) or 'none'}")
+    if len(mx) != 1 or len(mn) != 1:
+        return None, (f"sdc.rpt has {len(mx)} set_max_delay and {len(mn)} set_min_delay from pd_tog to pd_rx, "
+                      f"not one of each ({seen})")
+    for ps, ph, pf, pn in PAIRS:
+        if same(num(mx[0][0]), ps) and same(num(mn[0][0]), ph):
+            return (ps, ph, pf, pn), f"sdc.rpt: {seen}"
+    return None, (f"the SDC's pair (setup {mx[0][0]}, hold {mn[0][0]} ns) is not one of the known pairs "
+                  f"({PAIRS_TXT}); sdc.rpt: {seen}")
+
+
+GUARD, GUARD_WHY = read_guard()
+GUARD_TXT = (f"{GUARD[0]:.3f} / {GUARD[1]:.3f} ns ({GUARD[3]}, the SDC's)" if GUARD
+             else f"not known: {GUARD_WHY}")
+# The bounds the report script used: its "# guard bounds:" line, or 6.000 / 1.000 ns before the line existed.
+TCL_LINE = False
+TCL_GUARD = (6.0, 1.0, None, "fixed")
+TCL_WHY = "6.000 / 1.000 ns, fixed in the report script (a report made before it read the SDC's bounds)"
+for line in (ct or "").splitlines():
+    m = re.match(r"# guard bounds: setup (\S+) hold (\S+) \((\w+);", line)
+    if m:
+        TCL_LINE, TCL_GUARD = True, (num(m.group(1)), num(m.group(2)), None, m.group(3))
+        TCL_WHY = f"{m.group(1)} / {m.group(2)} ns ({m.group(3)}, the SDC's)"
+    elif line.startswith("# guard bounds: none"):
+        TCL_LINE, TCL_GUARD, TCL_WHY = True, None, "not known to the report script" + line[len("# guard bounds: none"):]
+# A report script that read the bounds must have read sdc.rpt's (the same file): otherwise its verdicts and this
+# script's are about different constraints.
+TCL_DIFFERS = TCL_LINE and ((TCL_GUARD is None) != (GUARD is None) or (GUARD is not None and not (
+    same(TCL_GUARD[0], GUARD[0]) and same(TCL_GUARD[1], GUARD[1]))))
+
+
+def fitter_line():
+    """information: the fitter-only set_max_delay on the pair in the run directory's copy of the SDC"""
+    for p in (os.path.join(fpga, "core", "daria_constraints.sdc"), os.path.join(fpga, "daria_constraints.sdc")):
+        t = rd(p)
+        if t is not None:
+            break
+    else:
+        return "fitter-only line not seen (no copy of daria_constraints.sdc in the run directory)"
+    t = "\n".join(l for l in re.sub(r"\\\n", " ", t).splitlines() if not l.strip().startswith("#"))
+    m = re.search(r'nameofexecutable\)\s*eq\s*"quartus_fit"\s*\}\s*\{(.*?)\n\}', t, re.S)
+    v = re.findall(r"set_max_delay\s+-from\s+\[get_registers[^\]]*u_guard\|pd_tog\}\]\s+-to\s+\[get_registers[^\]]*"
+                   r"u_guard\|pd_rx\}\]\s+(\S+)", m.group(1)) if m else []
+    if not v:
+        return "fitter-only line: none on the pair in the copy of daria_constraints.sdc"
+    own = "" if GUARD is None else (" (the pair's own)" if len(v) == 1 and same(num(v[0]), GUARD[2])
+                                    else f" (NOT {GUARD[2]:.3f}, the pair's own; information only)")
+    return f"fitter-only line: {', '.join(v)} ns{own}"
+
+
 # ---- (e): the SDC file and its exceptions -------------------------------------------------------------
 log = (rd(os.path.join(d, "quartus.log")) or "") + (rd(os.path.join(d, "report.log")) or "")
 warn = [l.strip() for l in log.splitlines() if "daria_constraints.sdc" in l and re.search(r"Warning|Error", l)]
 exc = rd(os.path.join(fpga, "exceptions.rpt")) or ""
 summ = exc[:exc.find("\n\n")] if exc else ""
 want = [("set_max_delay", "counter[0]", "counter[3]", "20.000"), ("set_max_delay", "counter[3]", "counter[0]", "20.000"),
-        ("set_min_delay", "counter[0]", "counter[3]", "-20.000"), ("set_min_delay", "counter[3]", "counter[0]", "-20.000"),
-        ("set_max_delay", "pd_tog", "pd_rx", "6.000"), ("set_min_delay", "pd_tog", "pd_rx", "1.000")]
-estat = []
-eok = True
+        ("set_min_delay", "counter[0]", "counter[3]", "-20.000"), ("set_min_delay", "counter[3]", "counter[0]", "-20.000")]
+if GUARD:
+    want += [("set_max_delay", "pd_tog", "pd_rx", f"{GUARD[0]:.3f}"), ("set_min_delay", "pd_tog", "pd_rx", f"{GUARD[1]:.3f}")]
+estat = [] if GUARD else [f"the guard pair's bounds {GUARD_TXT}"]
+eok = GUARD is not None
 for cmd, fr, to, val in want:
     st = None
     for line in summ.splitlines():
@@ -223,7 +348,9 @@ if not daria:
 else:
     check("e", "PASS" if eok and not warn and read_ok else "FAIL",
           ("read; " if read_ok else "NOT seen in the logs; ") + (f"{len(warn)} warning(s): " + " | ".join(warn[:3]) + "; " if warn else "no warnings; ")
-          + "; ".join(estat) + " (clk_arm -> clk_sys lines may be Partially Overridden by the pair; (k) shows where)")
+          + (f"the guard pair's bounds {GUARD_TXT}; " if GUARD else "")
+          + "; ".join(estat) + " (clk_arm -> clk_sys lines may be Partially Overridden by the pair; (k) shows where); "
+          + fitter_line())
 
 # ---- (f): metastability -----------------------------------------------------------------------------
 # report_metastability writes one block per chain ("Synchronizer Chain #n"),
@@ -301,11 +428,11 @@ else:
             for fr, fclk, tclk, lv in paths:
                 srcs.setdefault((fr, fclk != tclk), []).append(lv)
             cross = sorted(f for f, x in srcs if x)
-            same = sorted(f for f, x in srcs if not x)
+            own = sorted(f for f, x in srcs if not x)
             allow = 1 if t["cls"] == "reset" else 0
-            if len(cross) != 1 or len(same) > allow:
+            if len(cross) != 1 or len(own) > allow:
                 bad_first.append(f"{to}: fan-in {len(cross)} register(s) of the other clock {cross[:4]}, "
-                                 f"{len(same)} of its own (at most {allow}) {same[:4]}")
+                                 f"{len(own)} of its own (at most {allow}) {own[:4]}")
             lv = max(max(v) for v in srcs.values()) if srcs else 0
             if lv:
                 levels.append(f"{strip_suffix(to).split('|')[-1]} {lv}")
@@ -366,37 +493,28 @@ for line in ds.splitlines():
         pins.append(" ".join(cols[:6]))
 check("o", "INFO", f"{len(pins)} datasheet rows for cram0_a, adv_n, oe_n, dq (datasheet.rpt); first: {pins[:4]}")
 
-# ---- (a), (l), (h) by the divider (plan 5.4 as amended 2026-10-14) ---------------------------------------------
+# ---- (a), (l), (h) by the divider (plan 5.4 as amended 2026-10-14); (a), (b), (k) by the SDC's bounds ----------
 # step7_report.tcl judges (a), (l) and (h) by the rules as first written. The lead's decision on Q2 at VCO/19
 # (2026-10-14) amends them for a build at VCO/19, the shipped divider (step7_prep.txt's div 19): the guard
-# cannot lock at VCO/19 whatever the pair's delay, so its 6 ns window guards no function there, and (h)'s
+# cannot lock at VCO/19 whatever the pair's delay, so its window guards no function there, and (h)'s
 # threshold drops to +3.0 ns. Any other divider keeps the rules as first written. The figures come from the
 # report script's files: (a)'s per-corner lines and the corner list in checks.txt, timing.txt (every clock's
 # worst setup and hold per corner, what (l) reads) and (h)'s lines; for (l), the compile's Timing Analyzer
 # summary and fanin.tsv as well.
+# (a), (b) and (k) are judged again by the guard pair's bounds from sdc.rpt (above): (a) and (b) from the per-corner
+# setup and hold lines of pd_tog -> pd_rx in checks.txt, (k) from crossings.tsv (every clk_sys <-> clk_arm pair,
+# its setup and hold relationship). This script's reading of those figures by the bounds the report script used
+# (its "# guard bounds:" line, or 6.000 / 1.000 ns before that line existed) must give the report script's
+# verdict, or the check fails as a misread. Bounds are not a rule of 5.4 but what it measures against, so the
+# re-judged (a), (b) and (k) stand in both verdict lines, as (c.cells) does.
 div = prep.get("div", "?")
 AT19 = div == "19"
 H_MIN = 3.0 if AT19 else 4.5
 SYS = "ic|pll|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk"
-first = {}            # check id -> its verdict by the rules as first written (the report script's)
+first = {}            # check id -> its verdict by the rules as first written ((a): by the SDC's bounds)
 
 
-def num(s):
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return None
-
-
-def fmt(x):
-    return "?" if x is None else f"{x:.3f}"
-
-
-def same(x, y):       # figures printed to 1 ps
-    return x is not None and y is not None and abs(x - y) < 0.0005
-
-
-fig = {"corners": None, "a": {}, "h": None, "hin": None}
+fig = {"corners": None, "a": {}, "b": {}, "h": None, "hin": None}
 in_ab = False
 for line in (ct or "").splitlines():
     m = re.match(r"# corners: (.+)$", line)
@@ -405,10 +523,10 @@ for line in (ct or "").splitlines():
     if line.startswith("## "):
         in_ab = line.startswith("## (a) (b) (d)")
         continue
-    m = re.match(r"  (\S+) setup: (\d+) path\(s\);(.*)$", line)
+    m = re.match(r"  (\S+) (setup|hold): (\d+) path\(s\);(.*)$", line)
     if in_ab and m:
-        fig["a"][m.group(1)] = (int(m.group(2)), [(num(r), num(s)) for r, s in
-                                                  re.findall(r" rel (\S+) slack (\S+) skew \S+ data \S+;", m.group(3))])
+        fig["a" if m.group(2) == "setup" else "b"][m.group(1)] = (
+            int(m.group(3)), [(num(r), num(s)) for r, s in re.findall(r" rel (\S+) slack (\S+) skew \S+ data \S+;", m.group(4))])
     m = re.match(r"  t_\*_q -> clk_sdram: worst setup (\S+) ns .*worst hold over corners (\S+) ns", line)
     if m:
         fig["h"] = (num(m.group(1)), num(m.group(2)))
@@ -452,26 +570,75 @@ for row in (fan or "").splitlines()[1:]:
 rx_only_tog = bool(rx_src) and all(re.search(r"\|daria_fe_guard:u_guard\|pd_tog$", s) for s in rx_src)
 
 
-def judge_a():
-    """(first, amended, text); first is None when the figures are missing."""
+def pair_figs(key):
+    """(single, figures by corner, text, error) for the guard pair's setup ("a") or hold ("b") lines"""
+    which = "setup" if key == "a" else "hold"
     cs = fig["corners"]
     if not cs:
-        return None, "FAIL", "the corner list ('# corners:') is not in checks.txt"
-    miss = [c for c in cs if c not in fig["a"]]
+        return None, None, None, "the corner list ('# corners:') is not in checks.txt"
+    miss = [c for c in cs if c not in fig[key]]
     if miss:
-        return None, "FAIL", f"no setup figures for pd_tog -> pd_rx at {miss} in checks.txt"
-    single = all(fig["a"][c][0] == 1 and len(fig["a"][c][1]) == 1 for c in cs)
-    rel = all(fig["a"][c][1] and all(same(r, 6.0) for r, _ in fig["a"][c][1]) for c in cs)
-    met = all(s is not None and s >= 0 for c in cs for _, s in fig["a"][c][1])
-    sl = "; ".join(f"{c} {fig['a'][c][0]} path(s)" + "".join(f" rel {fmt(r)} slack {fmt(s)}" for r, s in fig["a"][c][1])
+        return None, None, None, f"no {which} figures for pd_tog -> pd_rx at {miss} in checks.txt"
+    single = all(fig[key][c][0] == 1 and len(fig[key][c][1]) == 1 for c in cs)
+    sl = "; ".join(f"{c} {fig[key][c][0]} path(s)" + "".join(f" rel {fmt(r)} slack {fmt(s)}" for r, s in fig[key][c][1])
                    for c in cs)
+    return single, [fig[key][c][1] for c in cs], sl, None
+
+
+def judge_a(g, why):
+    """(first, amended, text) by the bounds g (None: not known, why); first is None when the figures are missing."""
+    single, paths, sl, err = pair_figs("a")
+    if err:
+        return None, "FAIL", err
+    if g is None:
+        return "FAIL", "FAIL", f"VCO/{div}: the guard pair's bounds are {why}: {sl}"
+    rel = all(p and all(same(r, g[0]) for r, _ in p) for p in paths)
+    met = all(s is not None and s >= 0 for p in paths for _, s in p)
     f = "PASS" if single and rel and met else "FAIL"
     if not AT19:
-        return f, f, f"VCO/{div}: exactly one setup path pd_tog -> pd_rx at every corner, relationship 6.000 ns, met: {sl}"
+        return f, f, f"VCO/{div}: exactly one setup path pd_tog -> pd_rx at every corner, relationship {g[0]:.3f} ns, met: {sl}"
     a = "PASS" if single and rel else "FAIL"
     return f, a, (f"VCO/19 (plan 5.4 (a) as amended 2026-10-14): exactly one setup path pd_tog -> pd_rx at every corner "
-                  f"({'yes' if single else 'NO'}), relationship 6.000 ns, the constraint applied ({'yes' if rel else 'NO'}); "
+                  f"({'yes' if single else 'NO'}), relationship {g[0]:.3f} ns, the constraint applied ({'yes' if rel else 'NO'}); "
                   f"its slack reported, not gated: {sl}")
+
+
+def judge_b(g, why):
+    """(verdict, verdict, text) by the bounds g; the verdict is None when the figures are missing. No amendment."""
+    single, paths, sl, err = pair_figs("b")
+    if err:
+        return None, "FAIL", err
+    if g is None:
+        return "FAIL", "FAIL", f"the guard pair's bounds are {why}: {sl}"
+    rel = all(p and all(same(r, g[1]) for r, _ in p) for p in paths)
+    met = all(s is not None and s >= 0 for p in paths for _, s in p)
+    v = "PASS" if single and rel and met else "FAIL"
+    return v, v, f"exactly one hold path pd_tog -> pd_rx at every corner, relationship {g[1]:.3f} ns, met: {sl}"
+
+
+def judge_k(g, why):
+    """(verdict, verdict, text) from crossings.tsv by the bounds g, as step7_report.tcl's (k) judges"""
+    if tsv is None:
+        return None, "FAIL", "crossings.tsv missing"
+    rows = [l.split("\t") for l in tsv.splitlines()[1:] if l.strip()]
+    if any(len(r) != 8 for r in rows):
+        return None, "FAIL", "crossings.tsv: a row not in its format"
+    if not rows:
+        return "FAIL", "FAIL", "no clk_sys <-> clk_arm path at all (crossings.tsv)"
+    if g is None:
+        return "FAIL", "FAIL", f"the guard pair's bounds are {why} ({len(rows)} pairs; crossings.tsv)"
+    bad, ng = [], 0
+    for dirn, rel, _sl, hrel, _hsl, _lv, fr, to in rows:
+        guard = bool(re.match(r".*\|daria_fe_guard:u_guard\|pd_tog$", re.sub(r"~DUPLICATE\S*$", "", fr))
+                     and re.match(r".*\|daria_fe_guard:u_guard\|pd_rx$", re.sub(r"~DUPLICATE\S*$", "", to)))
+        ng += guard
+        wr, wrh = (g[0], g[1]) if guard else (20.0, -20.0)
+        if not same(num(rel), wr) or hrel == "-" or not same(num(hrel), wrh):
+            bad.append(f"{dirn}: {fr} -> {to} setup rel {rel}, hold rel {hrel} (expected {wr:.3f} / {wrh:.3f})")
+    v = "FAIL" if bad else "PASS"
+    return v, v, (f"every clk_sys <-> clk_arm path pair at the 20 / -20 ns relationship, pd_tog -> pd_rx at {g[0]:.3f} / "
+                  f"{g[1]:.3f} ns ({len(rows)} pairs, {ng} of them the guard pair; crossings.tsv)"
+                  + (f"; {len(bad)} not: {'; '.join(bad[:4])}" if bad else ""))
 
 
 def judge_l():
@@ -530,7 +697,8 @@ def judge_h():
                   + f": t_*_q -> clk_sdram setup {fmt(ws)} (>= +{H_MIN:.1f}), hold {fmt(wh)} (>= 0); into t_*_q {fmt(wi)} (>= +40)")
 
 
-for cid, judge in (("a", judge_a), ("l", judge_l), ("h", judge_h)):
+GUARDED = ("a", "b", "k")      # judged by the guard pair's bounds
+for cid, judge in (("a", judge_a), ("b", judge_b), ("k", judge_k), ("l", judge_l), ("h", judge_h)):
     idx = [i for i, r in enumerate(results) if r[0] == cid]
     if len(idx) != 1:
         continue          # never ran: "not reported" below, if it gates
@@ -538,15 +706,33 @@ for cid, judge in (("a", judge_a), ("l", judge_l), ("h", judge_h)):
     _, tv, ttext = results[i]
     if tv not in ("PASS", "FAIL") or "Tcl error" in ttext or "no such cell" in ttext:
         continue          # the report script's failure stands
-    first[cid] = tv
-    fv, av, text = judge()
-    if fv is None:
-        results[i] = (cid, "FAIL", f"{text}; the report script said {tv}")
-    elif fv != tv:
-        results[i] = (cid, "FAIL", f"misread: this script reads the report script's figures as {fv} by the rules as first "
-                                   f"written, the report script said {tv}; {text}")
+    if cid not in GUARDED:
+        first[cid] = tv
+        fv, av, text = judge()
+        if fv is None:
+            results[i] = (cid, "FAIL", f"{text}; the report script said {tv}")
+        elif fv != tv:
+            results[i] = (cid, "FAIL", f"misread: this script reads the report script's figures as {fv} by the rules as "
+                                       f"first written, the report script said {tv}; {text}")
+        else:
+            results[i] = (cid, av, f"{text}; as first written (the report script): {tv}")
+        continue
+    # (a), (b), (k): first by the bounds the report script used (the misread check), then by the SDC's.
+    tf, _, ttxt = judge(TCL_GUARD, TCL_WHY)
+    fv, av, text = judge(GUARD, GUARD_TXT)
+    first[cid] = "FAIL"
+    if tf is None or fv is None:
+        results[i] = (cid, "FAIL", f"{ttxt if tf is None else text}; the report script said {tv}")
+    elif tf != tv:
+        results[i] = (cid, "FAIL", f"misread: this script reads the report script's figures as {tf} by the bounds it used "
+                                   f"({TCL_WHY}), the report script said {tv}; {ttxt}")
+    elif TCL_DIFFERS:
+        results[i] = (cid, "FAIL", f"the report script judged with {TCL_WHY}, but sdc.rpt gives {GUARD_TXT}; {text}")
     else:
-        results[i] = (cid, av, f"{text}; as first written (the report script): {tv}")
+        first[cid] = fv
+        results[i] = (cid, av, text + (f"; by the SDC's bounds {GUARD_TXT}" if GUARD else "")
+                      + (f"; as first written: {fv}" if cid == "a" else "")
+                      + f"; the report script, with {TCL_WHY}: {tv}")
 
 # ---- (c.cells) judged again by the tree's table (plan 2.7) ---------------------------------------------------------
 # step7_report.tcl counts the registers of each first flop of its ff_table and writes the counts to firstflops.tsv
