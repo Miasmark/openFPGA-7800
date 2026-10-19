@@ -250,10 +250,10 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
    - `step7_report.tcl` ((a), (b), (k)) and `step7_checks.py` ((a), (e)) are taught G1's 8.0 / 0.5 ns. 2.2.1's ÷19 fits keep their verdicts.
    - `fit_selftest` (117 cases) gets planted G1 cases.
    - The expected verdicts of the I3 STA mutants (Q-mut) are re-derived under G1.
-   - The smoke test runs under the Quartus lock: about 12 min [measured: the study's costing].
+   - The smoke test runs under the Quartus lock: about 3 min [measured: Rev 0's runs, section 10; the study's costing had about 12 min].
    - From then on, Rev 0's debug build, the hold round and the release's pre-campaign round are all judged by the tracked tools.
 3. **A ÷18 debug test build of the candidate.**
-   - The tree is `6e2e880` + the candidate patch (MR, G1, T2's cures and v4; scratch) + A2 + `BUP_DEBUG`. `6e2e880` is 2.2.1 with the owner's lint fix; its `src/` change is comment-only. The candidate patch is the trial's whole tree against `4fd89ef`, and it applies to `6e2e880` too (checked 2026-10-19).
+   - The tree is `6e2e880` + the candidate patch (MR, G1, T2's cures and v4; scratch) + A2 + `BUP_DEBUG`. `6e2e880` is 2.2.1 with the owner's lint fix; its `src/` change is comment-only. The candidate patch is the trial's whole tree against `4fd89ef`, and it applies to `6e2e880` too (checked 2026-10-19). On a base that holds the Harmony commit (`2d770d5`, item 7), such as `DARIA-dev` after Rev 0 is merged, its `tb_daria.sv` hunks need a 3-way apply: `git apply --3way` applies every file cleanly, while a plain `git apply` stops at `tb_daria.sv` [measured: Rev 0's review, 2026-10-19]. A tree built without them has no `s1w_cyc` bench column.
    - Fit Q5 at ÷18 on seeds 1-3. Ship one seed that meets P29 (every clock and corner ≥ 0) and keep its `.rbf`.
    - If a seed fails a hold, name the path with a `KEEP_DB=1` refit before that seed is used. T2's Q5 seed-2 hold of −0.557 ns on `clk_sys`, on the same configuration without v4 and A2, was never explained [measured: the trial's fits].
    - Before the session:
@@ -282,9 +282,9 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 7. **The Harmony model into the repository**, bench only (3.2), with the scope of decision 6.
 8. **Documents (V-doc):**
    - B8 (`POCKET_CHANGES.md`'s counts). *Since the approval:* it waits for the release, because the file is under `src/` and Rev 0 commits nothing there.
-   - `docs/ATARIVOX.md`'s rubyQ row;
-   - `IMPROVEMENTS.md`'s PAL item (the image now exists);
-   - `README.md:229`: `clk_sdram` +2.433 ns should be +2.345 ns at the gated worse slow corner [measured: 2.2.1's ÷19 seed-2 fit, the study's baseline];
+   - `docs/ATARIVOX.md`'s rubyQ row. *Done 2026-10-19* (`e73389c`).
+   - `IMPROVEMENTS.md`'s PAL item (the image now exists). *Done 2026-10-19* (`0062943`).
+   - `README.md:229`: `clk_sdram` +2.433 ns should be +2.345 ns at the gated worse slow corner [measured: 2.2.1's ÷19 seed-2 fit, the study's baseline]. *Done 2026-10-19* (`e73389c`), with the same figure in `docs/DEVELOPING.md` and `docs/ATARIVOX.md`.
    - also `lint_step7.sh`'s missing AtariVox sources, a script fix (V-bench). *Since the approval:* done by the owner's commit `6e2e880` on `Mister-Pocket-Port` ("lint_step7.sh, AtariVox: lint the AtariVox sources; waive its warnings"). It was not yet in `main` on 2026-10-19. The owner, that day: "there was a minor update on mister-pocket-port I do not think I have pushed to main yet since it has to do with a lint check or something". Rev 0 does not redo it, and its test trees start from `6e2e880`.
 9. **Optional:** Spiders on a real Harmony (3.3), best in or before this session.
 
@@ -312,7 +312,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - The session waits for A2, then the fits, then about a day of simulation.
 - **Quartus lock:** about 2.6-3.6 h, or 3.6-4.6 h with the optional ÷19 build [per fit: 18.4-20.4 min, measured: the study's costing]:
   - Q5 ×3 at ÷18: about 1 h;
-  - the smoke test: about 12 min;
+  - the smoke test: about 3 min [measured: section 10];
   - the hold round's 5-7 fits: about 1.5-2.4 h.
 - **Simulation:** about 1 day, mostly `s4` [measured: c78's `s4` jobs took 16.3 h for both sets].
 - **Owner:** one session of 1-2 h.
@@ -472,7 +472,7 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
 **V-bench before the campaign**
 - `selftest.py` for `frame_gate.py` and for the gate checkers changed by the F′ re-base.
 - `fit_selftest`, if a fit script changes again.
-- The smoke test after B5 (about 12 min).
+- The smoke test after B5 (about 3 min [measured: section 10]).
 - `s1/check.sh`'s new reference.
 
 **Rev 1's extras**
@@ -507,7 +507,7 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
   - F′'s reference and its repeat: 2 fits;
   - the pre-campaign round, Q2 ×3 + Q5 ×3: 6 fits, about 2 h;
   - Q-mut and Q4 in the campaign: 2 fits;
-  - plus the smoke test after B5: about 12 min.
+  - plus the smoke test after B5: about 3 min [measured: section 10].
 - **Campaign:** about 40 h of wall time [measured: c76, 39 h 45 min in 48 pieces], plus about half a day for +cpu [estimated: the study's costing].
 - **Review and fix round:** about 1 day. c76's final review and fix round took about 6 h [measured: `docs/daria_step7/progress.md`].
 - **One owner session.**
@@ -824,7 +824,7 @@ The study's numbers are in brackets. "When" says when each decision is needed. T
 | Two releases instead | Rev 1 3-5 days; Rev 2 3-5 days, overlapping Rev 1's campaign | Two campaigns | 2 sessions | About 9-14 days after Rev 0 (11-17 back to back) |
 
 The bases:
-- fits at 18.4-20.4 min each, and the smoke test at about 12 min [measured: the study's baseline fits];
+- fits at 18.4-20.4 min each [measured: the study's baseline fits], and the smoke test at about 3 min [measured: Rev 0's runs, section 10];
 - `s1/check.sh` at 5-9 min, and +cpu at about half a day [estimated: the study's costing];
 - c76: 39 h 45 min in 48 pieces, 7-8 fits [measured: `docs/daria_step7/record.md`];
 - c78: 28 h 49 min, about 70 h of run time [measured: `docs/daria_step7/record.md`];
@@ -835,7 +835,7 @@ The bases:
 
 ## 10. Step-7 plan 5.4 amended for G1 (2026-10-19)
 
-From Rev 0's fit-script lane (3.0 item 2), on branch `rev0/g1`: commits `6e86b89`, `e125987` and `b55b4b3`. This section carries plan 5.4 forward, amended. The step-7 plan itself is not edited.
+From Rev 0's fit-script lane (3.0 item 2), on branch `rev0/g1`: commits `6e86b89`, `e125987` and `b55b4b3`. This section carries plan 5.4 forward, amended. The step-7 plan itself is not edited, except for one dated line under its 5.4 and one under its 7.2 that point here (added at Rev 0's review, 2026-10-19).
 
 **What changed.** Before this change the fit tools held the guard pair `pd_tog` → `pd_rx` to fixed numbers: 6.000 ns setup and 1.000 ns hold. So every fit made with G1 failed (a), (b), (e) and (k) by construction [measured: the trial's 16 fits]. Now the tools read the bounds from the SDC the fit was made with, as the Timing Analyzer read it (`sdc.rpt`). They accept only a pair from a table of known pairs in `step7_report.tcl` (`guard_pairs`). One rule judges both 2.2.1's fits and the candidate's.
 
