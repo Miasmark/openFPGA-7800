@@ -4,6 +4,19 @@ Ideas that are worth doing but are not needed for the release they were found in
 
 ## DARIA (2600 ARM cartridges)
 
+### The design study after 2.2.1, and the plan it led to
+
+*Added 2026-10-19. The study (2026-10-18) and its follow-up on Spiders are scratch, not in the repository. The plan that takes their items forward is `docs/daria_step10/plan.md`.*
+
+- **Area is not the limit; the CPU clock is.** 2.2.1 needs 15,839 of 18,480 ALMs (85.7%), about 2,755 of them DARIA's. At ÷18, 2.2.1 failed on all three seeds tried: seed 1 on `clk_arm`, seeds 2 and 3 on the guard pair [measured: fits].
+- **Two area wins** [measured: fits]:
+  - MR, `MUX_RESTRUCTURE ON` on 13 `clk_sys`-domain entities (13 qsf lines, no RTL): 909-918 fewer ALMs at ÷19 on seeds 1-3, with every ÷19 gate passing.
+  - `virtual_axis5`, the five virtual axes as one time-shared engine: 409 fewer again on top of MR, 1,318 fewer than 2.2.1 in all (one seed). It staggers the axes' 1 ms update by 0-4 `clk_sys`. It equals five instances with their ticks delayed that way on every clock over 4 × 10^7 random-stimulus clocks (a bench, not a proof).
+- **The clock.** Five restructurings in `bup_cpu.sv` (T2), with the guard pair re-bounded to [0.5, 8.0] ns (G1), meet ÷18 with `clk_arm` +2.298 to +2.464 ns on seeds 1-3 [measured: fits]. They cost the BupChip's firmware 3.1-3.2% more clocks [measured: model].
+- **L1W+L3, Spiders' late calls.** One-clock aligned Thumb word loads (L1W), and one clock off Thumb LDMIA and POP (L3). On top of T2 they bring Spiders' worst call at ÷18 from 104.05% to 89.33% of its budget, with 0 of 1,399 calls late [measured: RTL]. Frames 557-572 become normal 262-line frames [measured: whole-core simulation]. The cost is about 30 ALMs over T2 [measured: fits].
+- **The hold path.** On one of six seeds the candidate fails a `clk_sdram` hold in `sram_ctrl` by 0.503 ns (`t_wr_q` → `t_last[17]`, two registers in one LAB) [measured: fit]. Rev 0 tries a fix (plan, section 4).
+- **What the plan does with the items below.** S3 is no longer needed for Spiders. The ÷19 guard is not needed at ÷18. The overlay and the PAL session are in Rev 0. The aligned audio gate is deferred. MR, `virtual_axis5`, T2 with L1W+L3, RTL-1, the clean-ups and the FA2 saves go into one release at ÷18, the plan's recommendation; the owner decides after Rev 0 (plan, section 6).
+
 ### A shared-edge guard that works at ÷19
 
 *Added 2026-10-14, by the owner's decision, for a release after 2.2.1.*
@@ -28,6 +41,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **Cost** (an estimate). A design study with a lattice simulation like the hardware judge's scratch `det.py` (`docs/daria_fe/design.md` 8.1; not kept in the repository). New guard and arbiter RTL with its unit bench. Mode B at ÷19, expecting no near pairs. Then `docs/daria_step7/plan.md` 7.6's reruns, including seven fits (Q2 and Q5 on seeds 1-3, and Q-mut): about a day of fits, plus the simulation gates.
 - **When.** After hardware tests, especially if Galagon or Mappy show audio clicks.
   - *2026-10-17:* in step 8's hardware tests the owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. The report gave no click count (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
+  - *2026-10-19:* not needed at ÷18, where the guard locks. The plan for the next release recommends ÷18 (`docs/daria_step10/plan.md`, decision 3, open until after Rev 0). This item comes back only if ÷18 fails on a Pocket.
 
 ### The step-8 DARIA status overlay
 
@@ -45,6 +59,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - `bup_dbg_snap.sv`, the snapshot of open item 11, is meant to carry it.
 - **Evidence.** `docs/daria_step7/record.md`, "Hand-over to step 8"; `docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)".
 - **When.** After 2.2.1, with the next debug build.
+  - *2026-10-19:* in Rev 0 (`docs/daria_step10/plan.md` 3.0, item 1). Rev 0's debug test builds carry it from a scratch worktree. It lands in `src/` with the next release.
 
 ### The PAL region items on hardware, with a 50 Hz PAL image
 
@@ -58,12 +73,18 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **What it needs.**
   - For D1, a 2600 ARM image that draws 50 Hz PAL frames (312 lines). A synthetic one made by the project's own scripts would do, as `pal_dpc` is. Like every generated image, it stays out of git.
   - D2 needs no ARM image. `pal2600_a78`'s first image is a plain PAL 2600 program, so any 50 Hz PAL 2600 game followed by a PAL A78 runs it.
+- **The image now exists** (2026-10-17): `release/daria-pal50-test.zip`, gitignored.
+  - `daria_pal50_test.bin` is a synthetic DPC+ image that draws 312-line frames from its first frame. The project's own scripts made it, and it holds no game data.
+  - The zip also holds a PAL A78 for D2, the picture D1 gives in simulation, and a README with the pass and fail rules.
+  - D1 and D2 were simulated with it on `tb_wire`, on the shipping tree.
+  - Its generator is in scratch, not in the repository (`docs/daria_step10/plan.md`, decision 19).
 - **Cost.** One test session on the build under test. No RTL change.
-- **When.** When such an image is at hand.
+- **When.** Rev 0's Pocket session, on 2.2.1 and on the ÷18 debug build (`docs/daria_step10/plan.md` 3.0, item 5).
 
 ### Smaller items
 
 - **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. On hardware the owner sees Spiders' late calls as the picture shifting down for a couple of frames before a level loads, and they do not seem to affect play (step 8, 2026-10-17). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
+  - *2026-10-19:* no longer needed for Spiders. L1W+L3 ends those calls at ÷18 with one write port (above). S3 stays only as a reserve (`docs/daria_step10/plan.md`, decision 20, open).
 - **The C flag after a Thumb MUL** is marked unknown and halts with code 8 if read. Revisit if a game ever halts with code 8 (`docs/DARIA_CORE.md`, open item 4).
 - **Code or LDM above the 64 KB window** halts (codes 4 and 7). A fetch stall in front of `rom_q` would run it, if a larger CDFJ+ game needs it (`docs/DARIA_CORE.md`, open item 5).
 - **A cartridge EEPROM, and the ARM chip's other peripherals.**
@@ -78,6 +99,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - An aligned run gates audio too: each call's release is held to the reference run's, and the music tick's phase is matched. It exists only as a scratch bench tap.
   - It is shown at ÷18 for Galagon (599 frames) and SF2fix's DPC+ music (29 frames), not yet at ÷19, for CDF music or for the other images (`docs/daria_step7/progress.md`, "Frame runs on D against R1").
   - Cost: two bench options and one more run per image.
+  - *2026-10-19:* deferred by the owner: "if deferring the audio check allows the testing to go faster then yes, skip over it at this time." It is built later, with D1/D2 or on a reported audio problem (`docs/daria_step10/plan.md`, decision 13).
 
 ### After 2.2.1: RTL-1 and the `src/` clean-ups
 
@@ -98,6 +120,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 - **Cost of items 3-8.** Items 3, 4, 6 and 7 change comments only. They need plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Item 5 changes an assignment file, so it needs a new Q2 and the smoke test. Item 8 is a document.
 - **When.** Items 1 and 2 in the next revision; the rest with the first `src/` change after 2.2.1.
+  - *2026-10-19:* the plan puts items 1-8 into the next release (`docs/daria_step10/plan.md` 3.1). At ÷18 item 3's lattice line is right again, but its counter[3] line must then say VCO/18, 38.18 MHz. Item 7 goes with the ÷18 PLL change. Item 8 waits for the release too: Rev 0 changes nothing under `src/`.
 
 ## The 7800 core (both builds: with and without DARIA)
 
@@ -117,3 +140,4 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
     - It changes `src/` in both builds. By `docs/daria_step7/plan.md` 7.6 it re-runs `run_sim.sh`, `extra_tests.sh`, `s4/check.sh` and `pp_equiv.py`, and needs a new Q2.
   - **Evidence.** The owner's finding on the Pocket.
   - **When.** After 2.2.1, with the first `src/` change.
+    - *2026-10-19:* in the plan for the next release (`docs/daria_step10/plan.md` 3.1). One shared file or one per game is the owner's call (decision 15).
