@@ -4,6 +4,25 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 
 **Status, 2026-10-19.** Rev 0 is under way. It ships no release bitstream and commits nothing under `src/`: the `src/` freeze of 2026-10-16 stays until decision 1. The candidate CPU, the overlay and the test builds live in scratch worktrees and saved patches, not in the repository. Rev 0's results are recorded beside this plan when it ends.
 
+**Paused, 2026-10-19.** The owner: "Halt, record commit. Pause". All runs were stopped. Where Rev 0 stands:
+- **Done and reviewed:**
+  - G1's fit tools (section 10);
+  - the Harmony model as a bench option, its tools and `docs/HARMONY_MODEL.md` (3.2);
+  - this plan and Rev 0's documents (3.0 item 8).
+  The review of these commits found no major issue. Its fixes for the step-7 plan's pointer to section 10, the smoke test's run times and item 8's done marks are in.
+- **Done in scratch, not in the repository:**
+  - the status overlay (A2);
+  - the ÷18 debug build of the candidate and the ÷19 control build, each fitted on seeds 1-3 with at least one seed passing P29;
+  - Spiders in simulation on the ÷18 debug build (0 late calls on the overlay's counter, the guard locked, 0 unlocks);
+  - `s4/check.sh`'s DARIA set at 38.18 MHz;
+  - `THUMB=1 s1/check.sh` with the firmware: PCM identical to MiSTer's on songs 13, 14, 9 and 30; song 13's CPI 1.4208, +2.73% over the 1.383 gate (information for decision 10).
+  The two test builds and the owner's session checklist are packaged, but not yet given to the owner.
+- **Open when work resumes:**
+  - the review's remaining findings: the session checklist says Start clears the overlay's counters, but on this core Start is the console's Reset switch, which the game reads, so it does not (fix before the session); the whole-core overlay check can pass while checking no cell; three nits in `docs/HARMONY_MODEL.md` (the m2t3 range, the MUL figures' sources, the two images without established settings); and smaller notes;
+  - Rev 0's merge of its three branches and this record into `DARIA-dev`, if not done with this record;
+  - the hold fix trial of section 4 (decision 11), started and stopped before it ran;
+  - the owner's session (3.0 item 5).
+
 **Changes since the owner's approval, marked in place:**
 - Decisions 6 and 13 are settled by the owner's words of 2026-10-19 (section 6).
 - 3.0 item 8: `lint_step7.sh`'s missing AtariVox sources are done by the owner's own commit `6e2e880`. B8 waits for the release, because `POCKET_CHANGES.md` is under `src/`.
@@ -671,6 +690,17 @@ If ÷18 fails on silicon in Rev 0:
    - Plan 5.3's ladder says "if it still fails, analyse".
    - Seed 6's +0.040 ns shows the path is placement-sensitive, so any later change to the tree could break the shipped seed.
 
+**What Rev 0 found, and the owner's choice (2026-10-19)** [measured: Rev 0's seed-3 refits at ÷18 on the candidate, one with a kept database]
+- **The cause.** The LAB input mux that feeds `t_last[17]`'s data input also feeds the `{we, addr}` compare that makes `t_new`. `t_new` is on (h)'s setup path. So the router cannot lengthen `t_wr_q`'s wire to `t_last` without slowing the compare. On this path it added only about 0.3 ns.
+- **Fitter-only targets failed** on seed 3 (the target states the total, with `core_constraints.sdc`'s 0.1 ns):
+  - 0.3 ns on every `t_*_q` path: (h) hold −0.202 ns;
+  - 0.5 ns on every `t_*_q` path: hold +0.253 ns, but (h) setup fell to 4.280 ns, below the round's +4.5 ns;
+  - 0.7 ns on `t_*_q` → `t_last` only: hold −0.518 ns and (h) setup 3.475 ns.
+- **A hold exception was dropped.** A hold multicycle of 1 from `t_*_q` to the `t_last` registers passed every check on seed 3. It is sound only while `t_last`'s load enable keeps its full check, because the enable is low on every `clk_sys` edge where the key changes. Naming the registers also relaxed the enable path (`t_*_q` → compare → `t_new` → `t_last`'s enable), so the review rejected it. A version naming only `t_last`'s data pins was being fitted when the owner chose a structural fix instead.
+- **The fix the owner chose:** a second copy of the 18 key bits `{t_wr_q, t_addr_q}`, loaded exactly like the originals and kept from merging, used only as `t_last`'s data. The compare keeps the originals. The router can then lengthen the data wires without slowing the compare, and the real hold check stays. It adds about 18 registers.
+- **Its gates.** It is a change to `sram_ctrl.sv`, which both builds share. By 7.6 it brings the cartram matrix and the directed s19 run, and it goes into F′ with a new reference and Q4, all already in the release's gates.
+- **Its trial** (scratch: the equivalence proof, the SRAM benches, the synthesis report showing the copies survive, fits on seeds 3, 6, 1 and 2 and on the build without DARIA) was started and stopped before it ran, when the owner paused the work.
+
 ---
 
 ## 5. Open technical risks (most severe first)
@@ -742,7 +772,7 @@ The study's numbers are in brackets. "When" says when each decision is needed. T
 | 8 | [2] MR in `ap_core.qsf` (both builds) or `daria.qip` (DARIA only) | Before development | `ap_core.qsf`. T3, FA2 and the cleaned `bup_cpu.sv` change the non-DARIA build anyway, so the new reference (F′) is paid either way, and the `daria.qip` form is untested | Open |
 | 9 | [3] `virtual_axis5` | Before development | Yes: −408.5 ALMs on top of MR [measured: one seed]. It staggers the axes' 1 ms update by 0-4 `clk_sys`, and equals five instances with their ticks delayed that way on every clock over 4 × 10^7 random-stimulus clocks (a bench, not a proof) | Open |
 | 10 | [6] R1's cost to the BupChip, and the amended `s1/check.sh` CPI gate | After Rev 0's firmware check | Accept. +3.1-3.2% CPI; lowest clock without underrun 24.74 MHz against 38.18 MHz [measured: model, T2]. Unchanged by L1W. Rev 0 measures it on the RTL first | Open |
-| 11 | *(new)* The `sram_ctrl` hold: fix or seed rule | After Rev 0's hold round; final at the pre-campaign round | Fix first (DARIA-only fitter SDC; a location or RTL if needed). A P12 seed rule only if the fix fails on the combined tree | Open |
+| 11 | *(new)* The `sram_ctrl` hold: fix or seed rule | After Rev 0's hold round; final at the pre-campaign round | An RTL fix: duplicate the request-key registers that feed `t_last` (section 4, "What Rev 0 found") | **Settled 2026-10-19.** The owner: "Duplicating the register sounds like the best option." The fitter-only targets failed, and the hold exception is dropped. The change is under `src/`, in a file both builds share, so it waits for decision 1 and goes into the release (F′). Its trial has not run yet |
 | 13 | [9] The aligned audio run (A9) as a gate | Before the campaign: it changes the campaign's gate set | **Defer**: build it with D1/D2 or on a reported audio problem. This reverses the study's rule (audio gate before call timing changes), and the merged release changes call timing on every image | **Settled 2026-10-19: deferred.** The owner: "if deferring the audio check allows the testing to go faster then yes, skip over it at this time." Choosing A9 would have added 1-3 days of bench work and about 35 h of runs (12-17 h wall) before the campaign [estimated] |
 | 15 | [11] The FA2 save file: one shared file like `hsc.sav`, or one per game, and its name | Before development | No technical preference found. A per-game file mirrors the cartridge's own flash. The owner's preference decides | Open |
 
