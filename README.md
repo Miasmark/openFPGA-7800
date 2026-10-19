@@ -226,7 +226,7 @@ Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
 The Quartus build (2.2.1, fitter seed 2) meets timing on all four corners.
-Worst setup slack: +2.433 ns on clk_sdram (against a release gate of
+Worst setup slack: +2.345 ns on clk_sdram (against a release gate of
 +1.5 ns), +1.474 ns on DARIA's CPU clock, and +0.193 ns on the one 6 ns
 path of DARIA's front end (its phase detector), which moves with any change
 to the design: seeds 1 and 3 gave +0.084 and -0.262 ns there. Worst hold

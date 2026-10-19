@@ -522,7 +522,7 @@ on each of seeds 1, 2 and 3. DARIA's verified tree (`317eaa8`), with Fix B,
 gives +2.462, +2.683 and +2.919 ns on seeds 1-3, and its worst
 `clk_sdram` paths are Flicker Blend's half-period paths in `sram_ctrl`.
 2.2.1 adds the AtariVox voice to that tree, with DARIA's RTL unchanged,
-and ships the AtariVox build's own seed-2 fit: `clk_sdram` +2.433 ns. The
+and ships the AtariVox build's own seed-2 fit: `clk_sdram` +2.345 ns. The
 [README](../README.md) ("Verification") has its other figures, and
 [ATARIVOX.md](ATARIVOX.md) the voice build's seeds.
 
