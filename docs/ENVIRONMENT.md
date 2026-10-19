@@ -625,7 +625,29 @@ The venv, the OpenBIOS and the game files stay on disk under `sim/work`, because
 ### 11.5 Inputs
 
 - **OpenBIOS:** built by `02_user.sh` from `~/7800-devtools/7800openbios` at `b8bc745`. On the VM, `sim/work/bupchip/bios/7800openbios.bin` has md5 `659607f14d1a0743c004d2b0bc0807fc`. Section 5.3 refers to an md5 that it does not give; whether this one matches the container's is not recorded.
-- **Firmware and game images:** absent at inventory. Ask the owner for them (sections 5.2 and 5.4). Until then, the benches skip as section 8.6 says.
+- **Firmware:** the owner uploaded it on 2026-10-18. `src/fpga/mister/rtl/bupchip.hex` (17,604 B, md5 `eae50bf9b79013550a5852c71d04af3f`) and `.mif` (40,910 B, md5 `3b1ac1a950d754b4e95d6895483f60d3`) are byte-identical to the copies at `0c6996b^` (section 10, item 1). Both are gitignored. With them, `sim/bupchip/model/check.sh` (14 s) and `sim/bupchip/verif/run_all.sh` (2 min 29 s) pass with no step skipped.
+- **The ROM library:** `~/ROMLibrary` (1.4 GB, outside the repo, on disk), uploaded by the owner on 2026-10-18 in two parts. New uploads arrive in `~/inbox`. Copy what a bench needs from the library into `sim/work`; never into the tree. It holds:
+  - Trebor's 7800 ROM ProPack v8_17 (1,308 `.a78`: `Retail_v7_0` NTSC and PAL, and `UPHHD_20260101` with demos and hacks);
+  - `atari-2600-roms-usa.zip` (259 `.a26`);
+  - `supercharger/`: the Supercharger BIOS `supercharger.bin` (2,048 B, md5 `4565c1a7abce773e53c75b35414adefd`; for `--arfw FILE`, section 6), its games, `Supercharger_test_images.zip` (the three AR Test images) and a STELLA2 tape image;
+  - `RikkiVikki/`: the ProSystem install `make_arsc.py` reads (`Data/FoxBox.cdf`, `Data/FoxBox.bin`, `Music/`), `Rikki and Vikki.a78` (headered), `Rikki and Vikki (BupChip).a78`, `RV_Jukebox.a78`, a `.bps` patch, old Pocket test builds, and a second copy of the firmware (identical);
+  - the Champ Games demo zips: `Champ-Games_demo_all_NTSC.zip` (15 CDFJ demos) and `Champ-Games-Presents_demo_all_NTSC.zip` (13 DPC+ demos), and the full Juno First and Stratovox;
+  - homebrew images: Draconian, SF2 (`SF2fix_NTSC/PAL.bin`, the Stay Frosty 2 demo), `RobotWar-2684_demo_final_NTSC_Harmonyfix.bin`, `spacerocks_Harmony_fix.bin`, Frantic, Omicron, Go Fish, Grizzards, Boulder Dash, the AtariVox speech tester, `sync.bin`, `hiscore.bin`, two Triple Punch builds;
+  - the firmware files above.
+  - `RikkiVikki/` also carries a `make_arsc.py` (identical to the repo's) and a `hex2bin.py`; use the repo's.
+- **What the benches read,** copied from the library on 2026-10-18, under `sim/work/bupchip/`:
+
+  | Path | Contents | Used by |
+  |---|---|---|
+  | `game/rv.a78` | built by `python3 sim/bupchip/make_arsc.py ~/ROMLibrary/RikkiVikki sim/work/bupchip/game/rv.a78 --rom ~/ROMLibrary/RikkiVikki/"Rikki and Vikki.a78"`: 524,416 B cartridge + 211.8 KiB ARSC, 32 songs, md5 `c7b8be98f5de9ec07667352a925823a8`, byte-identical to the uploaded `Rikki and Vikki (BupChip).a78` | s1, s4, model, verif songs, jukebox |
+  | `champ/ntsc/` (and `champ/readme/`) | `Champ-Games_demo_all_NTSC.zip`, unzipped | `frames` (FRAMES16), `wire`'s Turbo run (`GAMES`) |
+  | `champ_presents/arm/` | the `cgp/` images of `Champ-Games-Presents_demo_all_NTSC.zip`; `Dino-Eggs_demo_final_CGP_ NTSC.bin` renamed without its space, as `docs/daria_fe/lanes/G_step7_resets.md:61` names it | `frames` (Stratovox), the lane docs' runs |
+  | `daria/roms/` | the homebrew `.bin` images above, Juno First full, the SF2 demo, `sync.bin`, `hiscore.bin` | the lane docs' runs (for example G_step7_resets.md:60-62) |
+
+  `GAMES=sim/work/bupchip` finds all 16 FRAMES16 images (`step7_gates.sh` searches it with `find`).
+- **The MiSTer reference PCMs** (`sim/work/bupchip/ref/song<N>.pcm`, section 5.4) were made on the VM on 2026-10-18, not uploaded: `WORK=sim/work/bupchip/refgen/s<N> sim/bupchip/run_bupchip.sh sim/work/bupchip/game/rv.a78 <N> 4` for songs 6, 9, 10, 13, 14 and 30 (song 13 first, which builds; the other five at once, sharing its `obj_dir`), then copied into `ref/`. Each is 767,936 B (191,984 frames, as `docs/BUPCHIP_CORE.md:872`). Song 13 took about 4 min, the five together about 3 min.
+  - `sim/bupchip/s1/check.sh sim/work/bupchip/game/rv.a78`: every step PASS, songs 13, 14, 9 and 30 "PCM identical to MiSTer's" (8 min). Without the references the four songs FAIL with "PCM not compared", although they play cleanly.
+  - `sim/bupchip/model/check.sh ../../work/bupchip/game/rv.a78` (from `sim/bupchip/model`): all six references equal over all 191,984 frames, PASS (3 min 11 s).
 - **Reference clones:** the clones of section 5.6 (lroby74, the Jaguar repo, retrobios, cdfjplus-template) are absent. No script needs them.
 
 ### 11.6 Sessions and long runs
