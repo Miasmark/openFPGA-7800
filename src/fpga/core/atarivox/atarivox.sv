@@ -21,7 +21,9 @@ module atarivox (
 
 	// 16,384 Hz from clk_sys: 874 x 16,384 = 14.32 MHz (NTSC), 866 for PAL
 	// (14.19 MHz); both within 0.1%.
+	/* verilator lint_off PROCASSINIT */  // power-up value (DEVELOPING.md, "Power-up values")
 	logic [9:0] div = 10'd0;
+	/* verilator lint_on PROCASSINIT */
 	wire  [9:0] div_last = pal ? 10'd865 : 10'd873;
 	wire        tick = (div == div_last);
 	always_ff @(posedge clk)
@@ -52,7 +54,9 @@ module atarivox (
 		.fifo_nonempty (nonempty),
 		.fifo_pop      (pop),
 		.sample        (sample),
+		/* verilator lint_off PINCONNECTEMPTY */  // the held sample is enough
 		.sample_strobe ()
+		/* verilator lint_on PINCONNECTEMPTY */
 	);
 
 	assign down_n = ~half_full;
