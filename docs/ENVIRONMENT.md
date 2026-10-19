@@ -572,7 +572,7 @@ Corrections to DEVELOPING.md. None of these have been applied there yet:
 4. Should the image be pinned by digest in the docs and in CI? A `docker pull` in a fresh container has not been tested this session.
 5. The exact disk quota is unknown; about 39 GB is an estimate [E]. Confirm it before planning work that needs the Quartus image plus large simulation outputs.
 6. Should `s4/check.sh` default to `JOBS=2`? And should `run_study.sh` take the Quartus lock and run fewer builds at once, to match the machine rules?
-7. What job limits apply on the self-hosted VM (section 11.6), with 5 cores (10 threads) and 30 GiB RAM? Section 7.4's were set for the container's 4 CPUs and 15 GiB.
+7. What job limits apply on the self-hosted VM (section 11.6), with 5 cores (10 threads) and 30 GiB RAM? Section 7.4's were set for the container's 4 CPUs and 15 GiB. Section 11.7 measures the VM and proposes 5 simulations, 3 while Quartus runs.
 
 ## 11. The self-hosted VM
 
@@ -637,3 +637,36 @@ The VM does not stop when a session goes idle, and has no 13-hour limit (section
 - **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
 - **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
 - **Load:** section 7.4's limits (3 simulations, 2 while Quartus runs) were set for the container's 4 CPUs; the VM has 5 cores (10 threads, 11.1). Limits for this VM are an open question (section 10, item 7). Until the owner sets them, keep section 7.4's.
+
+### 11.7 Headroom measured on 2026-10-18
+
+A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the limits stay those of 11.6 until the owner sets new ones.
+
+- **Method:** a simulation job was `tb_fe_guard` (built by `sim/bupchip/daria/fe_unit/run_unit.sh`, about 24 s a run, one thread) run back to back under `nice -n 10`, each run timed. The Quartus job was the CI-form full compile (section 3.4) of a copy of `src/fpga` in `$RAM_WORK`. `vmstat` and `/proc/pressure` (PSI) were sampled every 5 s. All runs passed and both compiles succeeded. The driver script was not committed.
+- **Simulations:**
+
+  | Load | Mean run | Slowdown |
+  |---|---|---|
+  | 1 alone | 23.5 s | - |
+  | 4 at once | 24.5 s | 4% |
+  | 6 at once | 25.3 s | 8% |
+
+  CPU and memory PSI stayed at 0 in every simulation-only phase.
+- **Quartus:**
+
+  | Load | Compile | Simulations beside it |
+  |---|---|---|
+  | alone | 656 s (10 min 56 s) | - |
+  | with 3 simulations | 718 s (9% slower) | mean 27.3 s (16% slower), worst 35.7 s |
+
+  - Alone, the compile used 26 min 26 s of CPU time, about 2.4 cores on average, with 3.9 GB peak virtual memory.
+  - With 3 simulations, CPU PSI averaged 3.7% and peaked at 19%: the first contention seen.
+  - Memory PSI stayed at 0, nothing was swapped, and free memory never fell below 7.6 GiB.
+- **Proposal (not adopted):** at most 5 simulations at once while no Quartus job runs, 3 while one does, and one Quartus job at a time under the lock (3.5). The bench is small; whole-core simulations (`run_daria.sh`, `tb_frames`) hold far more state and may contend more for the 12 MiB L3, so treat 5 as a ceiling. 4 simulations beside Quartus were not tested.
+
+### 11.8 The memory balloon
+
+- **Symptom:** the VM has a virtio balloon device (`/sys/bus/virtio/drivers/virtio_balloon/virtio3`). On 2026-10-18 `free` showed about 17 GiB used at idle, while processes held about 1 GiB and kernel memory and page cache about 2.5 GiB. The rest matches the balloon taking memory back for the host, which leaves about 14 GiB usable of the 30 GiB. Reading the balloon's size needs root (`/sys/kernel/debug/virtio-balloon`) and was not done.
+- **Cause:** the host's ZFS ARC (its read cache), which takes memory back from the VM through the balloon (the owner, 2026-10-18).
+- **Effect:** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
+- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too. Whether either has been done is [not recorded].
