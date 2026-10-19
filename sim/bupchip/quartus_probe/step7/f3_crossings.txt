@@ -16,7 +16,8 @@
 #            reset: a first flop with a synchronous reset of its own clock:
 #                   the same, and one more register, of its own clock
 #            guard: the phase detector's receiver (not a synchroniser; the
-#                   SDC holds it to 6 / 1 ns): as first
+#                   SDC holds it to the guard's bounds, 6 / 1 ns as first
+#                   written or G1's 8 / 0.5 ns): as first
 #            held:  a held bus taken after its toggle has crossed
 #   endpoint the register's name, '*' matching anything (no other wildcard);
 #            "~DUPLICATE" and similar suffixes are stripped first
