@@ -291,10 +291,10 @@ for line in (ct or "").splitlines():
         TCL_WHY = f"{m.group(1)} / {m.group(2)} ns ({m.group(3)}, the SDC's)"
     elif line.startswith("# guard bounds: none"):
         TCL_LINE, TCL_GUARD, TCL_WHY = True, None, "not known to the report script" + line[len("# guard bounds: none"):]
-# A report script that read the bounds must have read sdc.rpt's (the same file): otherwise its verdicts and this
-# script's are about different constraints.
-TCL_DIFFERS = TCL_LINE and ((TCL_GUARD is None) != (GUARD is None) or (GUARD is not None and not (
-    same(TCL_GUARD[0], GUARD[0]) and same(TCL_GUARD[1], GUARD[1]))))
+# A report script that read known bounds must have read sdc.rpt's (the same file): otherwise its verdicts and this
+# script's are about different constraints. One that read none, where the tree's table now knows the pair (a row
+# added since the fit), is judged again by the tree's table, as (c.cells) is; its own verdicts were FAIL.
+TCL_DIFFERS = bool(TCL_LINE and TCL_GUARD and GUARD) and not (same(TCL_GUARD[0], GUARD[0]) and same(TCL_GUARD[1], GUARD[1]))
 
 
 def fitter_line():

@@ -549,6 +549,10 @@ checker "FAIL: a b e k" daria "no sdc.rpt" $G1 t:nosdc
 has e "sdc.rpt missing"
 checker "FAIL: a b k" daria "the report script judged with 6 / 1 (its line) where sdc.rpt says G1" $G1 t:tclb=6.000,1.000
 has k "but sdc.rpt gives 8.000 / 0.500 ns"
+checker PASS daria "G1 fitted with a table that lacked G1's row (the report script read no known bounds and failed (a), (b), (k)): judged again by the tree's table" \
+	$G1 t:tclb=none
+has a "the report script, with not known to the report script"
+fline PASS
 checker "FAIL: a" daria "G1: the report script said (a) FAIL on figures that pass by its own bounds (a misread)" $G1 t:tcl_a=FAIL
 has a "misread"
 checker "FAIL: b" daria "G1: the report script said (b) FAIL on figures that pass by its own bounds (a misread)" $G1 t:tcl_b=FAIL

@@ -212,7 +212,7 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
   script, which held the pair to 6 / 1 ns, is judged again correctly from
   its own files.
 - `step7/selftest.sh` tests the driver's refusals, `step7_prep.py` and
-  `step7_checks.py` on made-up report files, without Quartus: 169 cases
+  `step7_checks.py` on made-up report files, without Quartus: 172 cases
   (117 before the guard pair's bounds were read from the SDC). It needs
   100 MB free on `/`; with less it skips the cases that copy `src/fpga` and
   exits 3 (PARTIAL). `sim/step7_gates.sh`'s `fit_selftest` gate runs it.

@@ -314,6 +314,8 @@ proc guard_bounds {pairs} {
 		set item "$v at [lindex $cols [expr {$ti + 3}]]"
 		if {$cmd eq "set_max_delay"} { lappend maxv $v; lappend maxi $item } else { lappend minv $v; lappend mini $item }
 	}
+	if {$maxi eq ""} { set maxi none }
+	if {$mini eq ""} { set mini none }
 	set seen "set_max_delay [join $maxi {, }]; set_min_delay [join $mini {, }]"
 	if {[llength $maxv] != 1 || [llength $minv] != 1} {
 		return [list "" "" "" "sdc.rpt has [llength $maxv] set_max_delay and [llength $minv] set_min_delay from pd_tog to pd_rx, not one of each ($seen)"]
