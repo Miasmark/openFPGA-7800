@@ -572,7 +572,7 @@ Corrections to DEVELOPING.md. None of these have been applied there yet:
 4. Should the image be pinned by digest in the docs and in CI? A `docker pull` in a fresh container has not been tested this session.
 5. The exact disk quota is unknown; about 39 GB is an estimate [E]. Confirm it before planning work that needs the Quartus image plus large simulation outputs.
 6. Should `s4/check.sh` default to `JOBS=2`? And should `run_study.sh` take the Quartus lock and run fewer builds at once, to match the machine rules?
-7. What job limits apply on the self-hosted VM (section 11.6), with 5 cores (10 threads) and 30 GiB RAM? Section 7.4's were set for the container's 4 CPUs and 15 GiB. Section 11.7 measures the VM and proposes 5 simulations, 3 while Quartus runs.
+7. ~~What job limits apply on the self-hosted VM (section 11.6)?~~ **Answered 2026-10-19** by the owner: "4 sims or 1 quartus run +3 sims", that is at most 4 simulations while no Quartus job runs and 3 while one does (section 11.6). Section 11.7 had measured the VM and proposed 5 and 3.
 
 ## 11. The self-hosted VM
 
@@ -584,7 +584,7 @@ Since 2026-10-18 the project also runs on the owner's own VM. Sections 1-10 desc
 - **Resources:** 10 vCPUs, 30 GiB RAM. The host is an Intel Core i7-8700K (6 cores, 12 threads, 12 MiB L3). The VM has 5 of its cores with 2 threads each, so `nproc` reports 10, but the compute is 5 cores': a second thread adds far less than a core for builds and simulations. Size parallel work by the 5 cores.
 - **Disk:** `/` is a 735 GB LVM volume, with 674 GB available at inventory. The roughly 39 GB budget of section 8.3 does not apply, and the Quartus image's 18.6 GB is a small part of it.
 - **Users and paths:** the user is `miasmark`, in the `sudo` and `docker` groups; sudo asks for a password. `/home/user` is a symlink to `/home/miasmark`, so the `/home/user/...` paths in this file work unchanged. The repo is `~/openFPGA-7800`.
-- **Provisioning:** the scripts that built the VM are in `~/provision` (outside the repo): `01_system.sh` (apt, Docker, `/etc/environment`, the symlink), `02_user.sh` (Claude Code, the clone, Verilator 5.040, the venv, the image pull, the OpenBIOS), `03_seal.sh` (template sealing) and `04_ramscratch.sh` (11.4). Their logs are beside them.
+- **Provisioning:** the scripts that built the VM are in `~/provision` (outside the repo): `01_system.sh` (apt, Docker, `/etc/environment`, the symlink), `02_user.sh` (the agent's CLI, the clone, Verilator 5.040, the venv, the image pull, the OpenBIOS), `03_seal.sh` (template sealing) and `04_ramscratch.sh` (11.4). Their logs are beside them.
 - **Remotes:** `origin` is the owner's fork, `upstream` is spiritualized1997/openFPGA-7800.
 
 ### 11.2 Tools
@@ -652,17 +652,18 @@ The venv, the OpenBIOS and the game files stay on disk under `sim/work`, because
 
 ### 11.6 Sessions and long runs
 
-The VM does not stop when a session goes idle, and has no 13-hour limit (sections 8.1 and 8.4). Work is still lost when the Claude session itself ends. That happens when the terminal or SSH connection closes, when the login expires, or when the VM reboots.
+The VM does not stop when a session goes idle, and has no 13-hour limit (sections 8.1 and 8.4). Work is still lost when the agent's session itself ends. An interactive session ends when its terminal or SSH connection closes; any session ends when the login expires or the VM reboots.
 
-- **tmux:** run Claude Code inside tmux (`tmux new -s claude`, then `claude`), and come back with `tmux attach -t claude` after a disconnect.
-- **Login:** the normal login expires. `claude setup-token` makes a long-lived token. Put it in `CLAUDE_CODE_OAUTH_TOKEN`, in a file only the user can read, so a long workflow is not stopped by an expired login.
+- **Background sessions:** a session started as a background job of the agent's CLI runs under the CLI's daemon process (its parent is systemd), not under the terminal. Closing the terminal or the VNC client does not end it [observed: the process tree, 2026-10-19]; a reboot does.
+- **tmux:** for an interactive session, start the agent's CLI inside tmux (`tmux new -s agent`), and come back with `tmux attach -t agent` after a disconnect.
+- **Login:** a long-lived token from the CLI's `setup-token` command, exported in its OAuth-token variable, keeps a login from expiring, but its scope is inference only, so Remote Control refuses it. On 2026-10-19 that export in `~/.bashrc` was commented out for this reason, and the VM uses the normal login, which renews itself with its refresh token.
 - **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
 - **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
-- **Load:** section 7.4's limits (3 simulations, 2 while Quartus runs) were set for the container's 4 CPUs; the VM has 5 cores (10 threads, 11.1). Limits for this VM are an open question (section 10, item 7). Until the owner sets them, keep section 7.4's.
+- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Section 7.4's limits (3 and 2) were set for the container's 4 CPUs.
 
 ### 11.7 Headroom measured on 2026-10-18
 
-A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the limits stay those of 11.6 until the owner sets new ones.
+A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
 
 - **Method:** a simulation job was `tb_fe_guard` (built by `sim/bupchip/daria/fe_unit/run_unit.sh`, about 24 s a run, one thread) run back to back under `nice -n 10`, each run timed. The Quartus job was the CI-form full compile (section 3.4) of a copy of `src/fpga` in `$RAM_WORK`. `vmstat` and `/proc/pressure` (PSI) were sampled every 5 s. All runs passed and both compiles succeeded. The driver script was not committed.
 - **Simulations:**
