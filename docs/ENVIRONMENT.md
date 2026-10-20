@@ -4,6 +4,8 @@ This file is for a Claude session in a new Claude Code cloud container that has 
 
 [docs/DEVELOPING.md](DEVELOPING.md) is still the reference for the core itself: its layout, build macros, the Quartus build, PLL regeneration and releases. This file does not repeat that material. Section 9 lists what this file adds and which statements in DEVELOPING.md are out of date.
 
+**On the self-hosted VM, read section 11 first:** it lists where that machine differs from the container this file describes.
+
 Markers:
 
 - **[untested]**: worked out from the history and the scripts, but never run in a fresh container.
@@ -571,3 +573,124 @@ Corrections to DEVELOPING.md. None of these have been applied there yet:
 4. Should the image be pinned by digest in the docs and in CI? A `docker pull` in a fresh container has not been tested this session.
 5. The exact disk quota is unknown; about 39 GB is an estimate [E]. Confirm it before planning work that needs the Quartus image plus large simulation outputs.
 6. Should `s4/check.sh` default to `JOBS=2`? And should `run_study.sh` take the Quartus lock and run fewer builds at once, to match the machine rules?
+7. ~~What job limits apply on the self-hosted VM (section 11.6)?~~ **Answered 2026-10-19** by the owner: "4 sims or 1 quartus run +3 sims", that is at most 4 simulations while no Quartus job runs and 3 while one does (section 11.6). Section 11.7 had measured the VM and proposed 5 and 3.
+
+## 11. The self-hosted VM
+
+Since 2026-10-18 the project also runs on the owner's own VM. Sections 1-10 describe the cloud container; this section lists where the VM differs. It is based on an inventory of the VM taken on 2026-10-18, on `Mister-Pocket-Port` at `6e2e880`. Where this section and an earlier one disagree, this section is right for the VM.
+
+### 11.1 Machine
+
+- **System:** Ubuntu 26.04.1 LTS, x86_64, a KVM guest with systemd. Daemons start at boot.
+- **Resources:** 10 vCPUs, 30 GiB RAM. The host is an Intel Core i7-8700K (6 cores, 12 threads, 12 MiB L3). The VM has 5 of its cores with 2 threads each, so `nproc` reports 10, but the compute is 5 cores': a second thread adds far less than a core for builds and simulations. Size parallel work by the 5 cores.
+- **Disk:** `/` is a 735 GB LVM volume, with 674 GB available at inventory. The roughly 39 GB budget of section 8.3 does not apply, and the Quartus image's 18.6 GB is a small part of it.
+- **Users and paths:** the user is `miasmark`, in the `sudo` and `docker` groups; sudo asks for a password. `/home/user` is a symlink to `/home/miasmark`, so the `/home/user/...` paths in this file work unchanged. The repo is `~/openFPGA-7800`.
+- **Provisioning:** the scripts that built the VM are in `~/provision` (outside the repo): `01_system.sh` (apt, Docker, `/etc/environment`, the symlink), `02_user.sh` (the agent's CLI, the clone, Verilator 5.040, the venv, the image pull, the OpenBIOS), `03_seal.sh` (template sealing) and `04_ramscratch.sh` (11.4). Their logs are beside them.
+- **Remotes:** `origin` is the owner's fork, `upstream` is spiritualized1997/openFPGA-7800.
+
+### 11.2 Tools
+
+All the tools of section 2.2 are present except those the project does not use: cmake, clang, node, npm, Playwright and a `yosys` on PATH. The versions differ:
+
+| Tool | Version on the VM | Note |
+|---|---|---|
+| Verilator | 5.040 in `/opt/verilator-5.040`; apt's is 5.032 | `/etc/environment` sets `VERILATOR=/opt/verilator-5.040/bin/verilator`, so `sim/run_sim.sh` picks 5.040 without the prefix (section 8.5 does not apply to login shells) |
+| Icarus Verilog | 12.0 | |
+| GHDL | 5.0.1 | |
+| arm-none-eabi-gcc | 14.2.1, binutils 2.45.50 | |
+| gcc / g++ | 15.2.0 | |
+| dasm | 2.20.14.1 | |
+| ccache | 4.12.3 | |
+| Python | 3.14.4 | refuses a system-wide `pip install` (PEP 668), so quick start step 3's `pip install pillow` fails: Pillow 12.1.1 comes from apt's `python3-pil` |
+| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259 | `sim/work/bupchip/venv`, as section 4 |
+| Docker | 29.9.1 | 11.3 |
+| git, gh | 2.53.0; gh 2.102.0 in `~/.local/bin` | gh is logged in as the owner, and is git's credential helper |
+
+### 11.3 Docker and Quartus
+
+- **dockerd is a systemd service** (`systemctl is-active docker`), enabled at boot. Sections 3.3 and 8.4 (starting dockerd by hand, the stale containerd pid) do not apply.
+- **The image** `raetro/quartus:21.1` is pulled (18.6 GB) and reports `Version 21.1.1 Build 850 06/23/2022 SJ Lite Edition`.
+- **The lock.** `/tmp` is a tmpfs, so the Quartus lock file (section 3.5) does not survive a reboot. `flock` creates it again, owned by `miasmark` rather than root. Keep using the lock as section 3.5 says.
+
+### 11.4 RAM scratch
+
+Two tmpfs mounts, each capped at 40% of RAM (13 GB), are set in `/etc/fstab`. Their contents are lost at every reboot. `/etc/profile.d/ramscratch.sh` exports their variables, and `~/RAM_SCRATCH.md` describes them.
+
+| Path | Variable | Use |
+|---|---|---|
+| `/scratch` | `$RAM_SCRATCH` | general scratch |
+| `sim/work_ram` | `$RAM_WORK` | inside the repo and gitignored, so the Docker wrappers accept it as `WORK`, for example `WORK=$RAM_WORK/qprobe` |
+
+The venv, the OpenBIOS and the game files stay on disk under `sim/work`, because they must survive a reboot.
+
+### 11.5 Inputs
+
+- **OpenBIOS:** built by `02_user.sh` from `~/7800-devtools/7800openbios` at `b8bc745`. On the VM, `sim/work/bupchip/bios/7800openbios.bin` has md5 `659607f14d1a0743c004d2b0bc0807fc`. Section 5.3 refers to an md5 that it does not give; whether this one matches the container's is not recorded.
+- **Firmware:** the owner uploaded it on 2026-10-18. `src/fpga/mister/rtl/bupchip.hex` (17,604 B, md5 `eae50bf9b79013550a5852c71d04af3f`) and `.mif` (40,910 B, md5 `3b1ac1a950d754b4e95d6895483f60d3`) are byte-identical to the copies at `0c6996b^` (section 10, item 1). Both are gitignored. With them, `sim/bupchip/model/check.sh` (14 s) and `sim/bupchip/verif/run_all.sh` (2 min 29 s) pass with no step skipped.
+- **The ROM library:** `~/ROMLibrary` (1.4 GB, outside the repo, on disk), uploaded by the owner on 2026-10-18 in two parts. New uploads arrive in `~/inbox`. Copy what a bench needs from the library into `sim/work`; never into the tree. It holds:
+  - Trebor's 7800 ROM ProPack v8_17 (1,308 `.a78`: `Retail_v7_0` NTSC and PAL, and `UPHHD_20260101` with demos and hacks);
+  - `atari-2600-roms-usa.zip` (259 `.a26`);
+  - `supercharger/`: the Supercharger BIOS `supercharger.bin` (2,048 B, md5 `4565c1a7abce773e53c75b35414adefd`; for `--arfw FILE`, section 6), its games, `Supercharger_test_images.zip` (the three AR Test images) and a STELLA2 tape image;
+  - `RikkiVikki/`: the ProSystem install `make_arsc.py` reads (`Data/FoxBox.cdf`, `Data/FoxBox.bin`, `Music/`), `Rikki and Vikki.a78` (headered), `Rikki and Vikki (BupChip).a78`, `RV_Jukebox.a78`, a `.bps` patch, old Pocket test builds, and a second copy of the firmware (identical);
+  - the Champ Games demo zips: `Champ-Games_demo_all_NTSC.zip` (15 CDFJ demos) and `Champ-Games-Presents_demo_all_NTSC.zip` (13 DPC+ demos), and the full Juno First and Stratovox;
+  - homebrew images: Draconian, SF2 (`SF2fix_NTSC/PAL.bin`, the Stay Frosty 2 demo), `RobotWar-2684_demo_final_NTSC_Harmonyfix.bin`, `spacerocks_Harmony_fix.bin`, Frantic, Omicron, Go Fish, Grizzards, Boulder Dash, the AtariVox speech tester, `sync.bin`, `hiscore.bin`, two Triple Punch builds;
+  - the firmware files above.
+  - `RikkiVikki/` also carries a `make_arsc.py` (identical to the repo's) and a `hex2bin.py`; use the repo's.
+- **What the benches read,** copied from the library on 2026-10-18, under `sim/work/bupchip/`:
+
+  | Path | Contents | Used by |
+  |---|---|---|
+  | `game/rv.a78` | built by `python3 sim/bupchip/make_arsc.py ~/ROMLibrary/RikkiVikki sim/work/bupchip/game/rv.a78 --rom ~/ROMLibrary/RikkiVikki/"Rikki and Vikki.a78"`: 524,416 B cartridge + 211.8 KiB ARSC, 32 songs, md5 `c7b8be98f5de9ec07667352a925823a8`, byte-identical to the uploaded `Rikki and Vikki (BupChip).a78` | s1, s4, model, verif songs, jukebox |
+  | `champ/ntsc/` (and `champ/readme/`) | `Champ-Games_demo_all_NTSC.zip`, unzipped | `frames` (FRAMES16), `wire`'s Turbo run (`GAMES`) |
+  | `champ_presents/arm/` | the `cgp/` images of `Champ-Games-Presents_demo_all_NTSC.zip`; `Dino-Eggs_demo_final_CGP_ NTSC.bin` renamed without its space, as `docs/daria_fe/lanes/G_step7_resets.md:61` names it | `frames` (Stratovox), the lane docs' runs |
+  | `daria/roms/` | the homebrew `.bin` images above, Juno First full, the SF2 demo, `sync.bin`, `hiscore.bin` | the lane docs' runs (for example G_step7_resets.md:60-62) |
+
+  `GAMES=sim/work/bupchip` finds all 16 FRAMES16 images (`step7_gates.sh` searches it with `find`).
+- **The MiSTer reference PCMs** (`sim/work/bupchip/ref/song<N>.pcm`, section 5.4) were made on the VM on 2026-10-18, not uploaded: `WORK=sim/work/bupchip/refgen/s<N> sim/bupchip/run_bupchip.sh sim/work/bupchip/game/rv.a78 <N> 4` for songs 6, 9, 10, 13, 14 and 30 (song 13 first, which builds; the other five at once, sharing its `obj_dir`), then copied into `ref/`. Each is 767,936 B (191,984 frames, as `docs/BUPCHIP_CORE.md:872`). Song 13 took about 4 min, the five together about 3 min.
+  - `sim/bupchip/s1/check.sh sim/work/bupchip/game/rv.a78`: every step PASS, songs 13, 14, 9 and 30 "PCM identical to MiSTer's" (8 min). Without the references the four songs FAIL with "PCM not compared", although they play cleanly.
+  - `sim/bupchip/model/check.sh ../../work/bupchip/game/rv.a78` (from `sim/bupchip/model`): all six references equal over all 191,984 frames, PASS (3 min 11 s).
+- **Reference clones:** the clones of section 5.6 (lroby74, the Jaguar repo, retrobios, cdfjplus-template) are absent. No script needs them.
+
+### 11.6 Sessions and long runs
+
+The VM does not stop when a session goes idle, and has no 13-hour limit (sections 8.1 and 8.4). Work is still lost when the agent's session itself ends. An interactive session ends when its terminal or SSH connection closes; any session ends when the login expires or the VM reboots.
+
+- **Background sessions:** a session started as a background job of the agent's CLI runs under the CLI's daemon process (its parent is systemd), not under the terminal. Closing the terminal or the VNC client does not end it [observed: the process tree, 2026-10-19]; a reboot does.
+- **tmux:** for an interactive session, start the agent's CLI inside tmux (`tmux new -s agent`), and come back with `tmux attach -t agent` after a disconnect.
+- **Login:** a long-lived token from the CLI's `setup-token` command, exported in its OAuth-token variable, keeps a login from expiring, but its scope is inference only, so Remote Control refuses it. On 2026-10-19 that export in `~/.bashrc` was commented out for this reason, and the VM uses the normal login, which renews itself with its refresh token.
+- **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
+- **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
+- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Section 7.4's limits (3 and 2) were set for the container's 4 CPUs.
+
+### 11.7 Headroom measured on 2026-10-18
+
+A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
+
+- **Method:** a simulation job was `tb_fe_guard` (built by `sim/bupchip/daria/fe_unit/run_unit.sh`, about 24 s a run, one thread) run back to back under `nice -n 10`, each run timed. The Quartus job was the CI-form full compile (section 3.4) of a copy of `src/fpga` in `$RAM_WORK`. `vmstat` and `/proc/pressure` (PSI) were sampled every 5 s. All runs passed and both compiles succeeded. The driver script was not committed.
+- **Simulations:**
+
+  | Load | Mean run | Slowdown |
+  |---|---|---|
+  | 1 alone | 23.5 s | - |
+  | 4 at once | 24.5 s | 4% |
+  | 6 at once | 25.3 s | 8% |
+
+  CPU and memory PSI stayed at 0 in every simulation-only phase.
+- **Quartus:**
+
+  | Load | Compile | Simulations beside it |
+  |---|---|---|
+  | alone | 656 s (10 min 56 s) | - |
+  | with 3 simulations | 718 s (9% slower) | mean 27.3 s (16% slower), worst 35.7 s |
+
+  - Alone, the compile used 26 min 26 s of CPU time, about 2.4 cores on average, with 3.9 GB peak virtual memory.
+  - With 3 simulations, CPU PSI averaged 3.7% and peaked at 19%: the first contention seen.
+  - Memory PSI stayed at 0, nothing was swapped, and free memory never fell below 7.6 GiB.
+- **Proposal (not adopted):** at most 5 simulations at once while no Quartus job runs, 3 while one does, and one Quartus job at a time under the lock (3.5). The bench is small; whole-core simulations (`run_daria.sh`, `tb_frames`) hold far more state and may contend more for the 12 MiB L3, so treat 5 as a ceiling. 4 simulations beside Quartus were not tested.
+
+### 11.8 The memory balloon
+
+- **Symptom:** the VM has a virtio balloon device (`/sys/bus/virtio/drivers/virtio_balloon/virtio3`). On 2026-10-18 `free` showed about 17 GiB used at idle, while processes held about 1 GiB and kernel memory and page cache about 2.5 GiB. The rest matches the balloon taking memory back for the host, which leaves about 14 GiB usable of the 30 GiB. Reading the balloon's size needs root (`/sys/kernel/debug/virtio-balloon`) and was not done.
+- **Cause:** the host's ZFS ARC (its read cache), which takes memory back from the VM through the balloon (the owner, 2026-10-18).
+- **Effect:** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
+- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too. Whether either has been done is [not recorded].

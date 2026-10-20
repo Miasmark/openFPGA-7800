@@ -565,7 +565,9 @@ assign hsc_active = 1'b1;
 // image has no header, so 2600 SaveKey games need the setting On.
 
 
-wire  [7:0] PAout;
+/* verilator lint_off UNUSEDSIGNAL */
+wire  [7:0] PAout;                  // [3:2] SaveKey, [0] AtariVox; the rest unused
+/* verilator lint_on UNUSEDSIGNAL */
 wire        sk_sda;
 wire  [7:0] sk_ram_q, sk_ram_d;
 wire [14:0] sk_ram_addr;
