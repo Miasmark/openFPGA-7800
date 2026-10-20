@@ -2,9 +2,9 @@
 
 Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2.1 and the documents of PR #7). It revises the order of work that the design study of 2026-10-18 proposed, after the study's follow-up on Spiders. The owner approved Rev 0 on 2026-10-19: "Okay. start rev 0."
 
-**Status, 2026-10-19.** Rev 0 is under way. It ships no release bitstream and commits nothing under `src/`: the `src/` freeze of 2026-10-16 stays until decision 1. The candidate CPU, the overlay and the test builds live in scratch worktrees and saved patches, not in the repository. Rev 0's results are recorded beside this plan when it ends.
+**Status, 2026-10-19.** Rev 0 is under way. It ships no release bitstream and commits nothing under `src/`: the `src/` freeze of 2026-10-16 stays until decision 1, which lifts it when work resumes on 2026-10-20 at 19:01 ET. The candidate CPU, the overlay and the test builds live in scratch worktrees and saved patches, not in the repository. Rev 0's results are recorded beside this plan when it ends.
 
-**Paused, 2026-10-19.** The owner: "Halt, record commit. Pause". All runs were stopped. Where Rev 0 stands:
+**Paused, 2026-10-19.** The owner: "Halt, record commit. Pause". All runs were stopped. **Work resumes on 2026-10-20 at 19:01 ET**, and `src/` unfreezes then (decision 1). Where Rev 0 stands:
 - **Done and reviewed:**
   - G1's fit tools (section 10);
   - the Harmony model as a bench option, its tools and `docs/HARMONY_MODEL.md` (3.2);
@@ -762,7 +762,7 @@ The study's numbers are in brackets. "When" says when each decision is needed. T
 
 | # | Decision | When | Recommendation | Status |
 |---|---|---|---|---|
-| 1 | [1] Unfreeze `src/` for the next release (RTL-1, RTL-2, the clean-ups and the CPU wait for it) | After Rev 0, before the release's development lands (Rev 0 commits nothing under `src/`) | Yes | Open. The freeze (2026-10-16) was for 2.2.1, with RTL-1 accepted as a known issue to fix later |
+| 1 | [1] Unfreeze `src/` for the next release (RTL-1, RTL-2, the clean-ups and the CPU wait for it) | After Rev 0, before the release's development lands (Rev 0 commits nothing under `src/`) | Yes | **Settled 2026-10-19: yes, from the resume.** The owner: "src can be unfrozen once we unpause on 7:01 PM ET on 10/20 tomorrow." So `src/` unfreezes on 2026-10-20 at 19:01 ET, before the owner's Rev 0 session rather than after it; the decisions that rest on that session (2, 3, 5, 7, 10) stay open. The freeze (2026-10-16) was for 2.2.1, with RTL-1 accepted as a known issue to fix later |
 | 2 | *(new)* Adopt L1W+L3 with T2's cures as the release's CPU | After Rev 0 | Yes | Open. The trial meets every pass criterion except one hold on one seed (section 4) |
 | 3 | [4] The divider | After Rev 0's ÷18 session | **÷18.** Fallback ÷19 with the same CPU: late calls still end, but the guard is inert (3.1, "If ÷18 fails on silicon") | **Recommended; the study's conflict is removed** [measured: RTL, mode B, frame run]. ÷18 gives both the guard lock and no late calls, and ÷17 is dropped. **Open until the owner decides after Rev 0**: the owner chose ÷19 for the first release on 2026-10-12 (plan 5.2) |
 | 4 | [7] DARIA may differ from MiSTer on Spiders | Before the campaign | Yes. The frame gate's Spiders rule becomes "on time", and the README and `docs/DARIA_CORE.md` decision 7 change with it | **Settled for Spiders if decision 5 is yes.** The owner's rule of 2026-10-18, "if the real chip meets the calls but the mister does not, I would rather go with the chip.", covers this case on the model's evidence |

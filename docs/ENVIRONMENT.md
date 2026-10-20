@@ -660,7 +660,7 @@ The VM does not stop when a session goes idle, and has no 13-hour limit (section
 - **Login:** a long-lived token from the CLI's `setup-token` command, exported in its OAuth-token variable, keeps a login from expiring, but its scope is inference only, so Remote Control refuses it. On 2026-10-19 that export in `~/.bashrc` was commented out for this reason, and the VM uses the normal login, which renews itself with its refresh token.
 - **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
 - **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
-- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Section 7.4's limits (3 and 2) were set for the container's 4 CPUs.
+- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"), as section 7.4 states. The earlier limits (3 and 2) were set for the container's 4 CPUs.
 
 ### 11.7 Headroom measured on 2026-10-18
 
