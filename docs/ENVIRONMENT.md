@@ -371,7 +371,7 @@ How to read the table:
 - **Commands:** only two invocations are recorded verbatim with their arguments: `sim/run_sim.sh` and the `flock` form of `daria_fe_map.sh`. Other rows give the script path; arguments and environment variables are in the script header or README.
 - **Pass criteria:** where a README or script states the rule or a recorded result, the table gives it. "Not recorded" means read the suite's README or script header before treating a run as good.
 - **Runtimes:** taken from DEVELOPING.md:93-99, the suite READMEs and the script headers.
-- **Limits:** observe the 2-job limit (section 7.4). Detach anything that runs close to an hour (section 8.2).
+- **Limits:** observe the job limits (section 7.4). Detach anything that runs close to an hour (section 8.2).
 
 | Family | Run command | Runtime | Needs | Pass criterion |
 |---|---|---|---|---|
@@ -435,8 +435,8 @@ How to read the table:
 
 ### 7.4 Load
 
-- **At most 3 simulations at once while no Quartus job runs, and 2 while one does** (the owner's rule from 2026-10-09; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used). Quartus itself runs one job at a time, under the lock of 3.5.
-  - `run_rand.sh` defaults to `JOBS=1`, caps it at 2, and states "the machine rule is at most 2".
+- **At most 4 simulations at once while no Quartus job runs, and 3 while one does** (the owner's rule for the self-hosted VM, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Quartus itself runs one job at a time, under the lock of 3.5. The container's rule (2026-10-09) was 3 and 2; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used under it.
+  - `run_rand.sh` defaults to `JOBS=1` and caps it at 3, the most that is allowed while Quartus runs.
   - `campaign.sh` runs two at a time, and `daria/run_all.sh` defaults to `JOBS=2`.
   - `s4/check.sh` defaults to `JOBS=3`, so pass `JOBS=2`.
 - **Quartus parallelism.** `daria/frontend_study/run_study.sh` runs 4 Quartus builds at once. Run it alone.
@@ -550,7 +550,7 @@ This file adds:
 - **Test suites:** the `sim/bupchip` suites (s1, s4 and stress, verif, model, daria with fe_unit, fe_dir, fe_rand, thumb, modes and mmio, and quartus_probe), with run times, inputs and the recorded pass counts.
 - **Rules and machine conventions:**
   - the disk budget and output locations;
-  - the 2-job limit, and the scripts that exceed it by default;
+  - the job limits, and the scripts that exceed them by default;
   - detaching long runs;
   - the clean-room and data rules;
   - the branch, commit-trailer and WIP-snapshot practice.

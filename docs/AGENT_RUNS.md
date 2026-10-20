@@ -77,7 +77,7 @@ Instead, write a short continuation script:
 
 ## 3. Simulation slots and the Quartus lock
 
-**The owner's rule (2026-10-09):** at most three simulations while no Quartus job runs, and two while one does (`docs/daria_step7/plan.md` 4.2). Quartus runs one job at a time, under the lock of ENVIRONMENT.md 3.5.
+**The owner's rule:** on the self-hosted VM (2026-10-19), at most four simulations while no Quartus job runs, and three while one does. In the container (2026-10-09) it was three and two (`docs/daria_step7/plan.md` 4.2); the helper below was built for that rule. Quartus runs one job at a time, under the lock of ENVIRONMENT.md 3.5.
 
 **The slot helper.** The step-7 runs used a small helper outside the repository that gives each call one slot:
 - Slot A is always available. Slot C, the orchestrating session's own simulation slot, is lent to lanes while that session runs none; like A, it does not depend on Quartus.
