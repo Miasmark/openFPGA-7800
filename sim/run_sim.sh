@@ -22,6 +22,8 @@
 #                  tb_frames is built without BUP_DEBUG and with -O3
 #                  --x-assign fast --x-initial fast, as run_daria.sh builds
 #                  tb_daria (docs/daria_step7/plan.md 3.6 I4c)
+#   FRAMES_DEBUG=1 build tb_frames with BUP_DEBUG all the same: its DARIA
+#                  status overlay checks (sim/tb_frames.sv's header)
 # The checker sim/check/run_sim_check.py turns this script's output into one
 # exit code.
 set -e
@@ -188,7 +190,9 @@ if [ -n "${BUILD_TOP:-}" ]; then
 			o=obj_frames
 			VL_OPT=(-O3 --x-assign fast --x-initial fast)
 			BUP_DEFS="${BUP_DEFS/ -DBUP_DEBUG/}"
-			echo "-- tb_frames: BUP_DEBUG off, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
+			dbg=off
+			if [ "${FRAMES_DEBUG:-0}" = 1 ] && [ "${BUPCHIP:-1}" = 1 ]; then BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"; dbg="on (FRAMES_DEBUG=1)"; fi
+			echo "-- tb_frames: BUP_DEBUG $dbg, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
 			build tb_frames $o "$HERE/tb_load.sv" ;;
 		*) echo "run_sim.sh: BUILD_TOP=$BUILD_TOP: tb_system, tb_load, tb_cartram or tb_frames" >&2; exit 1 ;;
 	esac
@@ -391,9 +395,11 @@ fi
 # self-check), every call daria_fe posts must return, with 0 PSRAM model
 # violations, no CPU halt, and the guard unlocked with 0 unlocks at VCO/19,
 # the default (the guard never locks there), or locked with 0 unlocks with
-# ARM_DIV=18. Only in the
-# DARIA build; without POCKET_DARIA the section is inactive, which is not a
-# pass (run_sim_check.py).
+# ARM_DIV=18. With BUP_DEBUG, each run's "DARIA overlay:" line (tb_load.sv)
+# must pass too: the status overlay's counts equal the bench's, its copy of
+# the RIOT timer equals the RIOT, and its cells read back as its layout says.
+# Only in the DARIA build; without POCKET_DARIA the section is inactive,
+# which is not a pass (run_sim_check.py).
 if [ "$DARIA_ON" = 1 ]; then
 	echo "-- DARIA: synthetic ARM images in the whole core (fe_dir/mkimg.py):"
 	DR="$WORK/daria"
@@ -432,6 +438,12 @@ if [ "$DARIA_ON" = 1 ]; then
 		    print("    FAIL: " + "; ".join(bad))
 		sys.exit(1 if bad else 0)
 		PY
+		# BUP_DEBUG builds: the DARIA status overlay's line (tb_load.sv) must pass
+		if [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]]; then
+			ol="$(grep -m1 "^DARIA overlay:" "$DR/$t.log" || echo "DARIA overlay: none (no line)")"
+			echo "    overlay: ${ol#DARIA overlay: }"
+			[[ "$ol" == *"; PASS" ]] || { echo "    FAIL: the DARIA status overlay"; daria_ok=0; }
+		fi
 	done
 	[ "$daria_ok" = 1 ] && echo "DARIA pass" || echo "DARIA FAIL"
 else

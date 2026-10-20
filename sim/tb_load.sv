@@ -425,6 +425,128 @@ module tb_load;
 		if (dr_on_a && dut.u_fe.ret_tog != dr_rt) dr_rets++;
 	end
 `endif
+`ifdef BUP_DEBUG
+`ifdef SIM_DARIA_FE
+	// ---------------- the DARIA status overlay (BUP_DEBUG builds) ----------------
+	// daria_dbg_status's counts and copy of the RIOT's timer (dut.u_dstat),
+	// and bup_status_osd.sv's DARIA rows (its header has the layout):
+	//   ovl_rt_bad  clk_sys on which the copy (timer, prescaler, incr,
+	//               rollover) differs from the RIOT's own (M6532.sv), while
+	//               the DARIA profile runs and the console is out of reset
+	//   ovl_px_bad  cells read back from the picture that differ from the
+	//               layout: on each frame, the centre pixel of every cell (the
+	//               line through the row's centre) must be the row's colour
+	//               where the bit is 1, grey where it is 0 and black where the
+	//               cell is not drawn, the bit taken by this bench's own map
+	//               from the overlay's input registers at that pixel
+	//   ovl_last    the rows read back from the last whole frame (lit = 1),
+	//               ovl_last_rows the rows drawn in it
+	// The "DARIA overlay:" line's verdict needs the counts equal to this
+	// bench's, ovl_rt_bad and ovl_px_bad 0; it does not need a frame: the
+	// synthetic images of run_sim.sh's DARIA section draw no normal frames
+	// (two none, one about 40 lines, so rows 0-2). tb_frames, on a game,
+	// also needs frames, compares the counts with its own (calls, late
+	// calls, unlocks, the guard) and prints what the picture showed.
+	int unsigned ovl_rt_bad = 0, ovl_px_bad = 0, ovl_px_n = 0, ovl_frames = 0;
+	logic [11:0] ovl_cur [0:8], ovl_last [0:8];
+	logic  [8:0] ovl_cur_rows = '0, ovl_last_rows = '0;
+	logic        ovl_vb_q = 1'b1;
+	initial for (int i = 0; i < 9; i++) begin ovl_cur[i] = '0; ovl_last[i] = '0; end
+
+	// the layout, cell by cell (bup_status_osd.sv's header): whether the
+	// cell is drawn, its bit, and its lit colour
+	task automatic ovl_cell(input int r, input int c, output bit shown, output bit b, output logic [23:0] rgb);
+		logic [48:0]  ds;
+		logic [31:0]  st, pc;
+		logic [110:0] ld;
+		ds = dut.bup_osd.ds; st = dut.bup_osd.st; pc = dut.bup_osd.hpc; ld = dut.bup_osd.ld;
+		shown = 1'b1; b = 1'b0; rgb = 24'h40A0FF;
+		case (r)
+			0: begin
+				case (c)
+					0: b = st[31];                      // CPU running
+					1: b = ds[48];                      // guard locked
+					3: b = st[28];                      // halted
+					4: b = ld[110];                     // capture seq_err
+					5: b = ld[109];                     // capture lost
+					6: b = ld[108];                     // receiver overrun
+					default: shown = 1'b0;
+				endcase
+				rgb = c < 2 ? 24'h00E000 : 24'hFF2020;
+			end
+			1: begin b = c < 4 ? st[27 - c] : st[19 - (c - 4)]; rgb = c < 4 ? 24'hFFE000 : 24'hFF8000; end
+			2: begin b = ds[47 - c]; rgb = 24'hFF2020; end   // late calls
+			3: begin b = ds[35 - c]; rgb = 24'hFF40FF; end   // unlocks
+			4: b = ds[23 - c];                               // calls 23:12
+			5: b = ds[11 - c];                               // calls 11:0
+			6: begin if (c < 4) shown = 1'b0; else b = pc[31 - (c - 4)]; rgb = 24'hFFFFFF; end
+			7: begin b = pc[23 - c]; rgb = 24'hFFFFFF; end
+			default: begin b = pc[11 - c]; rgb = 24'hFFFFFF; end
+		endcase
+	endtask
+
+	always @(posedge clk_sys) begin
+		// the RIOT's timer and its copy
+		if (dut.daria_profile && !dut.daria_reset &&
+			(dut.u_dstat.t_timer !== dut.main.riot_inst.timer || dut.u_dstat.t_pre !== dut.main.riot_inst.prescaler ||
+			 dut.u_dstat.t_incr !== dut.main.riot_inst.incr || dut.u_dstat.t_roll !== dut.main.riot_inst.rollover)) begin
+			if (ovl_rt_bad < 5)
+				$display("OVERLAY RIOT copy differs at %0.3f ms: timer %02x/%02x, prescaler %0d/%0d, incr %0d/%0d, rollover %0d/%0d (copy/RIOT)",
+					now_ns() / 1.0e6, dut.u_dstat.t_timer, dut.main.riot_inst.timer, dut.u_dstat.t_pre, dut.main.riot_inst.prescaler,
+					dut.u_dstat.t_incr, dut.main.riot_inst.incr, dut.u_dstat.t_roll, dut.main.riot_inst.rollover);
+			ovl_rt_bad++;
+		end
+		// the picture: one pixel per cell, at its centre
+		if (dut.bup_osd.dar && dut.bup_osd.ce_pix && dut.bup_osd.in_osd &&
+			dut.bup_osd.xc[2:0] == 3'd3 && dut.bup_osd.yc[2:0] == 3'd3) begin
+			int r, c;
+			bit shown, b;
+			logic [23:0] rgb, px, want;
+			r = int'(dut.bup_osd.row);
+			c = int'(dut.bup_osd.col);
+			px = {dut.bup_osd.r_out, dut.bup_osd.g_out, dut.bup_osd.b_out};
+			ovl_cell(r, c, shown, b, rgb);
+			want = !shown ? 24'h000000 : b ? rgb : (c[2] ? 24'h585858 : 24'h303030);
+			ovl_px_n++;
+			if (px !== want) begin
+				if (ovl_px_bad < 5)
+					$display("OVERLAY cell row %0d column %0d at %0.3f ms: pixel %06x, the layout says %06x", r, c, now_ns() / 1.0e6, px, want);
+				ovl_px_bad++;
+			end
+			if (r < 9) begin
+				ovl_cur[r][11 - c] = !(px == 24'h000000 || px == 24'h303030 || px == 24'h585858);
+				ovl_cur_rows[r] = 1'b1;
+			end
+		end
+		// a frame ends: keep what it showed
+		ovl_vb_q <= dut.bup_osd.vblank;
+		if (dut.bup_osd.vblank && !ovl_vb_q && ovl_cur_rows != '0) begin
+			ovl_last = ovl_cur;
+			ovl_last_rows = ovl_cur_rows;
+			ovl_cur_rows = '0;
+			ovl_frames++;
+		end
+	end
+
+	// what the last whole frame showed, as numbers
+	function automatic string ovl_shown();
+		string t;
+		if (ovl_frames == 0) return "the picture showed no DARIA rows";
+		// each value only where its rows were drawn in that frame: a short
+		// frame (a test image's) may end before the lower rows
+		t = $sformatf("the picture (frame %0d of the overlay, rows %09b drawn, row 0 on the right):", ovl_frames, ovl_last_rows);
+		if (ovl_last_rows[0])
+			t = {t, $sformatf(" running %0d, guard %0s, halted %0d,", ovl_last[0][11], ovl_last[0][10] ? "locked" : "unlocked", ovl_last[0][8])};
+		if (ovl_last_rows[1]) t = {t, $sformatf(" halt code %0d, fault code %0d,", ovl_last[1][11:8], ovl_last[1][7:0])};
+		if (ovl_last_rows[2]) t = {t, $sformatf(" late calls %0d,", ovl_last[2])};
+		if (ovl_last_rows[3]) t = {t, $sformatf(" unlocks %0d,", ovl_last[3])};
+		if (ovl_last_rows[5:4] == 2'b11) t = {t, $sformatf(" calls %0d,", {ovl_last[4], ovl_last[5]})};
+		if (ovl_last_rows[8:6] == 3'b111) t = {t, $sformatf(" halt PC %02x%03x%03x,", ovl_last[6][7:0], ovl_last[7], ovl_last[8])};
+		return t.substr(0, t.len() - 2);
+	endfunction
+`endif
+`endif
+
 	task automatic daria_report();
 		$display("DARIA result: marker %0d, self-check errors %0d, calls %0d, returns %0d, psram_viol %0d, halted %0d, guard %0s, unlocks %0d",
 			dut.main.riot_inst.riot_ram.mem_q[127], dut.main.riot_inst.riot_ram.mem_q[126], dr_calls, dr_rets,
@@ -435,6 +557,16 @@ module tb_load;
 			"absent (atari7800_pocket.sv has no daria_fe u_fe)",
 `endif
 			dr_unlocks);
+`ifdef BUP_DEBUG
+`ifdef SIM_DARIA_FE
+		// The overlay's own line: its counts against this bench's, then what
+		// the picture showed in the last whole frame.
+		$display("DARIA overlay: calls %0d (bench %0d), unlocks %0d (bench %0d), guard %0s; RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0s; %0s",
+			dut.u_dstat.calls, dr_calls, dut.u_dstat.unl, dr_unlocks, dut.u_dstat.locked ? "locked" : "unlocked", ovl_rt_bad, ovl_px_bad, ovl_px_n,
+			ovl_shown(), (dut.u_dstat.calls == 24'(dr_calls) && dut.u_dstat.unl == 12'(dr_unlocks) && dut.u_dstat.locked == dut.u_fe.dbg_locked
+			&& ovl_rt_bad == 0 && ovl_px_bad == 0) ? "PASS" : "FAIL");
+`endif
+`endif
 	endtask
 `endif
 
