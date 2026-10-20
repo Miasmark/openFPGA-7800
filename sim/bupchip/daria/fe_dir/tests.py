@@ -17,10 +17,19 @@ from mkimg import Img
 from armenc import OP_W8, OP_W16, OP_W32, OP_FSET, OP_ADD32, OP_COPY, OP_FILL, OP_FADD
 
 TESTS = {}
+# Images for the whole core only (run_sim.sh's DARIA section in BUP_DEBUG
+# builds), not part of the directed suite: mkimg.py builds them by name, and
+# run_dir.sh's default (every TESTS entry) leaves them out.
+CORE_TESTS = {}
 
 
 def test(fn):
     TESTS[fn.__name__] = fn
+    return fn
+
+
+def core_test(fn):
+    CORE_TESTS[fn.__name__] = fn
     return fn
 
 
@@ -1072,3 +1081,44 @@ def hard_reset_frame_dpc():
     return _reset_test(_busy_dpc(), (21, 0), ['+hard_reset_at=3'],
                        [('console_reset', '>=', 1), ('reset_release', '>=', 2), ('dir_marker', '>=', 3)],
                        'DPC+: the bench\'s +hard_reset_at=3 (a reset at a frame start)')
+
+
+# ---------------------------------------------------------------- whole core only (CORE_TESTS)
+@core_test
+def frame_cdfj():
+    """Frames long enough for the DARIA status overlay's six rows (BUP_DEBUG
+    builds, run_sim.sh's DARIA section; tb_load.sv's overlay block): about
+    105 lines each, of which the TIA's window shows the lines from 19 on, so
+    48 lines (rows 0-5) fit, and 72 (rows 0-8, the forced halt of tb_load's
+    +ovl_pattern_at) too. Every frame writes the RIOT timer and then posts a
+    call, and reads INTIM once after it (the late-call rule's poll, no wait
+    loop, so the frame's length does not depend on the timer): on alternate
+    frames TIM1T 2, which has run out by that read (a late call by the rule),
+    and TIM64T $40, which has not (on time)."""
+    img = Img('cdf', rev=2, scripts=[[(OP_FILL, 0x40000800, 0x04030201, 64)]])
+    img.cdf_tables({0: img.ptr_value(0)}, {0: 0x100})
+    img.program(6, init="""
+        LDA #$FF
+        STA CALLFN
+""", body="""
+        LDA $82
+        EOR #$FF
+        STA $82
+        BEQ fc_late
+        LDX #$40
+        STX TIM64T
+        JMP fc_call
+fc_late:
+        LDX #$02
+        STX TIM1T
+fc_call:
+        LDA #$FF
+        STA CALLFN
+        LDA INTIM
+        STA $81
+        INC M_DONE
+""", lines=100, syms={'TIM1T': 0x294})
+    return img, dict(scheme=(23, 2), frames=6,
+                     need=need(('call_accept', '>=', 3), ('dir_marker', '>=', 3)),
+                     desc='CDFJ: 105-line frames, a timer write, a call and one INTIM read in each '
+                          '(the whole core\'s DARIA status overlay)')

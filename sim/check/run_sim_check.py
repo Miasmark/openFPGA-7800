@@ -2,7 +2,7 @@
 """Verdict of a run_sim.sh log, as one exit code (DARIA step 7, plan 1.2 row 3).
 
   run_sim_check.py LOG [--build plain|daria|auto] [--audf 0,7,14,31]
-                       [--ref REF_LOG]
+                       [--ref REF_LOG] [--only daria]
 
 run_sim.sh prints measurements and a few verdicts (BIOS_BOOT, BUPCHIP_E2E,
 PLL_REGION, DARIA) and exits 0 whatever they say. This checks every case
@@ -30,6 +30,16 @@ DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 section prints that it is inactive; that is reported, and is not a pass of
 anything. A log from before step 7 (no "-- run_sim.sh:" line) has no DARIA
 section at all; it is then checked as a plain build.
+In a BUP_DEBUG build of DARIA (the "-- run_sim.sh:" line's defines hold
+-DBUP_DEBUG) the DARIA status overlay's lines are required too: one
+"overlay: ... PASS" line under each of the section's five runs (smoke_dpc,
+smoke_cdf, digital_cdfj, frame_cdfj, frame_cdfj_pattern), each with its
+"checked:" field, and the section's "overlay cells: ...; pass" line; a
+BUP_DEBUG build without them fails ("the overlay check did not run"), and
+so does an overlay line in a build without BUP_DEBUG.
+--only daria checks a run_sim.sh ONLY=daria log (tb_load and the DARIA
+section alone): the global rules and the DARIA section only. A log that
+says ONLY=daria fails without it, and one that does not fails with it.
 --ref REF_LOG also compares every measurement and verdict line with another
 log (e.g. the same tree before a bench change): any difference fails.
 Exit status: 0 pass, 1 fail, 2 usage.
@@ -42,8 +52,11 @@ import sys
 NTSC78 = r"238804 clk_sys \(59\.958 Hz\), active lines 224, active pixels/line 372, video PAL 0"
 TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured ([0-9.]+) Hz, "
                   r"TIA reference ([0-9.]+) Hz, ratio ([0-9.]+)$")
+# (frame_ and overlay: lines of BUP_DEBUG builds only, so a reference log of
+# a build without BUP_DEBUG compares as before)
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
-                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_)")
+                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
+OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern")
 AXIS = [
     r"AXIS start at 128",
     r"AXIS 16 ms tap right: 129",
@@ -132,7 +145,39 @@ def tone_ok(line, audf=None):
     return 0.990 <= float(m.group(4)) <= 1.010
 
 
-def check(log, build, audfs):
+def overlay_check(body, debug, bad, notes):
+    """The DARIA section's overlay lines (BUP_DEBUG builds): each run's
+    "overlay:" line, which must pass and say what it checked, and the
+    section's "overlay cells:" line."""
+    s = [x.rstrip() for x in body]
+    ovl = [x.strip() for x in s if x.strip().startswith("overlay:")]
+    if not debug:
+        if ovl:
+            bad.append("DARIA section: overlay lines in a build without BUP_DEBUG")
+        return
+    if not ovl and not any(x.strip().startswith("overlay cells:") for x in s):
+        bad.append("BUP_DEBUG build: the overlay check did not run (no overlay lines in the DARIA section)")
+        return
+    for run in OVL_RUNS:
+        idx = [i for i, x in enumerate(s) if re.match(r"^  %s: " % re.escape(run), x)]
+        if len(idx) != 1:
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: {len(idx)} result lines, expected 1")
+            continue
+        nxt = [x.strip() for x in s[idx[0] + 1:idx[0] + 3] if x.startswith("    overlay: ")]
+        if not nxt:
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: no overlay line")
+        elif not re.search(r"; checked: \d+ cells \(rows complete [01]{9}, required [01]{9}, at least \d+ cells\)", nxt[0]) \
+                or not nxt[0].endswith("; PASS"):
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: overlay line not a pass with its checked field: {nxt[0][:160]}")
+    agg = [x.strip() for x in s if x.strip().startswith("overlay cells:")]
+    if len(agg) != 1 or not re.fullmatch(r"overlay cells: [1-9]\d* read back in the section; rows complete [01]{3}111111 in "
+                                         r"the normal runs, 111111111 in the pattern run \(.*\); pass", agg[0]):
+        bad.append("BUP_DEBUG build: no passing 'overlay cells:' line for the section: %s" % (agg[:1] or "none"))
+    else:
+        notes.append("DARIA status overlay: " + agg[0])
+
+
+def check(log, build, audfs, only=None):
     L = Log(log)
     bad, notes = [], []
 
@@ -158,6 +203,22 @@ def check(log, build, audfs):
     new_format = any(x.startswith("-- run_sim.sh:") for x in L.lines)
     if build == "auto":
         build = "daria" if any(re.match(r"^-- run_sim\.sh: .*POCKET_DARIA 1,", x) for x in L.lines) else "plain"
+    debug = any(re.match(r"^-- run_sim\.sh: .*defines:.* -DBUP_DEBUG( |$)", x) for x in L.lines)
+    said_only = any(x.startswith("-- run_sim.sh ONLY=daria") for x in L.lines)
+    if said_only != (only == "daria"):
+        bad.append("the log is a run_sim.sh ONLY=daria run: check it with --only daria" if said_only
+                   else "--only daria, but the log is not a run_sim.sh ONLY=daria run")
+    if only == "daria":
+        h, b = L.section("-- DARIA")
+        if build != "daria" or h is None or "inactive" in h:
+            bad.append("--only daria: the DARIA section did not run")
+        elif "DARIA pass" not in [x.strip() for x in b]:
+            bad.append("DARIA build: no 'DARIA pass'")
+        else:
+            notes.append("DARIA section: pass (ONLY=daria: no other section ran)")
+        if h is not None:
+            overlay_check(b, debug, bad, notes)
+        return bad, notes, build
 
     # 7800 tones: the lines before "-- border hidden:"
     body = []
@@ -249,6 +310,8 @@ def check(log, build, audfs):
             bad.append("DARIA build: no 'DARIA pass'")
         else:
             notes.append("DARIA section: pass")
+        if h is not None and "inactive" not in h:
+            overlay_check(b, debug, bad, notes)
     else:
         if h is None:
             if new_format:
@@ -301,8 +364,9 @@ def main():
     p.add_argument("--build", choices=("plain", "daria", "auto"), default="auto")
     p.add_argument("--audf", default="0,7,14,31")
     p.add_argument("--ref")
+    p.add_argument("--only", choices=("daria",))
     a = p.parse_args()
-    bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")])
+    bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")], a.only)
     if a.ref:
         mine, ref = verdict_lines(a.log), verdict_lines(a.ref)
         if mine != ref:

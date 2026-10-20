@@ -108,7 +108,11 @@
 //   OVERLAY frame F: what the picture showed (each time it changes, and
 //                    every 100 frames)
 //   OVERLAY counts / checks / result: PASS|FAIL
-// +ovl_halt_at=F forces the overlay's halt rows from frame F (below).
+// +ovl_halt_at=F forces the overlay's halt rows from frame F (below); give
+// +ovl_rows=1FF with it, so that every cell of the nine rows must have been
+// read back. The result also needs what tb_load.sv's overlay block requires
+// of what was checked (+ovl_rows, default 3F: rows 0-5 complete; +ovl_cells),
+// and at least one of the end-of-run compares of the picture with the bench.
 // The overlay's result joins the run's. The frames, calls and every file
 // are those of the build without BUP_DEBUG, which observes only.
 //
@@ -526,26 +530,29 @@ module tb_frames;
 		end
 	// At the end: what the picture showed, the checks, and the result. The
 	// picture's last whole frame is compared with the bench's counts only
-	// where these stood still over the last two frame ends.
+	// where these stood still over the last two frame ends; at least one of
+	// the three must be compared (a run where none is checks nothing there).
 	function automatic bit ovl_finish();
 		bit ok, late_ok, unl_ok, lk_ok;
+		int n_cmp;
 		string late_s, unl_s, lk_s;
-		late_ok = 1; unl_ok = 1; lk_ok = 1;
+		late_ok = 1; unl_ok = 1; lk_ok = 1; n_cmp = 0;
 		late_s = "not compared (changed in the last two frames)"; unl_s = late_s; lk_s = late_s;
 		if (ovl_b_late[0] == ovl_b_late[1]) begin
-			late_ok = tb.ovl_last[2] == 12'(sat12(ovl_b_late[0])); late_s = late_ok ? "equal" : "DIFFER"; end
+			n_cmp++; late_ok = tb.ovl_last[2] == 12'(sat12(ovl_b_late[0])); late_s = late_ok ? "equal" : "DIFFER"; end
 		if (ovl_b_unl[0] == ovl_b_unl[1]) begin
-			unl_ok = tb.ovl_last[3] == 12'(sat12(ovl_b_unl[0])); unl_s = unl_ok ? "equal" : "DIFFER"; end
+			n_cmp++; unl_ok = tb.ovl_last[3] == 12'(sat12(ovl_b_unl[0])); unl_s = unl_ok ? "equal" : "DIFFER"; end
 		if (ovl_b_lk[0] == ovl_b_lk[1]) begin
-			lk_ok = tb.ovl_last[0][10] == ovl_b_lk[0]; lk_s = lk_ok ? "equal" : "DIFFER"; end
+			n_cmp++; lk_ok = tb.ovl_last[0][10] == ovl_b_lk[0]; lk_s = lk_ok ? "equal" : "DIFFER"; end
 		$display("OVERLAY counts: calls %0d, late %0d, unlocks %0d, guard %0s; %0d of %0d frame ends differ from the bench's",
 			tb.dut.u_dstat.calls, tb.dut.u_dstat.late, tb.dut.u_dstat.unl, tb.dut.u_dstat.locked ? "locked" : "unlocked", ovl_cnt_bad, ovl_cnt_n);
-		$display("OVERLAY checks: the RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; the picture against the bench: late calls %0s, unlocks %0s, guard %0s",
-			tb.ovl_rt_bad, tb.ovl_px_bad, tb.ovl_px_n, late_s, unl_s, lk_s);
+		$display("OVERLAY checks: the RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; the picture against the bench (%0d of 3 compared): late calls %0s, unlocks %0s, guard %0s",
+			tb.ovl_rt_bad, tb.ovl_px_bad, tb.ovl_px_n, n_cmp, late_s, unl_s, lk_s);
+		$display("OVERLAY %0s; %0s", tb.ovl_checked(), tb.ovl_cover_ok() ? "enough" : "NOT ENOUGH");
 		$display("OVERLAY %0s", tb.ovl_shown());
 		// a game's frame shows all six rows (rows 6-8 only while halted)
 		ok = ovl_cnt_bad == 0 && ovl_cnt_n > 0 && tb.ovl_rt_bad == 0 && tb.ovl_px_bad == 0 && tb.ovl_frames > 0 &&
-			tb.ovl_last_rows[5:0] == 6'h3F && late_ok && unl_ok && lk_ok;
+			tb.ovl_last_rows[5:0] == 6'h3F && late_ok && unl_ok && lk_ok && n_cmp > 0 && tb.ovl_cover_ok();
 		if (ovl_halt_at > 0) begin
 			bit h_ok;
 			h_ok = tb.ovl_last_rows == 9'h1FF && tb.ovl_last[0][11] && tb.ovl_last[0][8] && tb.ovl_last[1] == 12'h900 &&

@@ -24,6 +24,11 @@
 #                  tb_daria (docs/daria_step7/plan.md 3.6 I4c)
 #   FRAMES_DEBUG=1 build tb_frames with BUP_DEBUG all the same: its DARIA
 #                  status overlay checks (sim/tb_frames.sv's header)
+#   ONLY=daria     build tb_load alone and run only the DARIA section (below),
+#                  e.g. the BUP_DEBUG overlay check at another divider or on
+#                  a scratch tree (sim/bupchip/dstat/run_ovl.sh); its log is
+#                  checked with run_sim_check.py --only daria, as it is no
+#                  whole run
 # The checker sim/check/run_sim_check.py turns this script's output into one
 # exit code.
 set -e
@@ -181,6 +186,12 @@ build() {   # build <top> <objdir> [more bench sources]
 		|| { grep -m20 "%Error" "$WORK/$obj.log"; exit 1; }
 }
 echo "-- run_sim.sh: VERILATOR ${VERILATOR:-verilator} ($("${VERILATOR:-verilator}" --version)), RTL $(cd "$FPGA/../.." && pwd), POCKET_DARIA $DARIA_ON, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
+case "${ONLY:-}" in
+	"") ;;
+	daria) [ "$DARIA_ON" = 1 ] || { echo "run_sim.sh: ONLY=daria needs the DARIA build (DARIA=1)" >&2; exit 1; }
+		echo "-- run_sim.sh ONLY=daria: tb_load and the DARIA section alone, not a whole run" ;;
+	*) echo "run_sim.sh: ONLY=$ONLY: daria is the one section that runs alone" >&2; exit 1 ;;
+esac
 if [ -n "${BUILD_TOP:-}" ]; then
 	case "$BUILD_TOP" in
 		tb_cartram) o=obj_cartram; build tb_cartram $o "$HERE/tb_load.sv" ;;
@@ -199,11 +210,18 @@ if [ -n "${BUILD_TOP:-}" ]; then
 	echo "-- built $BUILD_TOP: $o/vtb md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)"
 	exit 0
 fi
+if [ -z "${ONLY:-}" ]; then
 build tb_system obj
 build tb_load obj_load
 echo "-- built: obj/vtb md5 $(md5sum < "$WORK/obj/vtb" | cut -d' ' -f1), obj_load/vtb md5 $(md5sum < "$WORK/obj_load/vtb" | cut -d' ' -f1)"
+else
+build tb_load obj_load
+echo "-- built: obj_load/vtb md5 $(md5sum < "$WORK/obj_load/vtb" | cut -d' ' -f1)"
+fi
 
 cd "$WORK"
+# (ONLY=daria: from here to the DARIA section, every case is left out)
+if [ -z "${ONLY:-}" ]; then
 for audf in ${@:-0 7 14 31}; do
 	rm -f rtl/mem0.hex   # may be a link to the upstream file: never write through it
 	python3 "$HERE/tone_test.py" "$audf" > rtl/mem0.hex
@@ -386,6 +404,7 @@ runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --sec
 		echo "-- BupChip end to end: skipped (no firmware at $BUPFW; set BUPFW=FILE; see docs/BUPCHIP.md)"
 	fi
 fi
+fi   # ONLY
 
 # DARIA in the whole core (docs/daria_step7/plan.md 3.6), game-free: tb_load
 # runs fe_dir's synthetic ARM images (sim/bupchip/daria/fe_dir/mkimg.py: a
@@ -395,22 +414,58 @@ fi
 # self-check), every call daria_fe posts must return, with 0 PSRAM model
 # violations, no CPU halt, and the guard unlocked with 0 unlocks at VCO/19,
 # the default (the guard never locks there), or locked with 0 unlocks with
-# ARM_DIV=18. With BUP_DEBUG, each run's "DARIA overlay:" line (tb_load.sv)
-# must pass too: the status overlay's counts equal the bench's, its copy of
-# the RIOT timer equals the RIOT, and its cells read back as its layout says.
+# ARM_DIV=18.
+# With BUP_DEBUG, the DARIA status overlay (tb_load.sv's overlay block) too.
+# Each run's "DARIA overlay:" line must pass: the overlay's counts equal the
+# bench's, its copy of the RIOT timer equals the RIOT, its cells read back as
+# its layout says from u_dstat's counts, and it checked what OVL below
+# requires of that run (the rows whose every cell must be read back, the
+# least number of cells read; +ovl_timer: the RIOT timer written and read,
+# with late calls and calls on time). smoke_dpc's and smoke_cdf's frames are
+# a few lines long and never reach the TIA's window, which opens at line 19:
+# for them the rows and cells are waived (+ovl_rows=0 +ovl_cells=0), and
+# their lines say so. Two more runs join the section in these builds only:
+# frame_cdfj (fe_dir's tests.CORE_TESTS: 105-line frames, which show the six
+# rows, and the RIOT timer written before each call and read once after it)
+# and frame_cdfj_pattern, the same image with the overlay's inputs forced
+# from 150 ms to a pattern and then its complement (+ovl_pattern_at), which
+# light every cell, every row and every colour, rows 6-8 included. Then the
+# section as a whole: "overlay cells:" sums the cells read back and requires
+# rows 0-5 complete in the normal runs and rows 0-8 in the pattern's.
 # Only in the DARIA build; without POCKET_DARIA the section is inactive,
 # which is not a pass (run_sim_check.py).
 if [ "$DARIA_ON" = 1 ]; then
 	echo "-- DARIA: synthetic ARM images in the whole core (fe_dir/mkimg.py):"
 	DR="$WORK/daria"
 	mkdir -p "$DR"; ln -sfn "$WORK/rtl" "$DR/rtl"
-	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" smoke_dpc smoke_cdf digital_cdfj > "$DR/mkimg.log"
+	DIMG=(smoke_dpc smoke_cdf digital_cdfj)
+	RUNS=("${DIMG[@]}")
+	OVL_ON=0
+	if [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]]; then
+		OVL_ON=1
+		DIMG+=(frame_cdfj)
+		RUNS+=(frame_cdfj frame_cdfj_pattern)
+	fi
+	# the overlay's requirement of each run (BUP_DEBUG builds). The cell
+	# floors are about half the cells measured at VCO/19 and /18
+	# (digital_cdfj 4,008; frame_cdfj and its pattern run: run_ovl.sh's logs).
+	declare -A OVL=(
+		[smoke_dpc]="+ovl_rows=0 +ovl_cells=0"
+		[smoke_cdf]="+ovl_rows=0 +ovl_cells=0"
+		[digital_cdfj]="+ovl_rows=7 +ovl_cells=2000"
+		[frame_cdfj]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1"
+		[frame_cdfj_pattern]="+region=1 +ovl_rows=1FF +ovl_cells=2000 +ovl_timer=1 +ovl_pattern_at=150")
+	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" "${DIMG[@]}" > "$DR/mkimg.log"
 	daria_ok=1
 	guard=unlocked; [ "${ARM_DIV:-19}" = 18 ] && guard=locked
-	for t in smoke_dpc smoke_cdf digital_cdfj; do
-		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $(fp daria_$t) < /dev/null > "$t.log" 2>&1) || true
-		line="$(grep -m1 "^DARIA result:" "$DR/$t.log" || echo "DARIA result: none (the run did not finish; see $DR/$t.log)")"
-		echo "  $t: ${line#DARIA result: }"
+	ovl_n=0; ovl_rows=0; ovl_prows=0
+	for r in "${RUNS[@]}"; do
+		t="${r%_pattern}"
+		oa=""; [ "$OVL_ON" = 1 ] && oa="${OVL[$r]}"
+		# shellcheck disable=SC2086
+		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $oa $(fp daria_$r) < /dev/null > "$r.log" 2>&1) || true
+		line="$(grep -m1 "^DARIA result:" "$DR/$r.log" || echo "DARIA result: none (the run did not finish; see $DR/$r.log)")"
+		echo "  $r: ${line#DARIA result: }"
 		python3 - "$DR/img/$t.meta" "$line" "$guard" <<-'PY' || daria_ok=0
 		import re, sys
 		meta, line, guard = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -439,16 +494,32 @@ if [ "$DARIA_ON" = 1 ]; then
 		sys.exit(1 if bad else 0)
 		PY
 		# BUP_DEBUG builds: the DARIA status overlay's line (tb_load.sv) must pass
-		if [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]]; then
-			ol="$(grep -m1 "^DARIA overlay:" "$DR/$t.log" || echo "DARIA overlay: none (no line)")"
+		if [ "$OVL_ON" = 1 ]; then
+			ol="$(grep -m1 "^DARIA overlay:" "$DR/$r.log" || echo "DARIA overlay: none (no line)")"
 			echo "    overlay: ${ol#DARIA overlay: }"
-			[[ "$ol" == *"; PASS" ]] || { echo "    FAIL: the DARIA status overlay"; daria_ok=0; }
+			[[ "$ol" == *"; PASS" ]] || { echo "    FAIL: the DARIA status overlay ($r)"; daria_ok=0; }
+			n="$(sed -n 's/.*; checked: \([0-9]*\) cells (rows complete \([01]*\),.*/\1/p' <<< "$ol")"
+			m="$(sed -n 's/.*; checked: \([0-9]*\) cells (rows complete \([01]*\),.*/\2/p' <<< "$ol")"
+			ovl_n=$((ovl_n + ${n:-0}))
+			if [ "$r" = frame_cdfj_pattern ]; then ovl_prows=$((ovl_prows | 2#${m:-0}))
+			else ovl_rows=$((ovl_rows | 2#${m:-0})); fi
 		fi
 	done
+	# BUP_DEBUG builds: the section as a whole read cells back, rows 0-5 in
+	# normal frames and rows 0-8 under the pattern (a section whose runs each
+	# met a waived or too small requirement fails here)
+	if [ "$OVL_ON" = 1 ]; then
+		ov="pass"
+		[ "$ovl_n" -gt 0 ] && [ $((ovl_rows & 0x3F)) = $((0x3F)) ] && [ "$ovl_prows" = $((0x1FF)) ] || { ov="FAIL"; daria_ok=0; }
+		bin9() { local i s=""; for i in 8 7 6 5 4 3 2 1 0; do s+=$((($1 >> i) & 1)); done; echo "$s"; }
+		echo "  overlay cells: $ovl_n read back in the section; rows complete $(bin9 $ovl_rows) in the normal runs, $(bin9 $ovl_prows) in the pattern run (required: rows 0-5, rows 0-8); $ov"
+	fi
 	[ "$daria_ok" = 1 ] && echo "DARIA pass" || echo "DARIA FAIL"
 else
 	echo "-- DARIA: inactive (POCKET_DARIA is not in the qsf; DARIA=1 builds it): not run, and not a pass"
 fi
+
+[ -z "${ONLY:-}" ] || exit 0
 
 echo "-- PAL/NTSC PLL retune sequence:"
 "${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_pll_region \

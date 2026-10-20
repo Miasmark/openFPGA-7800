@@ -432,34 +432,83 @@ module tb_load;
 	// and bup_status_osd.sv's DARIA rows (its header has the layout):
 	//   ovl_rt_bad  clk_sys on which the copy (timer, prescaler, incr,
 	//               rollover) differs from the RIOT's own (M6532.sv), while
-	//               the DARIA profile runs and the console is out of reset
+	//               the DARIA profile runs and the console is out of reset;
+	//               ovl_rt_n the clk_sys compared
 	//   ovl_px_bad  cells read back from the picture that differ from the
 	//               layout: on each frame, the centre pixel of every cell (the
 	//               line through the row's centre) must be the row's colour
 	//               where the bit is 1, grey where it is 0 and black where the
 	//               cell is not drawn, the bit taken by this bench's own map
-	//               from the overlay's input registers at that pixel
+	//               from the source: DARIA's counts from u_dstat's registers
+	//               (ovl_src_q: one clk_sys later, as the overlay registers
+	//               its dstat input), so a miswired dstat port is a
+	//               difference; the status word, halt PC and load flags from
+	//               the overlay's registers; under +ovl_pattern_at, the
+	//               forced pattern itself. ovl_px_n counts the cells read
 	//   ovl_last    the rows read back from the last whole frame (lit = 1),
 	//               ovl_last_rows the rows drawn in it
-	// The "DARIA overlay:" line's verdict needs the counts equal to this
-	// bench's, ovl_rt_bad and ovl_px_bad 0; it does not need a frame: the
-	// synthetic images of run_sim.sh's DARIA section draw no normal frames
-	// (two none, one about 40 lines, so rows 0-2). tb_frames, on a game,
-	// also needs frames, compares the counts with its own (calls, late
-	// calls, unlocks, the guard) and prints what the picture showed.
-	int unsigned ovl_rt_bad = 0, ovl_px_bad = 0, ovl_px_n = 0, ovl_frames = 0;
-	logic [11:0] ovl_cur [0:8], ovl_last [0:8];
+	// What was checked must be enough, or the verdict is FAIL: a run that
+	// reads no cell checks nothing (run_sim.sh's DARIA section gives each
+	// image its own requirement):
+	//   +ovl_rows=HEX  rows each of whose 12 cells must have been read at
+	//                  least once (default 3F: rows 0-5, a frame's six; 1FF
+	//                  with the halt rows; 0 waives it, and the line says so)
+	//   +ovl_cells=N   at least N cells read in all (default 1; 0 waives it)
+	//   +ovl_timer=1   the timer path exercised: the RIOT's timer written and
+	//                  read, and late calls above 0 and below the calls (an
+	//                  image that writes its timer before some calls and lets
+	//                  it run out, and not before others: frame_cdfj)
+	// and the RIOT copy compared on at least one clk_sys. Undrawn cells (row 0
+	// columns 2 and 7-11, row 6 columns 0-3) are read as black, so a row
+	// counts as complete when all 12 have been read.
+	//   +ovl_pattern_at=MS  MS ms after the reset release, at a frame's end,
+	//                  the overlay's inputs (daria_dstat, the status word,
+	//                  halt PC and load flags) are forced to a pattern that
+	//                  lights every row and colour, nine rows (halted); two
+	//                  whole frames later to its complement (the halt bit
+	//                  kept), so every drawn cell is lit in one of the two.
+	//                  Each must read back as forced: the last whole frame of
+	//                  each phase, all nine rows. The counts compared below
+	//                  are u_dstat's, which the forces do not reach.
+	// tb_frames, on a game, also compares the counts with its own (calls,
+	// late calls, unlocks, the guard) at every frame's end.
+	int unsigned ovl_rt_bad = 0, ovl_px_bad = 0, ovl_px_n = 0, ovl_frames = 0, ovl_rt_n = 0;
+	int unsigned ovl_tw_n = 0, ovl_tr_n = 0;
+	logic [11:0] ovl_cur [0:8], ovl_last [0:8], ovl_seen [0:8];
 	logic  [8:0] ovl_cur_rows = '0, ovl_last_rows = '0;
 	logic        ovl_vb_q = 1'b1;
-	initial for (int i = 0; i < 9; i++) begin ovl_cur[i] = '0; ovl_last[i] = '0; end
+	int unsigned ovl_need_cells = 1;
+	logic  [8:0] ovl_need_rows = 9'h03F;
+	bit          ovl_need_timer = 1'b0;
+	initial begin
+		for (int i = 0; i < 9; i++) begin ovl_cur[i] = '0; ovl_last[i] = '0; ovl_seen[i] = '0; end
+		void'($value$plusargs("ovl_rows=%h", ovl_need_rows));
+		void'($value$plusargs("ovl_cells=%d", ovl_need_cells));
+		ovl_need_timer = $test$plusargs("ovl_timer=1");
+	end
+	// the source of DARIA's counts, as the overlay's ds register holds them
+	logic [48:0] ovl_src_q = '0;
+	always @(posedge clk_sys) ovl_src_q <= {dut.u_dstat.locked, dut.u_dstat.late, dut.u_dstat.unl, dut.u_dstat.calls};
+
+	// the forced pattern (+ovl_pattern_at): phase 1, then its complement
+	// with the halt bit (status 28) kept, so rows 6-8 stay drawn
+	localparam logic [48:0]  OVL_P1_DS = {1'b1, 12'hA5C, 12'h3A5, 24'h5AC3A5};
+	localparam logic [31:0]  OVL_P1_ST = 32'h9A05_C000;    // running, halted, halt code A, fault code 5C
+	localparam logic [31:0]  OVL_P1_PC = 32'hA5C3_96F0;
+	localparam logic [110:0] OVL_P1_LD = {3'b101, 108'd0}; // seq_err, overrun
+	localparam logic [48:0]  OVL_P2_DS = ~OVL_P1_DS;
+	localparam logic [31:0]  OVL_P2_ST = 32'h150A_3000;    // halted, halt code 5, fault code A3
+	localparam logic [31:0]  OVL_P2_PC = ~OVL_P1_PC;
+	localparam logic [110:0] OVL_P2_LD = {3'b010, 108'd0}; // lost
+	int unsigned ovl_pat_ms = 0, ovl_t_sys = 0, ovl_pat_f0 = 0;
+	int          ovl_pat = 0;                              // 0 off, 1 or 2 the phase forced
+	bit          ovl_pat_ok1 = 1'b0, ovl_pat_done1 = 1'b0;
+	initial void'($value$plusargs("ovl_pattern_at=%d", ovl_pat_ms));
 
 	// the layout, cell by cell (bup_status_osd.sv's header): whether the
-	// cell is drawn, its bit, and its lit colour
-	task automatic ovl_cell(input int r, input int c, output bit shown, output bit b, output logic [23:0] rgb);
-		logic [48:0]  ds;
-		logic [31:0]  st, pc;
-		logic [110:0] ld;
-		ds = dut.bup_osd.ds; st = dut.bup_osd.st; pc = dut.bup_osd.hpc; ld = dut.bup_osd.ld;
+	// cell is drawn, its bit, and its lit colour, from the given inputs
+	task automatic ovl_cell(input int r, input int c, input logic [48:0] ds, input logic [31:0] st, input logic [31:0] pc,
+		input logic [110:0] ld, output bit shown, output bit b, output logic [23:0] rgb);
 		shown = 1'b1; b = 1'b0; rgb = 24'h40A0FF;
 		case (r)
 			0: begin
@@ -485,16 +534,54 @@ module tb_load;
 		endcase
 	endtask
 
+	// a pattern phase's nine rows as they must read back (lit = 1)
+	function automatic bit ovl_pat_match(input int ph);
+		bit shown, b;
+		logic [23:0] rgb;
+		for (int r = 0; r < 9; r++)
+			for (int c = 0; c < 12; c++) begin
+				if (ph == 1) ovl_cell(r, c, OVL_P1_DS, OVL_P1_ST, OVL_P1_PC, OVL_P1_LD, shown, b, rgb);
+				else ovl_cell(r, c, OVL_P2_DS, OVL_P2_ST, OVL_P2_PC, OVL_P2_LD, shown, b, rgb);
+				if (ovl_last[r][11 - c] != (shown && b)) return 1'b0;
+			end
+		return ovl_last_rows == 9'h1FF;
+	endfunction
+
+	task automatic ovl_force(input int ph);
+		if (ph == 1) begin
+			force dut.daria_dstat = OVL_P1_DS;
+			force dut.bup_dbg_status = OVL_P1_ST;
+			force dut.bup_dbg_halt_pc = OVL_P1_PC;
+			force dut.bup_dbg_load = OVL_P1_LD;
+		end else begin
+			force dut.daria_dstat = OVL_P2_DS;
+			force dut.bup_dbg_status = OVL_P2_ST;
+			force dut.bup_dbg_halt_pc = OVL_P2_PC;
+			force dut.bup_dbg_load = OVL_P2_LD;
+		end
+		ovl_pat = ph;
+		ovl_pat_f0 = ovl_frames;
+		$display("OVERLAY pattern %0d forced at %0.3f ms (overlay frame %0d)", ph, now_ns() / 1.0e6, ovl_frames);
+	endtask
+
 	always @(posedge clk_sys) begin
 		// the RIOT's timer and its copy
-		if (dut.daria_profile && !dut.daria_reset &&
-			(dut.u_dstat.t_timer !== dut.main.riot_inst.timer || dut.u_dstat.t_pre !== dut.main.riot_inst.prescaler ||
-			 dut.u_dstat.t_incr !== dut.main.riot_inst.incr || dut.u_dstat.t_roll !== dut.main.riot_inst.rollover)) begin
-			if (ovl_rt_bad < 5)
-				$display("OVERLAY RIOT copy differs at %0.3f ms: timer %02x/%02x, prescaler %0d/%0d, incr %0d/%0d, rollover %0d/%0d (copy/RIOT)",
-					now_ns() / 1.0e6, dut.u_dstat.t_timer, dut.main.riot_inst.timer, dut.u_dstat.t_pre, dut.main.riot_inst.prescaler,
-					dut.u_dstat.t_incr, dut.main.riot_inst.incr, dut.u_dstat.t_roll, dut.main.riot_inst.rollover);
-			ovl_rt_bad++;
+		if (dut.daria_profile && !dut.daria_reset) begin
+			ovl_rt_n++;
+			if (dut.u_dstat.t_timer !== dut.main.riot_inst.timer || dut.u_dstat.t_pre !== dut.main.riot_inst.prescaler ||
+				dut.u_dstat.t_incr !== dut.main.riot_inst.incr || dut.u_dstat.t_roll !== dut.main.riot_inst.rollover) begin
+				if (ovl_rt_bad < 5)
+					$display("OVERLAY RIOT copy differs at %0.3f ms: timer %02x/%02x, prescaler %0d/%0d, incr %0d/%0d, rollover %0d/%0d (copy/RIOT)",
+						now_ns() / 1.0e6, dut.u_dstat.t_timer, dut.main.riot_inst.timer, dut.u_dstat.t_pre, dut.main.riot_inst.prescaler,
+						dut.u_dstat.t_incr, dut.main.riot_inst.incr, dut.u_dstat.t_roll, dut.main.riot_inst.rollover);
+				ovl_rt_bad++;
+			end
+			// the RIOT's own timer accesses (its chip select, RAM select and A2)
+			if (dut.main.riot_inst.ce && dut.main.riot_inst.CS1 && !dut.main.riot_inst.CS2_n && dut.main.riot_inst.RS_n &&
+				dut.main.riot_inst.addr[2]) begin
+				if (!dut.main.riot_inst.RW_n && dut.main.riot_inst.addr[4]) ovl_tw_n++;
+				if (dut.main.riot_inst.RW_n) ovl_tr_n++;
+			end
 		end
 		// the picture: one pixel per cell, at its centre
 		if (dut.bup_osd.dar && dut.bup_osd.ce_pix && dut.bup_osd.in_osd &&
@@ -505,7 +592,11 @@ module tb_load;
 			r = int'(dut.bup_osd.row);
 			c = int'(dut.bup_osd.col);
 			px = {dut.bup_osd.r_out, dut.bup_osd.g_out, dut.bup_osd.b_out};
-			ovl_cell(r, c, shown, b, rgb);
+			case (ovl_pat)
+				1: ovl_cell(r, c, OVL_P1_DS, OVL_P1_ST, OVL_P1_PC, OVL_P1_LD, shown, b, rgb);
+				2: ovl_cell(r, c, OVL_P2_DS, OVL_P2_ST, OVL_P2_PC, OVL_P2_LD, shown, b, rgb);
+				default: ovl_cell(r, c, ovl_src_q, dut.bup_osd.st, dut.bup_osd.hpc, dut.bup_osd.ld, shown, b, rgb);
+			endcase
 			want = !shown ? 24'h000000 : b ? rgb : (c[2] ? 24'h585858 : 24'h303030);
 			ovl_px_n++;
 			if (px !== want) begin
@@ -513,20 +604,58 @@ module tb_load;
 					$display("OVERLAY cell row %0d column %0d at %0.3f ms: pixel %06x, the layout says %06x", r, c, now_ns() / 1.0e6, px, want);
 				ovl_px_bad++;
 			end
-			if (r < 9) begin
+			if (r < 9 && c < 12) begin
 				ovl_cur[r][11 - c] = !(px == 24'h000000 || px == 24'h303030 || px == 24'h585858);
 				ovl_cur_rows[r] = 1'b1;
+				ovl_seen[r][11 - c] = 1'b1;
 			end
 		end
 		// a frame ends: keep what it showed
 		ovl_vb_q <= dut.bup_osd.vblank;
-		if (dut.bup_osd.vblank && !ovl_vb_q && ovl_cur_rows != '0) begin
-			ovl_last = ovl_cur;
-			ovl_last_rows = ovl_cur_rows;
-			ovl_cur_rows = '0;
-			ovl_frames++;
+		if (dut.bup_osd.vblank && !ovl_vb_q) begin
+			if (ovl_cur_rows != '0) begin
+				ovl_last = ovl_cur;
+				ovl_last_rows = ovl_cur_rows;
+				ovl_cur_rows = '0;
+				ovl_frames++;
+			end
+			// the pattern's phases, each switched at a frame's end
+			if (ovl_pat_ms > 0 && ovl_pat == 0 && !ovl_pat_done1 && ovl_t_sys >= ovl_pat_ms * 14318)
+				ovl_force(1);
+			else if (ovl_pat == 1 && ovl_frames >= ovl_pat_f0 + 2) begin
+				ovl_pat_ok1 = ovl_pat_match(1);
+				ovl_pat_done1 = 1'b1;
+				$display("OVERLAY pattern 1 read back from overlay frame %0d: %0s", ovl_frames, ovl_pat_ok1 ? "as forced" : "NOT as forced");
+				ovl_force(2);
+			end
 		end
+		if (!reset_in) ovl_t_sys++;
 	end
+
+	// the coverage rules above: 1 when what was checked is enough
+	function automatic logic [8:0] ovl_rows_done();
+		logic [8:0] m;
+		for (int i = 0; i < 9; i++) m[i] = ovl_seen[i] == 12'hFFF;
+		return m;
+	endfunction
+	function automatic bit ovl_cover_ok();
+		if ((ovl_rows_done() & ovl_need_rows) != ovl_need_rows) return 1'b0;
+		return ovl_px_n >= ovl_need_cells && ovl_rt_n > 0;
+	endfunction
+	function automatic bit ovl_timer_ok();
+		return !ovl_need_timer || (ovl_tw_n > 0 && ovl_tr_n > 0 && dut.u_dstat.late > 0 && 24'(dut.u_dstat.late) < dut.u_dstat.calls);
+	endfunction
+	// the pattern's verdict: both phases read back as forced (when asked for)
+	function automatic bit ovl_pat_ok();
+		return ovl_pat_ms == 0 || (ovl_pat_ok1 && ovl_pat == 2 && ovl_frames >= ovl_pat_f0 + 2 && ovl_pat_match(2));
+	endfunction
+	function automatic string ovl_checked();
+		string t;
+		t = $sformatf("checked: %0d cells (rows complete %09b, required %09b, at least %0d cells), RIOT copy on %0d clk_sys, timer writes %0d, reads %0d",
+			ovl_px_n, ovl_rows_done(), ovl_need_rows, ovl_need_cells, ovl_rt_n, ovl_tw_n, ovl_tr_n);
+		if (ovl_need_timer) t = {t, " (required, with late calls above 0 and below the calls)"};
+		return t;
+	endfunction
 
 	// what the last whole frame showed, as numbers
 	function automatic string ovl_shown();
@@ -559,12 +688,30 @@ module tb_load;
 			dr_unlocks);
 `ifdef BUP_DEBUG
 `ifdef SIM_DARIA_FE
-		// The overlay's own line: its counts against this bench's, then what
-		// the picture showed in the last whole frame.
-		$display("DARIA overlay: calls %0d (bench %0d), unlocks %0d (bench %0d), guard %0s; RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0s; %0s",
-			dut.u_dstat.calls, dr_calls, dut.u_dstat.unl, dr_unlocks, dut.u_dstat.locked ? "locked" : "unlocked", ovl_rt_bad, ovl_px_bad, ovl_px_n,
-			ovl_shown(), (dut.u_dstat.calls == 24'(dr_calls) && dut.u_dstat.unl == 12'(dr_unlocks) && dut.u_dstat.locked == dut.u_fe.dbg_locked
-			&& ovl_rt_bad == 0 && ovl_px_bad == 0) ? "PASS" : "FAIL");
+		// The overlay's own line: its counts against this bench's, the RIOT
+		// copy, the cells read back, what was checked against what this run
+		// requires (+ovl_rows, +ovl_cells, +ovl_timer), the pattern's phases
+		// (+ovl_pattern_at), what the picture showed in the last whole frame,
+		// and the verdict: PASS, or FAIL with the terms that failed.
+		begin
+			string why, pat, res;
+			why = "";
+			if (!(dut.u_dstat.calls == 24'(dr_calls) && dut.u_dstat.unl == 12'(dr_unlocks) && dut.u_dstat.locked == dut.u_fe.dbg_locked))
+				why = {why, " counts"};
+			if (ovl_rt_bad != 0) why = {why, " riot-copy"};
+			if (ovl_px_bad != 0) why = {why, " cells"};
+			if (!ovl_cover_ok()) why = {why, " coverage"};
+			if (!ovl_timer_ok()) why = {why, " timer"};
+			if (!ovl_pat_ok()) why = {why, " pattern"};
+			if (ovl_pat_ms == 0) pat = "not forced";
+			else if (ovl_pat_ok()) pat = "read back as forced (both phases, nine rows)";
+			else pat = "NOT read back as forced";
+			if (why == "") res = "PASS";
+			else res = {"FAIL (", why.substr(1, why.len() - 1), ")"};
+			$display("DARIA overlay: calls %0d (bench %0d), late calls %0d, unlocks %0d (bench %0d), guard %0s; RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0s; pattern %0s; %0s; %0s",
+				dut.u_dstat.calls, dr_calls, dut.u_dstat.late, dut.u_dstat.unl, dr_unlocks, dut.u_dstat.locked ? "locked" : "unlocked",
+				ovl_rt_bad, ovl_px_bad, ovl_px_n, ovl_checked(), pat, ovl_shown(), res);
+		end
 `endif
 `endif
 	endtask

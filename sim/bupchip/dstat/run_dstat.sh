@@ -5,7 +5,10 @@
 # VERILATOR to override).
 #   ./run_dstat.sh
 # 1. Control: seeds 1-4, CYCLES bus cycles each (1,500,000). Each run must end
-#    with errors=0, and with late and on-time polls both counted.
+#    with errors=0, and with every coverage bin of its "coverage:" line above
+#    0: calls, late and on-time polls, timer writes on the old timer's wrap,
+#    INTIM reads in a rollover, polls on the wrap's own clock, and resets (a
+#    seed that misses one has not exercised that rule).
 # 2. Mutations of a copy of bup_status_osd.sv, each of which must give
 #    errors > 0 on seed 1: intim_keeps_rollover (an INTIM read leaves the
 #    rollover), late_at_call_end (the timer judged when the call ends, not at
@@ -61,12 +64,15 @@ for s in 1 2 3 4; do
 	nice -n 10 "$WORK/obj/vtb" +seed="$s" +cycles="$CYCLES" > "$WORK/s$s.log" 2>&1 || true
 	res="$(grep "^result:" "$WORK/s$s.log" || echo "result: none")"
 	cov="$(grep "^coverage:" "$WORK/s$s.log" || echo "coverage: none")"
-	late="$(sed -n 's/.*polls late \([0-9]*\),.*/\1/p' <<< "$cov")"
-	ontime="$(sed -n 's/.*on time \([0-9]*\),.*/\1/p' <<< "$cov")"
-	if [ "$(field errors "$res")" = 0 ] && [ "${late:-0}" -gt 0 ] && [ "${ontime:-0}" -gt 0 ]; then
+	# every bin: the numbers of the coverage line, 7 of them, each above 0
+	bins="$(sed -n 's/^coverage: calls \([0-9]*\), polls late \([0-9]*\), on time \([0-9]*\), timer writes on the old timer.s wrap \([0-9]*\), INTIM reads in a rollover \([0-9]*\), polls on the wrap.s clock \([0-9]*\), resets \([0-9]*\)$/\1 \2 \3 \4 \5 \6 \7/p' <<< "$cov")"
+	zero=0
+	[ "$(wc -w <<< "$bins")" = 7 ] || zero=1
+	for b in $bins; do [ "$b" -gt 0 ] || zero=1; done
+	if [ "$(field errors "$res")" = 0 ] && [ "$zero" = 0 ]; then
 		echo "PASS seed $s: ${res#result: }"
 	else
-		echo "FAIL seed $s: ${res#result: } ($WORK/s$s.log)"
+		echo "FAIL seed $s: ${res#result: }$([ "$zero" = 1 ] && echo "; a coverage bin is 0 or missing") ($WORK/s$s.log)"
 		grep -m5 "^ERROR" "$WORK/s$s.log" | sed 's/^/  /'
 		ok=0
 	fi
