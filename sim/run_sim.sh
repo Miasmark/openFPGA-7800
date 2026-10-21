@@ -233,7 +233,9 @@ sim ./obj_load/vtb +image=load_test.a78 +audf=7 $(fp load_a78) | grep -E "LOAD|T
 
 echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
-sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -E "LOAD|TONE"
+# grep -a: the LOAD line prints the image's first bytes as its header, raw;
+# in a UTF-8 locale grep would hold that line back ("binary file matches").
+sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -aE "LOAD|TONE"
 
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
