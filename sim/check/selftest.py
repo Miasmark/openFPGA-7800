@@ -192,6 +192,10 @@ def run_sim_cases(log, w):
         # tb_vaxis5: a seed with mismatches, and the planted fault not caught
         "vaxis5_mismatch": sub1(r"^(VAXIS5 seed 3 .* mismatches )0$", r"\g<1>7"),
         "vaxis5_planted_missed": sub1(r"^(VAXIS5 planted fault .*: )caught, \d+ mismatches$", r"\g<1>caught, 0 mismatches"),
+        # tb_region: a trial with the wrong retunes, a planted variant not caught, the section gone
+        "region_retunes": sub1(r"^REGION daria A trials 1641 retunes 1:1641 ", "REGION daria A trials 1641 retunes 1:1608 3:33 "),
+        "region_planted_missed": sub1(r"^(REGION verdict rtl1: planted, )caught$", r"\g<1>NOT caught"),
+        "region_missing": lambda t: re.sub(r"^-- the region asked of the PLL.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
         # the FA2 save slot: the reload lost, a saved byte read back wrong,
         # no save, and the section gone
         "fa2_reload_lost": sub1(r"^(FA2 work RAM after the reload: )0( of 255)", r"\g<1>255\g<2>"),

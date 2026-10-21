@@ -685,16 +685,17 @@ def scenarios(img):
                     "has scored 48 frames (about 1 s), and the game restarts in PAL (the plain build's count is "
                     "reported)", True)
 
-    # The final review's RTL-1, accepted for 2.2.1 as a known minor issue: after a PAL 2600 image the cartridge
-    # region is cleared to 0 while the PLL is PAL. During a PAL A78's download, once its header makes it a 7800
-    # cartridge, Auto asks for NTSC (cart_region 0) before byte 57 sets the region to PAL; in the DARIA build
-    # region_pll takes NTSC, the retune becomes pending, and the freeze while one is pending
-    # (atari7800_pocket.sv's daria_rt_pend) keeps region_pll there. pll_region then retunes to NTSC at the load's
-    # end and back to PAL after it: two retunes more than the plain build, which makes none. The final region is
-    # PAL in both. This scenario pins those counts: EXTRA_RETUNES (DARIA 2, plain 0). When the next revision fixes
-    # RTL-1, the DARIA build's count drops to 0, and its expected value here changes with it.
+    # The final review's RTL-1, accepted for 2.2.1 as a known minor issue and fixed in the release after it: after
+    # a PAL 2600 image the cartridge region is cleared to 0 while the PLL is PAL. During a PAL A78's download, once
+    # its header makes it a 7800 cartridge, Auto asks for NTSC (cart_region 0) before byte 57 sets the region to
+    # PAL. In 2.2.1's DARIA build region_pll took NTSC, the retune became pending, and the freeze while one is
+    # pending (atari7800_pocket.sv's daria_rt_pend) kept region_pll there; pll_region then retuned to NTSC at the
+    # load's end and back to PAL after it, two retunes more than the plain build, which makes none. With the fix
+    # region_pll follows region_select in an A78's header even with a retune pending (daria_a78_hdr), so it is
+    # PAL again before the load ends. The final region is PAL in both. This scenario pins the counts after the
+    # 2600's own retune: EXTRA_RETUNES (DARIA 0, plain 0; 2.2.1's DARIA build: NTSC, PAL).
     AT2 = 1000          # ms: the A78's load starts after the 2600's retune to PAL (955 ms on the D fix round's tree)
-    EXTRA_RETUNES = {"daria": ["NTSC", "PAL"], "plain": []}
+    EXTRA_RETUNES = {"daria": [], "plain": []}
 
     def pal2600_a78():
         args = ["+image=" + I("pal_test.a26"), "+wav=1100", "+image2=" + I("load_test_pal.a78"),
@@ -725,10 +726,9 @@ def scenarios(img):
                                                           r["sum"].get("releases")))
         s["note"] = "; ".join(notes)
         return j, s
-    S["pal2600_a78"] = (pal2600_a78, "RTL-1 (accepted for 2.2.1): a PAL 2600 image, then a PAL A78 on Auto, pll_region "
-                        "in the loop: after the 2600's retune to PAL, the DARIA build retunes twice more (to NTSC, then "
-                        "PAL), the plain build not at all; both end in PAL. The pinned count drops to 0 when the next "
-                        "revision fixes RTL-1", True)
+    S["pal2600_a78"] = (pal2600_a78, "RTL-1 (fixed after 2.2.1): a PAL 2600 image, then a PAL A78 on Auto, pll_region "
+                        "in the loop: after the 2600's retune to PAL, neither build retunes again (2.2.1's DARIA build "
+                        "retuned twice more, to NTSC, then PAL); both end in PAL", True)
 
     def pal_arm():
         s = run("daria", "pal_dpc", ["+image=" + I("pal_dpc.bin"), "+daria=1300", "+wire_pll"])
@@ -850,8 +850,8 @@ MUTANTS = {
                "wire daria_rt_mask = pll_busy_s[1] | (daria_rt_cnt[3:2] == 2'b11);\n"),
     # no withdrawal during a 2600 download: a retune pending from earlier in
     # the sequence starts at allcomplete, inside the window-close F6
-    "nowd": ("\t\tif ((cart_download | old_cart_download) & ~cart_is_7800)\n\t\t\tregion_pll <= daria_rgn;\n",
-             "\t\tif (1'b0)\n\t\t\tregion_pll <= daria_rgn;\n"),
+    "nowd": ("\t\tif ((cart_download | old_cart_download) & ~cart_is_7800)\n\t\t\tregion_pll <= daria_rgn_nx;\n",
+             "\t\tif (1'b0)\n\t\t\tregion_pll <= daria_rgn_nx;\n"),
     # a console reset during a pending retune not held to the retune: the
     # 6507 restarts without F6, then again after the retune's F6
     "nohold": ("\t\t(daria_rt_pend & reset & daria_arm);\n", "\t\t1'b0;\n"),
@@ -859,14 +859,14 @@ MUTANTS = {
     # as pll_region starts a retune (before pll_busy_s shows it) reaches
     # region_pll, daria_rgn takes it from a retune to the other region, and
     # pll_region starts a second retune as the first ends (seq_back_dpc)
-    "nofrzpend": ("else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))",
+    "nofrzpend": ("else if (!region_pll_hold && (!daria_rt_pend || daria_a78_hdr) && !(daria_reset & daria_arm))",
                   "else if (!region_pll_hold && !(daria_reset & daria_arm))"),
     # region_pll not frozen while an ARM image's console is in reset: a region
     # change on the clock after the reset rises (before tia_en falls) becomes
     # pending after daria_fe saw the reset rise, so the reset's F6 runs, and
     # allcomplete starts the retune inside it, with no F6 after it (seq_rfirst_dpc)
-    "nofrzarm": ("else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))",
-                 "else if (!region_pll_hold && !daria_rt_pend)"),
+    "nofrzarm": ("else if (!region_pll_hold && (!daria_rt_pend || daria_a78_hdr) && !(daria_reset & daria_arm))",
+                 "else if (!region_pll_hold && (!daria_rt_pend || daria_a78_hdr))"),
     # finding 5 undone: daria_mmio's timer rate (bupchip's daria_pal) from the
     # Region setting, not from the region the PLL runs at; it differs while a
     # retune waits for a load sequence's end (seq_*: rgn_bad)

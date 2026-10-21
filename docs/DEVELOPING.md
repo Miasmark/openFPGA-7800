@@ -150,6 +150,11 @@ become `logic`), builds two testbenches, and runs them:
   builds as one time-shared engine, against five `virtual_axis.sv` whose ticks
   are delayed 0-4 clocks as the engine staggers them, on every clock of four
   random-stimulus seeds (4 x 10^7 clocks), and a planted fault it must catch.
+- `tb_region` (`run_region.sh`): the wrapper's region logic (`region_pll`
+  and, with DARIA, `daria_rgn`), cut out of `atari7800_pocket.sv` as the
+  tree has it by `region_unit.py`, with `pll_region.v` in the load sequences
+  of RTL-1 and RTL-2 (`docs/IMPROVEMENTS.md`), on both builds, and four
+  planted variants it must catch (2.2.1's logic among them).
 
 What the sim does **not** model:
 

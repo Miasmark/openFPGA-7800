@@ -31,6 +31,10 @@ against its expected lines and fails on:
     the file as it was;
   - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
     with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
+  - tb_region (sim/run_region.sh) other than its lines for the DARIA and
+    the plain build (every trial of scenarios A, B and C with the retunes
+    wanted, and in the DARIA build daria_rgn exact and no retune back to
+    back), its four planted variants caught and "REGION pass";
   - "exit N" with N != 0 when the log records the script's exit status.
 DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 "POCKET_DARIA 1" line) "DARIA pass" is required. In the plain build the
@@ -103,6 +107,20 @@ VAXIS5 = [r"VAXIS5 seed %d cycles 10000000 ticks [1-9]\d* resets [1-9]\d* \(on a
     r"VAXIS5 planted fault \(axis 4 reads axis 3's slow\), seed 1: caught, [1-9]\d* mismatches",
     r"VAXIS5 pass",
 ]
+# tb_region through sim/run_region.sh: the region logic of both builds in
+# RTL-1's and RTL-2's load sequences, and its planted variants. REGION lines
+# are not in VERDICT_LINE, so a --ref log from before the bench still compares.
+REGION = [
+    r"REGION daria A trials 1641 retunes 1:1641 rgn_bad 0 b2b 0",
+    r"REGION daria B pal trials 11 retunes 0:11 rgn_bad 0 b2b 0",
+    r"REGION daria B ntsc trials 11 retunes 1:11 rgn_bad 0 b2b 0",
+    r"REGION daria C trials 49 retunes 2:49 rgn_bad 0 b2b 0",
+    r"REGION plain A trials 1641 retunes 1:1641 rgn_bad \d+ b2b 0",
+    r"REGION plain B pal trials 11 retunes 0:11 rgn_bad \d+ b2b 0",
+    r"REGION plain B ntsc trials 11 retunes 1:11 rgn_bad \d+ b2b 0",
+    r"REGION verdict daria: pass \(.*\)",
+    r"REGION verdict plain: pass \(.*\)",
+] + [r"REGION verdict %s: planted, caught" % v for v in ("old", "rtl2", "rtl1", "sketch")] + [r"REGION pass"]
 # The FA2 flash save slot (fa2.sav): each pattern and how many times the
 # section must hold it (the two FA2 program runs, then the A78 run; mapper 25
 # is detect2600.sv's BANKFA2). FA2 lines are not in VERDICT_LINE, so a --ref
@@ -403,6 +421,13 @@ def check(log, build, audfs, only=None):
         m = re.fullmatch(r"AUDIO silence after 2 s: (-?\d+) \(expect near 0\)", x.strip()) or m
     if not m or abs(int(m.group(1))) > 16:
         bad.append("audio filter: silence not near 0")
+    # the region asked of the PLL
+    h, b = L.section("-- the region asked of the PLL")
+    if b is None:
+        bad.append("tb_region: section missing")
+    else:
+        for p in REGION:
+            need(b, p, "tb_region")
     # virtual axis
     h, b = L.section("-- virtual paddle")
     for p in AXIS:

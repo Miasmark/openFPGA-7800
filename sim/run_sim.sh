@@ -577,6 +577,9 @@ echo "-- PAL/NTSC PLL retune sequence:"
 	|| { grep -m20 "%Error" "$WORK/obj_pllr.log"; exit 1; }
 sim ./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
 
+echo "-- the region asked of the PLL (atari7800_pocket.sv's region_pll with pll_region.v, tb_region; RTL-1, RTL-2):"
+WORK="$WORK/region" bash "$HERE/run_region.sh" | grep -E "^REGION " || true
+
 echo "-- audio filter:"
 "${VERILATOR:-verilator}" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_audio_filter \
 	-Mdir "$WORK/obj_af" -o vtb "$FPGA/core/audio_filter.sv" "$HERE/tb_audio_filter.sv" > "$WORK/obj_af.log" 2>&1 \

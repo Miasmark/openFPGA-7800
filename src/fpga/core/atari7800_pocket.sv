@@ -1077,7 +1077,8 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 // daria_rgn to be exact, region_pll changes only when none is pending or
 // under way, so each retune is to the one region asked for since the last,
 // and pll_region never starts a second one as the first ends. region_pll is
-// - frozen while pll_busy_s[1] is high or a retune is pending;
+// - frozen while pll_busy_s[1] is high or a retune is pending, except in an
+//   A78's header (below);
 // - frozen while an ARM image's console is in reset (daria_reset), so that
 //   it never changes on the clock where daria_fe sees a reset rise (tia_en,
 //   which region_pll_hold reads, falls a clock after the reset rises) or
@@ -1090,7 +1091,20 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 //   the slot's requestwrite, 4 clk_sys before cart_download, so it starts
 //   nothing as region_pll returns to the PLL's region; the image's own
 //   region is asked for when its console is released, on P20's mid-game
-//   path, which runs F6 again after the retune.
+//   path, which runs F6 again after the retune. The withdrawal takes
+//   daria_rgn's next value (daria_rgn_nx): on the clock where a retune
+//   ends, daria_rgn's old value is the region the PLL has just left, and
+//   region_pll would ask for it for one clk_sys, which a load sequence
+//   that ends on that clock would turn into two more retunes (RTL-2);
+// - free to follow region_select in an A78's 128-byte header, even with a
+//   retune pending (RTL-1): Auto reads cart_region[0] there, which keeps
+//   the last image's region (0 after a 2600 image) until byte 57 sets the
+//   A78's own, so a retune asked for in the header from the stale region
+//   would otherwise be held, run at the load's end, and be followed by one
+//   back. pll_region starts nothing in the header: loading is high until
+//   allcomplete, after the image's last byte, and the last clk_sys of a
+//   download, where cart_download outlives loading, are past the header,
+//   where region_pll is frozen as before.
 // So no retune is pending or under way when F6 starts (daria_rt_mask keeps
 // cart_reset low while one is, and a window-close F6 follows a withdrawal),
 // and none can become pending while F6 runs: no retune starts inside F6.
@@ -1101,13 +1115,14 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 reg  daria_rgn = 1'b0;
 /* verilator lint_on PROCASSINIT */
 assign daria_rt_pend = region_pll != daria_rgn;
+wire daria_rgn_nx  = (!pll_busy_s[1] && daria_rt_cnt == 4'd15) ? region_pll : daria_rgn;
+wire daria_a78_hdr = cart_download & cart_is_7800 & (ioctl_addr < 25'd128);
 always @(posedge clk_sys) begin
-	if (!pll_busy_s[1] && daria_rt_cnt == 4'd15)
-		daria_rgn <= region_pll;
+	daria_rgn <= daria_rgn_nx;
 	if (!pll_busy_s[1]) begin
 		if ((cart_download | old_cart_download) & ~cart_is_7800)
-			region_pll <= daria_rgn;
-		else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))
+			region_pll <= daria_rgn_nx;
+		else if (!region_pll_hold && (!daria_rt_pend || daria_a78_hdr) && !(daria_reset & daria_arm))
 			region_pll <= region_select;
 	end
 end
