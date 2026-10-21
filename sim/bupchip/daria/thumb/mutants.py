@@ -31,18 +31,19 @@ MUTANTS = {
     # F1's LSR #0 and ASR #0 as no shift (instead of #32).
     "f1_shift0_noshift": [("(sh_imm == 5'd0 && (sh_type == 2'b01 || sh_type == 2'b10)) ? 8'd32",
                            "(!tm && sh_imm == 5'd0 && (sh_type == 2'b01 || sh_type == 2'b10)) ? 8'd32")],
-    # NEG as 0 - Rd.
-    "neg_of_rd": [("alu_a = 32'd0;\t\t\t\t// Thumb NEG: 0 - Rs",
-                   "begin alu_a = 32'd0; alu_b = ra; end")],
+    # NEG as 0 - Rd (since R13 the zero operand is a_zero, picked in S_RUN).
+    "neg_of_rd": [("alu_b = sel_rb ? b_reg : pre_b;",
+                   "alu_b = (state == S_RUN && zero_run) ? ra : sel_rb ? b_reg : pre_b;")],
     # F5 MOV and ADD set flags (not only CMP).
     "f5_mov_sets_flags": [("wire th_s   = tf1 || tf2 || tf3 || tf4 || (tf5 && t5op == 2'b01);",
                            "wire th_s   = tf1 || tf2 || tf3 || tf4 || tf5;")],
     # F5 CMP sets no flags.
     "f5_cmp_no_flags": [("wire th_s   = tf1 || tf2 || tf3 || tf4 || (tf5 && t5op == 2'b01);",
                          "wire th_s   = tf1 || tf2 || tf3 || tf4;")],
-    # Thumb SBC's carry-in inverted.
-    "sbc_carry_inverted": [("OP_ADC, OP_SBC, OP_RSC: cin = flag_c;",
-                            "OP_ADC, OP_SBC, OP_RSC: cin = (tm && alu_op == OP_SBC) ? !flag_c : flag_c;")],
+    # Thumb SBC's carry-in inverted (since R13 the carry-in comes from the
+    # adder's controls; {inv_b, cin = C} is SBC's alone).
+    "sbc_carry_inverted": [("wire         cin     = ctl_now[1] || (ctl_now[0] && flag_c);",
+                            "wire         cin     = ctl_now[1] || (ctl_now[0] && ((tm && ctl_now[2]) ? !flag_c : flag_c));")],
     # Thumb STMIA stores the old base when the base is not first: the base is
     # written back only in the last beat.
     "stmia_old_base": [("end else if (blk_first && bit_w) begin",
@@ -71,6 +72,25 @@ MUTANTS = {
     # Thumb MUL clears V.
     "mul_writes_v": [("if (tm) flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1:0]};",
                       "if (tm) flags_d = {alu_res[31], alu_res == 32'd0, nzcv[1], 1'b0};")],
+    # L1W/L3 (one-clock aligned Thumb word loads, LDMIA/POP n+1;
+    # docs/BUPCHIP_CORE.md):
+    # m1: last clock's write beats the pending load value on port A.
+    "l1w_byp_first": [("(* keep *) wire [31:0] a_oth = ia == 4'hF ? r15_value : (pend_v && ia == {1'b0, pend_i}) ? pend_d : byp_data;",
+                       "(* keep *) wire [31:0] a_oth = ia == 4'hF ? r15_value : (byp_we && byp_idx == pa) ? byp_data : (pend_v && ia == {1'b0, pend_i}) ? pend_d : byp_data;")],
+    # m2: lb kept although the instruction writing the port writes the same register.
+    "l1w_lb_keep": [("lb_v <= iw_wa != {1'b0, ldw_idx};", "lb_v <= 1'b1;")],
+    # m3: lb not forwarded to the read ports.
+    "l1w_lb_nofwd": [("wire         pend_v = DC && (ldw || lb_v);", "wire         pend_v = DC && ldw;")],
+    # m4: lb not dropped on a later write of the same register.
+    "l1w_no_younger_clear": [("\t\t\tend else if (lb_v && iw_we && iw_wa == {1'b0, lb_idx})\n"
+                              "\t\t\t\tlb_v <= 1'b0;\t\t\t\t// a younger write of the same register\n",
+                              "\t\t\tend\n")],
+    # m5: asset and MMIO arrivals not held.
+    "l1w_no_hold_slow": [("wire         ld_hold = DC && ldw && (ldw_slow || !ldw_word);",
+                          "wire         ld_hold = DC && ldw && !ldw_word;")],
+    # m6: byte, halfword and misaligned arrivals not held.
+    "l1w_no_hold_narrow": [("wire         ld_hold = DC && ldw && (ldw_slow || !ldw_word);",
+                            "wire         ld_hold = DC && ldw && ldw_slow;")],
 }
 
 

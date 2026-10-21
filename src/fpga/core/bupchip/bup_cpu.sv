@@ -76,11 +76,23 @@
 //   MUL, MLA / UMULL                                            2 / 3
 //   STM / LDM of n registers                                    n+1 / n+2
 //
+// THUMB 1 (R1): the adder never takes the shifter's output
+// in the same clock. An ARM arithmetic op (ADD ADC SUB SBC RSB RSC CMP CMN)
+// whose register operand 2 is shifted (anything but LSL #0) registers the
+// shifted value (op2_q) and adds it in S_OP2: 1 -> 2 clocks, and 2 -> 3
+// with a shift by register; LDR/STR/LDRB/STRB with a shifted register
+// offset form the address in S_OP2: 2 -> 3 clocks. The logic ops, MOV and
+// MVN keep theirs. Thumb never shifts and adds in one instruction.
+//
 // Thumb maps onto the same classes: each BL half, MOV pc and the shifts by
 // immediate take 1 clock, F4's shifts by register 2, ADD pc 2, PUSH/POP and
 // LDMIA/STMIA as STM/LDM (POP {pc} as an LDM), and F6 (LDR from PC) as a ROM
 // load. In Thumb two instructions share a word: the ROM is read again with
-// the other half selected.
+// the other half selected. With THUMB 1 a Thumb load to the image window or
+// the cart RAM takes 1 clock (L1F) when it is an aligned word (L1W); a byte,
+// halfword or misaligned word, or a load found to reach the assets, holds the
+// next instruction one clock, and a load that may reach MMIO keeps its 2.
+// Thumb LDMIA and POP without PC take n+1 (L3).
 //
 // The second clock of a load, a two-clock store or an MMIO access is W: the
 // access address was registered at the end of execute, the ROM, RAM and
@@ -311,6 +323,7 @@ module bup_cpu
 	// DC only (with SW 3 these alias S_CLEAR and S_RUN: every use is gated by DC).
 	localparam state_t S_IDLE    = SW'(8);	// parked between calls
 	localparam state_t S_READOUT = SW'(9);	// a call's return: FIQ r8-r13 out on port B
+	localparam state_t S_OP2     = SW'(10);	// R1: the add of a shifted register operand (op2_q)
 
 	state_t      state;
 	logic [CODE_AW-1:0] pc;         // word address of the instruction in rom_q
@@ -503,36 +516,44 @@ module bup_cpu
 	wire th_l   = tf6 || (tf78 && hw[9] ? hw[11] || hw[10] : hw[11]);
 	wire th_imm = (tf2 && hw[10]) || tf3 || tf12 || tf13 || tbl1 || tbl2;
 
+	// The data-processing opcode of a Thumb halfword h (a function of the
+	// halfword alone, so R13 can decode it for both halves of rom_q).
+	/* verilator lint_off UNUSEDSIGNAL */  // t_op reads h[15:6] only
+	function automatic logic [3:0] t_op(input logic [15:0] h);
+		t_op = OP_ADD;
+		if (h[15:13] == 3'b000 && h[12:11] != 2'b11) t_op = OP_MOV;		// F1
+		else if (h[15:11] == 5'b00011) t_op = h[9] ? OP_SUB : OP_ADD;		// F2
+		else if (h[15:13] == 3'b001)						// F3
+			case (h[12:11])
+				2'd0: t_op = OP_MOV;
+				2'd1: t_op = OP_CMP;
+				2'd2: t_op = OP_ADD;
+				default: t_op = OP_SUB;
+			endcase
+		else if (h[15:10] == 6'b010000)						// F4
+			case (h[9:6])
+				4'h0: t_op = OP_AND;
+				4'h1: t_op = OP_EOR;
+				4'h5: t_op = OP_ADC;
+				4'h6: t_op = OP_SBC;
+				4'h8: t_op = OP_TST;
+				4'h9: t_op = OP_SUB;		// NEG: 0 - Rs (zero_run, R13)
+				4'hA: t_op = OP_CMP;
+				4'hB: t_op = OP_CMN;
+				4'hC: t_op = OP_ORR;
+				4'hE: t_op = OP_BIC;
+				4'hF: t_op = OP_MVN;
+				default: t_op = OP_MOV;	// the shifts by register; MUL
+			endcase
+		else if (h[15:10] == 6'b010001) t_op = h[9:8] == 2'b01 ? OP_CMP : h[9:8] == 2'b10 ? OP_MOV : OP_ADD;	// F5
+		else if (h[15:8] == 8'b1011_0000) t_op = h[7] ? OP_SUB : OP_ADD;	// F13
+	endfunction
+	/* verilator lint_on UNUSEDSIGNAL */
+
 	logic  [3:0] th_op;
 	logic [31:0] th_immv;
 	always_comb begin
-		th_op = OP_ADD;
-		if (tf1) th_op = OP_MOV;
-		else if (tf2) th_op = hw[9] ? OP_SUB : OP_ADD;
-		else if (tf3)
-			case (hw[12:11])
-				2'd0: th_op = OP_MOV;
-				2'd1: th_op = OP_CMP;
-				2'd2: th_op = OP_ADD;
-				default: th_op = OP_SUB;
-			endcase
-		else if (tf4)
-			case (t4op)
-				4'h0: th_op = OP_AND;
-				4'h1: th_op = OP_EOR;
-				4'h5: th_op = OP_ADC;
-				4'h6: th_op = OP_SBC;
-				4'h8: th_op = OP_TST;
-				4'h9: th_op = OP_SUB;		// NEG: 0 - Rs (zero_a)
-				4'hA: th_op = OP_CMP;
-				4'hB: th_op = OP_CMN;
-				4'hC: th_op = OP_ORR;
-				4'hE: th_op = OP_BIC;
-				4'hF: th_op = OP_MVN;
-				default: th_op = OP_MOV;	// the shifts by register; MUL
-			endcase
-		else if (tf5) th_op = t5op == 2'b01 ? OP_CMP : t5op == 2'b10 ? OP_MOV : OP_ADD;
-		else if (tf13) th_op = hw[7] ? OP_SUB : OP_ADD;
+		th_op = t_op(hw);
 
 		th_immv = {20'd0, hw[10:0], 1'b0};					// BL suffix
 		if (tf2) th_immv = {29'd0, hw[8:6]};
@@ -595,6 +616,34 @@ module bup_cpu
 	wire [3:0] ta_lo = t_port_a(rom_q[15:0]), ta_hi = t_port_a(rom_q[31:16]);
 	wire [3:0] tb_lo = t_port_b(rom_q[15:0]), tb_hi = t_port_b(rom_q[31:16]);
 
+	// R13: the adder's controls {inv_a, inv_b, cin = 1, cin = C} by opcode,
+	// and per Thumb halfword (a transfer adds its offset, PUSH subtracts, the
+	// rest by opcode), so in the first clock they come from rom_q directly,
+	// for both halves, picked by pc_h last; NEG's zero operand likewise.
+	function automatic logic [3:0] add_ctl(input logic [3:0] op);
+		case (op)
+			OP_SUB, OP_CMP: add_ctl = 4'b0110;
+			OP_RSB:         add_ctl = 4'b1010;
+			OP_ADC:         add_ctl = 4'b0001;
+			OP_SBC:         add_ctl = 4'b0101;
+			OP_RSC:         add_ctl = 4'b1001;
+			default:        add_ctl = 4'b0000;	// ADD, CMN; the logic ops do not use the adder
+		endcase
+	endfunction
+	function automatic logic [3:0] t_addctl(input logic [15:0] h);
+		if (h[15:11] == 5'b01001 || h[15:12] == 4'b0101 || h[15:13] == 3'b011 ||
+		    h[15:12] == 4'b1000 || h[15:12] == 4'b1001)
+			t_addctl = 4'b0000;				// F6-F11: base + offset
+		else if (h[15:12] == 4'b1011 && h[10:9] == 2'b10)
+			t_addctl = h[11] ? 4'b0000 : 4'b0110;		// POP adds, PUSH (STMDB) subtracts
+		else if (h[15:12] == 4'b1100)
+			t_addctl = 4'b0000;				// F15
+		else
+			t_addctl = add_ctl(t_op(h));
+	endfunction
+	wire [3:0] tctl_lo = t_addctl(rom_q[15:0]), tctl_hi = t_addctl(rom_q[31:16]);
+	wire       tneg_lo = rom_q[15:6] == 10'b0100_0010_01, tneg_hi = rom_q[31:22] == 10'b0100_0010_01;
+
 	// ---- the merged controls --------------------------------------------------------
 	// With THUMB 0 (or in ARM state) these are the ARM decode's.
 	wire [3:0] f_rn  = tm ? th_rn : a_rn;
@@ -634,7 +683,10 @@ module bup_cpu
 	wire       dp_cmp = dp_op[3:2] == 2'b10;		// TST TEQ CMP CMN: no result
 	wire       dp_rsh = tm ? t4sh : a_rsh;		// shift by register: two clocks
 	wire       op_imm = tm ? th_imm : insn[25];	// operand 2 is an immediate
+	/* verilator lint_off UNUSEDSIGNAL */  // zero_a: NEG's zero operand is now zero_run (R13);
+	// zero_a is unused; it is kept so that the code stays the one fitted and proven (aria_equiv)
 	wire       zero_a = tm && tf4 && t4op == 4'h9;	// NEG
+	/* verilator lint_on UNUSEDSIGNAL */
 	wire [15:0] list  = tm ? (tf14 ? {hw[11] && hw[8], !hw[11] && hw[8], 6'd0, hw[7:0]} : {8'd0, hw[7:0]})
 	                       : insn[15:0];		// PUSH's LR is bit 14, POP's PC bit 15
 	always_comb pcrel = tm && (tf6 || (tf12 && !hw[11]));
@@ -682,9 +734,48 @@ module bup_cpu
 	// its write and the data from the clock after that: any read of the array
 	// that the bypass does not cover then goes wrong.
 	(* ramstyle = "MLAB, no_rw_check" *) logic [31:0] rf [0:(1 << RFA) - 1];
+	// L1F (THUMB 1, Thumb state): a single load to the image
+	// window or the cart RAM takes one clock. Its data comes out of the RAM in
+	// the next instruction's first clock (ldw): it is forwarded into both read
+	// ports (pend_*), and written through the one write port if that
+	// instruction writes no register, else held in a one-entry write-behind
+	// register (lb_*) that drains at the next clock the port is free. Every
+	// Thumb load's own clock leaves the port free, so lb is always empty when
+	// data arrives. A load to the assets or MMIO found in that next clock
+	// (ldw_slow) holds the next instruction there, as W did. Thumb LDMIA and
+	// POP without PC hand their last register over the same way (L3).
+	logic [31:0] w_raw, ldata;
+	logic        ldw;               // a one-clock load's data arrives this clock
+	logic  [2:0] ldw_idx;           // its register (Thumb: r0-r7)
+	logic        ldw_slow;          // it went to the assets or MMIO: this clock is its W
+	logic        lb_v;              // the write-behind entry
+	logic  [2:0] lb_idx;
+	logic [31:0] lb_data;
+	// L1W: only an aligned word (or an LDM beat) is forwarded, as the RAM's
+	// word itself, with no lane rotate or extend on the path into the read
+	// ports. Any other arriving load (byte, halfword, misaligned word) holds
+	// the next instruction for this one clock, which is then the load's W.
+	wire         ldw_word = acc_block || (acc_size == 2'd2 && acc_addr[1:0] == 2'b00);
+	wire         ld_hold = DC && ldw && (ldw_slow || !ldw_word);	// the instruction in execute waits
+	logic        l1_go, l3_go;      // a one-clock load / an LDM's last beat hands over its data
+	logic        arr_w, drain;      // the port takes the arriving data / the entry
+	logic        iw_we, iw_class, iw_sel;	// the instruction's own write, before the port is shared
+	logic  [3:0] iw_wa;
+	logic [31:0] iw_other;
+	// Only r0-r7 are ever pending, and their entries are the same in every
+	// mode, so the pending value is matched on the architectural index.
+	/* verilator lint_off UNUSEDSIGNAL */  // the pending load value is read only with THUMB 1 (DC)
+	wire         pend_v = DC && (ldw || lb_v);
+	wire   [2:0] pend_i = ldw ? ldw_idx : lb_idx;
+	wire  [31:0] fw_word = acc_rg == RG_RAM ? ram_q : rom_dq;	// L1W: the arriving word, raw
+	wire  [31:0] pend_d = ldw ? fw_word : lb_data;
+	/* verilator lint_on UNUSEDSIGNAL */
 	logic        rf_we;
 	logic  [3:0] rf_wa;
 	logic [31:0] rf_wd;
+	(* keep *) logic [31:0] wd_other;	// R2: every source of rf_wd but the sum
+	(* keep *) logic        sel_sum;		// R2: rf_wd is the sum (state and instruction only)
+	(* keep *) logic        sel_ld;		// rf_wd is ld_wd (arriving or draining load data)
 	logic        rf_w_class;	// for the retire port: 1 = load data (port W)
 	logic        byp_we;
 	logic [RFA-1:0] byp_idx;
@@ -742,15 +833,32 @@ module bup_cpu
 		byp_data <= rf_wd;
 	end
 
+	// A pending load value is younger than last clock's write (L1F), which is
+	// younger than the array.
 	function automatic logic [31:0] read_reg(input logic [3:0] idx, input logic [31:0] arr,
-		input logic hit, input logic [31:0] held, input logic [31:0] r15);
+		input logic hit, input logic [31:0] held, input logic [31:0] r15,
+		input logic phit, input logic [31:0] pdata);
 		if (idx == 4'hF) read_reg = r15;
+		else if (phit) read_reg = pdata;
 		else if (hit) read_reg = held;
 		else read_reg = arr;
 	endfunction
 
-	wire [31:0] ra = read_reg(ia, rf[pa], byp_we && byp_idx == pa, byp_data, r15_value);
-	wire [31:0] rb = read_reg(ib, rf[pb], byp_we && byp_idx == pb, byp_data, r15_value);
+	wire [31:0] ra, rb;
+	generate if (DC) begin : g_rd
+		// L1F: the same priority, built so that the array's word, the last
+		// source to arrive (fetch, index decode, MLAB read), enters the last
+		// LUT alone: the select and every other source are ready before it.
+		(* keep *) wire        a_arr = ia != 4'hF && !(pend_v && ia == {1'b0, pend_i}) && !(byp_we && byp_idx == pa);
+		(* keep *) wire        b_arr = ib != 4'hF && !(pend_v && ib == {1'b0, pend_i}) && !(byp_we && byp_idx == pb);
+		(* keep *) wire [31:0] a_oth = ia == 4'hF ? r15_value : (pend_v && ia == {1'b0, pend_i}) ? pend_d : byp_data;
+		(* keep *) wire [31:0] b_oth = ib == 4'hF ? r15_value : (pend_v && ib == {1'b0, pend_i}) ? pend_d : byp_data;
+		assign ra = a_arr ? rf[pa] : a_oth;
+		assign rb = b_arr ? rf[pb] : b_oth;
+	end else begin : g_rd
+		assign ra = read_reg(ia, rf[pa], byp_we && byp_idx == pa, byp_data, r15_value, 1'b0, 32'd0);
+		assign rb = read_reg(ib, rf[pb], byp_we && byp_idx == pb, byp_data, r15_value, 1'b0, 32'd0);
+	end endgenerate
 
 	// Read port selection.
 	always_comb begin
@@ -823,59 +931,101 @@ module bup_cpu
 	// One adder with an optionally inverted operand on each side and a carry
 	// in covers ADD, ADC, SUB, SBC, RSB, RSC, CMP, CMN; it also forms
 	// transfer addresses, LDM/STM write-backs and the MLA sum.
-	logic [31:0] alu_a, alu_b, alu_res, sum;
-	logic  [3:0] alu_op;
+	logic [31:0] alu_a, alu_b, alu_res, sum, lres;
 	logic        add_c, add_v, arith;
 	logic  [4:0] n_regs;
 	assign n_regs = count_regs(list);
 
-	wire [31:0] a_off = a_sdt ? (insn[25] ? sh_value : {20'b0, insn[11:0]})
-	                          : (a_b ? {24'b0, insn[11:8], insn[3:0]} : rb);
-	wire [31:0] t_off = tm ? (tf78 ? rb : th_offv) : a_off;
+	/* verilator lint_off UNUSEDSIGNAL */  // is_arith needs op[3:1] only
+	function automatic logic is_arith(input logic [3:0] op);	// SUB RSB ADD ADC SBC RSC CMP CMN
+		is_arith = !(op[3:1] == 3'b000 || op[3:1] == 3'b100 || op[3:2] == 2'b11);
+	endfunction
+	/* verilator lint_on UNUSEDSIGNAL */
+
+	// R1 (THUMB 1): the shifter never feeds the adder in the same clock. An
+	// ARM arithmetic op with a shifted register operand 2, and LDR/STR(B) with
+	// a shifted register offset, register the shifted value (op2_q, in S_RUN,
+	// or in S_SHR2 for a shift by register) and add it in S_OP2.
+	logic [31:0] op2_q;
+	logic        op2_mem_q;             // S_OP2 forms a transfer's address, else completes an op
+	logic        shr_ar_q;              // the op of a shift by register is arithmetic: S_SHR2 -> S_OP2
+	wire         sh_id   = insn[11:5] == 7'd0;	// LSL #0: Rm unshifted
+	wire         op2_dp  = DC && !tm && a_dp && is_arith(a_op) && !insn[25] && !insn[4] && !sh_id;
+	wire         op2_mem = DC && !tm && a_sdt && insn[25] && !sh_id;
+
+	// R13: the adder's controls {inv_a, inv_b, cin = 1, cin = C}, in S_RUN
+	// straight from rom_q per format (no priority mux through alu_op); the
+	// clocks after it use the copy registered at the end of S_RUN (THUMB 1,
+	// rom_q being held), or with THUMB 0 the live opcode, as before (the
+	// formal proof against ARIA cannot assume a held rom_q).
+	logic  [3:0] ctl_q;
+	logic        mla_q;                 // THUMB 1: bit_w (MLA) registered for S_MUL2
+	wire   [3:0] actl    = (a_mem || a_blk) ? (a_u ? 4'b0000 : 4'b0110) : add_ctl(a_op);
+	wire   [3:0] ctl_run = tm ? (ph ? tctl_hi : tctl_lo) : actl;
+	wire   [3:0] ctl_now = state == S_RUN ? ctl_run : state == S_MUL2 ? 4'b0000 : THUMB ? ctl_q : add_ctl(dp_op);
+	wire         inv_a   = ctl_now[3];
+	wire         inv_b   = ctl_now[2];
+	wire         cin     = ctl_now[1] || (ctl_now[0] && flag_c);
+
+	// R14: every non-register source of the adder's B operand first (pre_b),
+	// the register last (sel_rb), so the register reaches the adder through
+	// one select-and-invert LUT. pre_b and sel_rb depend on rom_q, the state
+	// and registers only.
+	(* keep *) logic [31:0] pre_b;
+	(* keep *) logic        sel_rb;
+	always_comb begin
+		pre_b = tm ? th_immv : imm_rot;		// operand 2's immediate
+		sel_rb = !(op_imm && !sh_reg);
+		if (state == S_MUL2) begin
+			pre_b = prod[31:0];
+			sel_rb = 1'b0;
+		end else if (state == S_RUN && k_mem) begin
+			pre_b = tm ? th_offv : a_sdt ? {20'b0, insn[11:0]} : {24'b0, insn[11:8], insn[3:0]};
+			sel_rb = tm ? tf78 : a_sdt ? insn[25] : !a_b;
+		end else if (state == S_RUN && k_blk) begin
+			pre_b = {25'd0, n_regs, 2'b00};
+			sel_rb = 1'b0;
+		end else if (DC && state == S_OP2) begin
+			pre_b = op2_q;			// R1: the shifted operand, registered
+			sel_rb = 1'b0;
+		end
+	end
+	// The register operand: with THUMB 1 always Rm as read (R1; a_off's
+	// register case is rb); ARIA keeps the shifter on it.
+	wire  [31:0] b_reg = (DC || (state == S_RUN && k_mem && !a_sdt)) ? rb : sh_value;
+	wire         zero_run = THUMB && tm && (ph ? tneg_hi : tneg_lo);	// Thumb NEG: 0 - Rs
+	wire         a_zero = state == S_MUL2 ? !(THUMB ? mla_q : bit_w) : (state == S_RUN && zero_run);	// MLA adds Rn
 
 	always_comb begin
-		logic        inv_a, inv_b, cin;
 		logic [32:0] wide;
-		alu_a = ra;
-		alu_b = op2;
-		alu_op = dp_op;
-		if (state == S_MUL2) begin
-			alu_a = bit_w ? ra : 32'd0;		// MLA adds Rn (bits 15:12)
-			alu_b = prod[31:0];
-			alu_op = OP_ADD;
-		end else if (state == S_RUN && k_mem) begin
-			alu_b = t_off;
-			alu_op = bit_u ? OP_ADD : OP_SUB;
-		end else if (state == S_RUN && k_blk) begin
-			alu_b = {25'd0, n_regs, 2'b00};
-			alu_op = bit_u ? OP_ADD : OP_SUB;
-		end else if (state == S_RUN && zero_a)
-			alu_a = 32'd0;				// Thumb NEG: 0 - Rs
-		inv_a = alu_op == OP_RSB || alu_op == OP_RSC;
-		inv_b = alu_op == OP_SUB || alu_op == OP_SBC || alu_op == OP_CMP;
-		case (alu_op)
-			OP_SUB, OP_RSB, OP_CMP: cin = 1'b1;
-			OP_ADC, OP_SBC, OP_RSC: cin = flag_c;
-			default:                cin = 1'b0;
-		endcase
+		alu_a = a_zero ? 32'd0 : ra;
+		alu_b = sel_rb ? b_reg : pre_b;
 		wide = {1'b0, alu_a ^ {32{inv_a}}} + {1'b0, alu_b ^ {32{inv_b}}} + {32'd0, cin};
 		sum = wide[31:0];
 		add_c = wide[32];			// for a subtraction: NOT borrow
 		add_v = (alu_a[31] ^ inv_a) == (alu_b[31] ^ inv_b) && sum[31] != (alu_a[31] ^ inv_a);
-		arith = 1'b1;
-		case (alu_op)
-			OP_AND, OP_TST: begin alu_res = alu_a & alu_b;  arith = 1'b0; end
-			OP_EOR, OP_TEQ: begin alu_res = alu_a ^ alu_b;  arith = 1'b0; end
-			OP_ORR:         begin alu_res = alu_a | alu_b;  arith = 1'b0; end
-			OP_MOV:         begin alu_res = alu_b;          arith = 1'b0; end
-			OP_BIC:         begin alu_res = alu_a & ~alu_b; arith = 1'b0; end
-			OP_MVN:         begin alu_res = ~alu_b;         arith = 1'b0; end
-			default:        alu_res = sum;
-		endcase
 	end
 
-	// NZCV after a flag-setting data-processing instruction.
-	wire [3:0] dp_flags = {alu_res[31], alu_res == 32'd0, arith ? add_c : op2_c, arith ? add_v : nzcv[0]};
+	// The logic ops on their own operand, op2 (the shifter's or the
+	// immediate), beside the adder.
+	always_comb
+		case (dp_op)
+			OP_AND, OP_TST: lres = ra & op2;
+			OP_EOR, OP_TEQ: lres = ra ^ op2;
+			OP_ORR:         lres = ra | op2;
+			OP_BIC:         lres = ra & ~op2;
+			OP_MVN:         lres = ~op2;
+			default:        lres = op2;	// MOV (and the arithmetic ops, which take the sum)
+		endcase
+	// R2: whether the result is the sum, from the state and the instruction.
+	assign arith = state == S_MUL2 || (state == S_RUN && (k_mem || k_blk)) || (DC && state == S_OP2) ||
+	               is_arith(dp_op);
+	assign alu_res = arith ? sum : lres;
+
+	// NZCV after a flag-setting data-processing instruction; N and Z of the
+	// sum or of the logic result, picked last (R2).
+	wire [3:0] dp_flags = {arith ? sum[31] : lres[31], arith ? sum == 32'd0 : lres == 32'd0,
+	                       arith ? add_c : op2_c, arith ? add_v : nzcv[0]};
 
 	// ---- the access in W --------------------------------------------------------------
 	logic [31:0] acc_addr;
@@ -928,7 +1078,6 @@ module bup_cpu
 	// aligned word right by 8 x addr[1:0]. An odd LDRH returns the aligned
 	// halfword rotated right by 8, an odd LDRSH the sign-extended byte (as
 	// LDRSB); LDM ignores addr[1:0]. (GBATEK, "ARM CPU Memory Alignments".)
-	logic [31:0] w_raw, ldata;
 	always_comb begin
 		logic [31:0] rot;
 		case (acc_rg)
@@ -969,6 +1118,17 @@ module bup_cpu
 		endcase
 	endfunction
 
+	// L1F: the arriving load's region was registered with its access.
+	assign ldw_slow = acc_rg == RG_AST || acc_rg == RG_IO;
+	// L1F: a Thumb load that may reach MMIO keeps its two clocks, so that its
+	// peripheral read happens before it retires (the lockstep tags each
+	// access with the retires before it). The region's top nibble is the base's
+	// (an offset below 4 KB carries into it only from 0x?FFF_Fxxx, which is
+	// covered), or for [Rb, Ro] the sum of both registers' top nibbles plus a
+	// possible carry: 0xD or 0xE covers every MMIO address.
+	wire   [3:0] nib_sum  = ra[31:28] + (tf78 ? rb[31:28] : 4'd0);
+	wire         io_guess = nib_sum == 4'hD || nib_sum == 4'hE;
+
 	// ---- control ----------------------------------------------------------------------
 	wire [31:0] addr_x = bit_p ? sum : ra;		// single transfer address
 	// The one-clock store's region, from Rn and the immediate offset on an
@@ -977,7 +1137,12 @@ module bup_cpu
 	// muxes off the path to done (BUPCHIP_CORE, risk 2).
 	wire [31:0] st_off = tm ? th_offv : a_sdt ? {20'b0, insn[11:0]} : {24'b0, insn[11:8], insn[3:0]};
 	wire [31:0] st_addr = bit_p ? ra + (st_off ^ {32{!bit_u}}) + 32'(!bit_u) : ra;
-	wire        st_ram = region(st_addr, p26) == RG_RAM;
+	// R12 (THUMB 1): from Rn's top bits, without the adder. Every immediate
+	// store offset is below 4,096, so an added one cannot leave the 256 MB
+	// region unless Rn[27:12] is all ones, nor a subtracted one unless it is
+	// all zeros; those stores take the two-clock path (same results).
+	wire        st_ram = DC ? ra[31:28] == 4'h4 && (!bit_p || (bit_u ? !(&ra[27:12]) : (|ra[27:12])))
+	                        : region(st_addr, p26) == RG_RAM;
 	// The BL suffix's target, LR + offset, likewise on an adder of its own: the
 	// ALU's sum for the suffix, without the shifter and the operand muxes on
 	// the path to rom_addr.
@@ -999,7 +1164,7 @@ module bup_cpu
 	logic        c_unk;             // C is unknown: set by a Thumb MUL (THUMB 1)
 	wire         flags_halt = c_unk && (cond_rd_c || (cond_ok && op_rd_c));
 	wire         halt_now = chk_bad || late_v ||
-		(state == S_RUN && !(DC && ret_v) && !freeze && (cond_ok && dec_bad || flags_halt));
+		(state == S_RUN && !(DC && ret_v) && !freeze && !ld_hold && (cond_ok && dec_bad || flags_halt));
 	wire  [3:0] halt_code_now = chk_bad ? chk_code : late_v ? late_code :
 		(!THUMB || (cond_ok && dec_bad && !(c_unk && cond_rd_c))) ? dec_code : HALT_FLAGS;
 	wire [31:0] halt_pc_now = chk_bad ? chk_pc : late_v ? late_pc : pc_byte;
@@ -1040,7 +1205,8 @@ module bup_cpu
 		done = 1'b0;
 		rf_we = 1'b0;
 		rf_wa = f_rd;
-		rf_wd = alu_res;
+		wd_other = lres;			// R2: the result, the sum added last
+		sel_sum = arith;
 		rf_w_class = 1'b0;
 		flags_we = 1'b0;
 		flags_d = dp_flags;
@@ -1058,18 +1224,22 @@ module bup_cpu
 		late_code_d = HALT_FETCH;
 		ret_go = 1'b0;
 		reg_sel = 1'b0;
+		l1_go = 1'b0;
+		l3_go = 1'b0;
 
 		case (state)
 			S_CLEAR: begin
 				rf_we = 1'b1;
 				rf_wa = clr_idx[3:0];
-				rf_wd = 32'd0;
+				wd_other = 32'd0;
+				sel_sum = 1'b0;
 				npc = '0;
 				npc_h = 1'b0;
 				if (DC && launch) begin
 					// A call's launch: entries 0-21 from clr_wd, then the
 					// entry (an ARM one must be word-aligned).
-					rf_wd = clr_wd;
+					wd_other = clr_wd;
+					sel_sum = 1'b0;
 					{late_go, npc_h, npc} = jump(clr_pc);
 					late_go = late_go || (!clr_pc[0] && clr_pc[1]);
 					if (clr_idx == RFA'(21)) nstate = S_RUN;
@@ -1079,14 +1249,18 @@ module bup_cpu
 			end
 
 			S_RUN: begin
-				d_addr = addr_x;
-				if (!freeze) begin
+				// L1F: a held clock is the W of the load before (assets, MMIO).
+				d_addr = ld_hold ? acc_addr : addr_x;
+				reg_sel = ld_hold && acc_rg == RG_IO && !chk_bad;
+				if (!freeze && !ld_hold) begin
 					start = 1'b1;
 					if (!cond_ok) begin
 						done = 1'b1;			// no effect, one clock
 					end else if (k_dp) begin
 						if (dp_rsh)
 							nstate = S_SHR2;
+						else if (op2_dp)
+							nstate = S_OP2;		// R1: the add next clock, from op2_q
 						else begin
 							done = 1'b1;
 							rf_we = !dp_cmp;
@@ -1098,7 +1272,8 @@ module bup_cpu
 					end else if (k_mrs) begin
 						done = 1'b1;
 						rf_we = 1'b1;
-						rf_wd = {nzcv, 20'd0, MD ? ctl : 8'hD3};
+						wd_other = {nzcv, 20'd0, MD ? ctl : 8'hD3};
+						sel_sum = 1'b0;
 					end else if (k_msr) begin
 						done = 1'b1;
 						flags_we = insn[19];
@@ -1124,7 +1299,8 @@ module bup_cpu
 						if (br_link) begin			// BL
 							rf_we = 1'b1;
 							rf_wa = 4'd14;
-							rf_wd = link_value;
+							wd_other = link_value;
+							sel_sum = 1'b0;
 						end
 					end else if (k_bx) begin
 						// To Thumb with bit 0 set; to ARM, bit 1 must be clear.
@@ -1142,16 +1318,22 @@ module bup_cpu
 						ret_go = p26 && is_ret(bl_sum);
 						rf_we = 1'b1;
 						rf_wa = 4'd14;
-						rf_wd = link_value;
+						wd_other = link_value;
+						sel_sum = 1'b0;
 					end else if (k_movpc) begin		// MOV pc, Rm
 						done = 1'b1;
 						{late_go, npc_h, npc} = jump(rb);
 						ret_go = p26 && is_ret(rb);
 					end else if (k_addpc) begin		// ADD pc, Rm: the sum next clock
 						nstate = S_MUL3;
+					end else if (k_mem && op2_mem) begin
+						nstate = S_OP2;			// R1: the address next clock, from op2_q
 					end else if (k_mem) begin
 						acc_go = 1'b1;
-						if (bit_l) begin
+						if (DC && tm && bit_l && !io_guess) begin
+							done = 1'b1;			// L1F: the data arrives next clock
+							l1_go = 1'b1;
+						end else if (bit_l) begin
 							nstate = S_W;
 							rf_we = t_wb;			// base write-back now, data in W
 							rf_wa = f_rn;
@@ -1194,34 +1376,41 @@ module bup_cpu
 							ret_go = p26 && ldata == 32'hF000_0000;
 						end else begin
 							rf_we = 1'b1;
-							rf_wd = ldata;
+							wd_other = ldata;
+							sel_sum = 1'b0;
 							rf_w_class = 1'b1;
 						end
 					end else begin
 						ram_we = acc_rg == RG_RAM;
 						rf_we = wb_pend;
 						rf_wa = l_rn;
-						rf_wd = wb_value;
+						wd_other = wb_value;
+						sel_sum = 1'b0;
 					end
 				end
 			end
 
 			S_SHR2: begin
-				rf_wa = l_rd;
-				done = 1'b1;
-				npc = seq_w;
-				npc_h = seq_h;
-				seq_next = 1'b1;
-				rf_we = !dp_cmp;
-				flags_we = bit_l;
-				cu_clr = bit_l && c_def;
+				if (DC && shr_ar_q)
+					nstate = S_OP2;			// R1: the shifted value is added next clock
+				else begin
+					rf_wa = l_rd;
+					done = 1'b1;
+					npc = seq_w;
+					npc_h = seq_h;
+					seq_next = 1'b1;
+					rf_we = !dp_cmp;
+					flags_we = bit_l;
+					cu_clr = bit_l && c_def;
+				end
 			end
 
 			S_MUL2: begin
 				rf_we = 1'b1;
 				if (k_mull) begin
 					rf_wa = l_rd;				// RdLo
-					rf_wd = prod[31:0];
+					wd_other = prod[31:0];
+					sel_sum = 1'b0;
 					nstate = S_MUL3;
 				end else begin
 					rf_wa = l_rn;				// MUL/MLA: Rd is bits 19:16; Thumb's hw[2:0]
@@ -1245,7 +1434,8 @@ module bup_cpu
 				end else begin
 					rf_we = 1'b1;
 					rf_wa = l_rn;				// RdHi
-					rf_wd = prod[63:32];
+					wd_other = prod[63:32];
+					sel_sum = 1'b0;
 					done = 1'b1;
 					npc = seq_w;
 					npc_h = seq_h;
@@ -1261,17 +1451,25 @@ module bup_cpu
 					acc_go = 1'b1;
 					ram_we = !bit_l && beat_addr[31:28] == 4'h4;
 					if (!bit_l && blk_left == 16'd0) done = 1'b1;
+					// L3: a Thumb LDMIA/POP's last register (not PC) arrives
+					// while the next instruction runs.
+					if (DC && tm && bit_l && blk_left == 16'd0 && blk_idx != 4'hF) begin
+						done = 1'b1;
+						l3_go = 1'b1;
+					end
 				end else
 					done = 1'b1;			// LDM: the last register arrives
 				if (ld_pend) begin
 					rf_we = !(THUMB && ld_idx == 4'hF);	// POP {pc}: to npc instead
 					rf_wa = ld_idx;
-					rf_wd = ldata;
+					wd_other = ldata;
+					sel_sum = 1'b0;
 					rf_w_class = 1'b1;
 				end else if (blk_first && bit_w) begin
 					rf_we = 1'b1;				// the base, before any data comes back
 					rf_wa = l_rn;
-					rf_wd = blk_wb;
+					wd_other = blk_wb;
+					sel_sum = 1'b0;
 				end
 				if (done) begin
 					if (THUMB && ld_pend && ld_idx == 4'hF) begin
@@ -1285,8 +1483,33 @@ module bup_cpu
 				end
 			end
 
-			default: ;					// S_HALT; DC: S_IDLE, S_READOUT (below)
+			default: ;					// S_HALT; DC: S_IDLE, S_READOUT, S_OP2 (below)
 		endcase
+
+		// R1 (THUMB 1): the second clock of an arithmetic op with a shifted
+		// register operand (S_RUN or S_SHR2 registered it in op2_q), or of
+		// LDR/STR(B) with a shifted register offset, whose access starts now
+		// (a load's base write-back too; a store's goes to W as wb_value).
+		if (DC && state == S_OP2) begin
+			if (op2_mem_q) begin
+				d_addr = addr_x;
+				acc_go = 1'b1;
+				nstate = S_W;
+				if (bit_l) begin
+					rf_we = t_wb;
+					rf_wa = l_rn;
+				end
+			end else begin
+				rf_wa = l_rd;
+				done = 1'b1;
+				npc = seq_w;
+				npc_h = seq_h;
+				seq_next = 1'b1;
+				rf_we = !dp_cmp;
+				flags_we = bit_l;
+				cu_clr = bit_l && c_def;
+			end
+		end
 		if (ret_go) late_go = 1'b0;			// the sentinel is not a fault
 
 		// Running on from the end of the code space: the ARM7TDMI's fetch
@@ -1321,6 +1544,8 @@ module bup_cpu
 			acc_go = 1'b0;
 			late_go = 1'b0;
 			ret_go = 1'b0;
+			l1_go = 1'b0;
+			l3_go = 1'b0;
 		end
 
 		// A halt, or rst, stops everything this clock.
@@ -1341,9 +1566,45 @@ module bup_cpu
 			acc_go = 1'b0;
 			late_go = 1'b0;
 			ret_go = 1'b0;
+			l1_go = 1'b0;
+			l3_go = 1'b0;
 		end else if (done)
 			nstate = S_RUN;
+
+		// L1F: the instruction's own write first; arriving load data takes the
+		// port when that is free (else lb, below), and lb drains when nothing
+		// else needs it. Arriving data is written even when the instruction now
+		// in execute halts: it belongs to the load before, which completed.
+		iw_we = rf_we;
+		iw_wa = rf_wa;
+		iw_class = rf_w_class;
+		iw_sel = sel_sum;
+		iw_other = wd_other;
+		arr_w = 1'b0;
+		drain = 1'b0;
+		sel_ld = 1'b0;
+		if (DC && ldw && !chk_bad && !rst && !(ldw_slow && w_wait)) begin
+			arr_w = 1'b1;
+			if (!rf_we) begin
+				rf_we = 1'b1;
+				rf_wa = {1'b0, ldw_idx};
+				sel_ld = 1'b1;			// ld_wd, beside wd_other and sum
+				rf_w_class = 1'b1;
+			end
+		end else if (DC && lb_v && !rf_we && !rst && !halt_now && state != S_CLEAR) begin
+			drain = 1'b1;
+			rf_we = 1'b1;
+			rf_wa = {1'b0, lb_idx};
+			sel_ld = 1'b1;
+		end
 	end
+
+	// The port's data from three kept sources in one last LUT per bit: the
+	// sum (R2), the instruction's other result, and the load data arriving or
+	// draining (ldw and lb_v are never set together: lb is empty when data
+	// arrives). Neither the sum nor the logic result pays for the load's mux.
+	(* keep *) wire [31:0] ld_wd = ldw ? ldata : lb_data;
+	assign rf_wd = sel_ld ? ld_wd : sel_sum ? sum : wd_other;
 
 	assign rom_addr = npc;
 	wire [3:0] nzcv_next = flags_we ? flags_d : nzcv;
@@ -1437,8 +1698,10 @@ module bup_cpu
 				x_rn <= f_rn;
 				x_rm <= f_rm;
 				prod <= {32'd0, rb} * {32'd0, ra};
-				wb_value <= sum;
-				wb_pend <= t_wb;
+				ctl_q <= ctl_run;			// R13
+				mla_q <= bit_w;
+				op2_mem_q <= k_mem;			// R1
+				shr_ar_q <= is_arith(dp_op);
 				// LDM/STM: the write-back value, and where the first beat goes.
 				blk_rest <= list;
 				blk_wb <= sum;
@@ -1446,9 +1709,15 @@ module bup_cpu
 				blk_pre4 <= bit_p == bit_u;
 				blk_first <= 1'b1;
 			end
+			if (state == S_RUN || (DC && state == S_OP2)) begin
+				wb_value <= sum;
+				wb_pend <= t_wb;
+			end
+			if (DC && (state == S_RUN || state == S_SHR2))
+				op2_q <= sh_value;			// R1
 			if (state == S_SEQ && !halt_now) begin
 				blk_first <= 1'b0;
-				ld_pend <= bit_l && blk_rest != 16'd0;
+				ld_pend <= bit_l && blk_rest != 16'd0 && !l3_go;
 				if (blk_rest != 16'd0) begin
 					ld_idx <= blk_idx;
 					blk_rest <= blk_left;
@@ -1456,6 +1725,28 @@ module bup_cpu
 				end
 			end else
 				ld_pend <= 1'b0;
+		end
+	end
+
+	// L1F: the arriving load and the write-behind entry.
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			ldw <= 1'b0;
+			lb_v <= 1'b0;
+		end else if (DC) begin
+			ldw <= l1_go || l3_go || (ldw && ldw_slow && w_wait && !chk_bad && !halt_now);
+			if (l1_go) ldw_idx <= f_rd[2:0];
+			else if (l3_go) ldw_idx <= blk_idx[2:0];
+			if (state == S_CLEAR || ret_v || drain)
+				lb_v <= 1'b0;				// a launch rewrites r0-r12; the readout needs none
+			else if (arr_w && iw_we) begin
+				// The instruction writes too: hold the data, unless it writes the
+				// same register (it is younger).
+				lb_v <= iw_wa != {1'b0, ldw_idx};
+				lb_idx <= ldw_idx;
+				lb_data <= ldata;
+			end else if (lb_v && iw_we && iw_wa == {1'b0, lb_idx})
+				lb_v <= 1'b0;				// a younger write of the same register
 		end
 	end
 
@@ -1468,7 +1759,7 @@ module bup_cpu
 	assign ro_data   = rb;
 	assign w_addr    = acc_addr;
 	assign w_size    = acc_size;
-	assign w_asset   = state == S_W && acc_rg == RG_AST && acc_load && !chk_bad;
+	assign w_asset   = (state == S_W || ld_hold) && acc_rg == RG_AST && acc_load && !chk_bad;
 	assign reg_addr  = acc_addr[7:0];
 	assign reg_write = !acc_load;
 	assign reg_wdata = st_lanes(rb, acc_size);
@@ -1482,12 +1773,16 @@ module bup_cpu
 	assign rt_mode   = MD ? ctl[4:0] : 5'h13;
 	assign rt_t      = THUMB && (t_we ? t_d : ctl[5]);
 	assign rt_cunk   = c_unk_next;
-	assign rt_e_we   = rf_we && !rf_w_class && state != S_CLEAR;
-	assign rt_e_idx  = rf_wa;
-	assign rt_e_data = rf_wd;
-	assign rt_w_we   = rf_we && rf_w_class;
-	assign rt_w_idx  = rf_wa;
-	assign rt_w_data = rf_wd;
+	// L1F: the instruction's own write is port E (or W for S_W and LDM data);
+	// arriving load data is reported as port W in the clock it arrives, with
+	// the next instruction's start, whether it goes to the port or to lb; a
+	// drain of lb is not an instruction's write.
+	assign rt_e_we   = iw_we && !iw_class && state != S_CLEAR;
+	assign rt_e_idx  = iw_wa;
+	assign rt_e_data = iw_sel ? sum : iw_other;
+	assign rt_w_we   = (iw_we && iw_class) || arr_w;
+	assign rt_w_idx  = arr_w ? {1'b0, ldw_idx} : iw_wa;
+	assign rt_w_data = arr_w ? ldata : (iw_sel ? sum : iw_other);
 `endif
 endmodule
 

@@ -54,7 +54,7 @@ read_sdc
 update_timing_netlist
 
 # ---- the build ---------------------------------------------------------------------------
-array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 19}
+array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 18}
 if {[file exists step7_prep.txt]} {
 	set fh [open step7_prep.txt]
 	foreach line [split [read $fh] "\n"] {

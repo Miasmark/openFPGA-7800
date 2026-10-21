@@ -7,7 +7,7 @@
 #   counter[2]  clk_sys_90  clk_sys at 90 degrees, video sample clock
 #   counter[3]  clk_arm     the BupChip's CPU (POCKET_BUPCHIP;
 #               docs/BUPCHIP_CORE.md, "Clocking"), same VCO: 2 x clk_sys
-#               (ARIA), or VCO/19, 36.17 MHz, with DARIA (POCKET_DARIA;
+#               (ARIA), or VCO/18, 38.18 MHz, with DARIA (POCKET_DARIA;
 #               pll/pll_core.v)
 # The PLL is reconfigurable, which names its outputs by counter. Timing is
 # checked at the NTSC (faster) setting; PAL only slows every clock by 0.9%.

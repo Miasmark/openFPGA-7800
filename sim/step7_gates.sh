@@ -12,12 +12,25 @@
 #                macros without POCKET_DARIA, the new DARIA files excluded,
 #                which pp_equiv refuses when one holds a directive that
 #                would reach the files after it) has 0 'daria' tokens, and
-#                its hash is PP_EXPECT (F's; on aeee6d2 fc52edb6...6f52);
+#                its hash is PP_EXPECT (F's, on aeee6d2 fc52edb6...6f52;
+#                until F′ the interim value under pp_guards);
 #                and top.sv with cart2600.sv preprocess to PP_ORACLE_BASE's
 #                (default aeee6d2) with tb_daria's two macro sets, plain and
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
-#                the qsf has POCKET_DARIA, else --qsf comments)
+#                the qsf has POCKET_DARIA, --qsf release when PP_GUARD_FROM's
+#                qsf has it too, else --qsf comments). Until the release's
+#                F′ (docs/daria_step10/plan.md 3.1) the chain runs from the
+#                commit that added MR's MUX_RESTRUCTURE lines to ap_core.qsf
+#                (git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf),
+#                with PP_EXPECT (2026-10-21)
+#                34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21,
+#                the non-DARIA stream of the L1W+L3 CPU and the sram_ctrl key
+#                copy. The MR commit's own stream,
+#                56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd,
+#                differs from it only by the lint_off/lint_on pair taken out of
+#                bup_cpu.sv's t_addctl after it (Verilator keeps lint
+#                metacomments in -E's output)
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
@@ -84,8 +97,8 @@
 #                the tests that copy src/fpga and is PARTIAL
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
-#                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
-#                pll_core.v's divider; plan 5.2's tb_s4 check at it)
+#                row 5: the non-DARIA one and DARIA=1 ARM38=1 (VCO/18,
+#                pll_core.v's divider)
 #                PSRAM_CS=50.0, the latter with SNAP_REQUIRED=1 once
 #                bup_dbg_snap.sv is in the tree (every tb_s4 run must then
 #                print "snap: ok": the snapshot check of plan 1.2 rows 5 and
@@ -130,8 +143,9 @@
 #                section alone in a BUP_DEBUG build (each run's overlay line
 #                with its coverage, the pattern run, the section's "overlay
 #                cells:" line), and its RTL mutants each CAUGHT; ARM_DIV
-#                passes through (default 19). Then run_ovl.sh's control
-#                again with ARM_DIV=18, where the guard really locks. About
+#                passes through (default 18, pll_core.v's divider). Then
+#                run_ovl.sh's control again with ARM_DIV=19, the other
+#                lattice, where the guard never locks. About
 #                an hour and a half in one slot. Needs POCKET_DARIA in the qsf
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
@@ -151,8 +165,8 @@
 #                no call (P27: the load shown by detect2600's scheme alone;
 #                an R1 run with no calls.csv is void); any
 #                other --strict (every column equal, no call on either side)
-#                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
-#                as at VCO/19, pll_core.v's divider and tb_load's default).
+#                (FRAMES_GUARD: locked, unlocked or none; default locked,
+#                as at VCO/18, pll_core.v's divider and tb_load's default).
 #                The images are read by path, never copied; the runs go to
 #                OUT/frames/runs. Needs GAMES and R1_DIR
 # A gate whose script or input does not exist yet is NOT AVAILABLE, and one
@@ -314,7 +328,12 @@ g_pp_equiv() {
 	return $rc
 }
 g_pp_guards() {
-	local q=comments; [ "$QSF_DARIA" = 1 ] && q=daria
+	local q=comments
+	if [ "$QSF_DARIA" = 1 ]; then
+		q=daria
+		git -C "$REPO" show "$PP_GUARD_FROM:src/fpga/ap_core.qsf" 2> /dev/null \
+			| grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' && q=release
+	fi
 	python3 "$REPO/sim/tools/pp_guards.py" --repo "$REPO" --from "$PP_GUARD_FROM" --to HEAD --qsf "$q"
 }
 g_divider() { python3 "$HERE/check/div_check.py" --repo "$REPO"; }
@@ -420,8 +439,8 @@ g_s4_check() {
 	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	local snap=0
 	[ -f "$REPO/src/fpga/core/bupchip/bup_dbg_snap.sv" ] && snap=1
-	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
-	DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
+	DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
@@ -469,7 +488,7 @@ g_dbg_overlay() {
 	local rc=0
 	WORK="$OUT/dstat" slot bash "$HERE/bupchip/dstat/run_dstat.sh" || rc=1
 	WORK="$OUT/ovl" slot bash "$HERE/bupchip/dstat/run_ovl.sh" || rc=1
-	WORK="$OUT/ovl18" ARM_DIV=18 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
+	WORK="$OUT/ovl19" ARM_DIV=19 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
 	return $rc
 }
 g_frames() {
@@ -490,7 +509,7 @@ g_frames() {
 		# video differ from R1's for a reason outside DARIA.
 		WORK="$d" NAME="$name" FRAMES="$n" INPUTS=tb_daria slot bash "$HERE/run_frames.sh" "$img" || rc=1
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-			--expect-guard "${FRAMES_GUARD:-unlocked}" --rule "${FRAMES_RULE:-v1}" || rc=1
+			--expect-guard "${FRAMES_GUARD:-locked}" --rule "${FRAMES_RULE:-v1}" || rc=1
 	done
 	for name in $FRAMES16; do
 		[[ " $(echo ${FRAMES_LIST:-$FRAMES16}) " == *" $name "* ]] || left+=("$name")

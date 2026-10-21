@@ -443,12 +443,12 @@ module tb_daria;
 	typedef enum int {
 		S_ARMCYC, S_THUMB, S_ARM, S_FREQ, S_FROM, S_FRAM, S_FOTHER, S_RD_ROM, S_RD_RAM,
 		S_WR_RAM, S_RD_MMIO, S_WR_MMIO, S_RD_OTHER, S_WR_OTHER, S_TAKEN, S_EST,
-		S_DPC, S_DL16, S_DL32, S_RD_ROM_B, S_RD_ROM_H, S_RD_ROM_W, S_S1, S_S3, S_N
+		S_DPC, S_DL16, S_DL32, S_RD_ROM_B, S_RD_ROM_H, S_RD_ROM_W, S_S1, S_S3, S_S1W, S_N
 	} stat_t;
 	string sname [S_N] = '{"arm_cyc", "thumb", "arm", "fetch_req", "fetch_rom", "fetch_ram",
 		"fetch_other", "rd_rom", "rd_ram", "wr_ram", "rd_mmio", "wr_mmio", "rd_other",
 		"wr_other", "taken", "est_arm7", "dist_pc", "dist_l16", "dist_l32", "rd_rom_b",
-		"rd_rom_h", "rd_rom_w", "s1_cyc", "s3_cyc"};
+		"rd_rom_h", "rd_rom_w", "s1_cyc", "s3_cyc", "s1w_cyc"};
 	longint cs [S_N];
 	longint gs [S_N];
 	longint kind_cnt [K_N];
@@ -472,6 +472,13 @@ module tb_daria;
 	logic        unal_wr_ex [16];
 	logic   in_call = 0;
 	logic   prev_valid = 0;
+	// For s1w_cyc (L1W): the data read seen since the last retire (upstream
+	// reads a load's data before it retires it).
+	/* verilator lint_off PROCASSINIT */  // power-up values (DEVELOPING.md, "Power-up values")
+	logic        pr_v = 0;
+	logic [31:0] pr_addr = 0;
+	logic  [1:0] pr_size = 0;
+	/* verilator lint_on PROCASSINIT */
 	logic [31:0] prev_pc;
 	int     prev_size;
 	kind_t  prev_kind;
@@ -787,6 +794,9 @@ module tb_daria;
 				for (int k = 0; k < NCFG; k++) c_miss[s][k] = 0;
 			end
 			prev_valid = 0;
+			/* verilator lint_off BLKSEQ */  // as the rest of this block
+			pr_v = 0;
+			/* verilator lint_on BLKSEQ */
 			first_bl = 0;
 			if (dtrace != 0) $fwrite(fd_dt, "c %0d %0d\n", call_id, frame);
 			if (mam_on != 0) mam_start();
@@ -815,6 +825,26 @@ module tb_daria;
 			cs[S_EST] += base_cycles(k, a_rins);
 			cs[S_S1] += s1_cycles(k, a_rins);
 			cs[S_S3] += s3_cycles(k, a_rins);
+			// s1w_cyc (L1W+L3, docs/BUPCHIP_CORE.md): s1_cyc minus 1 for a
+			// Thumb LDR word load (F6, F7/F9 without B, F11) whose data read is
+			// word-aligned in the window (below 64 KiB) or the cart RAM, and minus
+			// 1 for a Thumb LDMIA, or POP without PC.
+			/* verilator lint_off BLKSEQ */  // as the rest of this block
+			/* verilator lint_off WIDTHEXPAND */
+			begin
+				int c1;
+				bit wl;
+				c1 = s1_cycles(k, a_rins);
+				wl = k == T6_LDRPC || k == T11_LDR_SP || (k == T7_LDR_REG && !a_rins[10]) ||
+				     (k == T9_LDR_IMM && !a_rins[12]);
+				if (a_rthumb && wl && pr_v && pr_size == 2'd2 && pr_addr[1:0] == 2'd0 &&
+				    (pr_addr < 32'h0001_0000 || pr_addr[31:28] == 4'h4)) c1 -= 1;
+				if (a_rthumb && (k == T15_LDMIA || (k == T14_POP && !a_rins[8]))) c1 -= 1;
+				cs[S_S1W] += c1;
+			end
+			pr_v = 0;
+			/* verilator lint_on WIDTHEXPAND */
+			/* verilator lint_on BLKSEQ */
 			if (pc_count.exists(a_rpc)) pc_count[a_rpc]++; else pc_count[a_rpc] = 1;
 			if (a_rpc < rom_size) begin
 				int ix;
@@ -864,6 +894,11 @@ module tb_daria;
 					if (mmio_wr.exists(m_addr)) mmio_wr[m_addr]++; else mmio_wr[m_addr] = 1;
 				end else cs[S_WR_OTHER]++;
 			end else begin
+				/* verilator lint_off BLKSEQ */  // as the rest of this block
+				pr_v = 1;
+				pr_addr = m_addr;
+				pr_size = m_size;
+				/* verilator lint_on BLKSEQ */
 				if (is_rom) begin
 					cs[S_RD_ROM]++;
 					rom_rd_kib[m_addr[18:10]]++;

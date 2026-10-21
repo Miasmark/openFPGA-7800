@@ -140,6 +140,27 @@ test("ret_bx_thumb", """
 	.thumb
 	bx lr
 """, calls=3, ro=same(3))
+# L1W/L3 (docs/BUPCHIP_CORE.md): a one-clock LDR whose word arrives while the next
+# instruction writes the port goes to the write-behind entry lb; the return
+# follows at once (lb drains in the return's clock or is dropped at ret_v; the
+# readout reads FIQ r8-r13 only, and the launch rewrites r0-r12).
+test("ret_lb_pending", """
+	.org 0x20
+	.thumb
+	ldr r1, [sp, #0]
+	movs r2, #5
+	bx lr
+""", calls=3, ro=same(3))
+test("ret_lb_pending_pop", """
+	.org 0x20
+	.thumb
+	ldr r0, =0xF0000001
+	push {r0}
+	ldr r1, [sp, #4]
+	movs r2, #5
+	pop {pc}
+	.ltorg
+""", calls=2, ro=same(2))
 test("ret_pop", """
 	.org 0x20
 	.thumb

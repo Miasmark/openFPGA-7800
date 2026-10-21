@@ -26,11 +26,11 @@
 #            of them with psram.sv mid-access and with the halfword arriving
 #   WMSWEEP=1 with +wmsweep: the remap sweep must have run
 #   PSRAM, PREEMPT, PREFETCH, PCM_DEPTH, DARIA, PSRAM_CS: see build_s4.sh
-#   ARM38=1  clk_arm at 38.18 MHz (+arm38; VCO/18, the divider DARIA was
-#            planned for), except in runs that ask for +arm15
-#   ARM19=1  clk_arm at 36.17 MHz (+arm19; VCO/19, DARIA's clock: the divider
-#            pll_core.v ships since the owner's choice of 2026-10-12), except
-#            in runs that ask for +arm15; not with ARM38=1
+#   ARM38=1  clk_arm at 38.18 MHz (+arm38; VCO/18, DARIA's clock: the divider
+#            pll_core.v ships), except in runs that ask for +arm15
+#   ARM19=1  clk_arm at 36.17 MHz (+arm19; VCO/19, the fallback divider,
+#            shipped from the owner's choice of 2026-10-12 until the L1W+L3
+#            CPU), except in runs that ask for +arm15; not with ARM38=1
 #   SNAP_REQUIRED=1  the snapshot check must have run ("snap: ok"); 0 also
 #            lets "snap: na" pass. Default 1 when DARIA=1 and
 #            src/fpga/core/bupchip/bup_dbg_snap.sv exists (build_s4.sh then

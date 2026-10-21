@@ -19,7 +19,7 @@
 #                with a joystick)
 #   DARIA, ARM_DIV, VERILATOR, VL_JOBS, RTL_TREE: passed to run_sim.sh's build
 #                (ARM_DIV=18 or 19 also adds +arm_div to the run; tb_load's
-#                default is 19, pll_core.v's divider)
+#                default is 18, pll_core.v's divider)
 #   FRAMES_DEBUG=1  passed to run_sim.sh's build too: BUP_DEBUG, and the
 #                DARIA status overlay's checks (tb_frames.sv's header).
 #                run_sim.sh records the build's mode in WORK/obj_frames.mode

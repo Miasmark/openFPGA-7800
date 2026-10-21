@@ -19,7 +19,8 @@
 #      identical to MiSTer's ($REFDIR/song<N>.pcm, default
 #      sim/work/bupchip/ref) from the song's first frame, with no halt,
 #      underrun or overflow, and Misery_F (song 13) at a CPI within 1% of
-#      1.383.
+#      1.383, or with THUMB=1 within 1% of 1.4208 (DARIA's core pays for R1,
+#      docs/BUPCHIP_CORE.md "Cycles per class").
 #   ./check.sh [GAME.a78]
 # THUMB=1 runs all of it on DARIA's core (THUMB 1, MODES 1) in the BupChip
 # profile, arm_only high (docs/DARIA_CORE.md, step 2: "ARIA unchanged"); use
@@ -81,8 +82,10 @@ if [ -n "$GAME" ]; then
 		[ "$(cat "$WORK/song$s.rc")" = 0 ] && grep -q "^PCM IDENTICAL: all .* from the song's start" "$WORK/song$s.out" && ok=1
 		if [ "$s" = 13 ] && [ "$ok" = 1 ]; then
 			cpi="$(sed -n 's/^result: .* cpi=\([0-9.]*\) .*/\1/p' "$WORK/song$s.out")"
-			python3 -c "import sys; sys.exit(0 if abs($cpi / 1.383 - 1) <= 0.01 else 1)" || ok=0
-			echo "CPI $cpi against 1.383: $([ $ok = 1 ] && echo within 1% || echo OUTSIDE 1%)"
+			ref=1.383
+			[ "${THUMB:-0}" = 0 ] || ref=1.4208
+			python3 -c "import sys; sys.exit(0 if abs($cpi / $ref - 1) <= 0.01 else 1)" || ok=0
+			echo "CPI $cpi against $ref: $([ $ok = 1 ] && echo within 1% || echo OUTSIDE 1%)"
 		fi
 		[ "$ok" = 1 ] && RESULTS+=("PASS  song $s: PCM identical to MiSTer's") || RESULTS+=("FAIL  song $s (see $WORK/song$s.out)")
 	done

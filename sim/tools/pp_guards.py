@@ -24,9 +24,18 @@ covers neither VHDL nor memory files nor the qsf. Over `git diff FROM TO`:
              --qsf comments: every .qsf and .sdc file is the same at FROM and
              TO once comments and blank lines are stripped (7.6's
              comment-only exemption).
+             --qsf release: for a range that starts where the DARIA lines
+             are already in (the release's chain, docs/daria_step10/plan.md
+             3.1, "Order of commits"): the ap_core.qsf diff is the SEED line
+             and comment lines only, TO has exactly one SEED line when FROM
+             has one (a lost line would ship Quartus' default seed), and
+             every other .qsf and .sdc file is
+             the same once comments are stripped, but for
+             core/daria_constraints.sdc, which only the DARIA build reads
+             (its SDC_FILE line is one of the three) and which may change.
              --qsf none: no qsf rule.
 
-Usage: pp_guards.py --from REV [--to REV] [--repo DIR] [--qsf daria|comments|none]
+Usage: pp_guards.py --from REV [--to REV] [--repo DIR] [--qsf daria|release|comments|none]
   --to defaults to HEAD; --to WORKTREE compares with the working tree
   (tracked files only). Exit status 0 when every guard passes, else 1.
 SPDX-License-Identifier: MIT
@@ -177,13 +186,31 @@ def guard_qsf_daria(repo, a):
     return bad
 
 
-def guard_qsf_comments(repo, a):
+def guard_qsf_comments(repo, a, free=()):
     names = set(git(repo, "diff", "--name-only", *diff_args(a)).split())
     bad = []
-    for n in sorted(x for x in names if re.search(r"\.(qsf|sdc)$", x)):
+    for n in sorted(x for x in names if re.search(r"\.(qsf|sdc)$", x) and x not in free):
         if strip_tcl(blob(repo, a.frm, n)) != strip_tcl(blob(repo, a.to, n)):
             bad.append(f"{n}: differs with comments stripped")
     return bad
+
+
+DARIA_SDC = "src/fpga/core/daria_constraints.sdc"
+
+
+def guard_qsf_release(repo, a):
+    q = "src/fpga/ap_core.qsf"
+    frm = strip_tcl(blob(repo, a.frm, q))
+    bad = [f"{q} at {a.frm} lacks the DARIA line: {t}" for t in DARIA_QSF if t not in frm]
+    rest = lambda text: [t for t in strip_tcl(text) if not SEED.match(t)]
+    if rest(blob(repo, a.frm, q)) != rest(blob(repo, a.to, q)):
+        bad.append(f"{q}: differs other than in the SEED line and comments")
+    seeds = lambda rev: sum(1 for t in strip_tcl(blob(repo, rev, q)) if SEED.match(t))
+    n_to = seeds(a.to)
+    if n_to > 1 or (n_to != 1 and seeds(a.frm)):
+        # a lost SEED line would ship Quartus' default seed, not P12's
+        bad.append(f"{q}: expected exactly one SEED line, {a.to} has {n_to}")
+    return bad + guard_qsf_comments(repo, a, free=(q, DARIA_SDC))
 
 
 def main():
@@ -191,13 +218,15 @@ def main():
     p.add_argument("--repo", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
     p.add_argument("--from", dest="frm", required=True)
     p.add_argument("--to", default="HEAD")
-    p.add_argument("--qsf", choices=("daria", "comments", "none"), default="none")
+    p.add_argument("--qsf", choices=("daria", "release", "comments", "none"), default="none")
     a = p.parse_args()
     repo = os.path.abspath(a.repo)
     rc = 0
     checks = [("directive", guard_directive), ("daria", guard_daria), ("files", guard_files)]
     if a.qsf == "daria":
         checks.append(("qsf daria", guard_qsf_daria))
+    elif a.qsf == "release":
+        checks.append(("qsf release", guard_qsf_release))
     elif a.qsf == "comments":
         checks.append(("qsf/sdc comments", guard_qsf_comments))
     print(f"pp_guards {a.frm}..{a.to} in {repo}")

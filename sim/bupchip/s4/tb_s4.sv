@@ -63,8 +63,8 @@
 //                   S3's clock, instead of 2 x
 //   +arm38          clk_arm at 8/3 x clk_sys (38.18 MHz, DARIA's VCO / 18;
 //                   37.83 with +pal), rising edges together every 3 clk_sys
-//   +arm19          clk_arm at 48/19 x clk_sys (36.17 MHz, DARIA's shipped
-//                   divider VCO / 19; 35.84 with +pal), 9.5 VCO periods high
+//   +arm19          clk_arm at 48/19 x clk_sys (36.17 MHz, the ÷19 fallback,
+//                   VCO / 19, 2.2.1's; 35.84 with +pal), 9.5 VCO periods high
 //                   and 9.5 low, rising edges together every 19 clk_sys
 //                   (docs/daria_step7/plan.md F5, 5.2)
 //   +ramjunk=SEED   POCKET_DARIA builds: fill all 32 KB of cart RAM with

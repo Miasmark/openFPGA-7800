@@ -10,8 +10,8 @@
 // Everything here runs on clk_sys (14.318181 MHz) except the SDRAM
 // controller, which runs on clk_sdram (exactly 4 x clk_sys, phase aligned),
 // and with POCKET_BUPCHIP the BupChip and its PSRAM controller, on clk_arm
-// (exactly 2 x clk_sys, phase aligned; with POCKET_DARIA VCO/19, 36.17 MHz,
-// from the same VCO, so 48 clk_arm to 19 clk_sys: pll/pll_core.v). The DARIA
+// (exactly 2 x clk_sys, phase aligned; with POCKET_DARIA VCO/18, 38.18 MHz,
+// from the same VCO, so 8 clk_arm to 3 clk_sys: pll/pll_core.v). The DARIA
 // front end (POCKET_DARIA, daria_fe below) runs on clk_sys, but for one
 // clk_arm flop of its guard.
 //
@@ -27,7 +27,7 @@ module atari7800_pocket
 	input  wire        clk_sys,
 	input  wire        clk_sdram,
 `ifdef POCKET_BUPCHIP
-	input  wire        clk_arm,         // the BupChip: 2 x clk_sys, edge aligned; VCO/19 with POCKET_DARIA
+	input  wire        clk_arm,         // the BupChip: 2 x clk_sys, edge aligned; VCO/18 with POCKET_DARIA
 `endif
 	input  wire        pll_locked,
 	input  wire        pll_busy,        // clk_74a: PLL retune (PAL/NTSC) in progress
@@ -1604,10 +1604,9 @@ daria_fe u_fe
 // is a minimum time, and slower settings break its state machine
 // (docs/BUPCHIP_CORE.md, "Controller"). CLOCK_SPEED is 28.636364 with
 // clk_arm at 2 x clk_sys, 5 clk_arm per halfword. With POCKET_DARIA clk_arm
-// is VCO/19, 36.17 MHz (VCO/18, 38.18 MHz, until plan 5.2), where one clock
-// from oe_n to the sample (27.6 ns; 26.2 ns at VCO/18) leaves no margin over
-// the part's output-enable access with the pad delays (about 27 ns, an
-// estimate), so CLOCK_SPEED is 50.0: two clocks there, 6 clk_arm per
+// is VCO/18, 38.18 MHz, where one clock from oe_n to the sample (26.2 ns) is
+// short of the part's output-enable access with the pad delays (about 27 ns,
+// an estimate), so CLOCK_SPEED is 50.0: two clocks there, 6 clk_arm per
 // halfword (docs/DARIA_CORE.md 7.4;
 // docs/daria_step7/plan.md P18, which tb_load checks by the parameter).
 `ifdef POCKET_DARIA

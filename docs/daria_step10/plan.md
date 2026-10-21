@@ -444,6 +444,7 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
    - `PP_EXPECT` becomes F′'s non-DARIA stream hash.
    - `PP_GUARD_FROM` becomes F′.
    - `pp_guards`' qsf rule must fit that range. From F′ the `ap_core.qsf` diff should be the SEED line and comments only. `--qsf daria` as written expects the three DARIA lines to be added once, and would fail.
+   - **Interim until F′ (2026-10-21):** `PP_GUARD_FROM` = the MR commit (`git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf`), `PP_EXPECT` = `34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21` (the L1W+L3 CPU and the `sram_ctrl` key copy; the MR commit's own stream, `56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd`, has two more lint metacomment lines in `bup_cpu.sv`); `pp_guards` picks `--qsf release` (`sim/step7_gates.sh`'s header).
 3. **Then the DARIA-side changes:**
    - G1;
    - the PLL at C3 = 18, with the bench defaults;
