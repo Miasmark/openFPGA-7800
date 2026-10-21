@@ -392,6 +392,10 @@ def main():
             f.write('desc %s\n' % meta.get('desc', ''))
             if meta.get('tree_bench'):
                 f.write('tree_bench 1\n')
+            if meta.get('ovl_late'):
+                # the late calls the DARIA status overlay must count in a
+                # tb_load +daria=MS run (run_sim.sh's DARIA section)
+                f.write('ovl_late %d %d\n' % meta['ovl_late'])
             for k, a in sorted(img.labels.items(), key=lambda kv: kv[1]):
                 f.write('check %s %d\n' % (k, a))
         print('%-14s %6d bytes  scheme %d rev %d' % (n, len(rom), bs, rev))

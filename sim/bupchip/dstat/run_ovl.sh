@@ -14,11 +14,20 @@
 #              calls' low twelve bits miswired between u_dstat and the overlay
 #   xc88       bup_status_osd.sv: the DARIA rows' window ends at x 88, not
 #              96; column 11 is never drawn
+#   g_locked0  atari7800_pocket.sv: u_dstat's .g_locked(1'b0); the guard bit
+#              never set (seen in frame_cdfj_pattern, whose +ovl_guard
+#              forces the guard's nets, at VCO/19 too)
+#   g_unlock0  atari7800_pocket.sv: u_dstat's .g_unlock(1'b0); no unlock
+#              counted (frame_cdfj_pattern's forced pulses)
+#   rows9      bup_status_osd.sv: the DARIA rows are 72 lines tall whether
+#              halted or not; rows 6-8 drawn while running
 # A mutant is CAUGHT when every run's DARIA result still passes (the fault is
 # the overlay's alone), the section ends "DARIA FAIL", at least one overlay
-# line fails, and every overlay line that fails names only read-back terms
-# (cells, coverage, pattern; not counts, riot-copy or timer, which the
-# mutants leave alone). A build that fails, a run without its lines or a
+# line fails, every overlay line that fails names only terms the mutant can
+# reach (TERMS below: cells, coverage and pattern for the first three; the
+# guard, unlocks or rows term for the last three; never calls, riot-copy or
+# timer, which every mutant leaves alone) and some line names the term the
+# mutant is for (KEY below). A build that fails, a run without its lines or a
 # DARIA result that fails is an ERROR, not a catch.
 # Environment: ARM_DIV (run_sim.sh's; default the benches' 19), WORK
 # (default sim/work/bupchip/dstat/ovl), VERILATOR (default
@@ -33,7 +42,7 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 WORK="${WORK:-$ROOT/sim/work/bupchip/dstat/ovl}"
 export VERILATOR="${VERILATOR:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
 export VL_JOBS="${VL_JOBS:-2}"
-MUTANTS="nodaria dstat_lo0 xc88"
+MUTANTS="nodaria dstat_lo0 xc88 g_locked0 g_unlock0 rows9"
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 WHAT=("$@")
@@ -72,6 +81,9 @@ mutate() {
 	    "xc88": ("bupchip/bup_status_osd.sv",
 	             "wire       in_osd = (dar ? yc < d_lines : en && yc < 7'd104) && !hblank && !vblank && xc < 7'd96;",
 	             "wire       in_osd = (dar ? yc < d_lines && xc < 7'd88 : en && yc < 7'd104) && !hblank && !vblank && xc < 7'd96;"),
+	    "g_locked0": ("atari7800_pocket.sv", "\t.g_locked  (daria_dbg_locked),", "\t.g_locked  (1'b0),"),
+	    "g_unlock0": ("atari7800_pocket.sv", "\t.g_unlock  (daria_dbg_unlock),", "\t.g_unlock  (1'b0),"),
+	    "rows9": ("bupchip/bup_status_osd.sv", "wire [6:0] d_lines = st[28] ? 7'd72 : 7'd48;", "wire [6:0] d_lines = 7'd72;"),
 	}
 	f, a, b = M[m]
 	p = core + "/" + f
@@ -104,9 +116,15 @@ for w in "${WHAT[@]}"; do
 	section "mut_$w" "$mt"
 	out="$WORK/mut_$w/run_sim.out"
 	grep -E "^(-- built|  [a-z_]+: |    overlay: |    FAIL|  overlay cells:|DARIA (pass|FAIL)|exit )" "$out" | cut -c1-400
-	v="$(python3 - "$out" <<-'PY'
+	v="$(python3 - "$out" "$w" <<-'PY'
 	import re, sys
 	L = open(sys.argv[1], errors="replace").read().splitlines()
+	mut = sys.argv[2]
+	READ = {"cells", "coverage", "pattern"}
+	TERMS = {"nodaria": READ, "dstat_lo0": READ, "xc88": READ,
+	         "g_locked0": {"guard"}, "g_unlock0": {"unlocks"}, "rows9": {"rows"}}[mut]
+	KEY = {"nodaria": "coverage", "dstat_lo0": "cells", "xc88": "coverage",
+	       "g_locked0": "guard", "g_unlock0": "unlocks", "rows9": "rows"}[mut]
 	runs, cur = {}, None
 	for l in L:
 	    m = re.match(r"^  ([a-z_]+): (.*)$", l)
@@ -120,8 +138,8 @@ for w in "${WHAT[@]}"; do
 	why = []
 	if not any(l.startswith("-- built:") for l in L):
 	    why.append("no build")
-	if len(runs) != 5:
-	    why.append("%d runs, not 5" % len(runs))
+	if len(runs) != 6:
+	    why.append("%d runs, not 6" % len(runs))
 	for r, d in runs.items():
 	    if d["fail"] or d["result"].startswith("none"):
 	        why.append(r + ": its DARIA result fails")
@@ -135,13 +153,16 @@ for w in "${WHAT[@]}"; do
 	    m = re.search(r"; FAIL \(([a-z -]+)\)$", d["ovl"])
 	    if m:
 	        fails[r] = m.group(1).split()
-	other = sorted({t for v in fails.values() for t in v} - {"cells", "coverage", "pattern"})
+	named = {t for v in fails.values() for t in v}
+	other = sorted(named - TERMS)
 	if "DARIA FAIL" not in L:
 	    print("NOT CAUGHT: the section does not say DARIA FAIL")
 	elif not fails:
 	    print("NOT CAUGHT: every overlay line passes")
 	elif other:
 	    print("ERROR: an overlay line fails on %s, which this mutant leaves alone" % ", ".join(other))
+	elif KEY not in named:
+	    print("NOT CAUGHT for its reason: no overlay line fails on %s (they fail on %s)" % (KEY, ", ".join(sorted(named))))
 	else:
 	    print("CAUGHT: " + "; ".join("%s fails on %s" % (r, " ".join(v)) for r, v in fails.items()))
 	PY

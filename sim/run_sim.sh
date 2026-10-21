@@ -23,7 +23,9 @@
 #                  --x-assign fast --x-initial fast, as run_daria.sh builds
 #                  tb_daria (docs/daria_step7/plan.md 3.6 I4c)
 #   FRAMES_DEBUG=1 build tb_frames with BUP_DEBUG all the same: its DARIA
-#                  status overlay checks (sim/tb_frames.sv's header)
+#                  status overlay checks (sim/tb_frames.sv's header). The
+#                  build writes WORK/obj_frames.mode ("FRAMES_DEBUG=0|1 md5
+#                  <the binary's>"), which sim/run_frames.sh checks
 #   ONLY=daria     build tb_load alone and run only the DARIA section (below),
 #                  e.g. the BUP_DEBUG overlay check at another divider or on
 #                  a scratch tree (sim/bupchip/dstat/run_ovl.sh); its log is
@@ -204,7 +206,10 @@ if [ -n "${BUILD_TOP:-}" ]; then
 			dbg=off
 			if [ "${FRAMES_DEBUG:-0}" = 1 ] && [ "${BUPCHIP:-1}" = 1 ]; then BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"; dbg="on (FRAMES_DEBUG=1)"; fi
 			echo "-- tb_frames: BUP_DEBUG $dbg, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
-			build tb_frames $o "$HERE/tb_load.sv" ;;
+			build tb_frames $o "$HERE/tb_load.sv"
+			# the build's mode, for run_frames.sh: BUP_DEBUG or not, and the binary it is for
+			fdbg=0; [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]] && fdbg=1
+			echo "FRAMES_DEBUG=$fdbg md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)" > "$WORK/$o.mode" ;;
 		*) echo "run_sim.sh: BUILD_TOP=$BUILD_TOP: tb_system, tb_load, tb_cartram or tb_frames" >&2; exit 1 ;;
 	esac
 	echo "-- built $BUILD_TOP: $o/vtb md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)"
@@ -417,21 +422,31 @@ fi   # ONLY
 # ARM_DIV=18.
 # With BUP_DEBUG, the DARIA status overlay (tb_load.sv's overlay block) too.
 # Each run's "DARIA overlay:" line must pass: the overlay's counts equal the
-# bench's, its copy of the RIOT timer equals the RIOT, its cells read back as
-# its layout says from u_dstat's counts, and it checked what OVL below
-# requires of that run (the rows whose every cell must be read back, the
-# least number of cells read; +ovl_timer: the RIOT timer written and read,
-# with late calls and calls on time). smoke_dpc's and smoke_cdf's frames are
-# a few lines long and never reach the TIA's window, which opens at line 19:
-# for them the rows and cells are waived (+ovl_rows=0 +ovl_cells=0), and
-# their lines say so. Two more runs join the section in these builds only:
-# frame_cdfj (fe_dir's tests.CORE_TESTS: 105-line frames, which show the six
-# rows, and the RIOT timer written before each call and read once after it)
-# and frame_cdfj_pattern, the same image with the overlay's inputs forced
+# bench's (calls since the console's last reset, unlocks, the guard bit),
+# its copy of the RIOT timer equals the RIOT, its cells read back as its
+# layout says from u_dstat's counts, rows 6-8 only while halted, and it
+# checked what OVL below requires of that run (the rows whose every cell must
+# be read back, at least a given number of cells read; +ovl_timer: the RIOT
+# timer written and read, with late calls and calls on time; +ovl_late=meta:
+# exactly the late calls the image's .meta gives for this run length).
+# smoke_dpc's and smoke_cdf's frames are a few lines long and never reach the
+# TIA's window, which opens at line 19: for them the rows and cells are
+# waived (+ovl_rows=0 +ovl_cells=0), and their lines say so. Three more runs
+# join the section in these builds only: frame_cdfj (fe_dir's
+# tests.CORE_TESTS: 105-line frames, which show the six rows, and the RIOT
+# timer written before each call and read once after it);
+# frame_cdfj_pattern, the same image with the guard's nets forced from 100
+# ms (locked for 20 ms, 4 unlock pulses: +ovl_guard, so the guard and unlock
+# terms compare nonzero values at VCO/19 too) and the overlay's inputs forced
 # from 150 ms to a pattern and then its complement (+ovl_pattern_at), which
-# light every cell, every row and every colour, rows 6-8 included. Then the
-# section as a whole: "overlay cells:" sums the cells read back and requires
-# rows 0-5 complete in the normal runs and rows 0-8 in the pattern's.
+# light every cell, every row and every colour, rows 6-8 included; and
+# frame_cdfj_retune, the same image with a PAL/NTSC retune at 150 ms
+# (+retune), whose console reset clears u_dstat's calls and late calls: the
+# second epoch must compare as the first (+ovl_resets=2). Then the section as
+# a whole: "overlay cells:" sums the cells read back and requires rows 0-5
+# complete in the normal runs and rows 0-8 in the pattern's.
+# sim/check/run_sim_check.py also requires each run's line to state the
+# requirement OVL gives it.
 # Only in the DARIA build; without POCKET_DARIA the section is inactive,
 # which is not a pass (run_sim_check.py).
 if [ "$DARIA_ON" = 1 ]; then
@@ -444,31 +459,46 @@ if [ "$DARIA_ON" = 1 ]; then
 	if [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]]; then
 		OVL_ON=1
 		DIMG+=(frame_cdfj)
-		RUNS+=(frame_cdfj frame_cdfj_pattern)
+		RUNS+=(frame_cdfj frame_cdfj_pattern frame_cdfj_retune)
 	fi
 	# the overlay's requirement of each run (BUP_DEBUG builds). The cell
 	# floors are about half the cells measured at VCO/19 and /18
 	# (digital_cdfj 4,008; frame_cdfj and its pattern run: run_ovl.sh's logs).
+	# +ovl_late=meta: the .meta's "ovl_late N MS", for +daria=MS only.
 	declare -A OVL=(
 		[smoke_dpc]="+ovl_rows=0 +ovl_cells=0"
 		[smoke_cdf]="+ovl_rows=0 +ovl_cells=0"
 		[digital_cdfj]="+ovl_rows=7 +ovl_cells=2000"
-		[frame_cdfj]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1"
-		[frame_cdfj_pattern]="+region=1 +ovl_rows=1FF +ovl_cells=2000 +ovl_timer=1 +ovl_pattern_at=150")
+		[frame_cdfj]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1 +ovl_late=meta"
+		[frame_cdfj_pattern]="+region=1 +ovl_rows=1FF +ovl_cells=2000 +ovl_timer=1 +ovl_late=meta +ovl_guard=4 +ovl_guard_at=100 +ovl_pattern_at=150"
+		[frame_cdfj_retune]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1 +ovl_resets=2 +retune=150")
 	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" "${DIMG[@]}" > "$DR/mkimg.log"
 	daria_ok=1
 	guard=unlocked; [ "${ARM_DIV:-19}" = 18 ] && guard=locked
 	ovl_n=0; ovl_rows=0; ovl_prows=0
 	for r in "${RUNS[@]}"; do
-		t="${r%_pattern}"
+		t="${r%_pattern}"; t="${t%_retune}"
 		oa=""; [ "$OVL_ON" = 1 ] && oa="${OVL[$r]}"
+		lfail=""
+		if [[ " $oa " == *" +ovl_late=meta "* ]]; then
+			lm="$(sed -n 's/^ovl_late \([0-9]*\) \([0-9]*\)$/\1 \2/p' "$DR/img/$t.meta")"
+			if [ -n "$lm" ] && [ "${lm#* }" = "${DARIA_MS:-300}" ]; then oa="${oa/+ovl_late=meta/+ovl_late=${lm% *}}"
+			else
+				lfail="$t.meta gives no late count for +daria=${DARIA_MS:-300} (it has: ${lm:-none})"
+				oa="${oa/ +ovl_late=meta/}"
+			fi
+		fi
 		# shellcheck disable=SC2086
 		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $oa $(fp daria_$r) < /dev/null > "$r.log" 2>&1) || true
 		line="$(grep -m1 "^DARIA result:" "$DR/$r.log" || echo "DARIA result: none (the run did not finish; see $DR/$r.log)")"
 		echo "  $r: ${line#DARIA result: }"
-		python3 - "$DR/img/$t.meta" "$line" "$guard" <<-'PY' || daria_ok=0
+		[ -z "$lfail" ] || { echo "    FAIL: $lfail"; daria_ok=0; }
+		# +ovl_guard=N forces N unlock pulses on the guard's net, which the
+		# bench's unlock count (this line's) sees too: exactly N, not 0
+		ul=0; [[ " $oa " =~ \ \+ovl_guard=([0-9]+)\  ]] && ul="${BASH_REMATCH[1]}"
+		python3 - "$DR/img/$t.meta" "$line" "$guard" "$ul" <<-'PY' || daria_ok=0
 		import re, sys
-		meta, line, guard = sys.argv[1], sys.argv[2], sys.argv[3]
+		meta, line, guard, ul = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 		need = {"dir_marker": 1, "call_accept": 1}
 		for l in open(meta):
 		    m = re.match(r"need (dir_marker|call_accept) >= (\d+)$", l.strip())
@@ -488,7 +518,7 @@ if [ "$DARIA_ON" = 1 ]; then
 		    if int(viol): bad.append("psram_viol %s" % viol)
 		    if int(halt): bad.append("halted")
 		    if g != guard: bad.append("guard %s, expected %s" % (g, guard))
-		    if int(unl): bad.append("unlocks %s" % unl)
+		    if int(unl) != ul: bad.append("unlocks %s" % unl + (", expected %d (forced)" % ul if ul else ""))
 		if bad:
 		    print("    FAIL: " + "; ".join(bad))
 		sys.exit(1 if bad else 0)

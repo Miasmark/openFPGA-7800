@@ -110,7 +110,9 @@
 //   OVERLAY counts / checks / result: PASS|FAIL
 // +ovl_halt_at=F forces the overlay's halt rows from frame F (below); give
 // +ovl_rows=1FF with it, so that every cell of the nine rows must have been
-// read back. The result also needs what tb_load.sv's overlay block requires
+// read back. Without it the last whole frame must show exactly rows 0-5, and
+// no frame may draw rows 6-8 while the halt bit is 0 (tb_load.sv's
+// ovl_rows_bad). The result also needs what tb_load.sv's overlay block requires
 // of what was checked (+ovl_rows, default 3F: rows 0-5 complete; +ovl_cells),
 // and at least one of the end-of-run compares of the picture with the bench.
 // The overlay's result joins the run's. The frames, calls and every file
@@ -546,13 +548,14 @@ module tb_frames;
 			n_cmp++; lk_ok = tb.ovl_last[0][10] == ovl_b_lk[0]; lk_s = lk_ok ? "equal" : "DIFFER"; end
 		$display("OVERLAY counts: calls %0d, late %0d, unlocks %0d, guard %0s; %0d of %0d frame ends differ from the bench's",
 			tb.dut.u_dstat.calls, tb.dut.u_dstat.late, tb.dut.u_dstat.unl, tb.dut.u_dstat.locked ? "locked" : "unlocked", ovl_cnt_bad, ovl_cnt_n);
-		$display("OVERLAY checks: the RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; the picture against the bench (%0d of 3 compared): late calls %0s, unlocks %0s, guard %0s",
-			tb.ovl_rt_bad, tb.ovl_px_bad, tb.ovl_px_n, n_cmp, late_s, unl_s, lk_s);
+		$display("OVERLAY checks: the RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0d frames drew rows 6-8 while not halted; the picture against the bench (%0d of 3 compared): late calls %0s, unlocks %0s, guard %0s",
+			tb.ovl_rt_bad, tb.ovl_px_bad, tb.ovl_px_n, tb.ovl_rows_bad, n_cmp, late_s, unl_s, lk_s);
 		$display("OVERLAY %0s; %0s", tb.ovl_checked(), tb.ovl_cover_ok() ? "enough" : "NOT ENOUGH");
 		$display("OVERLAY %0s", tb.ovl_shown());
-		// a game's frame shows all six rows (rows 6-8 only while halted)
+		// a game's frame shows all six rows, and rows 6-8 only while halted
 		ok = ovl_cnt_bad == 0 && ovl_cnt_n > 0 && tb.ovl_rt_bad == 0 && tb.ovl_px_bad == 0 && tb.ovl_frames > 0 &&
-			tb.ovl_last_rows[5:0] == 6'h3F && late_ok && unl_ok && lk_ok && n_cmp > 0 && tb.ovl_cover_ok();
+			tb.ovl_rows_bad == 0 && (ovl_halt_at > 0 ? tb.ovl_last_rows[5:0] == 6'h3F : tb.ovl_last_rows == 9'h03F) &&
+			late_ok && unl_ok && lk_ok && n_cmp > 0 && tb.ovl_cover_ok();
 		if (ovl_halt_at > 0) begin
 			bit h_ok;
 			h_ok = tb.ovl_last_rows == 9'h1FF && tb.ovl_last[0][11] && tb.ovl_last[0][8] && tb.ovl_last[1] == 12'h900 &&

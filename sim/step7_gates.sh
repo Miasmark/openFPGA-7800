@@ -130,8 +130,9 @@
 #                section alone in a BUP_DEBUG build (each run's overlay line
 #                with its coverage, the pattern run, the section's "overlay
 #                cells:" line), and its RTL mutants each CAUGHT; ARM_DIV
-#                passes through (default 19). About an hour in one slot.
-#                Needs POCKET_DARIA in the qsf
+#                passes through (default 19). Then run_ovl.sh's control
+#                again with ARM_DIV=18, where the guard really locks. About
+#                an hour and a half in one slot. Needs POCKET_DARIA in the qsf
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
 #                as R1's bench presents them, bench parity) against R1's
@@ -468,6 +469,7 @@ g_dbg_overlay() {
 	local rc=0
 	WORK="$OUT/dstat" slot bash "$HERE/bupchip/dstat/run_dstat.sh" || rc=1
 	WORK="$OUT/ovl" slot bash "$HERE/bupchip/dstat/run_ovl.sh" || rc=1
+	WORK="$OUT/ovl18" ARM_DIV=18 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
 	return $rc
 }
 g_frames() {

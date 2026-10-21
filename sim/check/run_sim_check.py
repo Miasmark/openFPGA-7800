@@ -32,11 +32,14 @@ anything. A log from before step 7 (no "-- run_sim.sh:" line) has no DARIA
 section at all; it is then checked as a plain build.
 In a BUP_DEBUG build of DARIA (the "-- run_sim.sh:" line's defines hold
 -DBUP_DEBUG) the DARIA status overlay's lines are required too: one
-"overlay: ... PASS" line under each of the section's five runs (smoke_dpc,
-smoke_cdf, digital_cdfj, frame_cdfj, frame_cdfj_pattern), each with its
-"checked:" field, and the section's "overlay cells: ...; pass" line; a
-BUP_DEBUG build without them fails ("the overlay check did not run"), and
-so does an overlay line in a build without BUP_DEBUG.
+"overlay: ... PASS" line under each of the section's six runs (smoke_dpc,
+smoke_cdf, digital_cdfj, frame_cdfj, frame_cdfj_pattern, frame_cdfj_retune),
+each with its "checked:" field stating the requirement run_sim.sh's OVL
+table gives that run (OVL_REQ below: the rows, the waiver or a cell floor,
+the exact late calls, the forced guard, the pattern, the second reset), and
+the section's "overlay cells: ...; pass" line; a BUP_DEBUG build without
+them fails ("the overlay check did not run"), and so does an overlay line in
+a build without BUP_DEBUG.
 --only daria checks a run_sim.sh ONLY=daria log (tb_load and the DARIA
 section alone): the global rules and the DARIA section only. A log that
 says ONLY=daria fails without it, and one that does not fails with it.
@@ -56,7 +59,23 @@ TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured 
 # a build without BUP_DEBUG compares as before)
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
                           r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
-OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern")
+OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern", "frame_cdfj_retune")
+# What each run's overlay line must say it required and checked (run_sim.sh's
+# OVL table): a line that passes on a smaller requirement fails here.
+_WAIVED = r"required 000000000, at least 0 cells\)"
+_LATE = r"\(required, with exactly (\d+) late calls\)"
+_SOME_LATE = r"\(required, with late calls above 0 and below the calls\)"
+OVL_REQ = {
+    "smoke_dpc": [_WAIVED],
+    "smoke_cdf": [_WAIVED],
+    "digital_cdfj": [r"required 000000111, at least [1-9]\d* cells\)"],
+    "frame_cdfj": [r"required 000111111, at least [1-9]\d* cells\)", _LATE],
+    "frame_cdfj_pattern": [r"required 111111111, at least [1-9]\d* cells\)", _LATE,
+                           r"guard forced: [1-9]\d* unlock pulses counted, locked on [1-9]\d* clk_sys \(required at least [1-9]\d* pulses\)",
+                           r"; pattern read back as forced \("],
+    "frame_cdfj_retune": [r"required 000111111, at least [1-9]\d* cells\)", _SOME_LATE,
+                          r"reset releases [2-9]\d* \(required at least 2\)"],
+}
 AXIS = [
     r"AXIS start at 128",
     r"AXIS 16 ms tap right: 129",
@@ -169,6 +188,13 @@ def overlay_check(body, debug, bad, notes):
         elif not re.search(r"; checked: \d+ cells \(rows complete [01]{9}, required [01]{9}, at least \d+ cells\)", nxt[0]) \
                 or not nxt[0].endswith("; PASS"):
             bad.append(f"BUP_DEBUG build: DARIA run {run}: overlay line not a pass with its checked field: {nxt[0][:160]}")
+        else:
+            miss = [r for r in OVL_REQ[run] if not re.search(r, nxt[0])]
+            if miss:
+                bad.append(f"BUP_DEBUG build: DARIA run {run}: overlay line without its requirement: " + "; ".join(miss))
+            m, n = re.search(_LATE, nxt[0]), re.match(r"overlay: calls \d+ .*?, late calls (\d+),", nxt[0])
+            if m and (not n or n.group(1) != m.group(1)):
+                bad.append(f"BUP_DEBUG build: DARIA run {run}: late calls {n.group(1) if n else '?'}, required {m.group(1)}")
     agg = [x.strip() for x in s if x.strip().startswith("overlay cells:")]
     if len(agg) != 1 or not re.fullmatch(r"overlay cells: [1-9]\d* read back in the section; rows complete [01]{3}111111 in "
                                          r"the normal runs, 111111111 in the pattern run \(.*\); pass", agg[0]):
