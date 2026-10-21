@@ -202,6 +202,13 @@ def run_sim_cases(log, w):
         "fa2_slot_differs": sub1(r"^(FA2 save slot read back \(APF read protocol\): )0( of 256)", r"\g<1>4\g<2>"),
         "fa2_no_save": sub1(r"^(FA2 program: .*flash loads 2, saves )1(, slot RAM writes )256$", r"\g<1>0\g<2>0"),
         "fa2_a78_overwrote": sub1(r"^(FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>"),
+        # the A78 taken for FA2: its save reached the slot (as before the
+        # wrapper's fa2_on gate: 255 of 256 bytes), or it was not taken for
+        # FA2 at all, so the run could not fail
+        "fa2_a78fa2_overwrote": sub1(r"^(FA2 image: 2600 mapper 25, .*saves 1, slot RAM writes )0(\n(?:.*\n)*?"
+                                     r"FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>255\g<3>"),
+        "fa2_a78fa2_not_fa2": sub1(r"^(FA2 image: 2600 mapper )25(, cart_is_7800 1, tia_mode 0; flash loads 0, )saves 1",
+                                   r"\g<1>0\g<2>saves 0"),
         "fa2_missing": lambda t: re.sub(r"^-- FA2 flash save slot.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
     }
     for k, fn in cases.items():

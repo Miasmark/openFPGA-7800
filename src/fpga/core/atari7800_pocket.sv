@@ -645,6 +645,15 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 // unconnected port this replaces read $FF too). The Pocket writes the file in
 // before the core runs, so the bridge never waits for a load, and it writes
 // every save slot back itself, so the mapper's dirty pulse has no use here.
+// The port is on only in 2600 mode (fa2_on: tia_mode, set at the end of a
+// load that is no A78). detect2600.sv classifies every image, A78s too, and
+// takes some A78 payloads for FA2 (24 or 28 KiB, or 32 KiB with a zero
+// tail); cart2600.sv then runs mapper_fa2.sv, which in 7800 mode still sees
+// the bus, so a 7800 game's accesses to $x0FF and $xFF4 could start a save
+// and write junk over the shared file. With fa2_on low the bridge sees no
+// request and the mapper gets the answers of the unconnected port this
+// replaces (ready 1, $FF), so it finishes any copy without touching the slot.
+wire       fa2_on = tia_mode;
 wire       fa2_req, fa2_we, fa2_rdy, fa2_ram_we;
 wire [7:0] fa2_addr, fa2_wdata, fa2_rdata, fa2_ram_addr, fa2_ram_d, fa2_ram_q;
 /* verilator lint_off UNUSEDSIGNAL */
@@ -658,7 +667,7 @@ fa2_nvram_bridge fa2_bridge
 	.new_image          (1'b0),
 	.backing_busy       (1'b0),
 	.file_load_complete (1'b1),
-	.request            (fa2_req),
+	.request            (fa2_req & fa2_on),
 	.write              (fa2_we),
 	.addr               (fa2_addr),
 	.wdata              (fa2_wdata),
@@ -1361,8 +1370,8 @@ Atari7800 main
 	.fa2_nvram_write  (fa2_we),
 	.fa2_nvram_addr   (fa2_addr),
 	.fa2_nvram_wdata  (fa2_wdata),
-	.fa2_nvram_rdata  (fa2_rdata),
-	.fa2_nvram_ready  (fa2_rdy),
+	.fa2_nvram_rdata  (fa2_on ? fa2_rdata : 8'hFF),
+	.fa2_nvram_ready  (fa2_on ? fa2_rdy : 1'b1),
 	.fa2_nvram_dirty  (),
 	.ddram_clk        (),
 	.ddram_addr       (),

@@ -268,8 +268,12 @@ sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -aE "LOAD
 # synthetic FA2 cartridge (no game data) loads the flash through the
 # mapper's fa2_nvram_* port, saves it changed, and loads it again; tb_load
 # writes the file in before the run and reads the slot back afterwards with
-# the APF read protocol (+fa2save, +fa2expect, +fa2prog). The A78 run shows a
-# game that is not FA2 leaving the shared file as it was.
+# the APF read protocol (+fa2save, +fa2expect, +fa2prog). Two A78 runs, each
+# with the file loaded, must leave it as it was: load_test.a78, which
+# detect2600.sv does not take for FA2 (mapper_fa2 stays in reset), and
+# fa2_test.py's a78 image, which it does take for FA2 (mapper 25) and which
+# issues a save command in 7800 mode; the wrapper's fa2_on keeps that save
+# off the slot (saves 1, slot RAM writes 0).
 echo "-- FA2 flash save slot (fa2.sav): a synthetic FA2 cartridge loads, saves and reloads it through the mapper's port:"
 python3 "$HERE/fa2_test.py" image > fa2_test.a26
 python3 "$HERE/fa2_test.py" flash 256 > fa2_flash.bin
@@ -279,8 +283,11 @@ echo "  a saved flash file (expect 2 loads, 1 save, 256 slot RAM writes; 0 bytes
 sim ./obj_load/vtb +image=fa2_test.a26 +fa2save=fa2_flash.bin +fa2expect=fa2_flash_expect.bin +fa2prog $(fp fa2_file) | grep -aE "^ *FA2"
 echo "  no file, a blank flash read as \$FF (expect the same counts; 0 bytes differ):"
 sim ./obj_load/vtb +image=fa2_test.a26 +fa2expect=fa2_blank_expect.bin +fa2prog $(fp fa2_blank) | grep -aE "^ *FA2"
-echo "  an A78 game with the file loaded (expect 0 bytes differ):"
+echo "  an A78 game with the file loaded, not taken for FA2 (expect 0 bytes differ):"
 sim ./obj_load/vtb +image=load_test.a78 +audf=7 +fa2save=fa2_flash.bin $(fp fa2_a78) | grep -aE "^ *FA2"
+python3 "$HERE/fa2_test.py" a78 > fa2_test.a78
+echo "  an A78 game taken for FA2 that issues a save command in 7800 mode, the file loaded (expect mapper 25, 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a78 +fa2save=fa2_flash.bin $(fp fa2_a78fa2) | grep -aE "^ *FA2"
 
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a

@@ -5,6 +5,8 @@
   fa2_test.py flash SEED     256 pseudo-random bytes (random.Random(SEED))
   fa2_test.py expect [SEED]  what the program leaves in the flash, starting
                              from that file, or from a blank flash ($FF)
+  fa2_test.py a78            32 KiB A78 (128-byte header) that detect2600.sv
+                             takes for FA2, and that issues a save command
 
 A 24 KiB 2600 image is detected as FA2 (detect2600.sv). mapper_fa2.sv puts
 its 256-byte work RAM at $1000-$10FF (write) and $1100-$11FF (read), and
@@ -20,6 +22,15 @@ in every bank, at $1200:
   4. fill bytes 0-254 with $5A, load the flash again and wait: the work RAM
      must then hold the saved bytes again;
   5. store $A5 at $80 (RIOT RAM byte 0), the bench's signal, and loop.
+
+The a78 image is a 7800 game that must leave the shared fa2.sav alone.
+detect2600.sv classifies every image, A78s too: an A78 whose 32 KiB payload
+has a zero tail (file offsets 29696-32767, header included) is BANKFA2, and
+cart2600.sv then runs mapper_fa2.sv, which in 7800 mode still sees the bus
+as {AB[12], AB[11:0]}. The program, at $8000 (the payload's start), stores
+2 at $10FF (work RAM byte $FF: the save command) and reads $1FF4 (the flash
+hotspot), then loops. Without a gate on 7800 mode that save writes the
+mapper's work RAM (all $00 here) over the file.
 
 SPDX-License-Identifier: MIT
 """
@@ -91,6 +102,28 @@ def image():
     return img
 
 
+def a78():
+    hdr = bytearray(128)
+    hdr[0] = 4                                    # header version
+    hdr[1:17] = b"ATARI7800".ljust(16)
+    hdr[17:49] = b"FA2 save test (synthetic)".ljust(32, b"\0")
+    hdr[49:53] = (32768).to_bytes(4, "big")       # payload size
+    hdr[55] = hdr[56] = 1                         # joysticks; flags 0, NTSC
+    hdr[100:128] = b"ACTUAL CART DATA STARTS HERE"
+    pay = bytearray(32768)                        # $8000-$FFFF
+    code = bytes((0x78, 0xD8, 0xA2, 0xFF, 0x9A,   # SEI; CLD; LDX #$FF; TXS
+                  0xA9, 0x02, 0x8D, 0xFF, 0x10,   # LDA #2; STA $10FF
+                  0x2C, 0xF4, 0x1F,               # BIT $1FF4
+                  0x4C, 0x0D, 0x80))              # JMP $800D (itself)
+    pay[:len(code)] = code
+    for v in (0x7FFA, 0x7FFC, 0x7FFE):            # NMI, reset, IRQ: $8000
+        pay[v:v + 2] = bytes((0x00, 0x80))
+    img = bytes(hdr + pay)
+    # detect2600.sv's 32 KiB FA2 rule: file bytes 29696-32767 all zero
+    assert len(img) - 128 == 32768 and not any(img[29696:32768])
+    return img
+
+
 def flash(seed):
     return random.Random(seed).randbytes(256)
 
@@ -103,6 +136,8 @@ def main():
     a = sys.argv[1:]
     if a == ["image"]:
         out = image()
+    elif a == ["a78"]:
+        out = a78()
     elif len(a) == 2 and a[0] == "flash":
         out = flash(int(a[1]))
     elif a[:1] == ["expect"] and len(a) <= 2:

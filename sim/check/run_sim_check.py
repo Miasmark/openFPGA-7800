@@ -27,8 +27,10 @@ against its expected lines and fails on:
   - the FA2 flash save slot's lines (fa2.sav, sim/fa2_test.py's program)
     other than expected: each FA2 program run done with 2 flash loads, 1
     save and 256 writes into the slot's RAM, 0 bytes wrong in the work RAM
-    after the reload and in the slot read back, and the A78 run leaving
-    the file as it was;
+    after the reload and in the slot read back, and both A78 runs leaving
+    the file as it was: load_test.a78 (not taken for FA2) and fa2_test.py's
+    a78 image (taken for FA2, mapper 25, its save done with no write into
+    the slot's RAM);
   - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
     with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
   - tb_region (sim/run_region.sh) other than its lines for the DARIA and
@@ -122,15 +124,19 @@ REGION = [
     r"REGION verdict plain: pass \(.*\)",
 ] + [r"REGION verdict %s: planted, caught" % v for v in ("old", "rtl2", "rtl1", "sketch")] + [r"REGION pass"]
 # The FA2 flash save slot (fa2.sav): each pattern and how many times the
-# section must hold it (the two FA2 program runs, then the A78 run; mapper 25
-# is detect2600.sv's BANKFA2). FA2 lines are not in VERDICT_LINE, so a --ref
-# log from before the slot still compares.
+# section must hold it (the two FA2 program runs, then the two A78 runs; mapper
+# 25 is detect2600.sv's BANKFA2). The second A78 run is the one that can fail:
+# an A78 taken for FA2 whose save command, in 7800 mode, must not reach the
+# slot (before the wrapper's fa2_on gate it wrote 255 of 256 bytes). FA2 lines
+# are not in VERDICT_LINE, so a --ref log from before the slot still compares.
 FA2 = [
     (r"FA2 program: mapper 25, done after \d+ ms; flash loads 2, saves 1, slot RAM writes 256", 2),
     (r"FA2 work RAM after the reload: 0 of 255 bytes differ from the expected file", 2),
     (r"FA2 save slot read back \(APF read protocol\): 0 of 256 bytes differ from the expected file", 2),
+    (r"FA2 image: 2600 mapper (?!25,)\d+, cart_is_7800 1, tia_mode 0; flash loads 0, saves 0, slot RAM writes 0", 1),
+    (r"FA2 image: 2600 mapper 25, cart_is_7800 1, tia_mode 0; flash loads 0, saves 1, slot RAM writes 0", 1),
     (r"FA2 save slot after load, reset and 300 ms of running \(APF read protocol\): "
-     r"0 of 256 bytes differ from the expected file", 1),
+     r"0 of 256 bytes differ from the expected file", 2),
 ]
 # BIOS cases: title prefix -> (required patterns, does its TONE line have to pass)
 BIOS_CASES = [

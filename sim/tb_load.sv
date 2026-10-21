@@ -1920,6 +1920,12 @@ module tb_load;
 			$display("SAVEKEY save after load, reset and running: %0d of 32768 bytes differ from the save file", sk_diffs);
 		end
 		if (have_fa2) begin
+			// What ran beside the file: the 2600 mapper detect2600.sv chose
+			// (25 = BANKFA2, which runs mapper_fa2.sv), the mode, and
+			// mapper_fa2's copies (a save counts once it is done, whether
+			// or not it reached the slot) and the slot RAM's writes.
+			$display("FA2 image: 2600 mapper %0d, cart_is_7800 %0d, tia_mode %0d; flash loads %0d, saves %0d, slot RAM writes %0d",
+				dut.main.cart2600.mapper, dut.cart_is_7800, dut.tia_mode, fa2_loads, fa2_saves, fa2_port_wr);
 			fa2_readback();
 			$display("FA2 save slot after load, reset and 300 ms of running (APF read protocol): %0d of 256 bytes differ from the expected file", fa2_diffs);
 		end
