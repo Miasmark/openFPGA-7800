@@ -13,8 +13,8 @@ RUN_DIR      a run_daria.sh run with +mam=1 (calls.csv.gz, slack.csv, zero.csv,
 --cfg CFG    the MAM configuration in force (default m2t4: mode 2, MAMTIM 4)
 --daria CSV  DARIA's clocks per call, matched by call number: a calls.csv of
              a tb_frames run (column arm_cyc) or daria.csv of a shadow run
-             (--daria-col daria_clk); --daria-mhz its clock (default VCO/19,
-             36.172249 MHz)
+             (--daria-col daria_clk); --daria-mhz its clock (default VCO/18,
+             38.181818 MHz, DARIA's divider)
 --trace T    the run's +mamtrace file: re-checked with mam_check.py and used
              for the reference model's sensitivity runs
 --out FILE   also write the report there
@@ -319,7 +319,7 @@ def main(argv):
     p.add_argument('--cfg', default='m2t4', choices=ALL)
     p.add_argument('--daria')
     p.add_argument('--daria-col', default='arm_cyc')
-    p.add_argument('--daria-mhz', type=float, default=36.172249)
+    p.add_argument('--daria-mhz', type=float, default=38.181818)
     p.add_argument('--trace')
     p.add_argument('--out')
     a = p.parse_args(argv)
