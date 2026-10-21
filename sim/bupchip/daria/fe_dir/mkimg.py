@@ -9,7 +9,8 @@ the ARM side is armenc.call_routine (hand-encoded Thumb/ARM), and the 6507
 side is assembled by asm6502 from the test sources in tests.py. No game data.
 
   mkimg.py OUTDIR [TEST ...]     write OUTDIR/<test>.bin and OUTDIR/<test>.meta
-                                 (all tests when none is named)
+                                 (all of tests.TESTS when none is named; an
+                                 image of tests.CORE_TESTS only by its name)
 
 Layouts (upstream mapper_dpcplus/mapper_cdf, arm_mapper_ram_init):
   DPC+   32 KB. $0000-$0BFF driver (CRC32 of it picks revision 1 when it is
@@ -370,10 +371,11 @@ def main():
     import tests
     out = sys.argv[1]
     names = sys.argv[2:] or list(tests.TESTS)
+    known = dict(tests.TESTS, **tests.CORE_TESTS)     # CORE_TESTS: by name only
     os.makedirs(out, exist_ok=True)
     for n in names:
         tests._chk[0] = 0
-        img, meta = tests.TESTS[n]()
+        img, meta = known[n]()
         rom = img.build()
         bs, rev = classify(rom)
         exp = meta['scheme']
@@ -390,6 +392,10 @@ def main():
             f.write('desc %s\n' % meta.get('desc', ''))
             if meta.get('tree_bench'):
                 f.write('tree_bench 1\n')
+            if meta.get('ovl_late'):
+                # the late calls the DARIA status overlay must count in a
+                # tb_load +daria=MS run (run_sim.sh's DARIA section)
+                f.write('ovl_late %d %d\n' % meta['ovl_late'])
             for k, a in sorted(img.labels.items(), key=lambda kv: kv[1]):
                 f.write('check %s %d\n' % (k, a))
         print('%-14s %6d bytes  scheme %d rev %d' % (n, len(rom), bs, rev))

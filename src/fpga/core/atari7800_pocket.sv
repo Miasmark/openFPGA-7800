@@ -410,6 +410,9 @@ wire [31:0] daria_fea_q, daria_feb_q, daria_crb_q, daria_crb_wd, daria_stb_q, da
 wire        daria_crb_we, daria_stb_we;
 wire  [3:0] daria_crb_be, daria_stb_be;
 wire  [7:0] daria_stb_addr;
+`ifdef BUP_DEBUG
+wire        daria_dbg_locked, daria_dbg_unlock;   // u_fe's P22 exports, for the overlay
+`endif
 assign      daria_hold = daria_init_busy & daria_arm;
 
 // P20 for the front end's other writes: none reaches cart RAM or state RAM
@@ -1487,7 +1490,7 @@ bupchip_pocket bupchip
 	.daria_ret_tog  (daria_ret_tog),
 	.daria_ready    (daria_ready),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.daria_halted   (),               // read by step 8's BUP_DEBUG overlay
+	.daria_halted   (),               // open: the overlay shows the halt from dbg_status
 	/* verilator lint_on PINCONNECTEMPTY */
 	.daria_stb_addr (daria_stb_addr),
 	.daria_stb_we   (daria_stb_we & daria_we_ok),
@@ -1585,10 +1588,15 @@ daria_fe u_fe
 	.hk_en           (1'b0),
 	.hk_stb          (1'b0),
 	.hk_ret          (192'd0),
+`ifdef BUP_DEBUG
+	.dbg_locked      (daria_dbg_locked),  // the DARIA status overlay (below)
+	.dbg_unlock      (daria_dbg_unlock)
+`else
 	/* verilator lint_off PINCONNECTEMPTY */
 	.dbg_locked      (),
 	.dbg_unlock      ()
 	/* verilator lint_on PINCONNECTEMPTY */
+`endif
 );
 `endif
 
@@ -1634,8 +1642,32 @@ psram #(.CLOCK_SPEED(28.636364)) bup_psram
 );
 
 `ifdef BUP_DEBUG
+`ifdef POCKET_DARIA
+// DARIA's counts for the status overlay: calls, late calls, the guard's lock
+// and unlocks, from the 6507's bus (top.sv's AB, RW and write byte, with the
+// RIOT's clock enable and reset), daria_fe's call side and its P22 exports.
+// daria_dbg_status, in bup_status_osd.sv, has the rules. Hardware test
+// builds only; nothing else reads them.
+wire [48:0] daria_dstat;
+daria_dbg_status u_dstat
+(
+	.clk       (clk_sys),
+	.rst       (daria_reset),       // top.sv's effective_reset, the RIOT's reset
+	.ce        (daria_pclk0),       // the RIOT's clock enable
+	.ab        (bios_addr),         // top.sv's AB
+	.rw        (RW),
+	.db_w      (din),               // top.sv's write_DB
+	.call_busy (daria_call_busy),
+	.call_tog  (daria_call_tog),
+	.g_locked  (daria_dbg_locked),
+	.g_unlock  (daria_dbg_unlock),
+	.dstat     (daria_dstat)
+);
+`endif
+
 // Hardware test builds: the BupChip's status word over the picture's
-// top-left corner while a Souper cartridge is loaded (bup_status_osd.sv).
+// top-left corner while a Souper cartridge is loaded, and DARIA's while a
+// 2600 ARM cartridge runs (bup_status_osd.sv).
 bup_status_osd bup_osd
 (
 	.clk     (clk_sys),
@@ -1643,6 +1675,13 @@ bup_status_osd bup_osd
 	.status  (bup_dbg_status),
 	.halt_pc (bup_dbg_halt_pc),
 	.load    (bup_dbg_load),
+`ifdef POCKET_DARIA
+	.daria   (daria_profile),
+	.dstat   (daria_dstat),
+`else
+	.daria   (1'b0),
+	.dstat   (49'd0),
+`endif
 	.ce_pix  (ce_pix),
 	.hblank  (HBlank),
 	.vblank  (VBlank),

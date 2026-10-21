@@ -94,10 +94,12 @@
 #                src/fpga/mister/rtl/bupchip.hex): without them the jobs
 #                that can run must pass and the gate reports PARTIAL, which
 #                is not a pass
-#   lint         sim/lint_step7.sh: Verilator -Wall over the three macro
-#                sets of plan 3.3 item 1 (the shipped set, the shipped set
-#                without POCKET_DARIA, run_daria.sh's WRAPPER set), no
-#                warning added against aeee6d2
+#   lint         sim/lint_step7.sh --debug: Verilator -Wall over the three
+#                macro sets of plan 3.3 item 1 (the shipped set, the shipped
+#                set without POCKET_DARIA, run_daria.sh's WRAPPER set) and the
+#                shipped set with BUP_DEBUG (the hardware test builds' set,
+#                which holds the DARIA status overlay), no warning added
+#                against aeee6d2 (about 20 s)
 #   wire         lane I1's whole-core checks of the DARIA wiring (plan 7.3,
 #                1.2 row 1; sim/bupchip/daria/wire/wire.py): tb_wire built in
 #                both builds, every scenario (DIRECTED=1: the whole-core
@@ -120,6 +122,17 @@
 #                Needs POCKET_DARIA in the qsf; about 6 hours in one slot
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
+#   dbg_overlay  opt-in (only with --only dbg_overlay; not in a run without
+#                --only): the DARIA status overlay of the BUP_DEBUG builds.
+#                sim/bupchip/dstat/run_dstat.sh (daria_dbg_status against
+#                M6532.sv and tb_frames' late rule, its mutations caught),
+#                then sim/bupchip/dstat/run_ovl.sh: run_sim.sh's DARIA
+#                section alone in a BUP_DEBUG build (each run's overlay line
+#                with its coverage, the pattern run, the section's "overlay
+#                cells:" line), and its RTL mutants each CAUGHT; ARM_DIV
+#                passes through (default 19). Then run_ovl.sh's control
+#                again with ARM_DIV=18, where the guard really locks. About
+#                an hour and a half in one slot. Needs POCKET_DARIA in the qsf
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
 #                as R1's bench presents them, bench parity) against R1's
@@ -183,7 +196,9 @@ OUT="$(cd "$OUT" && pwd)"
 QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
-GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames)
+GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames dbg_overlay)
+# opt-in gates: run only when --only names them
+OPTIN=" dbg_overlay "
 # --only and --skip name gates of GATES only: a misspelt name would select nothing
 for g in ${ONLY//,/ } ${SKIP//,/ }; do
 	[[ " ${GATES[*]} " == *" $g "* ]] || { echo "step7_gates.sh: unknown gate '$g' in --only or --skip (the gates: ${GATES[*]})" >&2; exit 2; }
@@ -220,6 +235,8 @@ avail() {
 			elif [ "$QSF_DARIA" != 1 ]; then echo "POCKET_DARIA is not in the qsf (tb_wire checks the DARIA wiring)"; fi ;;
 		daria_smp) [ -f "$HERE/bupchip/daria/smp/run_smp.sh" ] || echo "sim/bupchip/daria/smp/run_smp.sh does not exist yet (lane I1)" ;;
 		dbg_snap) [ -f "$HERE/bupchip/dbgsnap/run_dbgsnap.sh" ] || echo "sim/bupchip/dbgsnap/run_dbgsnap.sh does not exist yet (lane I3)" ;;
+		dbg_overlay) if [ ! -f "$HERE/bupchip/dstat/run_ovl.sh" ]; then echo "sim/bupchip/dstat/run_ovl.sh does not exist"
+			elif [ "$QSF_DARIA" != 1 ]; then echo "POCKET_DARIA is not in the qsf (the overlay's DARIA rows)"; fi ;;
 		frames) if [ ! -f "$HERE/tb_frames.sv" ]; then echo "sim/tb_frames.sv does not exist"
 			elif [ -z "${GAMES:-}" ] || [ ! -d "${GAMES:-}" ]; then echo "GAMES (the directory of game images) not given"
 			elif [ -z "${R1_DIR:-}" ] || [ ! -d "${R1_DIR:-}" ]; then echo "R1_DIR (the reference runs) not given"; fi ;;
@@ -228,12 +245,14 @@ avail() {
 
 selected() {
 	[ -z "$ONLY" ] || [[ "$ONLY" == *",$1,"* ]] || return 1
+	[[ "$OPTIN" != *" $1 "* ]] || [[ "$ONLY" == *",$1,"* ]] || return 1
 	[[ "$SKIP" != *",$1,"* ]]
 }
 
 if [ "$LIST" = 1 ]; then
 	for g in "${GATES[@]}"; do
 		w="$(avail "$g")"
+		[[ "$OPTIN" != *" $g "* ]] || w="${w:-available} (opt-in: --only $g)"
 		printf '%-12s %s\n' "$g" "${w:-available}"
 	done
 	exit 0
@@ -412,7 +431,7 @@ g_s4_check() {
 	fi
 	return 0
 }
-g_lint() { bash "$HERE/lint_step7.sh"; }
+g_lint() { bash "$HERE/lint_step7.sh" --debug; }
 g_wire() {
 	local w="$OUT/wire" wp="$HERE/bupchip/daria/wire/wire.py" r rc=0 m mut t tdir="" why="" scn=()
 	if [ -n "${GAMES:-}" ] && [ -d "${GAMES:-}" ]; then
@@ -446,6 +465,13 @@ g_wire() {
 }
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
+g_dbg_overlay() {
+	local rc=0
+	WORK="$OUT/dstat" slot bash "$HERE/bupchip/dstat/run_dstat.sh" || rc=1
+	WORK="$OUT/ovl" slot bash "$HERE/bupchip/dstat/run_ovl.sh" || rc=1
+	WORK="$OUT/ovl18" ARM_DIV=18 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
+	return $rc
+}
 g_frames() {
 	local rc=0 name img ref n d="$OUT/frames" left=()
 	mkdir -p "$d"
@@ -478,7 +504,11 @@ g_frames() {
 
 declare -A RES
 for g in "${GATES[@]}"; do
-	selected "$g" || { RES[$g]="not selected"; continue; }
+	if ! selected "$g"; then
+		RES[$g]="not selected"
+		[[ "$OPTIN" != *" $g "* ]] || RES[$g]="not selected (opt-in: --only $g)"
+		continue
+	fi
 	why="$(avail "$g")"
 	if [ -n "$why" ]; then
 		RES[$g]="NOT AVAILABLE: $why"

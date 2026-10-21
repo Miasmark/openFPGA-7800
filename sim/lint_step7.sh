@@ -3,12 +3,18 @@
 # plan.md 3.3 item 1), each against the same set on a base revision: no
 # warning may be added (counted: a warning text that appears once more is
 # added too). Warnings removed are listed and allowed.
-#   sim/lint_step7.sh [--out DIR] [--base REV]
+#   sim/lint_step7.sh [--out DIR] [--base REV] [--debug]
 # Sets (ap_core.qsf's VERILOG_MACROs, read from the tree's qsf):
 #   daria    the qsf's macros plus POCKET_DARIA, top atari7800_pocket
 #   nodaria  the qsf's macros without POCKET_DARIA, top atari7800_pocket
 #   wrapper  run_daria.sh's SHADOW=1 WRAPPER=1 set (POCKET_DARIA without
 #            NO_ARM_MAPPER, upstream's ARM as the oracle), top tb_daria
+#   debug    with --debug only: the daria set plus BUP_DEBUG (a hardware
+#            test build's, Q5's), top atari7800_pocket, for a change seen
+#            only under BUP_DEBUG (plan 7.6), such as the status overlay
+#   debug_nodaria  with --debug only: the nodaria set plus BUP_DEBUG (a
+#            BupChip-only hardware test build), top atari7800_pocket: the
+#            status overlay's DARIA ports are there too, tied to 0
 # The base (default aeee6d2, the step's base) is taken with git archive into
 # the output directory, so neither tree is written. Warnings are compared
 # with the tree's path and the line and column numbers removed.
@@ -21,10 +27,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 OUT="$HERE/work/step7/lint"
 BASE=aeee6d2
+SETS="daria nodaria wrapper"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--out) OUT="$2"; shift 2 ;;
 		--base) BASE="$2"; shift 2 ;;
+		--debug) SETS="$SETS debug debug_nodaria"; shift ;;
 		*) echo "lint_step7.sh: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -74,8 +82,9 @@ lint() {
 	QSF_DEFS=($(sed -n 's/^set_global_assignment -name VERILOG_MACRO "\([A-Za-z0-9_]*\)=\(.*\)"$/-D\1=\2/p' "$FPGA/ap_core.qsf" \
 		| grep -v '^-DPOCKET_DARIA='))
 	case "$SET" in
-		daria|nodaria)
-			DEFS=("${QSF_DEFS[@]}"); [ "$SET" = daria ] && DEFS+=(-DPOCKET_DARIA=1)
+		daria|nodaria|debug|debug_nodaria)
+			DEFS=("${QSF_DEFS[@]}"); [ "$SET" = daria ] || [ "$SET" = debug ] && DEFS+=(-DPOCKET_DARIA=1)
+			[ "$SET" = debug ] || [ "$SET" = debug_nodaria ] && DEFS+=(-DBUP_DEBUG=1)
 			SRCS=("${CORE[@]}" "$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
 				"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$P/paddles.sv"
 				"$RTL/lightgun.sv" "$FPGA/pocket_utils/data_loader.sv" "$FPGA/core/audio_filter.sv" "${BUP[@]}")
@@ -83,7 +92,7 @@ lint() {
 			for f in avox_rx avox_engine atarivox; do
 				[ -f "$FPGA/core/atarivox/$f.sv" ] && SRCS+=("$FPGA/core/atarivox/$f.sv")
 			done
-			[ "$SET" = daria ] && SRCS+=("${DARIA[@]}" "${FE[@]}")
+			[ "$SET" = daria ] || [ "$SET" = debug ] && SRCS+=("${DARIA[@]}" "${FE[@]}")
 			TOP=atari7800_pocket ;;
 		wrapper)
 			local H="$T/sim/bupchip/daria"
@@ -106,7 +115,7 @@ lint() {
 }
 
 fail=0
-for set in daria nodaria wrapper; do
+for set in $SETS; do
 	echo "== $set"
 	mkdir -p "$OUT/head" "$OUT/base_lint"
 	lint "$OUT/base" "$set" "$OUT/base_lint" || { echo "   base: lint error (see $OUT/base_lint/$set.raw)"; fail=1; }

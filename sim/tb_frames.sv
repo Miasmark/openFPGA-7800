@@ -98,6 +98,26 @@
 // Build with run_sim.sh BUILD_TOP=tb_frames (BUP_DEBUG off, -O3 --x-assign
 // fast --x-initial fast); sim/run_frames.sh builds and runs it.
 //
+// With FRAMES_DEBUG=1 (run_sim.sh, run_frames.sh) the build has BUP_DEBUG,
+// and the bench also checks the DARIA status overlay (daria_dbg_status's
+// counts, bup_status_osd.sv's DARIA rows; tb_load.sv's overlay block
+// checks the RIOT timer's copy and reads the rows back from the picture):
+// at every frame's end the overlay's calls, late calls, unlocks and guard
+// state must equal this bench's (calls since the last restart, late calls
+// as above, unlocks over the run, dbg_locked), and run.log gets the lines
+//   OVERLAY frame F: what the picture showed (each time it changes, and
+//                    every 100 frames)
+//   OVERLAY counts / checks / result: PASS|FAIL
+// +ovl_halt_at=F forces the overlay's halt rows from frame F (below); give
+// +ovl_rows=1FF with it, so that every cell of the nine rows must have been
+// read back. Without it the last whole frame must show exactly rows 0-5, and
+// no frame may draw rows 6-8 while the halt bit is 0 (tb_load.sv's
+// ovl_rows_bad). The result also needs what tb_load.sv's overlay block requires
+// of what was checked (+ovl_rows, default 3F: rows 0-5 complete; +ovl_cells),
+// and at least one of the end-of-run compares of the picture with the bench.
+// The overlay's result joins the run's. The frames, calls and every file
+// are those of the build without BUP_DEBUG, which observes only.
+//
 // Every file here derives from the game image: keep them in sim/work.
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
@@ -457,6 +477,99 @@ module tb_frames;
 	// Before the first frame nothing is pressed, as in tb_daria (whose script
 	// first runs at the reset release, frame 0, where every _at is past).
 
+`ifdef BUP_DEBUG
+`ifdef SIM_DARIA_FE
+	// ---- the DARIA status overlay (FRAMES_DEBUG=1; the header) ------------------------------
+	// Compared in the clock after each VSYNC rise, when no call, timer poll
+	// or unlock is under way: the frame counter has moved on by then.
+	int     ovl_cnt_bad = 0, ovl_cnt_n = 0;
+	logic   ovl_vs_q = 0, ovl_vs_q2 = 0;
+	logic [11:0] ovl_shown_late = 12'hFFF, ovl_shown_unl = 12'hFFF;
+	logic   ovl_shown_lk = 1'b1;
+	// the bench's values at the last two frame ends, for the end-of-run check
+	int     ovl_b_late [0:1], ovl_b_unl [0:1];
+	logic   ovl_b_lk [0:1];
+	initial begin ovl_b_late = '{-1, -2}; ovl_b_unl = '{-1, -2}; ovl_b_lk = '{1'b0, 1'b1}; end
+	function automatic int sat12(input int v); return v > 4095 ? 4095 : v; endfunction
+	always @(posedge tb.clk_sys) begin
+		ovl_vs_q <= vsync_raw;
+		ovl_vs_q2 <= ovl_vs_q;
+		if (running && ovl_vs_q && !ovl_vs_q2 && frame > 1) begin
+			int calls_b;
+			calls_b = n_tog - base_tog;
+			ovl_cnt_n++;
+			if (tb.dut.u_dstat.calls != 24'(calls_b) || tb.dut.u_dstat.late != 12'(sat12(overruns)) ||
+				tb.dut.u_dstat.unl != 12'(sat12(unlocks)) || tb.dut.u_dstat.locked != g_dbg_lk) begin
+				if (ovl_cnt_bad < 5)
+					$display("OVERLAY frame %0d: counts calls %0d late %0d unlocks %0d guard %0d, the bench's %0d %0d %0d %0d",
+						frame, tb.dut.u_dstat.calls, tb.dut.u_dstat.late, tb.dut.u_dstat.unl, tb.dut.u_dstat.locked, calls_b, overruns, unlocks, g_dbg_lk);
+				ovl_cnt_bad++;
+			end
+			ovl_b_late[1] = ovl_b_late[0]; ovl_b_late[0] = overruns;
+			ovl_b_unl[1] = ovl_b_unl[0]; ovl_b_unl[0] = unlocks;
+			ovl_b_lk[1] = ovl_b_lk[0]; ovl_b_lk[0] = g_dbg_lk;
+			if (tb.ovl_frames > 0 && (tb.ovl_last[2] != ovl_shown_late || tb.ovl_last[3] != ovl_shown_unl ||
+				tb.ovl_last[0][10] != ovl_shown_lk || frame % 100 == 0)) begin
+				$display("OVERLAY frame %0d: %0s", frame, tb.ovl_shown());
+				ovl_shown_late = tb.ovl_last[2];
+				ovl_shown_unl = tb.ovl_last[3];
+				ovl_shown_lk = tb.ovl_last[0][10];
+			end
+		end
+	end
+	// +ovl_halt_at=F: from frame F on, the BupChip's debug status word and
+	// halt PC (bupchip.dbg_status_arm and halt_pc, which only the overlay
+	// reads) are forced to a halt: CPU running, halted, halt code 9, halt PC
+	// 0x40001234. The overlay then draws its nine rows, and the end of the
+	// run expects the picture to show exactly that. The CPU runs on, so the
+	// frames, calls and counts stay the run's own.
+	int     ovl_halt_at = 0;
+	initial void'($value$plusargs("ovl_halt_at=%d", ovl_halt_at));
+	always @(posedge tb.clk_sys)
+		if (ovl_halt_at > 0 && running && frame == ovl_halt_at) begin
+			force tb.dut.bupchip.dbg_status_arm = 32'h9900_0000;
+			force tb.dut.bupchip.halt_pc = 32'h4000_1234;
+		end
+	// At the end: what the picture showed, the checks, and the result. The
+	// picture's last whole frame is compared with the bench's counts only
+	// where these stood still over the last two frame ends; at least one of
+	// the three must be compared (a run where none is checks nothing there).
+	function automatic bit ovl_finish();
+		bit ok, late_ok, unl_ok, lk_ok;
+		int n_cmp;
+		string late_s, unl_s, lk_s;
+		late_ok = 1; unl_ok = 1; lk_ok = 1; n_cmp = 0;
+		late_s = "not compared (changed in the last two frames)"; unl_s = late_s; lk_s = late_s;
+		if (ovl_b_late[0] == ovl_b_late[1]) begin
+			n_cmp++; late_ok = tb.ovl_last[2] == 12'(sat12(ovl_b_late[0])); late_s = late_ok ? "equal" : "DIFFER"; end
+		if (ovl_b_unl[0] == ovl_b_unl[1]) begin
+			n_cmp++; unl_ok = tb.ovl_last[3] == 12'(sat12(ovl_b_unl[0])); unl_s = unl_ok ? "equal" : "DIFFER"; end
+		if (ovl_b_lk[0] == ovl_b_lk[1]) begin
+			n_cmp++; lk_ok = tb.ovl_last[0][10] == ovl_b_lk[0]; lk_s = lk_ok ? "equal" : "DIFFER"; end
+		$display("OVERLAY counts: calls %0d, late %0d, unlocks %0d, guard %0s; %0d of %0d frame ends differ from the bench's",
+			tb.dut.u_dstat.calls, tb.dut.u_dstat.late, tb.dut.u_dstat.unl, tb.dut.u_dstat.locked ? "locked" : "unlocked", ovl_cnt_bad, ovl_cnt_n);
+		$display("OVERLAY checks: the RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0d frames drew rows 6-8 while not halted; the picture against the bench (%0d of 3 compared): late calls %0s, unlocks %0s, guard %0s",
+			tb.ovl_rt_bad, tb.ovl_px_bad, tb.ovl_px_n, tb.ovl_rows_bad, n_cmp, late_s, unl_s, lk_s);
+		$display("OVERLAY %0s; %0s", tb.ovl_checked(), tb.ovl_cover_ok() ? "enough" : "NOT ENOUGH");
+		$display("OVERLAY %0s", tb.ovl_shown());
+		// a game's frame shows all six rows, and rows 6-8 only while halted
+		ok = ovl_cnt_bad == 0 && ovl_cnt_n > 0 && tb.ovl_rt_bad == 0 && tb.ovl_px_bad == 0 && tb.ovl_frames > 0 &&
+			tb.ovl_rows_bad == 0 && (ovl_halt_at > 0 ? tb.ovl_last_rows[5:0] == 6'h3F : tb.ovl_last_rows == 9'h03F) &&
+			late_ok && unl_ok && lk_ok && n_cmp > 0 && tb.ovl_cover_ok();
+		if (ovl_halt_at > 0) begin
+			bit h_ok;
+			h_ok = tb.ovl_last_rows == 9'h1FF && tb.ovl_last[0][11] && tb.ovl_last[0][8] && tb.ovl_last[1] == 12'h900 &&
+				{tb.ovl_last[6][7:0], tb.ovl_last[7], tb.ovl_last[8]} == 32'h4000_1234;
+			$display("OVERLAY the forced halt (+ovl_halt_at=%0d): %0s", ovl_halt_at,
+				h_ok ? "shown as forced (halted, code 9, fault code 0, PC 40001234, nine rows)" : "NOT shown as forced");
+			ok = ok && h_ok;
+		end
+		$display("OVERLAY result: %s", ok ? "PASS" : "FAIL");
+		return ok;
+	endfunction
+`endif
+`endif
+
 	// ---- the end ------------------------------------------------------------------------
 	task automatic finish_run();
 		bit ok, calls_ok;
@@ -503,6 +616,9 @@ module tb_frames;
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
 			sys_calls, overruns, halts, halts != 0 ? int'(d_hcode) : 0, psram_viol, guard, unlocks);
 		ok = halts == 0 && psram_viol == 0 && unlocks == 0 && g_lk_bad == 0 && g_ul_bad == 0 && calls_ok && frame == frames;
+`ifdef BUP_DEBUG
+		ok = ovl_finish() && ok;
+`endif
 `else
 		$display("FRAMES no daria_fe in the wrapper (not a POCKET_DARIA build, or u_fe not wired): calls not seen");
 		$display("STATUS calls %0d, late %0d, halts %0d, halt_code %0d, psram_viol %0d, guard %s, unlocks %0d",
