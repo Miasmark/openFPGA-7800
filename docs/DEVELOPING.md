@@ -209,17 +209,11 @@ MiSTer's firmware images from GitHub at test time.
 
 ### Update the MiSTer core
 
-Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`, but re-apply the
-Pocket changes to all eleven modified upstream files: `top.sv`, `cart.sv`,
-`cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v` and
-`Pokey/pokey_adapter.sv`. POCKET_CHANGES.md's own summary counts eight and
-its "Updating" list names six, which would drop the TIA window fix, the
-SRAM frame port, the memory-editor removal and the POKEY write hold; its
-sections describe all eleven. It is under `src/`, which stays as verified
-for 2.2.1, so it is corrected after 2.2.1
-([daria_step7/record.md](daria_step7/record.md), "After 2.2.1: `src/`
-clean-ups"). Then:
+Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`: it re-applies
+the Pocket changes to all eleven modified upstream files (`top.sv`,
+`cart.sv`, `cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`,
+`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`
+and `Pokey/pokey_adapter.sv`). Then:
 
 1. Add any new upstream source files to `core/core.qip` **and** `sim/run_sim.sh`.
 2. Run `sim/run_sim.sh` and `sim/extra_tests.sh`. `extra_tests.sh` catches
