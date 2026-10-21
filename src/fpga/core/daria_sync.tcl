@@ -18,7 +18,7 @@
 # "SYNCHRONIZER_IDENTIFICATION" assignment is illegal"), which stops Analysis
 # & Synthesis. Assignments from a SOURCE_TCL_SCRIPT_FILE are not tagged.
 # Checked on a fitted design with the core's names four levels deep
-# (sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh): all 16 marks read
+# (sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh): all 15 marks read
 # "User Specified", none is reported ignored, and without daria.qip the same
 # registers read "Automatic" or head no chain.
 #
@@ -28,10 +28,12 @@
 # is no synchroniser (SYNCHRONIZER_IDENTIFICATION OFF in daria_fe_guard.sv;
 # its SDC pair is in daria_constraints.sdc).
 #
-# Three of these chains are absent from the release build and are marked
+# Two of these chains are absent from the release build and are marked
 # for the builds that have them: pause_a (its input, pause_core, is tied 0,
-# so synthesis removes it), halted_s (daria_halted has no load before
-# step 8) and cap_err_a (BUP_DEBUG only).
+# so synthesis removes it) and halted_s (daria_halted has no load before
+# step 8). bupchip_pocket.sv's cap_err_a has no mark: it feeds only the
+# status word's bit 11, which bup_status_osd.sv does not show, so no build
+# keeps it, the BUP_DEBUG build among them (plan 2.7).
 #
 # Form: -to "*|<entity>:*|<register>[0]" (brackets escaped for Tcl).
 
@@ -45,8 +47,6 @@ set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|mres_a\[0\]"
 # bupchip/bupchip_pocket.sv: the $8007 command toggle (cmd_byte held)
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|cmd_s\[0\]"
-# bupchip/bupchip_pocket.sv, BUP_DEBUG: the capture's sticky error flags
-set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|cap_err_a\[0\]"
 # bupchip/daria_call.sv: call_tog
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|daria_call:*|tog_s\[0\]"
 # bupchip/daria_mmio.sv: the TC snapshot toggle (hold, hold_tok held)

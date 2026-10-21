@@ -7,12 +7,12 @@
 # Five projects, each compiled (quartus_map, quartus_fit) and then
 # reported (quartus_sta -t step7_report.tcl, step7_checks.py), and two
 # reported again on one of them with its SDC edited (quartus_sta only):
-#   all16_qip    every register daria.qip marks is present (SMOKE_Q5,
-#                SMOKE_ALL16), with QIP_FILE daria.qip: each of the 16 must
+#   allmarks_qip every register daria.qip marks is present (SMOKE_Q5,
+#                SMOKE_ALLMARKS), with QIP_FILE daria.qip: each of the 15 must
 #                head a chain whose "Method of Synchronizer Identification" is
 #                "User Specified", no mark may be reported ignored, and the
 #                compile may report no error or warning about them
-#   all16_noqip  the same without daria.qip: none of the 16 is "User
+#   allmarks_noqip the same without daria.qip: none of the 15 is "User
 #                Specified" (each is "Automatic" or not a chain), so the marks
 #                above come from the qip
 #   q5_clean     a Q5 build (SMOKE_Q5) with daria.qip: (c.cells), (f), (k),
@@ -57,7 +57,7 @@ CORE="$ROOT/src/fpga/core"
 WORK="$(realpath -m "${WORK:-$ROOT/sim/work/step7/smoke}")"
 IMAGE="${IMAGE:-raetro/quartus:21.1}"
 LOCK="${QUARTUS_LOCK:-}"
-ALL="all16_qip all16_noqip q5_clean q5_mut q5_g1 q5_g1_nopair q5_g1_odd"
+ALL="allmarks_qip allmarks_noqip q5_clean q5_mut q5_g1 q5_g1_nopair q5_g1_odd"
 ONLY="${ONLY:-$ALL}"
 die() { echo "run_smoke.sh: $*" >&2; exit 2; }
 case "$WORK/" in
@@ -189,8 +189,8 @@ if [ "${CHECK_ONLY:-0}" = 0 ]; then
 		case "$n" in q5_g1_nopair|q5_g1_odd) variant "$n" "${n#q5_g1_}"; continue ;; esac
 		[ "${REPORT_ONLY:-0}" = 0 ] || { [ -d "$WORK/$n/fpga/db" ] || die "REPORT_ONLY: $WORK/$n has no database"; compile "$n"; continue; }
 		case "$n" in
-			all16_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 SMOKE_ALL16 ;;
-			all16_noqip) QIP=""                project "$n" SMOKE_Q5 SMOKE_ALL16 ;;
+			allmarks_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 SMOKE_ALLMARKS ;;
+			allmarks_noqip) QIP=""                project "$n" SMOKE_Q5 SMOKE_ALLMARKS ;;
 			q5_clean)    QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 ;;
 			q5_mut)      QIP="$QIPMUT"         project "$n" SMOKE_Q5 SMOKE_MUT ;;
 			q5_g1)       QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5
@@ -226,7 +226,7 @@ def glob_re(pat):
 
 marks = [m.replace("\\[", "[").replace("\\]", "]") for m in
          re.findall(r'(?m)^set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "([^"]+)"', rd(qip))]
-say(len(marks) == 16, f"daria_sync.tcl marks {len(marks)} registers (16 expected)")
+say(len(marks) == 15, f"daria_sync.tcl marks {len(marks)} registers (15 expected)")
 
 def chains(n):
     out = {}
@@ -270,24 +270,24 @@ def ignored(n):
                     hits.append(os.path.basename(p) + " Ignored Assignments: " + line.strip()[:160])
     return hits
 
-if "all16_qip" in only:
-    c = chains("all16_qip")
-    print(f"-- all16_qip: {len(c)} synchroniser chains")
+if "allmarks_qip" in only:
+    c = chains("allmarks_qip")
+    print(f"-- allmarks_qip: {len(c)} synchroniser chains")
     for m in marks:
         how = [h for node, h in c.items() if glob_re(m).match(node)]
-        say(bool(how) and all(h.lower().startswith("user") for h in how), f"all16_qip: {m} -> {how or 'no chain'}")
-    ig = ignored("all16_qip")
-    err = [l.strip()[:200] for l in rd(os.path.join(work, "all16_qip", "quartus.log")).splitlines()
+        say(bool(how) and all(h.lower().startswith("user") for h in how), f"allmarks_qip: {m} -> {how or 'no chain'}")
+    ig = ignored("allmarks_qip")
+    err = [l.strip()[:200] for l in rd(os.path.join(work, "allmarks_qip", "quartus.log")).splitlines()
            if re.search(r"^(Error|Critical Warning|Warning)", l.strip()) and re.search(r"daria|qip|SYNCHRONIZER|125091", l, re.I)
            and "daria_fe_guard.sv" not in l]
-    say(not ig and not err, f"all16_qip: no mark ignored and no error or warning about daria.qip, daria_sync.tcl or the marks "
+    say(not ig and not err, f"allmarks_qip: no mark ignored and no error or warning about daria.qip, daria_sync.tcl or the marks "
         f"({(ig + err)[:4] or 'none'})")
-if "all16_noqip" in only:
-    c = chains("all16_noqip")
-    print(f"-- all16_noqip: {len(c)} synchroniser chains")
+if "allmarks_noqip" in only:
+    c = chains("allmarks_noqip")
+    print(f"-- allmarks_noqip: {len(c)} synchroniser chains")
     for m in marks:
         how = [h for node, h in c.items() if glob_re(m).match(node)]
-        say(not any(h.lower().startswith("user") for h in how), f"all16_noqip: {m} -> {how or 'no chain'} (not User Specified)")
+        say(not any(h.lower().startswith("user") for h in how), f"allmarks_noqip: {m} -> {how or 'no chain'} (not User Specified)")
 def checks_txt(n):
     return rd(os.path.join(work, n, "fpga", "checks.txt"))
 
