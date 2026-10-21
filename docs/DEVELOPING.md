@@ -359,6 +359,10 @@ C0-C2 (`output_clock_frequency0` and `2`, 14.318180 against 14.318181 MHz;
 `output_clock_frequency1`, 57.272722 against 57.272724 MHz;
 `pll_output_clk_frequency`, the VCO, 687.272644 against 687.272687 MHz),
 which go under `POCKET_DARIA` with counter 3 (2.2.1's file, `b177e64`).
+The ÷19 fallback tree, the L1W+L3 CPU and MR at ÷19 (what a revert of the
+commit that moved DARIA to VCO/18 leaves), has no fit yet: such a revert
+is followed by three ÷19 fits, seeds 1-3, before it ships
+([daria_step10/plan.md](daria_step10/plan.md) 3.1, "If ÷18 fails on silicon").
 The reconfiguration controller (`pll/pll_cfg/`) comes from
 `--component-name=altera_pll_reconfig --output-name=pll_cfg`.
 

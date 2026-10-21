@@ -355,16 +355,16 @@ The S1 column is the delivered core's (`bup_cpu.sv:71-77`). B's sketch, on which
 
 S2 is S3 with 2-clock MUL/MLA and 2-clock register-offset stores.
 
-**DARIA's core (`THUMB` 1).** DARIA builds the same file with `THUMB` 1 (`docs/DARIA_CORE.md`). The comments in `bup_cpu.sv` name its timing changes by the labels below. R1, R12, L1F, L1W and L3 are gated by `THUMB`, so the BupChip's core (`THUMB` 0) keeps its clocks; R2, R13 and R14 restructure logic both cores share, and `sim/bupchip/daria/thumb/aria_equiv.sh` proves the `THUMB` 0 core equivalent to 806dcd4's for `MODES` 0 and 1.
+**DARIA's core (`THUMB` 1).** DARIA builds the same file with `THUMB` 1 (`docs/DARIA_CORE.md`). The comments in `bup_cpu.sv` name its timing changes by the labels below. R1, R12, L1F, L1W and L3 are gated by `THUMB`, so the core of the build without DARIA (`THUMB` 0) keeps its clocks; in the release (`POCKET_DARIA`) the BupChip profile runs on the `THUMB` 1 core and pays R1 (below); R2, R13 and R14 restructure logic both cores share, and `sim/bupchip/daria/thumb/aria_equiv.sh` proves the `THUMB` 0 core equivalent to 806dcd4's for `MODES` 0 and 1.
 
 | Label | What it changes | Clocks |
 |---|---|---|
 | R1 | The adder never takes the shifter's output in the same clock: an ARM arithmetic op (ADD ADC SUB SBC RSB RSC CMP CMN) with a shifted register operand 2 registers the shifted value (`op2_q`) and adds it in `S_OP2`; LDR/STR/LDRB/STRB with a shifted register offset form the address there | Such an op 1 → 2, with a shift by register 2 → 3; such a load or store 2 → 3 |
 | R2 | The register file's write data picks the sum last, from the state and instruction only (`sel_sum`, `wd_other`) | None |
 | R12 | A store's RAM-or-not decision from Rn's top bits, without the adder; a store whose offset could carry out of Rn's 256 MB region takes the two-clock path | None in practice (same results) |
-| R13 | The adder's controls {inv_a, inv_b, cin = 1, cin = C} straight from `rom_q` per format, registered for the later clocks (`ctl_q`); Thumb NEG's zero operand likewise | None |
+| R13 | The adder's controls {inv_a, inv_b, cin = 1, cin = C} straight from `rom_q` per format, registered for the later clocks (`ctl_q`; `THUMB` 1; `THUMB` 0 keeps the live opcode); Thumb NEG's zero operand likewise | None |
 | R14 | The adder's B operand: every non-register source first (`pre_b`), the register last (`sel_rb`) | None |
-| L1F | In Thumb state, a single load to the image window or the cart RAM takes one clock: its data arrives in the next instruction's first clock, is forwarded into both read ports, and is written through the write port or held one clock in a write-behind entry (`lb`). A load that may reach MMIO keeps its two clocks | Load 2 → 1 (with L1W's rule) |
+| L1F | In Thumb state, a single load to the image window or the cart RAM takes one clock: its data arrives in the next instruction's first clock, is forwarded into both read ports, and is written through the write port or held in a write-behind entry (`lb`) until the port is free. A load that may reach MMIO keeps its two clocks | Load 2 → 1 (with L1W's rule) |
 | L1W | Only an aligned word (or an LDM beat) is forwarded, as the RAM's word itself; a byte, halfword or misaligned word, or a load found in that clock to reach the assets, holds the next instruction one clock | Aligned word load 1; the others 2 |
 | L3 | Thumb LDMIA and POP without PC hand their last register over the same way | n+2 → n+1 |
 
