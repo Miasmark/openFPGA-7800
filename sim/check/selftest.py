@@ -1237,6 +1237,7 @@ def gate_cases(w):
       synth(w, "auto_f4_riot", calls_per=0, scheme=6, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
     A("auto_non_arm_with_calls", nref, synth(w, "auto_f4_calls", calls_per=1, scheme=6), False)
     # Spiders: overrun frames 150-165 excused when they are the late frames on both sides
+    # (--overrun late, the rule up to 2.2.1; the --overrun ontime cases follow these)
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
@@ -1260,28 +1261,53 @@ def gate_cases(w):
     for rule in ([], ["--rule", "shift"]):
         tag = "" if not rule else "shift: "
         expect(tag + "spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
-                                         "--excuse", "150-165"] + rule, True)
+                                         "--excuse", "150-165", "--overrun", "late"] + rule, True)
         expect(tag + "spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames",
-                                               "200", "--excuse", "150-165"] + rule, False)
+                                               "200", "--excuse", "150-165", "--overrun", "late"] + rule, False)
         expect(tag + "spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
-                                                     "--excuse", "150-165"] + rule, False)
+                                                     "--excuse", "150-165", "--overrun", "late"] + rule, False)
     expect("v1_spiders_audio_differs_after (counted)",
            [fg, sref, synth(w, "spiders_aud", mutate=sp(audio_after=True), late=late), "--frames", "200",
-            "--excuse", "150-165"], True)
+            "--excuse", "150-165", "--overrun", "late"], True)
     expect("shift: spiders_audio_differs_after",
            [fg, sref, synth(w, "spiders_aud_s", mutate=sp(audio_after=True), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], False)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], False)
     # a release_shift run must settle on truly equal frames: the excused
     # overrun frames (riot differing there too) do not count
     expect("shift: spiders_release_shift_3_frames_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], False)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], False)
     expect("shift: spiders_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], True)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], True)
+    # --overrun ontime (the default; step-10 plan decision 4): REF overruns in
+    # 150-165, CAND is on time there (no late call, every frame as long as frame 149)
+    def spo(long_frame=False, riot_after=False):
+        def m(fp, c, s, st):
+            for f in range(150, 166):
+                setcol(fp, f, "video")
+            if long_frame:
+                setcol(fp, 157, "len_sys")
+            if riot_after:
+                setcol(fp, 170, "riot")
+        return m
+    for rule in ([], ["--rule", "shift"]):
+        tag = "" if not rule else "shift: "
+        expect(tag + "spiders_ontime", [fg, sref, synth(w, "spiders_on", mutate=spo()), "--frames", "200",
+                                        "--excuse", "150-165"] + rule, True)
+        expect(tag + "spiders_ontime_by_default (no --overrun)", [fg, sref, synth(w, "spiders_on_d", mutate=spo()),
+                                                                  "--frames", "200", "--excuse", "150-165"] + rule, True)
+        expect(tag + "spiders_ontime_but_late", [fg, sref, synth(w, "spiders_on_late", mutate=sp(), late=late),
+                                                 "--frames", "200", "--excuse", "150-165", "--overrun", "ontime"] + rule, False)
+        expect(tag + "spiders_ontime_one_long_frame", [fg, sref, synth(w, "spiders_on_long", mutate=spo(long_frame=True)),
+                                                       "--frames", "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_ontime_differs_after", [fg, sref, synth(w, "spiders_on_after", mutate=spo(riot_after=True)),
+                                                      "--frames", "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_ontime_ref_not_late", [fg, ref, synth(w, "spiders_on_noref", mutate=spo()),
+                                                     "--frames", "200", "--excuse", "150-165"] + rule, False)
     expect("v1_spiders_riot_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far_v1", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165"], False)
+            "--excuse", "150-165", "--overrun", "late"], False)
 
 
 def main():

@@ -68,9 +68,18 @@ are wanted, not required, for the first release):
     +fp (t_sys, rst_n, rst_sys) are not compared here: tb_frames counts from
     its own reset release and tb_daria from its own;
   - Spiders (--excuse 557-572, set by default when NAME contains "Spiders"):
-    frames F0..F1 are excused when they are the overrun frames on both sides
-    (the frames of the late calls) and every column matches from F1+1 (with
-    --rule v1 every gated column; audio is counted there as anywhere);
+    frames F0..F1 are REF's overrun frames (the frames of its late calls).
+    --overrun ontime (the default from the L1W+L3 CPU on; decision 4 of
+    docs/daria_step10/plan.md, settled on decision 5's model on 2026-10-21:
+    the modelled Harmony meets these calls, MiSTer does not, and the owner
+    prefers the chip): CAND must have no late call in
+    F0..F1 and every one of those frames must be as long as frame F0-1 (a
+    262-line frame, VBLANK on time); the frames are then excused and every
+    column must match from F1+1, and REF's late calls in F0..F1 are left out
+    of the late-call comparison. --overrun late (the rule up to 2.2.1): the
+    frames are excused when they are the overrun frames on both sides and
+    every column matches from F1+1 (with --rule v1 every gated column; audio
+    is counted there as anywhere);
   - REF's load was seen (P27): calls.csv has calls, and with --scheme S its
     run.log names detect2600's force_bs S;
   - the call count and the late calls (slack.csv rows kind 1 with slack <= 0:
@@ -339,16 +348,35 @@ def gate(a):
     boot_differs = v1 and boot_r != boot_c
     # Spiders' overrun frames
     excuse = None
+    ontime_late = set()                 # --overrun ontime: REF's late calls in the excused frames
     if a.excuse:
         f0, f1 = (int(x) for x in a.excuse.split("-"))
         late_r, lf_r = late_frames(a.ref, calls_r, a.ref_prefix)
         late_c, lf_c = late_frames(a.cand, calls_c, a.ref_prefix)
         want = list(range(f0, f1 + 1))
-        if lf_r == want and lf_c == want:
-            excuse = (f0, f1)
-            notes.append(f"frames {f0}-{f1} are the overrun frames on both sides: excused if every column matches from {f1 + 1}")
+        if a.overrun == "late":
+            if lf_r == want and lf_c == want:
+                excuse = (f0, f1)
+                notes.append(f"frames {f0}-{f1} are the overrun frames on both sides: excused if every column matches from {f1 + 1}")
+            else:
+                notes.append(f"frames {f0}-{f1} not excused: late-call frames REF {lf_r}, CAND {lf_c}")
         else:
-            notes.append(f"frames {f0}-{f1} not excused: late-call frames REF {lf_r}, CAND {lf_c}")
+            norm = fc.get(f0 - 1, {}).get("len_sys")
+            long_c = [f for f in want if f not in fc or fc[f]["len_sys"] != norm]
+            in_win = sorted(set(lf_c or []) & set(want))
+            fcsv = read_csv(path_in(a.cand, "frames.csv")) if os.path.isdir(a.cand) else None
+            lines = sorted({r.get("lines") for r in fcsv or [] if r.get("frame", "").isdigit() and int(r["frame"]) in want})
+            if lf_r == want and not in_win and not long_c and norm is not None:
+                excuse = (f0, f1)
+                frame_of = {int(c["call"]): int(c["frame"]) for c in calls_r or []}
+                ontime_late = {c for c in late_r or [] if frame_of.get(c) in want}
+                notes.append(f"frames {f0}-{f1}: REF's overrun frames ({len(ontime_late)} late calls); CAND on time there "
+                             f"(no late call, every frame {norm} clk_sys like frame {f0 - 1}"
+                             + (f", lines {','.join(lines)}" if lines else "") + f"): excused if every column matches from {f1 + 1}")
+            else:
+                bad.append(f"frames {f0}-{f1} not on time in CAND (--overrun ontime): late-call frames REF {lf_r}, CAND in "
+                           f"the window {in_win}; CAND frames not {norm} clk_sys long: {long_c[:8]}"
+                           + (f"; lines {','.join(lines)}" if lines else ""))
     common = sorted(set(fr) & set(fc))
     counts = {}
     shift_count = {"riot": 0, "audio": 0}
@@ -415,8 +443,9 @@ def gate(a):
     late_c, _ = late_frames(a.cand, calls_c, a.ref_prefix)
     if nr != nc:
         bad.append(f"calls: REF {nr}, CAND {nc}")
-    if late_r is not None and late_c is not None and len(late_r) != len(late_c):
-        bad.append(f"late calls: REF {len(late_r)}, CAND {len(late_c)}")
+    if late_r is not None and late_c is not None and len(late_r) - len(ontime_late) != len(late_c):
+        bad.append(f"late calls: REF {len(late_r)}" + (f" ({len(ontime_late)} of them in the excused frames, where CAND "
+                   f"must be on time)" if ontime_late else "") + f", CAND {len(late_c)}")
     # --rule v1: each call's ARM instruction count, and bench parity
     instr = None
     if v1:
@@ -458,7 +487,8 @@ def gate(a):
                 if int(late) != len(cand_late_all): bad.append(f"STATUS late {late}, CAND's slack.csv has {len(cand_late_all)}")
             else:
                 if int(calls) != nr: bad.append(f"STATUS calls {calls}, REF has {nr}")
-                if late_r is not None and int(late) != len(late_r): bad.append(f"STATUS late {late}, REF has {len(late_r)}")
+                if late_r is not None and int(late) != len(late_r) - len(ontime_late):
+                    bad.append(f"STATUS late {late}, REF has {len(late_r)}" + (f", {len(ontime_late)} of them excused (on time)" if ontime_late else ""))
     name = a.name or os.path.basename(os.path.normpath(a.cand))
     print(f"frame_gate {name}: {len(fr)} / {len(fc)} frames; calls {nr} / {nc}; late "
           f"{len(late_r) if late_r is not None else '-'} / {len(late_c) if late_c is not None else '-'}")
@@ -578,6 +608,9 @@ def main():
                    help="release_shift frames allowed per column (default the larger of 8 and 1%% of the run's frames)")
     p.add_argument("--name")
     p.add_argument("--excuse", help="F0-F1: frames excused as overrun frames (default 557-572 for Spiders)")
+    p.add_argument("--overrun", choices=("ontime", "late"), default="ontime",
+                   help="what CAND does in the excused frames: ontime (default; step-10 plan decision 4, settled on "
+                        "decision 5's model, 2026-10-21) or late (both sides overrun, the rule up to 2.2.1)")
     p.add_argument("--expect-guard", default="unlocked", choices=("locked", "unlocked", "none"))
     p.add_argument("--no-status", action="store_true")
     p.add_argument("--scheme", type=int)
