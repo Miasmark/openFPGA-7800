@@ -106,7 +106,10 @@ The Pocket build defines all six (`NO_ARM_MAPPER`, `NO_DDRAM`,
 `../ap_core.qsf`. A build without the DARIA front end deletes
 `POCKET_DARIA` there, with the qsf's two other DARIA lines (`core/daria.qip`
 and `core/daria_constraints.sdc`).
-Without the macros the changed files are identical to upstream in behaviour.
+Without the macros, `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`,
+`EEPROM_24LC256.sv`, `video_mux.sv` and `bram.v` are identical to upstream in
+behaviour; the changes to `TIA.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv` and
+`Pokey/pokey_adapter.sv` have no macro.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
 
