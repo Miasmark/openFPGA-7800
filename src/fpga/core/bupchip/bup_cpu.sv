@@ -537,7 +537,7 @@ module bup_cpu
 				4'h5: t_op = OP_ADC;
 				4'h6: t_op = OP_SBC;
 				4'h8: t_op = OP_TST;
-				4'h9: t_op = OP_SUB;		// NEG: 0 - Rs (zero_a)
+				4'h9: t_op = OP_SUB;		// NEG: 0 - Rs (zero_run, R13)
 				4'hA: t_op = OP_CMP;
 				4'hB: t_op = OP_CMN;
 				4'hC: t_op = OP_ORR;
@@ -630,7 +630,6 @@ module bup_cpu
 			default:        add_ctl = 4'b0000;	// ADD, CMN; the logic ops do not use the adder
 		endcase
 	endfunction
-	/* verilator lint_off UNUSEDSIGNAL */  // t_addctl reads h's top bits; t_op its [15:6]
 	function automatic logic [3:0] t_addctl(input logic [15:0] h);
 		if (h[15:11] == 5'b01001 || h[15:12] == 4'b0101 || h[15:13] == 3'b011 ||
 		    h[15:12] == 4'b1000 || h[15:12] == 4'b1001)
@@ -642,7 +641,6 @@ module bup_cpu
 		else
 			t_addctl = add_ctl(t_op(h));
 	endfunction
-	/* verilator lint_on UNUSEDSIGNAL */
 	wire [3:0] tctl_lo = t_addctl(rom_q[15:0]), tctl_hi = t_addctl(rom_q[31:16]);
 	wire       tneg_lo = rom_q[15:6] == 10'b0100_0010_01, tneg_hi = rom_q[31:22] == 10'b0100_0010_01;
 
@@ -685,7 +683,8 @@ module bup_cpu
 	wire       dp_cmp = dp_op[3:2] == 2'b10;		// TST TEQ CMP CMN: no result
 	wire       dp_rsh = tm ? t4sh : a_rsh;		// shift by register: two clocks
 	wire       op_imm = tm ? th_imm : insn[25];	// operand 2 is an immediate
-	/* verilator lint_off UNUSEDSIGNAL */  // zero_a: NEG's zero operand is now zero_run (R13)
+	/* verilator lint_off UNUSEDSIGNAL */  // zero_a: NEG's zero operand is now zero_run (R13);
+	// zero_a is unused; it is kept so that the code stays the one fitted and proven (aria_equiv)
 	wire       zero_a = tm && tf4 && t4op == 4'h9;	// NEG
 	/* verilator lint_on UNUSEDSIGNAL */
 	wire [15:0] list  = tm ? (tf14 ? {hw[11] && hw[8], !hw[11] && hw[8], 6'd0, hw[7:0]} : {8'd0, hw[7:0]})

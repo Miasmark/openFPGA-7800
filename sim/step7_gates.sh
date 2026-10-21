@@ -12,7 +12,8 @@
 #                macros without POCKET_DARIA, the new DARIA files excluded,
 #                which pp_equiv refuses when one holds a directive that
 #                would reach the files after it) has 0 'daria' tokens, and
-#                its hash is PP_EXPECT (F's; on aeee6d2 fc52edb6...6f52);
+#                its hash is PP_EXPECT (F's, on aeee6d2 fc52edb6...6f52;
+#                until F′ the interim value under pp_guards);
 #                and top.sv with cart2600.sv preprocess to PP_ORACLE_BASE's
 #                (default aeee6d2) with tb_daria's two macro sets, plain and
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
@@ -22,8 +23,14 @@
 #                F′ (docs/daria_step10/plan.md 3.1) the chain runs from the
 #                commit that added MR's MUX_RESTRUCTURE lines to ap_core.qsf
 #                (git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf),
-#                with PP_EXPECT 56033140...98fd, that commit's non-DARIA
-#                stream (the L1W+L3 CPU and the sram_ctrl key copy)
+#                with PP_EXPECT (2026-10-21)
+#                34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21,
+#                the non-DARIA stream of the L1W+L3 CPU and the sram_ctrl key
+#                copy. The MR commit's own stream,
+#                56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd,
+#                differs from it only by the lint_off/lint_on pair taken out of
+#                bup_cpu.sv's t_addctl after it (Verilator keeps lint
+#                metacomments in -E's output)
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
