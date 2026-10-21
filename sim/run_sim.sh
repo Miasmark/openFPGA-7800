@@ -264,6 +264,24 @@ python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.s
 # in a UTF-8 locale grep would hold that line back ("binary file matches").
 sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -aE "LOAD|TONE"
 
+# The FA2 flash's save slot (fa2.sav, 0x40000000): sim/fa2_test.py's
+# synthetic FA2 cartridge (no game data) loads the flash through the
+# mapper's fa2_nvram_* port, saves it changed, and loads it again; tb_load
+# writes the file in before the run and reads the slot back afterwards with
+# the APF read protocol (+fa2save, +fa2expect, +fa2prog). The A78 run shows a
+# game that is not FA2 leaving the shared file as it was.
+echo "-- FA2 flash save slot (fa2.sav): a synthetic FA2 cartridge loads, saves and reloads it through the mapper's port:"
+python3 "$HERE/fa2_test.py" image > fa2_test.a26
+python3 "$HERE/fa2_test.py" flash 256 > fa2_flash.bin
+python3 "$HERE/fa2_test.py" expect 256 > fa2_flash_expect.bin
+python3 "$HERE/fa2_test.py" expect > fa2_blank_expect.bin
+echo "  a saved flash file (expect 2 loads, 1 save, 256 slot RAM writes; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2save=fa2_flash.bin +fa2expect=fa2_flash_expect.bin +fa2prog $(fp fa2_file) | grep -aE "^ *FA2"
+echo "  no file, a blank flash read as \$FF (expect the same counts; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2expect=fa2_blank_expect.bin +fa2prog $(fp fa2_blank) | grep -aE "^ *FA2"
+echo "  an A78 game with the file loaded (expect 0 bytes differ):"
+sim ./obj_load/vtb +image=load_test.a78 +audf=7 +fa2save=fa2_flash.bin $(fp fa2_a78) | grep -aE "^ *FA2"
+
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
 # 2600 image starts directly, as with Skip BIOS on, whatever the load order.

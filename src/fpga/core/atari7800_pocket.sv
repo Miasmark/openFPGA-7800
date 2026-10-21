@@ -116,6 +116,13 @@ module atari7800_pocket
 	input  wire [31:0] sk_bridge_din,   // big endian: [31:24] is the lowest byte
 	output wire [31:0] sk_bridge_dout,  // word latched at the last read strobe
 
+	// FA2 cartridge flash (256 bytes), second port for its save slot (clk_74a)
+	input  wire  [5:0] fa2_bridge_addr, // 32 bit word address
+	input  wire        fa2_bridge_wr,
+	input  wire        fa2_bridge_rd,   // APF read strobe for this region
+	input  wire [31:0] fa2_bridge_din,  // big endian: [31:24] is the lowest byte
+	output wire [31:0] fa2_bridge_dout, // word latched at the last read strobe
+
 	// SDRAM
 	output wire [12:0] SDRAM_A,
 	output wire  [1:0] SDRAM_BA,
@@ -628,6 +635,57 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 	.dout_b (sk_bridge_dout)
 );
 `endif
+
+// FA2 flash: the 256 bytes an FA2 cartridge (Star Castle Arcade) keeps in its
+// flash. mapper_fa2.sv copies its work RAM to and from them through the
+// fa2_nvram_* port, a byte per request/ready handshake. Upstream's
+// fa2_nvram_bridge.sv answers the handshake, as on MiSTer, from a save_ram_dp
+// whose other port is the fa2.sav save slot: one shared file for every FA2
+// game, like hsc.sav. A new file is blank as $FF, as an erased flash (the
+// unconnected port this replaces read $FF too). The Pocket writes the file in
+// before the core runs, so the bridge never waits for a load, and it writes
+// every save slot back itself, so the mapper's dirty pulse has no use here.
+wire       fa2_req, fa2_we, fa2_rdy, fa2_ram_we;
+wire [7:0] fa2_addr, fa2_wdata, fa2_rdata, fa2_ram_addr, fa2_ram_d, fa2_ram_q;
+/* verilator lint_off UNUSEDSIGNAL */
+wire       fa2_ram_cs;                  // the bridge's select; save_ram_dp has none
+/* verilator lint_on UNUSEDSIGNAL */
+
+fa2_nvram_bridge fa2_bridge
+(
+	.clk                (clk_sys),
+	.reset              (reset),
+	.new_image          (1'b0),
+	.backing_busy       (1'b0),
+	.file_load_complete (1'b1),
+	.request            (fa2_req),
+	.write              (fa2_we),
+	.addr               (fa2_addr),
+	.wdata              (fa2_wdata),
+	.ready              (fa2_rdy),
+	.rdata              (fa2_rdata),
+	.backing_rdata      (fa2_ram_q),
+	.backing_cs         (fa2_ram_cs),
+	.backing_write      (fa2_ram_we),
+	.backing_addr       (fa2_ram_addr),
+	.backing_wdata      (fa2_ram_d)
+);
+
+save_ram_dp #(.WORD_ADDR_BITS(6), .BLANK(8'hFF)) fa2_ram
+(
+	.clk_a  (clk_sys),
+	.addr_a (fa2_ram_addr),
+	.din_a  (fa2_ram_d),
+	.we_a   (fa2_ram_we),
+	.dout_a (fa2_ram_q),
+
+	.clk_b  (clk_74a),
+	.addr_b (fa2_bridge_addr),
+	.din_b  (fa2_bridge_din),
+	.we_b   (fa2_bridge_wr),
+	.rd_b   (fa2_bridge_rd),
+	.dout_b (fa2_bridge_dout)
+);
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
@@ -1284,12 +1342,12 @@ Atari7800 main
 	.mapper_load_end  (old_cart_download && ~cart_download),
 	.mapper_load_wait (),
 	.mapper_init_busy (mapper_init_busy),
-	.fa2_nvram_request(),
-	.fa2_nvram_write  (),
-	.fa2_nvram_addr   (),
-	.fa2_nvram_wdata  (),
-	.fa2_nvram_rdata  (8'hFF),
-	.fa2_nvram_ready  (1'b1),
+	.fa2_nvram_request(fa2_req),
+	.fa2_nvram_write  (fa2_we),
+	.fa2_nvram_addr   (fa2_addr),
+	.fa2_nvram_wdata  (fa2_wdata),
+	.fa2_nvram_rdata  (fa2_rdata),
+	.fa2_nvram_ready  (fa2_rdy),
 	.fa2_nvram_dirty  (),
 	.ddram_clk        (),
 	.ddram_addr       (),

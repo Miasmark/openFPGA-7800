@@ -64,6 +64,10 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   on port 2); 2600 SaveKey games need it set to On. Unlike MiSTer, the high
   score cart stays available alongside it, since each has its own file: a
   cart whose header asks for both (such as Triple Punch) gets both.
+- **FA2 saves** (Star Castle Arcade's high scores): the 256 bytes an FA2
+  cartridge keeps in its flash go in **one shared file**, `fa2.sav`, beside
+  `hsc.sav` and `savekey.sav`. A new file starts blank ($FF), as an erased
+  flash. Every FA2 game shares it; Star Castle Arcade is the only one known.
 - **AtariVox voice** (the SpeakJet speech chip on port 2), with the SaveKey
   that is the AtariVox's other half: the voice is there whenever the SaveKey
   is on (so 2600 AtariVox games need *SaveKey (port 2)* set to On), and
@@ -141,7 +145,6 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 | Feature | Why |
 |---|---|
 | 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
-| 2600 FA2 saves (Star Castle Arcade) | Star Castle Arcade does not keep its high scores on the Pocket. The FA2 scheme saves 256 bytes to the cartridge's flash, and the Pocket wrapper has never connected that port (`atari7800_pocket.sv`, the `fa2_nvram_*` lines): the game always reads a blank flash, and what it saves is lost. A 256-byte save file, like `hsc.sav`, is planned after 2.2.1 ([docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md)). |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
 | Composite video filter | Only the RGB output is used. |
 
@@ -207,6 +210,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
+| FA2 save slot | a synthetic FA2 cartridge loads the 256-byte `fa2.sav` through the mapper's port, saves it changed and loads it again: 0 bytes wrong in the work RAM and in the slot read back under the APF read protocol, from a saved file and from none (blank $FF); an A78 game leaves the file as it was |
 | Display geometry | Active lines per frame match the display mode: NTSC 224 (MARIA lines 27-250: 7800basic's `screensafe` sample in 224-line mode fills them exactly, from 2.1.3), overscan 242, PAL 274 (overscan setting ignored), 2600 240 / PAL 288. Triple Punch (NTSC and PAL) shows its bonus timer at the bottom with Show Overscan on (NTSC) or always (PAL) |
 | Paddles (virtual) | A 2600 test program timing INPT0-3 after the pot dump: all four paddles respond, the D-pad reaches both ends (lines 1 and 191 of 192), X and Y change the speed, A/B press the buttons, and a stick moved on controller 1 takes over (Paddles on both ports) |
 | Driving controller (virtual) | SWCHA bits 5:4 step 3, 1, 0, 2 turning right and the reverse turning left; A reads on INPT4 |

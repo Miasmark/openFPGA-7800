@@ -90,6 +90,7 @@ module tb_system;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
 	logic [1:0] sk_setting = 2'd2; logic [1:0] vox_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
+	logic [5:0] fa2_addr = 0; logic fa2_wr = 0, fa2_rd = 0; logic [31:0] fa2_din = 0; wire [31:0] fa2_dout;
 	logic hide_border = 1'b0;
 	logic [1:0] region = 2'd1;   // NTSC; +pal for PAL
 	logic overscan = 1'b0;       // +overscan
@@ -143,6 +144,8 @@ module tb_system;
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
+		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),
+		.fa2_bridge_dout(fa2_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
 		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),

@@ -192,6 +192,13 @@ def run_sim_cases(log, w):
         # tb_vaxis5: a seed with mismatches, and the planted fault not caught
         "vaxis5_mismatch": sub1(r"^(VAXIS5 seed 3 .* mismatches )0$", r"\g<1>7"),
         "vaxis5_planted_missed": sub1(r"^(VAXIS5 planted fault .*: )caught, \d+ mismatches$", r"\g<1>caught, 0 mismatches"),
+        # the FA2 save slot: the reload lost, a saved byte read back wrong,
+        # no save, and the section gone
+        "fa2_reload_lost": sub1(r"^(FA2 work RAM after the reload: )0( of 255)", r"\g<1>255\g<2>"),
+        "fa2_slot_differs": sub1(r"^(FA2 save slot read back \(APF read protocol\): )0( of 256)", r"\g<1>4\g<2>"),
+        "fa2_no_save": sub1(r"^(FA2 program: .*flash loads 2, saves )1(, slot RAM writes )256$", r"\g<1>0\g<2>0"),
+        "fa2_a78_overwrote": sub1(r"^(FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>"),
+        "fa2_missing": lambda t: re.sub(r"^-- FA2 flash save slot.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)

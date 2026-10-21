@@ -177,6 +177,8 @@ Something that fails only on hardware is most likely in one of those.
 | `save=FILE` | Preload a 2 KiB `hsc.sav`, check it survives |
 | `sk_on`, `sk_auto` | SaveKey setting (default Off) |
 | `sksave=FILE`, `skcheck` | Preload/check the SaveKey image |
+| `fa2save=FILE`, `fa2expect=FILE` | Preload a 256-byte `fa2.sav`; check what the slot holds at the end (default: the preloaded file, or blank $FF) |
+| `fa2prog` | For `fa2_test.py`'s FA2 image: wait for its load, save and reload through the FA2 port, then check the work RAM and the slot |
 | `pokeyirq` | POKEY IRQ setting on |
 | `pokeylog` | Every POKEY write to `pokey_writes.txt` |
 | `i2ctrace`, `i2craw_from/_to=MS` | Decode the SaveKey I2C bus; dump raw lines |
@@ -292,8 +294,9 @@ port has already had:
    reads the size before it writes the settings, so a size that depends on a
    setting is wrong when it matters. A size of 0 can make it drop or
    truncate the file.
-3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey; the
-   next is `0x40000000`) and add it to the `bridge_rd_data` mux.
+3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey,
+   `0x40000000` FA2; the next is `0x50000000`) and add it to the
+   `bridge_rd_data` mux.
 4. Decide what a new, blank file should hold. The FPGA's RAM powers up as
    zeros. A real SaveKey is blank as `$FF`, so `save_ram_dp` has a `BLANK`
    parameter. A zero-filled SaveKey broke Triple Punch.

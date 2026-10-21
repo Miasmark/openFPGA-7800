@@ -82,6 +82,7 @@ module tb_load;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
 	logic [1:0] sk_setting = 2'd2; logic [1:0] vox_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
+	logic [5:0] fa2_addr = 0; logic fa2_wr = 0, fa2_rd = 0; logic [31:0] fa2_din = 0; wire [31:0] fa2_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
 	// +bios=FILE: a 7800 BIOS through its data slot, before the cartridge
@@ -197,6 +198,8 @@ module tb_load;
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
+		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),
+		.fa2_bridge_dout(fa2_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
 		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),
@@ -1330,6 +1333,43 @@ module tb_load;
 	logic [7:0] save_img [0:2047];
 	bit have_save = 0;
 	int save_diffs;
+	// The FA2 flash's save slot (fa2.sav, 256 bytes, bridge words 0-63):
+	// +fa2save, +fa2expect and +fa2prog (below). The counters follow
+	// mapper_fa2's copies: a flash load that reached byte $FF, a save's
+	// dirty pulse, and the bridge's writes into the slot's RAM.
+	logic [7:0] fa2_img [0:255];
+	logic [7:0] fa2_exp [0:255];
+	bit have_fa2 = 0, fa2_prog = 0;
+	string fa2_path;
+	int fa2_diffs, fa2_loads = 0, fa2_saves = 0, fa2_port_wr = 0;
+	always @(posedge clk_sys) begin
+		if (dut.fa2_ram_we) fa2_port_wr++;
+		if (dut.main.cart2600.mapper_FA2.copy_state == 3'd1 && dut.main.cart2600.mapper_FA2.nvram_ready
+		    && dut.main.cart2600.mapper_FA2.copy_addr == 8'hFF) fa2_loads++;
+		if (dut.main.cart2600.mapper_FA2.nvram_dirty) fa2_saves++;
+	end
+	// Read the FA2 slot back the way the Pocket saves it, with the HSC's APF
+	// read protocol (below): 65 transactions for 64 words, the last address
+	// wrapping to word 0. fa2_diffs counts the bytes that differ from fa2_exp.
+	task automatic fa2_readback();
+		fa2_diffs = 0;
+		for (int t = 0; t <= 64; t++) begin
+			logic [31:0] got;
+			@(posedge clk_74a); fa2_addr = t[5:0];
+			repeat (4) @(posedge clk_74a);
+			got = fa2_dout;
+			fa2_rd = 1'b1; @(posedge clk_74a); fa2_rd = 1'b0;
+			repeat (2) @(posedge clk_74a);
+			if (t > 0)
+				for (int k = 0; k < 4; k++)
+					if (got[31 - 8*k -: 8] !== fa2_exp[4*(t-1) + k]) begin
+						if (fa2_diffs < 8)
+							$display("  FA2 byte %02x: expected %02x, read back %02x", 4*(t-1) + k,
+								fa2_exp[4*(t-1) + k], got[31 - 8*k -: 8]);
+						fa2_diffs++;
+					end
+		end
+	endtask
 
 	// +bios=FILE: the 7800 BIOS through its data slot (0x103, bridge address
 	// 0x02000000, data.json's), at most 16 KiB.
@@ -1460,6 +1500,37 @@ module tb_load;
 			end
 			have_save = 1;
 		end
+		// +fa2save=FILE: write a 256-byte FA2 flash file through its save slot
+		// port while the core is held in reset, as for +save. +fa2expect=FILE:
+		// what the slot must hold when it is read back at the end (default:
+		// the +fa2save file, or blank $FF without one). Either one turns the
+		// read-back on.
+		for (int i = 0; i < 256; i++) fa2_img[i] = 8'hFF;
+		if ($value$plusargs("fa2save=%s", fa2_path)) begin
+			fd = $fopen(fa2_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fa2_path); $finish; end
+			for (int i = 0; i < 256; i++) begin c = $fgetc(fd); fa2_img[i] = c[7:0]; end
+			$fclose(fd);
+			for (int i = 0; i < 64; i++) begin
+				@(posedge clk_74a);
+				fa2_addr = i[5:0];
+				fa2_din = {fa2_img[4*i], fa2_img[4*i+1], fa2_img[4*i+2], fa2_img[4*i+3]};
+				fa2_wr = 1'b1;
+				@(posedge clk_74a);
+				fa2_wr = 1'b0;
+				repeat (20) @(posedge clk_74a);
+			end
+			have_fa2 = 1;
+		end
+		for (int i = 0; i < 256; i++) fa2_exp[i] = fa2_img[i];
+		if ($value$plusargs("fa2expect=%s", fa2_path)) begin
+			fd = $fopen(fa2_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fa2_path); $finish; end
+			for (int i = 0; i < 256; i++) begin c = $fgetc(fd); fa2_exp[i] = c[7:0]; end
+			$fclose(fd);
+			have_fa2 = 1;
+		end
+		fa2_prog = $test$plusargs("fa2prog");
 		if (!$test$plusargs("bioslast")) load_bios();
 		// +hscfw=FILE / +arfw=FILE: load the HSC firmware / Supercharger BIOS
 		// through their data slots first, as the Pocket does at core start.
@@ -1614,6 +1685,30 @@ module tb_load;
 			$finish;
 		end
 `endif
+		if (fa2_prog) begin
+			// +fa2prog: the cartridge is sim/fa2_test.py's FA2 program. It
+			// loads the flash into the mapper's work RAM (command 1), writes
+			// bytes 0-254 back inverted, saves the work RAM (command 2), fills
+			// bytes 0-254 with $5A, loads the flash again and stores $A5 at
+			// $80. Wait for that (at most 2 s), then check the reload in the
+			// work RAM and the save slot through the APF read protocol.
+			automatic int ms = 0;
+			while (dut.main.riot_inst.riot_ram.mem_q[0] !== 8'hA5 && ms < 2000) begin
+				repeat (14318) @(posedge clk_sys);
+				ms++;
+			end
+			$display("FA2 program: mapper %0d, %0s after %0d ms; flash loads %0d, saves %0d, slot RAM writes %0d",
+				dut.main.cart2600.mapper, dut.main.riot_inst.riot_ram.mem_q[0] === 8'hA5 ? "done" : "not done",
+				ms, fa2_loads, fa2_saves, fa2_port_wr);
+			fa2_diffs = 0;
+			for (int i = 0; i < 255; i++)
+				if (dut.main.cart2600.mapper_FA2.working_ram.u_ram.mem_q[i] !== fa2_exp[i]) fa2_diffs++;
+			$display("FA2 work RAM after the reload: %0d of 255 bytes differ from the expected file", fa2_diffs);
+			run74 = 1'b1;
+			fa2_readback();
+			$display("FA2 save slot read back (APF read protocol): %0d of 256 bytes differ from the expected file", fa2_diffs);
+			$finish;
+		end
 		if ($test$plusargs("inputtest")) begin
 			// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X (slow), 12 Y (fast)
 			$display("INPUT port types: A %0d, B %0d, gun on port %0d", dut.porta_type, dut.portb_type, dut.gun_port + 1);
@@ -1823,6 +1918,10 @@ module tb_load;
 						end
 			end
 			$display("SAVEKEY save after load, reset and running: %0d of 32768 bytes differ from the save file", sk_diffs);
+		end
+		if (have_fa2) begin
+			fa2_readback();
+			$display("FA2 save slot after load, reset and 300 ms of running (APF read protocol): %0d of 256 bytes differ from the expected file", fa2_diffs);
 		end
 		if ($test$plusargs("skcheck")) begin
 			// What the test cart wrote over I2C must be in the RAM that gets
