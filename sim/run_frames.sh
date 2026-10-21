@@ -54,7 +54,9 @@ if [ ! -x "$BIN" ] || [ "$(mode)" != "$FDBG" ] || { [ "${NOBUILD:-0}" = 0 ] && [
 		"$HERE/run_sim.sh" "$HERE/sim_stubs.sv" "$HERE/bupchip/s4/psram_model.sv" -newer "$BIN" \
 		\( -name '*.sv' -o -name '*.v' -o -name '*.sh' -o -name '*.qsf' -o -name '*.hex' \) 2>/dev/null | head -1)" ]; }; then
 	if [ "${NOBUILD:-0}" != 0 ] && [ -x "$BIN" ]; then
-		echo "run_frames.sh: NOBUILD=1, but $BIN is recorded as FRAMES_DEBUG=$(mode || true) (none: no record for this binary), not FRAMES_DEBUG=$FDBG" >&2
+		m="$(mode || true)"
+		if [ -n "$m" ]; then m="a FRAMES_DEBUG=$m build"; else m="a build with no mode recorded for it"; fi
+		echo "run_frames.sh: NOBUILD=1, but $BIN is $m, not FRAMES_DEBUG=$FDBG" >&2
 		exit 2
 	fi
 	echo "building $BIN (FRAMES_DEBUG=$FDBG) ..." >&2
