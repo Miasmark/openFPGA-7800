@@ -73,8 +73,9 @@ are wanted, not required, for the first release):
     docs/daria_step10/plan.md, settled on decision 5's model on 2026-10-21:
     the modelled Harmony meets these calls, MiSTer does not, and the owner
     prefers the chip): CAND must have no late call in
-    F0..F1 and every one of those frames must be as long as frame F0-1 (a
-    262-line frame, VBLANK on time); the frames are then excused and every
+    F0..F1 (CAND's slack.csv must exist: without it the check fails) and
+    every one of those frames must be as long as frame F0-1 (on Spiders a
+    262-line frame); the frames are then excused and every
     column must match from F1+1, and REF's late calls in F0..F1 are left out
     of the late-call comparison. --overrun late (the rule up to 2.2.1): the
     frames are excused when they are the overrun frames on both sides and
@@ -366,7 +367,10 @@ def gate(a):
             in_win = sorted(set(lf_c or []) & set(want))
             fcsv = read_csv(path_in(a.cand, "frames.csv")) if os.path.isdir(a.cand) else None
             lines = sorted({r.get("lines") for r in fcsv or [] if r.get("frame", "").isdigit() and int(r["frame"]) in want})
-            if lf_r == want and not in_win and not long_c and norm is not None:
+            if lf_c is None:
+                bad.append(f"frames {f0}-{f1} not excused (--overrun ontime): CAND has no slack.csv, so its "
+                           f"late calls cannot be checked")
+            elif lf_r == want and not in_win and not long_c and norm is not None:
                 excuse = (f0, f1)
                 frame_of = {int(c["call"]): int(c["frame"]) for c in calls_r or []}
                 ontime_late = {c for c in late_r or [] if frame_of.get(c) in want}

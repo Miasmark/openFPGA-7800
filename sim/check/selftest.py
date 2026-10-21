@@ -573,6 +573,9 @@ def guard_cases(w):
         ("release: the MR line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3), False),
         ("release: a DARIA qsf line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3.split("\n", 1)[1] + mr), False),
         ("release: a second SEED line", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf + "set_global_assignment -name SEED 3\n"), False),
+        # a lost SEED line would ship Quartus' default seed, not P12's
+        ("release: the SEED line removed", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("set_global_assignment -name SEED 1\n", "")),
+         False),
         ("release: an SDC code change in core_constraints.sdc",
          lambda: edit("src/fpga/core/core_constraints.sdc", "69.841", "69.000"), False),
     ]
@@ -581,10 +584,36 @@ def guard_cases(w):
         fn()
         g("add", "-A")
         g("commit", "-q", "-m", name)
-        expect(name, [pg, "--repo", d, "--from", "base_rel", "--to", "HEAD", "--qsf", "release"], want)
+        expect(name, [pg, "--repo", d, "--from", "base_rel", "--to", "HEAD", "--qsf", "release"], want,
+               check=(lambda out, rc: "" if "expected exactly one SEED line" in out else "the SEED count is not named")
+               if "SEED line" in name and not want else None)
         g("checkout", "-q", "-f", "base_rel")
-    # from base, which lacks the DARIA lines, the release rule must refuse
-    expect("release: FROM without the DARIA lines", [pg, "--repo", d, "--from", "base", "--to", "base_rel", "--qsf", "release"], False)
+    # from base, which lacks the DARIA lines, the release rule must refuse; base..base
+    # leaves the qsf unchanged, so only the missing DARIA lines can fail it
+    expect("release: FROM without the DARIA lines", [pg, "--repo", d, "--from", "base", "--to", "base", "--qsf", "release"], False,
+           check=lambda out, rc: "" if "lacks the DARIA line" in out else "the missing DARIA lines are not named")
+    # step7_gates.sh's pp_guards gate picks the qsf mode itself: release when
+    # PP_GUARD_FROM's qsf has POCKET_DARIA too, daria when only the tree's has it
+    g("checkout", "-q", "-f", "base_rel")
+    write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("SEED 1", "SEED 2"))
+    g("add", "-A")
+    g("commit", "-q", "-m", "seed 2")
+    for rel, src in (("sim/step7_gates.sh", os.path.join(SIM, "step7_gates.sh")), ("sim/tools/pp_guards.py", pg),
+                     ("sim/tools/pp_equiv.py", os.path.join(SIM, "tools", "pp_equiv.py"))):
+        os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+        shutil.copy2(src, os.path.join(d, rel))   # untracked: the guards read committed blobs only
+    env = {k: v for k, v in os.environ.items() if k not in ("SIM_LOCK", "PP_GUARD_FROM")}
+    for frm, mode, want in (("base_rel", "release", True), ("base", "daria", False)):
+        out = os.path.join(w, "gates_pp_guards_" + frm)
+        shutil.rmtree(out, ignore_errors=True)
+
+        def check(o, rc, out=out, mode=mode):
+            p = os.path.join(out, "pp_guards.log")
+            t = open(p).read() if os.path.exists(p) else ""
+            return "" if f"GUARD qsf {mode}:" in t else f"pp_guards.log does not show 'GUARD qsf {mode}'"
+        expect(f"step7_gates.sh --only pp_guards, PP_GUARD_FROM {frm}: --qsf {mode}",
+               ["bash", os.path.join(d, "sim", "step7_gates.sh"), "--out", out, "--only", "pp_guards"], want, py=False,
+               env=dict(env, PP_GUARD_FROM=frm, VERILATOR="true"), check=check)
 
 
 def hygiene_cases(w):
@@ -1337,7 +1366,7 @@ def gate_cases(w):
     for rule in ([], ["--rule", "shift"]):
         tag = "" if not rule else "shift: "
         expect(tag + "spiders_ontime", [fg, sref, synth(w, "spiders_on", mutate=spo()), "--frames", "200",
-                                        "--excuse", "150-165"] + rule, True)
+                                        "--excuse", "150-165", "--overrun", "ontime"] + rule, True)
         expect(tag + "spiders_ontime_by_default (no --overrun)", [fg, sref, synth(w, "spiders_on_d", mutate=spo()),
                                                                   "--frames", "200", "--excuse", "150-165"] + rule, True)
         expect(tag + "spiders_ontime_but_late", [fg, sref, synth(w, "spiders_on_late", mutate=sp(), late=late),
@@ -1348,6 +1377,13 @@ def gate_cases(w):
                                                       "--frames", "200", "--excuse", "150-165"] + rule, False)
         expect(tag + "spiders_ontime_ref_not_late", [fg, ref, synth(w, "spiders_on_noref", mutate=spo()),
                                                      "--frames", "200", "--excuse", "150-165"] + rule, False)
+        # CAND without slack.csv: its late calls cannot be checked, so the frames are not
+        # excused (with --no-status the STATUS line does not stand in for it)
+        noslack = synth(w, "spiders_on_noslack", mutate=spo())
+        os.remove(os.path.join(noslack, "slack.csv"))
+        expect(tag + "spiders_ontime_cand_without_slack", [fg, sref, noslack, "--frames", "200", "--excuse", "150-165",
+                                                           "--no-status"] + rule, False,
+               check=lambda out, rc: "" if "CAND has no slack.csv" in out else "the missing slack.csv is not named")
     expect("v1_spiders_riot_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far_v1", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
             "--excuse", "150-165", "--overrun", "late"], False)

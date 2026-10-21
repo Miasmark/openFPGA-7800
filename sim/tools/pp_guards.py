@@ -27,7 +27,9 @@ covers neither VHDL nor memory files nor the qsf. Over `git diff FROM TO`:
              --qsf release: for a range that starts where the DARIA lines
              are already in (the release's chain, docs/daria_step10/plan.md
              3.1, "Order of commits"): the ap_core.qsf diff is the SEED line
-             and comment lines only, and every other .qsf and .sdc file is
+             and comment lines only, TO has exactly one SEED line when FROM
+             has one (a lost line would ship Quartus' default seed), and
+             every other .qsf and .sdc file is
              the same once comments are stripped, but for
              core/daria_constraints.sdc, which only the DARIA build reads
              (its SDC_FILE line is one of the three) and which may change.
@@ -203,8 +205,11 @@ def guard_qsf_release(repo, a):
     rest = lambda text: [t for t in strip_tcl(text) if not SEED.match(t)]
     if rest(blob(repo, a.frm, q)) != rest(blob(repo, a.to, q)):
         bad.append(f"{q}: differs other than in the SEED line and comments")
-    if sum(1 for t in strip_tcl(blob(repo, a.to, q)) if SEED.match(t)) > 1:
-        bad.append(f"{q}: more than one SEED line")
+    seeds = lambda rev: sum(1 for t in strip_tcl(blob(repo, rev, q)) if SEED.match(t))
+    n_to = seeds(a.to)
+    if n_to > 1 or (n_to != 1 and seeds(a.frm)):
+        # a lost SEED line would ship Quartus' default seed, not P12's
+        bad.append(f"{q}: expected exactly one SEED line, {a.to} has {n_to}")
     return bad + guard_qsf_comments(repo, a, free=(q, DARIA_SDC))
 
 
