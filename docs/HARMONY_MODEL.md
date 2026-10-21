@@ -35,7 +35,10 @@ The project applies it as two cases:
 - **The first case: Spiders' 16 late calls only** (frames 557-572). At
   Spiders' settings (70 MHz, mode 2, MAMTIM 4) the modelled chip takes 91.6-92.0%
   of each call's safe budget. MiSTer's core holds the 6507 for 109.8%. 2.2.1 at
-  ÷19 is late on the same 16 calls, as MiSTer is (progress.md, c77).
+  ÷19 is late on the same 16 calls, as MiSTer is (progress.md, c77). The
+  release after 2.2.1 (÷18, the L1W+L3 CPU) is on time on them, as the rule
+  asks: frames 557-572 stay 262-line frames (`frame_gate.py --overrun ontime`,
+  its default; `docs/DARIA_CORE.md`, decision 7).
 - **The second case: nowhere found.** Seven images were modelled, 20,984 calls
   with a budget. Five ran at their settings in force (Spiders, Qyx, Gorf, Lady
   Bug and Zoo Keeper). Elevator Agent and Zaxxon have no settings in force (no
@@ -46,8 +49,11 @@ The project applies it as two cases:
   above 82% on the chip [estimated: the worst call's zero-wait share times a
   margin above the largest MAM factor seen].
 
-**Whether the model is enough evidence** for this rule is still the owner's
-open question. A check on a real cartridge is below ("A check on silicon").
+**Whether the model is enough evidence** for this rule was the owner's
+question. Settled on 2026-10-21: *"no harmony cart, we operating on the
+model."* So the model stands as the evidence, and the check on a real
+cartridge below ("A check on silicon") will not run unless a cartridge comes
+to hand (`docs/daria_step10/plan.md`, decision 5).
 
 ### The owner's YouTube observation
 

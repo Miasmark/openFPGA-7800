@@ -32,6 +32,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 - Decision 5 is settled by the owner's words of 2026-10-21 (no Harmony cartridge; the model is the evidence), and with it decision 4 for Spiders (section 6). 3.0 item 9 and 3.3 (the real-Harmony check) will not run.
 - Section 4 gains "The trial" (2026-10-20), and decision 11's row says the trial passed and the fix is in `src/`. The fix landed after decision 1 lifted the `src/` freeze (2026-10-20 at 19:01 ET), as release work for F′. Also in section 4: the Rev 0 round's +0.1 ns margin is worded as a margin on (h) hold, "Its gates" names V-rtl as well as the `sram_ctrl.sv` row of 7.6, and any ÷19 bitstream built after the fix re-runs seeds 1-3 before a seed is chosen.
 - 3.0 item 1: the overlay (A2) landed in `src/` on 2026-10-20 (`0d9ce33`), after decision 1, for the next release and `BUP_DEBUG` only, so Rev 0 no longer keeps it in scratch. The paused record's finding on its check is closed (`5d5d591`), and so are the findings of that branch's review. A debug bitstream from `DARIA-dev` now carries decision 11's copy too, so it is a new tree and needs its own Q5 under P29 (3.0 item 1).
+- 3.1 gains a progress block (2026-10-21): what has landed for the release and on which commits, and what is still to come. The owner's seed ruling of 2026-10-21 is recorded in the step-7 plan's P12, and decisions 4 and 5's `ontime` rule in its P13.
 
 **How this plan came about**
 - The owner asked on 2026-10-17: "How would we go about trying to improve Daria at this point? Space and logic is rather full."
@@ -365,6 +366,19 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 
 ### 3.1 The next release: Rev 1 + Rev 2 merged at ÷18 (recommended)
 
+**Progress, 2026-10-21.** The owner chose one release at ÷18 (decisions 2, 3 and 7), landed before Rev 0's session, which still has to confirm ÷18 on silicon. Stage 2's branch is not pushed yet.
+- **In `DARIA-dev`** (`d05cb11`, Stage 1): the L1W+L3 CPU with T2's cures (`bc6a1ec`, decisions 2 and 10), MR in `ap_core.qsf` (`de9a903`, decision 8), and ÷18 with the bench defaults and G1 (`09aa7f8`, decision 3, its own commit so that it can be reverted alone), with their review fixes. The decision 11 hold fix (`7a4bf2c`) and the overlay (A2) were already in.
+- **On branch `rev1/div18-s2`** (Stage 2, on top of `f29794a`):
+  - `8a8bddb` `virtual_axis5` (decision 9), with `tb_vaxis5` in `run_sim.sh`;
+  - `4738c65` the FA2 saves, one shared `fa2.sav` (decision 15): F′, the last commit that changes the build without DARIA;
+  - `ba0812c` the identity chain re-based on F′ ("Order of commits", item 2);
+  - `5ad0a6b` RTL-1 and RTL-2, with the unit bench `tb_region` and `tb_wire`'s `pal2600_a78` at no extra retune;
+  - `dd135dd` B5, with the smoke test passing at 15 marks;
+  - `5febe80` B8;
+  - the documents' commit: every item of "Documents" below, except README's timing paragraph, which takes the release's Q2, and the hardware results that wait for the session (open items 7 and 10, IMPROVEMENTS's PAL items). `BUPCHIP_CORE.md`'s three items and `DEVELOPING.md`'s came with Stage 1 (`bc6a1ec`, `09aa7f8`, `9451d56`).
+- **Benches and checkers** from the list below landed with Stage 1 (`s1/check.sh`'s `THUMB=1` gate at 1.4208, `frame_gate.py --overrun ontime`, `l1f.S`, the L1W mutants with `neg_of_rd` and `sbc_carry_inverted` retired, `run_call.py`'s cases, `s1w_cyc`) and with Stage 2 (`tb_vaxis5`, `tb_load`'s FA2 round trip, `tb_region`, the re-based chain).
+- **Still to come**, in this order: F′'s non-DARIA reference fit with its repeat and Q4; B3 needs nothing more (the ÷18 commit made its lines right); the pre-campaign round (Q2 ×3 and Q5 ×3 on the combined tree, Q-mut, the STA mutants); the seed (P12 as amended on 2026-10-21) with B4's comment and B6; the campaign; the review; V-hw.
+
 **Contents**
 - **CPU** (`bup_cpu.sv`):
   - T2's R1, R12, R13, R14 and R2, plus L1W+L3, as v4 (md5 `4f224fbf`).
@@ -430,6 +444,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - **Design notes:**
     - G1's reasoning goes into `docs/daria_fe/design.md` 8.2.
     - This document carries plan P12, P13 and 5.4 forward, amended. 5.4's amendment for G1 is already here (section 10). P13's Spiders rule ("on time") and any P12 seed rule (decision 11) are added with the release.
+    - *Done 2026-10-21:* P12 and P13 each carry a dated amendment in the step-7 plan's own rows: P12 the owner's seed ruling of 2026-10-21 (the safest seed that passes everything, expected to be seed 3; `SEED` moves only after the pre-campaign round), P13 the `ontime` rule of decisions 4 and 5. G1's reasoning is in `docs/daria_fe/design.md` 8.2.
   - **The AtariVox change.** The campaign also covers `4fd89ef`'s AtariVox change. The documents do not record plan 7.6's `run_sim`/`extra_tests`/`s4`/`pp_equiv` set for it (the study, 7.3 and 8.3).
 
 **Order of commits** (keeps the non-DARIA identity chain meaningful)

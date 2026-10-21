@@ -14,8 +14,9 @@ Related documents:
   (no more than 4 minutes between a subagent's calls, restarts and resuming, simulation slots,
   disk).
 - [IMPROVEMENTS.md](IMPROVEMENTS.md): improvements found but left for a
-  later release (a guard that works at ÷19, S3, a cartridge EEPROM, the
-  `src/` clean-ups after 2.2.1), each with what it would fix and its cost.
+  later release (a guard that works at ÷19 if ÷18 is ever left, S3 as a
+  reserve, a cartridge EEPROM, the two `src/` comment clean-ups left after
+  2.2.1), each with what it would fix and its cost, and the items done since.
 - [HARMONY_MODEL.md](HARMONY_MODEL.md): the bench's model of a real Harmony
   cartridge's chip (LPC2103), a second timing reference for the 2600 ARM
   calls beside MiSTer's core: the settings per game, its limits, and the
