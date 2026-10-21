@@ -22,16 +22,20 @@
 #                qsf has it too, else --qsf comments). The release's chain
 #                (docs/daria_step10/plan.md 3.1, re-based 2026-10-21) runs
 #                from F′, the last commit that changes the build without
-#                DARIA: the FA2 save slot, the commit that added
-#                fa2_nvram_bridge to the wrapper
-#                (git log -1 --format=%h -S fa2_nvram_bridge -- src/fpga/core/atari7800_pocket.sv;
-#                4738c65 on rev1/div18-s2), with PP_EXPECT
-#                8a7e8a3d9dc32f0134b34d78b6467c586daffde69b087cc8f02ae53fc7753b7b,
-#                F′'s non-DARIA stream (MR, virtual_axis5, the FA2 slot, the
-#                L1W+L3 CPU, the sram_ctrl key copy). pp_guards then takes
-#                --qsf release: from F′ only ap_core.qsf's SEED line and
-#                comments may change. Before F′ the interim chain ran from
-#                the MR commit (git log -1 --format=%h -S MUX_RESTRUCTURE --
+#                DARIA: the FA2 port's gate to 2600 mode, the commit that
+#                added fa2_on to the wrapper
+#                (git log -1 --format=%h -S fa2_on -- src/fpga/core/atari7800_pocket.sv;
+#                35bf88f on rev1/div18-s2), with PP_EXPECT
+#                2fe5aed73e6edfc89866145aa3ec99ec1e757a532169b39a725f168e69f74f4b,
+#                F′'s non-DARIA stream (MR, virtual_axis5 without
+#                virtual_axis.sv, the FA2 slot in 2600 mode, the L1W+L3 CPU,
+#                the sram_ctrl key copy). pp_guards then takes --qsf
+#                release: from F′ only ap_core.qsf's SEED line and comments
+#                may change. Before it the chain ran from the FA2 slot's
+#                first commit (-S fa2_nvram_bridge, 4738c65) with
+#                8a7e8a3d...3b7b, until the Stage 2 review found that an A78
+#                could write the slot; before that, from the MR commit
+#                (git log -1 --format=%h -S MUX_RESTRUCTURE --
 #                src/fpga/ap_core.qsf) with 34b3f60a...bd21
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
