@@ -11,7 +11,7 @@ Related documents:
   Quartus in Docker, simulators, where data lives, every bench and its
   command, working conventions and pitfalls).
 - [AGENT_RUNS.md](AGENT_RUNS.md): running long multi-agent work here
-  (poll at most every 4 minutes, restarts and resuming, simulation slots,
+  (no more than 4 minutes between a subagent's calls, restarts and resuming, simulation slots,
   disk).
 - [IMPROVEMENTS.md](IMPROVEMENTS.md): improvements found but left for a
   later release (a guard that works at ÷19, S3, a cartridge EEPROM, the

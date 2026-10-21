@@ -2,7 +2,7 @@
 
 Lessons from running multi-agent work on DARIA step 7 (2026-10-09 to 10-11): an orchestrating session that starts workflows of subagents, each running builds, simulations and Quartus fits for hours. Read this before starting long agent work here. The machine and tool setup is in [ENVIRONMENT.md](ENVIRONMENT.md).
 
-## 1. The prompt cache: poll at most every 4 minutes
+## 1. The prompt cache: never more than 4 minutes between a subagent's calls
 
 **The two lifetimes.** The orchestrating session's prompt cache lasts 1 hour. Workflow subagents get a 5-minute cache. This was measured from the session's transcripts on 2026-10-10:
 - every one of the orchestrating session's 21M cache-write tokens was a 1-hour write;
@@ -12,11 +12,26 @@ Lessons from running multi-agent work on DARIA step 7 (2026-10-09 to 10-11): an 
 
 **What went wrong.** Agents that waited on a simulation or a fit used to check every 10 minutes. Each check found the cache expired and rewrote the whole context. Over the session to 2026-10-10 that was 37% of all spend: a median of 419k tokens rewritten per check.
 
+**Measured on the self-hosted VM (2026-10-20).** The same two lifetimes hold there:
+- the orchestrating session wrote only 1-hour cache entries (509,602 tokens, none at 5 minutes); every call after a gap under an hour read its context from the cache (7 of 7, four of them after 10-60 minutes), and both calls after a gap of more than an hour rewrote it;
+- the workflow subagents wrote only 5-minute entries (1.97M tokens, none at 1 hour);
+- one probe agent with a fixed context of about 32k tokens waited a set time between calls:
+
+| Gap before the call | Read from the cache | Written to the cache | |
+|---|---|---|---|
+| 213 s | 31,475 | 181 | hit |
+| 272 s | 31,656 | 181 | hit |
+| 333 s | 0 | 32,018 | whole context rewritten |
+| 424 s | 0 | 32,199 | whole context rewritten |
+
+So a subagent's cache lasts 5 minutes, and the 4-minute rule leaves about a minute for the call itself.
+
 **The rule:**
-- While a subagent waits for a long job, it never lets more than 4 minutes pass between its own calls.
+- While a subagent waits for a long job, it never lets more than 4 minutes pass between its own calls. "At most every 4 minutes" has been read as "no more often than every 4 minutes"; it means the opposite.
 - It waits in bounded steps, for example `timeout 230 bash -c 'until <done-test>; do sleep 20; done'`, then checks, then waits again.
+- No single tool call may run longer than about 4 minutes: no command timeout above 240 s, and anything longer runs detached (`setsid nohup ... &`) with the bounded waits above. On 2026-10-20 two agents waited with 10-minute calls; they were stopped and restarted with this wording. A plain foreground `sleep N` is refused by the agent's shell; wait on a condition, as above.
 - Two 4-minute waits cost about one twenty-fifth of one 10-minute wait.
-- When a wait is measured in hours, it is cheaper to end the subagent and let the orchestrating session (1-hour cache) do the waiting, then start a fresh agent for the next step.
+- When a wait is measured in hours, it is cheaper to end the subagent and let the orchestrating session (1-hour cache) do the waiting, then start a fresh agent for the next step. The agent returns what it waits on: each detached job, its log and an exact done-test.
 
 **Measured effect.** Calls by the gap since the same agent's previous call:
 
@@ -36,6 +51,8 @@ Lessons from running multi-agent work on DARIA step 7 (2026-10-09 to 10-11): an 
 A call that follows a gap of 5 minutes or more and has a large cache write is a rewrite. Put the rule in every subagent prompt; the agents follow it when it is stated with the reason.
 
 ## 2. Restarts
+
+**On the self-hosted VM** ([ENVIRONMENT.md](ENVIRONMENT.md) 11), this section mostly does not apply. The VM stays on: it does not stop when a session goes idle, and it has no 13-hour limit. So skip the precautions below that exist only for restarts: splitting runs into one-hour pieces, `WIP` snapshot commits, resumable worker scripts and progress files. Keep a short NOTES.md per lane. "Resuming a workflow" still applies when a workflow is stopped on purpose. The rest of this section records the cloud container (2026-10-09 to 10-16).
 
 **How often.** Six restarts hit in about 65 hours (2026-10-09 to 10-12): one of the container, five of the session only. On 2026-10-13 and 14 the machine came up fresh at 23:01, 02:40, 04:40, 20:39 and 23:48 UTC.
 
