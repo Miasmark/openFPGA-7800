@@ -17,7 +17,13 @@
 #                (default aeee6d2) with tb_daria's two macro sets, plain and
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
-#                the qsf has POCKET_DARIA, else --qsf comments)
+#                the qsf has POCKET_DARIA, --qsf release when PP_GUARD_FROM's
+#                qsf has it too, else --qsf comments). Until the release's
+#                F′ (docs/daria_step10/plan.md 3.1) the chain runs from the
+#                commit that added MR's MUX_RESTRUCTURE lines to ap_core.qsf
+#                (git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf),
+#                with PP_EXPECT 56033140...98fd, that commit's non-DARIA
+#                stream (the L1W+L3 CPU and the sram_ctrl key copy)
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
@@ -314,7 +320,12 @@ g_pp_equiv() {
 	return $rc
 }
 g_pp_guards() {
-	local q=comments; [ "$QSF_DARIA" = 1 ] && q=daria
+	local q=comments
+	if [ "$QSF_DARIA" = 1 ]; then
+		q=daria
+		git -C "$REPO" show "$PP_GUARD_FROM:src/fpga/ap_core.qsf" 2> /dev/null \
+			| grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' && q=release
+	fi
 	python3 "$REPO/sim/tools/pp_guards.py" --repo "$REPO" --from "$PP_GUARD_FROM" --to HEAD --qsf "$q"
 }
 g_divider() { python3 "$HERE/check/div_check.py" --repo "$REPO"; }

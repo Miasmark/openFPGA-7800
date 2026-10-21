@@ -50,7 +50,10 @@ the input-dependent groups below that did not run for want of their input
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
                    and a missing DARIA qsf line, an SDC code change, a
-                   removed translate_off/on pair, a new daria_ or
+                   removed translate_off/on pair, --qsf release's cases (a
+                   qsf line added or removed, a second SEED line, a code
+                   change in an SDC file other than daria_constraints.sdc,
+                   a FROM without the DARIA lines), a new daria_ or
                    bup_dbg_snap file with `define, `undef, `timescale or
                    left at `default_nettype none; and the changes it must
                    let through), hygiene.sh (a cartridge image, a PNG, a
@@ -551,6 +554,37 @@ def guard_cases(w):
         g("commit", "-q", "-m", name)
         expect(name, [pg, "--repo", d, "--from", "base", "--to", "HEAD", "--qsf", q], want)
         g("checkout", "-q", "-f", "base")
+    # --qsf release: from a commit that has the DARIA lines (and an MR line);
+    # only the SEED line and comments of ap_core.qsf may change, and
+    # daria_constraints.sdc, which only the DARIA build reads
+    mr = 'set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|x:y"\n'
+    rel_qsf = QSF + daria3 + mr
+    write(d, "src/fpga/ap_core.qsf", rel_qsf)
+    write(d, "src/fpga/core/daria_constraints.sdc", "# guard pair\nset_max_delay 6.0 -from a -to b\n")
+    g("add", "-A")
+    g("commit", "-q", "-m", "base_rel")
+    g("tag", "base_rel")
+    rel_cases = [
+        ("release: SEED, a qsf comment and daria_constraints.sdc's bounds", lambda: (
+            write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("SEED 1", "SEED 2").replace("# test project", "# seed 2 chosen")),
+            edit("src/fpga/core/daria_constraints.sdc", "6.0", "8.0")), True),
+        ("release: an SDC comment only", lambda: edit("src/fpga/core/core_constraints.sdc", "# clocks", "# the clocks"), True),
+        ("release: an extra qsf line", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf + mr.replace("x:y", "x:z")), False),
+        ("release: the MR line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3), False),
+        ("release: a DARIA qsf line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3.split("\n", 1)[1] + mr), False),
+        ("release: a second SEED line", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf + "set_global_assignment -name SEED 3\n"), False),
+        ("release: an SDC code change in core_constraints.sdc",
+         lambda: edit("src/fpga/core/core_constraints.sdc", "69.841", "69.000"), False),
+    ]
+    for name, fn, want in rel_cases:
+        g("checkout", "-q", "-f", "base_rel")
+        fn()
+        g("add", "-A")
+        g("commit", "-q", "-m", name)
+        expect(name, [pg, "--repo", d, "--from", "base_rel", "--to", "HEAD", "--qsf", "release"], want)
+        g("checkout", "-q", "-f", "base_rel")
+    # from base, which lacks the DARIA lines, the release rule must refuse
+    expect("release: FROM without the DARIA lines", [pg, "--repo", d, "--from", "base", "--to", "base_rel", "--qsf", "release"], False)
 
 
 def hygiene_cases(w):

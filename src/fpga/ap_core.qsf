@@ -812,3 +812,21 @@ set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_lb_n
 set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to cram0_dq[*]
 set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to cram0_dq[*]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[*]
+
+# MR: MUX_RESTRUCTURE ON for 13 clk_sys-domain entities (both builds; in the
+# build without DARIA the daria_fe line matches nothing). About 910 fewer ALMs
+# at VCO/19 on seeds 1-3 (docs/IMPROVEMENTS.md); in every fit of the release's
+# CPU at VCO/18 (docs/daria_step10/plan.md, decision 8).
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|Atari7800:main"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|daria_fe:u_fe"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|detect2600:detect2600"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|paddle_timer:*"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|virtual_axis:*"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|lightgun:lightgun"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|EEPROM_24LC0X:savekey"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|a78_cart_extent:cart_extent"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|stick_dirs:dual_left"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|stick_dirs:dual_right"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|atarivox:atarivox"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|audio_filter:afilt"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|core_bridge_cmd:icb"
