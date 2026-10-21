@@ -13,24 +13,26 @@
 #                which pp_equiv refuses when one holds a directive that
 #                would reach the files after it) has 0 'daria' tokens, and
 #                its hash is PP_EXPECT (F's, on aeee6d2 fc52edb6...6f52;
-#                until F′ the interim value under pp_guards);
+#                for the release, F′'s: see pp_guards);
 #                and top.sv with cart2600.sv preprocess to PP_ORACLE_BASE's
 #                (default aeee6d2) with tb_daria's two macro sets, plain and
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
 #                the qsf has POCKET_DARIA, --qsf release when PP_GUARD_FROM's
-#                qsf has it too, else --qsf comments). Until the release's
-#                F′ (docs/daria_step10/plan.md 3.1) the chain runs from the
-#                commit that added MR's MUX_RESTRUCTURE lines to ap_core.qsf
-#                (git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf),
-#                with PP_EXPECT (2026-10-21)
-#                34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21,
-#                the non-DARIA stream of the L1W+L3 CPU and the sram_ctrl key
-#                copy. The MR commit's own stream,
-#                56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd,
-#                differs from it only by the lint_off/lint_on pair taken out of
-#                bup_cpu.sv's t_addctl after it (Verilator keeps lint
-#                metacomments in -E's output)
+#                qsf has it too, else --qsf comments). The release's chain
+#                (docs/daria_step10/plan.md 3.1, re-based 2026-10-21) runs
+#                from F′, the last commit that changes the build without
+#                DARIA: the FA2 save slot, the commit that added
+#                fa2_nvram_bridge to the wrapper
+#                (git log -1 --format=%h -S fa2_nvram_bridge -- src/fpga/core/atari7800_pocket.sv;
+#                4738c65 on rev1/div18-s2), with PP_EXPECT
+#                8a7e8a3d9dc32f0134b34d78b6467c586daffde69b087cc8f02ae53fc7753b7b,
+#                F′'s non-DARIA stream (MR, virtual_axis5, the FA2 slot, the
+#                L1W+L3 CPU, the sram_ctrl key copy). pp_guards then takes
+#                --qsf release: from F′ only ap_core.qsf's SEED line and
+#                comments may change. Before F′ the interim chain ran from
+#                the MR commit (git log -1 --format=%h -S MUX_RESTRUCTURE --
+#                src/fpga/ap_core.qsf) with 34b3f60a...bd21
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
