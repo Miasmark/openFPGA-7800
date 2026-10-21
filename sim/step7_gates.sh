@@ -406,7 +406,7 @@ g_selftest() {
 		miss+=("--reset ($OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log: the cartram gate, with Fix B in the tree)")
 	fi
 	if [ -f "$OUT/rs/cartram/logs/artape_b0.log" ]; then args+=(--artape "$OUT/rs/cartram/logs/artape_b0.log")
-	else miss+=("--artape ($OUT/rs/cartram/logs/artape_b0.log: the run_sim gate)"); fi
+	else miss+=("--artape ($OUT/rs/cartram/logs/artape_b0.log: the extra_tests gate with AR_TAPE=1)"); fi
 	if [ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ]; then
 		args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
 	else miss+=("--extra ($OUT/extra_tests.out and EXTRA_REF: the extra_tests gate)"); fi

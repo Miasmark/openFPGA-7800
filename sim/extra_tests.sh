@@ -78,10 +78,18 @@ if [ ! -x "$X/dasm/bin/dasm" ]; then
 	git clone -q --depth 1 https://github.com/dasm-assembler/dasm "$X/dasm"
 	make -C "$X/dasm" -j4 >/dev/null
 fi
-if [ ! -x "$X/7800basic/7800basic" ]; then
+# 7800basic's makefile is serial only: its 7800preprocess and 7800optimize
+# rules both write and delete lex.yy.c in the source directory, so with -j
+# they can compile each other's half-written file and fail (its head of
+# 2026-10-10, e7c18d2, did with -j4). Its output goes to a log, so that a
+# failure shows; a partial build is removed, so the next run builds again.
+if [ ! -x "$X/7800basic/7800preprocess" ]; then
+	rm -rf "$X/7800basic"
 	git clone -q --depth 1 https://github.com/7800-devtools/7800basic "$X/7800basic"
-	make -C "$X/7800basic" -j4 all >/dev/null 2>&1
+	make -C "$X/7800basic" all > "$X/7800basic.make.log" 2>&1 \
+		|| { echo "7800basic: make failed (last lines of $X/7800basic.make.log):"; tail -5 "$X/7800basic.make.log"; exit 1; }
 fi
+echo "-- tools: dasm $(git -C "$X/dasm" rev-parse --short HEAD 2>/dev/null), 7800basic $(git -C "$X/7800basic" rev-parse --short HEAD 2>/dev/null)"
 export PATH="$X/dasm/bin:$X/7800basic:$PATH" bas7800dir="$X/7800basic"
 
 build() {   # build <name> <sample> <sed expression or "">
