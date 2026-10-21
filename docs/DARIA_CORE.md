@@ -1197,7 +1197,7 @@ In the 2600 profile the BupChip is idle, and so are its PSRAM, its `psram.sv` co
   - The late target check (`:694, 703, 742`, and step 2's POP {pc} and hi-register MOV/ADD pc) gains a parallel compare. The fetch address the target implies is word-aligned in ARM state and halfword-aligned in Thumb. If it equals 0xF000_0000 in the 2600 profile, the core returns instead of halting.
   - That is upstream's `mem_fetch && mem_addr == 32'hF0000000` (`arm_mapper_memory.sv:558`). So 0xF000_0001 (Thumb) returns, and 0xF000_0002 halts.
   - The compare sits in the registered `late_go` path, not in `npc`.
-- **Halts during a call.** The call never returns, and the 6507 stays held. `halted`, `halt_code` and `halt_pc` reach `clk_sys` through two flops for DARIA's status overlay (step 8; built after 2.2.1 and landed on 2026-10-20, `BUP_DEBUG` only: `docs/IMPROVEMENTS.md`, "The step-8 DARIA status overlay"). A console reset recovers. Upstream's abort lands in the driver's vectors, which is no better.
+- **Halts during a call.** The call never returns, and the 6507 stays held. `halted`, `halt_code` and `halt_pc` reach `clk_sys` through `bup_dbg_snap`'s snapshot (`dbg_status`, `dbg_halt_pc`) for DARIA's status overlay; `halted` also through two flops, as `daria_halted`, which nothing reads (step 8; built after 2.2.1 and landed on 2026-10-20, `BUP_DEBUG` only: `docs/IMPROVEMENTS.md`, "The step-8 DARIA status overlay"). A console reset recovers. Upstream's abort lands in the driver's vectors, which is no better.
 - **`MODES` 1 for both profiles.** CoreTone's one MSR writes 0xD3, which `MODES` 1 accepts, and ARIA's tests pass in lockstep with `MODES` 1 ("Step 0 work").
 
 #### 5. The call port

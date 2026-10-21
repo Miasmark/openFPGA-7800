@@ -65,7 +65,8 @@
 // the console's last reset, unlocks since power-up. The halt PC is the byte
 // address, so rows 6-8 read as eight hex digits. The DARIA rows exist only
 // under BUP_DEBUG, so a build without it preprocesses this file to the same
-// text as before (docs/daria_step7/plan.md 7.6).
+// stream as before, comments dropped (pp_equiv.py; docs/daria_step7/plan.md
+// 7.6).
 //
 // The status comes from clk_arm and clk_sys registers and is sampled here on
 // clk_sys. Without POCKET_DARIA clk_arm is 2 x clk_sys from the same VCO, so
