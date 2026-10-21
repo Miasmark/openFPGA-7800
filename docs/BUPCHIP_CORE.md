@@ -790,7 +790,7 @@ The firmware reads samples sequentially, one `ldrsb` per voice per frame, which 
 | `bup_asset_wr.sv` | `clk_arm` message receiver: `asset_ready` and `asset_size` (also an input of `bup_cpu`), ROM writes and `fw_loaded`, PSRAM arbitration between writes and fills (not held) |
 | `bup_capture.sv` | ARSC header parse, byte-pair packer, firmware word packer, START/WRITE/END and FWSTART/FWWRITE/FWEND message stream (`clk_sys`) |
 | `bup_tick48k.sv` | The `clk_74a` accumulator and toggle |
-| `bup_status_osd.sv` | `BUP_DEBUG` only: the status word drawn over the picture's top-left corner, so a hardware test can read it (step 5; instantiated in `atari7800_pocket.sv`) |
+| `bup_status_osd.sv` | `BUP_DEBUG` only: the status word drawn over the picture's top-left corner, so a hardware test can read it (step 5; instantiated in `atari7800_pocket.sv`). In DARIA builds it also holds `daria_dbg_status` (DARIA's calls, late calls and guard unlocks) and, while a 2600 ARM cartridge runs, draws DARIA's status instead (2026-10-20; `docs/IMPROVEMENTS.md`, "The step-8 DARIA status overlay") |
 | `bup_load_probe.sv` | `BUP_DEBUG` only: counts and times what the loader delivers around the slot switches (bytes of another slot's address under a flag, bytes taken after a flag fell, bytes dropped, the gaps), for the overlay |
 
 **`bup_cpu` ports (S1, `bup_cpu.sv:175-248`).** The wrapper of step 4 connects these:
@@ -854,7 +854,7 @@ Also:
 | Name | Effect |
 |---|---|
 | `POCKET_BUPCHIP` | `top.sv` exports the command and takes in the audio; the Pocket files build the BupChip |
-| `BUP_DEBUG` | Adds a status word (halt code and PC; shadow-counter flags for command overflow, PCM overflow and PCM underflow; fault code; lowest PCM level), the load probe (`bup_load_probe.sv`), a check of the firmware as written into the ROM (word count, order, and CRC-32 against `bupchip.bin`'s published `95b8b4f8`) and the throttle, and shows them on screen: `bup_status_osd.sv` draws thirteen rows of cells over the picture's top-left 96 × 104 pixels while a Souper cartridge is loaded (step 5; its header has the layout). Hardware test builds only; off in releases. |
+| `BUP_DEBUG` | Adds a status word (halt code and PC; shadow-counter flags for command overflow, PCM overflow and PCM underflow; fault code; lowest PCM level), the load probe (`bup_load_probe.sv`), a check of the firmware as written into the ROM (word count, order, and CRC-32 against `bupchip.bin`'s published `95b8b4f8`) and the throttle, and shows them on screen: `bup_status_osd.sv` draws thirteen rows of cells over the picture's top-left 96 × 104 pixels while a Souper cartridge is loaded (step 5; its header has the layout). In a DARIA build (`POCKET_DARIA`) it also draws DARIA's status while a 2600 ARM cartridge runs: six rows (CPU running and halted, the guard's lock, the capture's flags; halt and fault codes; late calls; guard unlocks; calls), nine while halted (the halt PC), counted by `daria_dbg_status` in the same file (2026-10-20). Hardware test builds only; off in releases. |
 | `PCM_DEPTH`, `BUP_THROTTLE` | Parameters of `bupchip_pocket` |
 | `MODES` | Parameter of `bup_cpu`, default 0: the mode fixed at SVC, as described here. 1 is DARIA's: SVC, SYS and FIQ with their banked registers (`bup_cpu.sv:13-19`; `docs/DARIA_CORE.md`). The BupChip uses 0. |
 | `ALTERA_RESERVED_QIS` | Set by Quartus. The retire port is simulation-only, as in `cache_ram.v:31` (`bup_cpu.sv:230-247, 1476-1491`). |
