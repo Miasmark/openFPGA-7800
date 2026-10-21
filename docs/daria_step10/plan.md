@@ -20,7 +20,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 - **Open when work resumes:**
   - the review's remaining findings, none of them in the repository's commits: the whole-core overlay check can pass while checking no cell (the overlay is still in scratch; fix it before it lands in `src/`), and a few notes on scratch records. The checklist's Start/Reset wording and the three `docs/HARMONY_MODEL.md` nits were fixed before the pause (the nits in `dc1e882`);
   - Rev 0's three branches and this record are merged into `DARIA-dev`;
-  - the hold fix trial of section 4 (decision 11), started and stopped before it ran;
+  - the hold fix trial of section 4 (decision 11), started and stopped before it ran (it ran and passed on 2026-10-20: section 4, "The trial");
   - the owner's session (3.0 item 5).
 
 **Changes since the owner's approval, marked in place:**
@@ -701,6 +701,29 @@ If ÷18 fails on silicon in Rev 0:
 - **Its gates.** It is a change to `sram_ctrl.sv`, which both builds share. By 7.6 it brings the cartram matrix and the directed s19 run, and it goes into F′ with a new reference and Q4, all already in the release's gates.
 - **Its trial** (scratch: the equivalence proof, the SRAM benches, the synthesis report showing the copies survive, fits on seeds 3, 6, 1 and 2 and on the build without DARIA) was started and stopped before it ran, when the owner paused the work.
 
+**The trial (2026-10-20): it passes** [measured: the trial's scratch records; the change is the commit that adds this paragraph]
+- **The change** (`sram_ctrl.sv`): `t_wr_qd` and `t_addr_qd`, loaded on the same `clk_sys` edge from the same inputs as `t_wr_q` and `t_addr_q`; `t_last` loads `t_key_d = {t_wr_qd, t_addr_qd}`; the compare keeps `t_key`. `DONT_MERGE_REGISTER` (as `altera_attribute`) is on the originals and the copies. The `t_key`, `t_new` and `m_new` lines are unchanged.
+- **Equivalence.** Yosys (yowasp-yosys 0.70, no `opt_merge`) proves the patched module equal to `a54b07a`'s: with the flip-flops stepping together (717 of 717 `$equiv` cells), and with the three clocks as free inputs (`clk2fflogic`, 778 of 778, the copy and original pairs included). Three mutants fail as they should: a copy loaded from the wrong input (M1, M2) fails both; copies on `clk_sdram` (M3) fail the clock-aware pass only. A Verilator lockstep bench (10^7 `clk` cycles, `clk_74a` asynchronous) finds no output or `t_last` difference and catches all three mutants, M3 by its copy-equals-original assertion only.
+- **Synthesis.** `sram_ctrl` goes from 526 to 542 registers: `t_wr_qd` and `t_addr_qd[14:0]` survive. Bits 15 and 16 are constant 0 in the Pocket build, as in the originals. No `sram_ctrl` register is merged (the control fit merges two).
+- **The fits** (the ÷18 ones on the trial's tree, `4fd89ef` + its diff; f and g on `a54b07a`; figures in ns, the worse slow corner):
+
+| Fit | `clk_arm` | `clk_sdram` | Worst hold | (h) setup / hold | ALMs | Verdict |
+|---|---|---|---|---|---|---|
+| ÷18 seed 3, no copy (control) | +2.645 | +3.084 | −0.503 | 5.790 / −0.503 | 14,954 | FAIL: (l), gate.hold, (h), as the trial's |
+| ÷18 seed 3 | +2.077 | +2.797 | +0.111 | 7.349 / +0.240 | 14,999 | PASS |
+| ÷18 seed 6 | +2.109 | +2.849 | +0.108 | 7.174 / +0.222 | 14,999 | PASS |
+| ÷18 seed 1 | +2.018 | +2.595 | +0.083 | 6.927 / +0.299 | 14,992 | PASS |
+| ÷18 seed 2 | +1.509 | +2.644 | +0.117 | 6.965 / +0.281 | 14,986 | PASS |
+| `a54b07a` + copy, DARIA ÷19, seed 2 | +1.188 | +2.397 | +0.118 | 6.904 / +0.248 | 15,842 | PASS |
+| `a54b07a` + copy, no DARIA, seed 2 | — | +2.818 | +0.103 | 5.460 / +0.251 | 13,451 | PASS |
+
+  - The control reproduces the trial's seed-3 fit to the last digit, so this machine's Quartus matches the container's.
+  - On seed 3 the failing endpoint, `t_wr_qd` → `t_last[17]`, has +0.387 ns of hold at the fast 0 °C corner. Every hold path into `t_last` is at least +0.304 ns. `t_wr_qd` still sits in `t_last[17]`'s LAB, but it feeds only that register's data input.
+  - Every round criterion above holds: every hold ≥ 0, (h) hold ≥ +0.1 ns on every ÷18 seed, (h) setup ≥ +4.5 ns, `clk_sdram` ≥ +1.5 ns, every 5.4 check passing with no new warning in (e).
+  - `clk_arm` moves by −0.57, +0.20, +0.06 and −0.41 ns on seeds 3, 6, 1 and 2 against the trial's fits of the same seed. That is the size of the trial's own per-seed changes (−0.54 to +0.35 ns), so it is read as seed noise; these are not paired measurements. Seed 2's +1.509 ns is just above the trial's +1.5 ns rule. The guard pair passes on every fit. The ÷19 build's guard setup is +0.002 ns at slow 85 °C (reported, not gated at ÷19); 2.2.1's own seed-2 fit had +0.193, and that build's seeds ranged from −0.262 to +0.391.
+- **The benches** on `a54b07a` + copy: the cartram gate passes (matrix, s19, the reset sweep, midswap, forcecoinc; the nohold and nocmp mutants are caught; the plain build's 21 fingerprints equal the DARIA build's). All 21 cartram fingerprints of each build equal `a54b07a`'s. The `tb_wire` scenarios bios_dpc, bios_cdf, dpc_then_souper and souper_then_cdf pass on both builds.
+- **For F′:** the copy changes the build without DARIA, so its `pp_equiv` stream hash changes (`a54b07a` `64d9eba0…1b0d`, with the copy `478f8b4a…57b2`). F′'s `PP_EXPECT` must be taken with the copy in.
+
 ---
 
 ## 5. Open technical risks (most severe first)
@@ -772,7 +795,7 @@ The study's numbers are in brackets. "When" says when each decision is needed. T
 | 8 | [2] MR in `ap_core.qsf` (both builds) or `daria.qip` (DARIA only) | Before development | `ap_core.qsf`. T3, FA2 and the cleaned `bup_cpu.sv` change the non-DARIA build anyway, so the new reference (F′) is paid either way, and the `daria.qip` form is untested | Open |
 | 9 | [3] `virtual_axis5` | Before development | Yes: −408.5 ALMs on top of MR [measured: one seed]. It staggers the axes' 1 ms update by 0-4 `clk_sys`, and equals five instances with their ticks delayed that way on every clock over 4 × 10^7 random-stimulus clocks (a bench, not a proof) | Open |
 | 10 | [6] R1's cost to the BupChip, and the amended `s1/check.sh` CPI gate | After Rev 0's firmware check | Accept. +3.1-3.2% CPI; lowest clock without underrun 24.74 MHz against 38.18 MHz [measured: model, T2]. Unchanged by L1W. Rev 0 measures it on the RTL first | Open |
-| 11 | *(new)* The `sram_ctrl` hold: fix or seed rule | After Rev 0's hold round; final at the pre-campaign round | An RTL fix: duplicate the request-key registers that feed `t_last` (section 4, "What Rev 0 found") | **Settled 2026-10-19.** The owner: "Duplicating the register sounds like the best option." The fitter-only targets failed, and the hold exception is dropped. The change is under `src/`, in a file both builds share, so it waits for decision 1 and goes into the release (F′). Its trial has not run yet |
+| 11 | *(new)* The `sram_ctrl` hold: fix or seed rule | After Rev 0's hold round; final at the pre-campaign round | An RTL fix: duplicate the request-key registers that feed `t_last` (section 4, "What Rev 0 found") | **Settled 2026-10-19.** The owner: "Duplicating the register sounds like the best option." The fitter-only targets failed, and the hold exception is dropped. The change is under `src/`, in a file both builds share, so it waits for decision 1 and goes into the release (F′). Its trial passed on 2026-10-20 (section 4, "The trial"), and the change is in `src/` |
 | 13 | [9] The aligned audio run (A9) as a gate | Before the campaign: it changes the campaign's gate set | **Defer**: build it with D1/D2 or on a reported audio problem. This reverses the study's rule (audio gate before call timing changes), and the merged release changes call timing on every image | **Settled 2026-10-19: deferred.** The owner: "if deferring the audio check allows the testing to go faster then yes, skip over it at this time." Choosing A9 would have added 1-3 days of bench work and about 35 h of runs (12-17 h wall) before the campaign [estimated] |
 | 15 | [11] The FA2 save file: one shared file like `hsc.sav`, or one per game, and its name | Before development | No technical preference found. A per-game file mirrors the cartridge's own flash. The owner's preference decides | Open |
 
