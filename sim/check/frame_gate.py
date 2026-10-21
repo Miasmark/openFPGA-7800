@@ -87,9 +87,9 @@ are wanted, not required, for the first release):
     sides;
   - CAND's status line (unless --no-status), which tb_frames prints as
       STATUS calls C, late L, halts H, halt_code X, psram_viol V, guard G, unlocks U
-    with halts 0, psram_viol 0, unlocks 0, guard unlocked (--expect-guard:
-    "unlocked", the default, at VCO/19, pll_core.v's divider and tb_load's
-    default, where the guard never locks; "locked" at VCO/18, +arm_div=18;
+    with halts 0, psram_viol 0, unlocks 0, guard locked (--expect-guard:
+    "locked", the default, at VCO/18, pll_core.v's divider and tb_load's
+    default; "unlocked" at VCO/19, +arm_div=19, where the guard never locks;
     "none" skips it), and C and L equal to REF's.
 --ref-prefix: REF is a longer run (R1 at 1,500 frames) and CAND ran N
 frames: REF's fp.csv is cut to frames 1..N-1, and both sides' calls to those
@@ -611,7 +611,7 @@ def main():
     p.add_argument("--overrun", choices=("ontime", "late"), default="ontime",
                    help="what CAND does in the excused frames: ontime (default; step-10 plan decision 4, settled on "
                         "decision 5's model, 2026-10-21) or late (both sides overrun, the rule up to 2.2.1)")
-    p.add_argument("--expect-guard", default="unlocked", choices=("locked", "unlocked", "none"))
+    p.add_argument("--expect-guard", default="locked", choices=("locked", "unlocked", "none"))
     p.add_argument("--no-status", action="store_true")
     p.add_argument("--scheme", type=int)
     p.add_argument("--ref-prefix", action="store_true",

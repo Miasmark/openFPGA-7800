@@ -90,8 +90,8 @@
 #                the tests that copy src/fpga and is PARTIAL
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
-#                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
-#                pll_core.v's divider; plan 5.2's tb_s4 check at it)
+#                row 5: the non-DARIA one and DARIA=1 ARM38=1 (VCO/18,
+#                pll_core.v's divider)
 #                PSRAM_CS=50.0, the latter with SNAP_REQUIRED=1 once
 #                bup_dbg_snap.sv is in the tree (every tb_s4 run must then
 #                print "snap: ok": the snapshot check of plan 1.2 rows 5 and
@@ -136,8 +136,9 @@
 #                section alone in a BUP_DEBUG build (each run's overlay line
 #                with its coverage, the pattern run, the section's "overlay
 #                cells:" line), and its RTL mutants each CAUGHT; ARM_DIV
-#                passes through (default 19). Then run_ovl.sh's control
-#                again with ARM_DIV=18, where the guard really locks. About
+#                passes through (default 18, pll_core.v's divider). Then
+#                run_ovl.sh's control again with ARM_DIV=19, the other
+#                lattice, where the guard never locks. About
 #                an hour and a half in one slot. Needs POCKET_DARIA in the qsf
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
@@ -157,8 +158,8 @@
 #                no call (P27: the load shown by detect2600's scheme alone;
 #                an R1 run with no calls.csv is void); any
 #                other --strict (every column equal, no call on either side)
-#                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
-#                as at VCO/19, pll_core.v's divider and tb_load's default).
+#                (FRAMES_GUARD: locked, unlocked or none; default locked,
+#                as at VCO/18, pll_core.v's divider and tb_load's default).
 #                The images are read by path, never copied; the runs go to
 #                OUT/frames/runs. Needs GAMES and R1_DIR
 # A gate whose script or input does not exist yet is NOT AVAILABLE, and one
@@ -431,8 +432,8 @@ g_s4_check() {
 	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	local snap=0
 	[ -f "$REPO/src/fpga/core/bupchip/bup_dbg_snap.sv" ] && snap=1
-	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
-	DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
+	DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
@@ -480,7 +481,7 @@ g_dbg_overlay() {
 	local rc=0
 	WORK="$OUT/dstat" slot bash "$HERE/bupchip/dstat/run_dstat.sh" || rc=1
 	WORK="$OUT/ovl" slot bash "$HERE/bupchip/dstat/run_ovl.sh" || rc=1
-	WORK="$OUT/ovl18" ARM_DIV=18 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
+	WORK="$OUT/ovl19" ARM_DIV=19 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
 	return $rc
 }
 g_frames() {
@@ -501,7 +502,7 @@ g_frames() {
 		# video differ from R1's for a reason outside DARIA.
 		WORK="$d" NAME="$name" FRAMES="$n" INPUTS=tb_daria slot bash "$HERE/run_frames.sh" "$img" || rc=1
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-			--expect-guard "${FRAMES_GUARD:-unlocked}" --rule "${FRAMES_RULE:-v1}" || rc=1
+			--expect-guard "${FRAMES_GUARD:-locked}" --rule "${FRAMES_RULE:-v1}" || rc=1
 	done
 	for name in $FRAMES16; do
 		[[ " $(echo ${FRAMES_LIST:-$FRAMES16}) " == *" $name "* ]] || left+=("$name")

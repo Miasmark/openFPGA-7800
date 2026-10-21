@@ -70,7 +70,7 @@
 //
 // The status comes from clk_arm and clk_sys registers and is sampled here on
 // clk_sys. Without POCKET_DARIA clk_arm is 2 x clk_sys from the same VCO, so
-// the clk_arm bits are timed paths. With it clk_arm is VCO/19, and
+// the clk_arm bits are timed paths. With it clk_arm is VCO/18, and
 // bupchip_pocket.sv passes its clk_arm bits through bup_dbg_snap.sv, a
 // snapshot taken every 1,024 clk_sys, so every bit arrives here from a clk_sys
 // register (open item 11, docs/DARIA_CORE.md). Display only; nothing else
@@ -269,7 +269,7 @@ endmodule
 // read of the RIOT timer (INTIM or TIMINT) after the call's hold
 // (arm_call_busy) ends, the timer it wrote before the call has wrapped past
 // zero since. The game then finds its timer expired, and its frame runs long:
-// Spiders' frames 557-572 at VCO/19, 16 calls. Sampling the timer when the
+// Spiders' frames 557-572 with 2.2.1's CPU, 16 calls. Sampling the timer when the
 // call ends would count 0 there, as the timer runs out later (plan 6.2
 // question 5), so the rule needs the timer's wrap at the read. top.sv exports
 // no RIOT signal, so t_* below is a copy of the RIOT's timer

@@ -723,13 +723,13 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="unlocked", frames=False, cross=(), scheme=23,
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23,
           inputs="tb_daria's"):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
-    hold reaches into the next frame. The guard's status is unlocked, as at
-    VCO/19 (frame_gate.py's default --expect-guard); run.log says the paddle
+    hold reaches into the next frame. The guard's status is locked, as at
+    VCO/18 (frame_gate.py's default --expect-guard); run.log says the paddle
     inputs were tb_daria's (bench parity) unless inputs is None."""
     rnd = random.Random(1)
     d = os.path.join(w, name)
@@ -777,21 +777,25 @@ DIV_SITES = [   # (file, the default's text at VCO/19, the same at VCO/18)
     ("sim/step7_gates.sh", "${FRAMES_GUARD:-unlocked}", "${FRAMES_GUARD:-locked}"),
     ("sim/step7_gates.sh", "\tDARIA=1 ARM19=1 PSRAM_CS=", "\tDARIA=1 ARM38=1 PSRAM_CS="),
     ("sim/bupchip/quartus_probe/step7/step7_report.tcl", "fixb 1 div 19}", "fixb 1 div 18}"),
-    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV=19'),
-    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-18}"'),
+]
+# sites that follow the tree's divider: the planted fault is a fixed number,
+# the other divider ({o})
+DIV_FOLLOW = [
+    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV={o}'),
+    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-{o}}"'),
 ]
 
 
 def div_cases(w):
     """div_check.py on a scratch copy of the files it reads (the tree's, at
-    VCO/19): it passes; each site moved to the other divider fails it; and
-    pll_core.v's counter 3 at VCO/18 (step7_prep.py's own C3 table) with
-    the benches left at 19 fails it."""
+    VCO/18 or VCO/19): it passes; each site moved to the other divider fails
+    it; and pll_core.v's counter 3 at the other divider (step7_prep.py's own
+    C3 table) with the benches left at the tree's fails it."""
     dc = os.path.join(HERE, "div_check.py")
     repo = os.path.dirname(SIM)
     d = os.path.join(w, "divtree")
     print("div_check.py on a copy of the tree's divider sites:")
-    files = sorted({s[0] for s in DIV_SITES} | {"src/fpga/core/pll/pll_core.v",
+    files = sorted({s[0] for s in DIV_SITES + DIV_FOLLOW} | {"src/fpga/core/pll/pll_core.v",
                                                   "sim/bupchip/quartus_probe/step7/step7_prep.py"})
 
     def fresh():
@@ -802,24 +806,28 @@ def div_cases(w):
     fresh()
     tree = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
                            os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
-    if tree != "19":
-        print(f"  (the tree's divider is {tree or 'unreadable'}, not 19: the planted cases assume 19; skipped)")
-        expect("div_check on the tree's copy", [dc, "--repo", d], True)
+    if tree not in ("18", "19"):
+        print(f"  WRONG the tree's divider is {tree or 'unreadable'}, not 18 or 19: the planted cases need one of them")
+        results.append(False)
         return
-    expect("div_check on the tree's copy", [dc, "--repo", d], True)
-    for f, at19, at18 in DIV_SITES:
+    div = int(tree)
+    other = 37 - div
+    expect(f"div_check on the tree's copy (VCO/{div})", [dc, "--repo", d], True)
+    sites = [(f, a19 if div == 19 else a18, a18 if div == 19 else a19) for f, a19, a18 in DIV_SITES]
+    sites += [(f, good, bad.replace("{o}", str(other))) for f, good, bad in DIV_FOLLOW]
+    for f, here, there in sites:
         fresh()
         p = os.path.join(d, f)
         t = open(p).read()
-        if t.count(at19) != 1:
-            print(f"  WRONG the site's text in {f} is not there once: {at19!r}")
+        if t.count(here) != 1:
+            print(f"  WRONG the site's text in {f} is not there once: {here!r}")
             results.append(False)
             continue
-        open(p, "w").write(t.replace(at19, at18))
-        expect(f"div_check with {f} at the other divider", [dc, "--repo", d], False)
-    # pll_core.v moved to C3 = 18 (step7_prep.py's table of ip-generate's
+        open(p, "w").write(t.replace(here, there))
+        expect(f"div_check with {f} at VCO/{other}", [dc, "--repo", d], False)
+    # pll_core.v moved to the other C3 (step7_prep.py's table of ip-generate's
     # values, read from its source: the script runs at import), the benches
-    # left at 19
+    # left at the tree's
     fresh()
     import ast
     src = open(os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py")).read()
@@ -831,18 +839,19 @@ def div_cases(w):
     n, out = 0, []
     for line in open(p).read().split("\n"):
         m = re.match(r"^\s*\.(\w+)\((.*)\),?\s*$", line)
-        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][19]]:
-            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][18]], 1)
+        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][div]] \
+                and m.group(2) != tab["C3_VALUES"][m.group(1)][tab["C3_COL"][other]]:
+            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][other]], 1)
             n += 1
         out.append(line)
     open(p, "w").write("\n".join(out))
     got = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
                           os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
-    if got != "18":
-        print(f"  WRONG pll_core.v's copy did not move to C3 = 18 ({n} lines edited; --tree-div {got or 'failed'})")
+    if got != str(other):
+        print(f"  WRONG pll_core.v's copy did not move to C3 = {other} ({n} lines edited; --tree-div {got or 'failed'})")
         results.append(False)
     else:
-        expect(f"div_check with pll_core.v at C3 = 18 ({n} lines), the benches at 19", [dc, "--repo", d], False)
+        expect(f"div_check with pll_core.v at C3 = {other} ({n} lines), the benches at {div}", [dc, "--repo", d], False)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -1144,8 +1153,8 @@ def gate_cases(w):
     lines = open(cp).read().splitlines()
     open(cp, "w").write("".join(",".join(l.split(",")[:7]) + "\n" for l in lines))
     expect("v1_calls_without_thumb_and_arm", [fg, ref, noi, "--frames", "200"], False)
-    expect("v1_status_guard_locked_expected", [fg, synth(w, "ref_lk", status="locked"), synth(w, "v1_lk", status="locked"),
-                                               "--frames", "200", "--expect-guard", "locked"], True)
+    expect("v1_status_guard_unlocked_expected", [fg, synth(w, "ref_ul", status="unlocked"), synth(w, "v1_ul", status="unlocked"),
+                                                 "--frames", "200", "--expect-guard", "unlocked"], True)
 
     # ---- the strict rule (--rule shift): riot and audio equal or release_shift
     S("release_shift_riot_3_frames", m_shift(50, 52), want=True)
@@ -1221,7 +1230,7 @@ def gate_cases(w):
         R("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
         R("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
         R("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
-        R("status_guard_locked", lambda fp, c, s, st: st.__setitem__("guard", "locked"), want=False)
+        R("status_guard_unlocked", lambda fp, c, s, st: st.__setitem__("guard", "unlocked"), want=False)
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)

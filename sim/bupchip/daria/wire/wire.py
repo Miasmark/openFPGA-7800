@@ -40,8 +40,8 @@ second loads.
 Environment: WORK (default sim/work/step7/wire), VERILATOR (default
 /opt/verilator-5.040/bin/verilator), VL_JOBS (default 2), RTL_TREE (build
 another checkout's RTL with these benches: a mutant's scratch worktree),
-ARM_DIV (19, the default and pll_core.v's divider: clk_arm at VCO/19, where
-the guard never locks; 18: VCO/18, the guard expected locked), DIRECTED=1
+ARM_DIV (18, the default and pll_core.v's divider: clk_arm at VCO/18, the
+guard expected locked; 19: VCO/19, where the guard never locks), DIRECTED=1
 (also every fe_dir directed image, the whole-core directed set), PAL2600_PLAIN=0
 (pal2600 without its plain-build run, which is only reported), WIRE_JSON=FILE
 (run: append one JSON line per scenario judged: name, result, every failed
@@ -63,7 +63,7 @@ RTL_TREE = os.path.abspath(os.environ["RTL_TREE"]) if os.environ.get("RTL_TREE")
 GAMES = os.environ.get("GAMES", "")
 BIOS = os.environ.get("BIOS", "")
 BUPFW = os.environ.get("BUPFW", os.path.join(REPO, "src/fpga/mister/rtl/bupchip.hex"))
-ARM_DIV = os.environ.get("ARM_DIV", "19")
+ARM_DIV = os.environ.get("ARM_DIV", "18")
 TIMEOUT = int(os.environ.get("WIRE_TIMEOUT", "7200"))
 TURBO = "Turbo-Arcade_demo_final_CG_NTSC.bin"
 

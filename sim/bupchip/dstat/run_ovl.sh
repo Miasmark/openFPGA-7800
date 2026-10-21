@@ -29,7 +29,7 @@
 # timer, which every mutant leaves alone) and some line names the term the
 # mutant is for (KEY below). A build that fails, a run without its lines or a
 # DARIA result that fails is an ERROR, not a catch.
-# Environment: ARM_DIV (run_sim.sh's; default the benches' 19), WORK
+# Environment: ARM_DIV (run_sim.sh's; default the benches' 18), WORK
 # (default sim/work/bupchip/dstat/ovl), VERILATOR (default
 # /opt/verilator-5.040/bin/verilator), VL_JOBS (2). One simulation at a time.
 # The log starts with the tree's HEAD and status and the tool (plan P23);
@@ -51,7 +51,7 @@ for w in "${WHAT[@]}"; do
 	[[ " control $MUTANTS " == *" $w "* ]] || { echo "run_ovl.sh: $w: control or one of $MUTANTS" >&2; exit 2; }
 done
 
-echo "== run_ovl.sh $(date -u '+%Y-%m-%d %H:%M:%S UTC'): ${WHAT[*]}, ARM_DIV ${ARM_DIV:-19 (default)}"
+echo "== run_ovl.sh $(date -u '+%Y-%m-%d %H:%M:%S UTC'): ${WHAT[*]}, ARM_DIV ${ARM_DIV:-18 (default)}"
 echo "HEAD $(git -C "$ROOT" rev-parse HEAD)"
 echo "status: $(git -C "$ROOT" status --porcelain | wc -l) lines"
 git -C "$ROOT" status --porcelain | sed 's/^/  /'

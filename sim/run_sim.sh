@@ -13,7 +13,7 @@
 #   FP=1           every run also writes its per-frame fingerprint (tb_load's
 #                  and tb_system's +fp) to $WORK/fp/<case>.csv, for comparing
 #                  two builds frame by frame (sim/check/frame_gate.py --strict)
-#   ARM_DIV=18     the DARIA build's clk_arm at VCO/18 instead of VCO/19 (the
+#   ARM_DIV=19     the DARIA build's clk_arm at VCO/19 instead of VCO/18 (the
 #                  benches' default, pll_core.v's divider)
 #   RTL_TREE=DIR   build the RTL of another checkout (DIR/src/fpga) with this
 #                  checkout's benches, e.g. a lane's worktree
@@ -419,9 +419,9 @@ fi   # ONLY
 # 32 KB) through the real loader and wrapper. Each must boot and finish its
 # test bodies (RIOT $FF at least the count its .meta needs, $FE 0: no failed
 # self-check), every call daria_fe posts must return, with 0 PSRAM model
-# violations, no CPU halt, and the guard unlocked with 0 unlocks at VCO/19,
-# the default (the guard never locks there), or locked with 0 unlocks with
-# ARM_DIV=18.
+# violations, no CPU halt, and the guard locked with 0 unlocks at VCO/18,
+# the default, or unlocked with 0 unlocks with ARM_DIV=19 (the guard never
+# locks there).
 # With BUP_DEBUG, the DARIA status overlay (tb_load.sv's overlay block) too.
 # Each run's "DARIA overlay:" line must pass: the overlay's counts equal the
 # bench's (calls since the console's last reset, unlocks, the guard bit),
@@ -476,7 +476,7 @@ if [ "$DARIA_ON" = 1 ]; then
 		[frame_cdfj_retune]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1 +ovl_resets=2 +retune=150")
 	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" "${DIMG[@]}" > "$DR/mkimg.log"
 	daria_ok=1
-	guard=unlocked; [ "${ARM_DIV:-19}" = 18 ] && guard=locked
+	guard=locked; [ "${ARM_DIV:-18}" = 19 ] && guard=unlocked
 	ovl_n=0; ovl_rows=0; ovl_prows=0
 	for r in "${RUNS[@]}"; do
 		t="${r%_pattern}"; t="${t%_retune}"
