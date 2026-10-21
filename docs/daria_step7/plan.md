@@ -254,7 +254,7 @@ The table below is the synchroniser list (P8) and contract F3. I3 writes it and 
 | Direction | First flop (declaration) | In Build B | In Q5 |
 |---|---|---|---|
 | `clk_sys` → `clk_arm` | `hold_a[0]` (`bupchip_pocket.sv:214`) | yes | yes |
-| | `pause_a[0]` (`:214`) | no: its input, `pause_core`, is tied 0 (`core_top.v:883`; `atari7800_pocket.sv:1173`), so synthesis removes the chain | no |
+| | `pause_a[0]` (`:214`) | no: its input, `pause_core`, is tied 0 (`core_top.v:883`; `atari7800_pocket.sv:1173`), so synthesis removes the chain | no. *2026-10-21 (Stage 2 review):* its FORCED mark in `daria_sync.tcl` matched no build (the fitter listed it as ignored in Q2 and Q5) and is removed, with `halted_s[0]`'s (13 marks) |
 | | `prof_a[0]`, `ram32_a[0]`, `mres_a[0]` (`:227`) | yes | yes |
 | | `cmd_s[0]` (`:419`) | yes | yes |
 | | `tog_s[0]` (`daria_call.sv:71`) | yes | yes |
@@ -264,7 +264,7 @@ The table below is the synchroniser list (P8) and contract F3. I3 writes it and 
 | | the snapshot's request flop (`bup_dbg_snap`, new) | no (`BUP_DEBUG`) | yes |
 | | `cap_err_a[0]` (`bupchip_pocket.sv:608`) | no (`BUP_DEBUG`) | no: it feeds only the status word's bit 11 (`cap_err_a[1] \| wr_overrun`, `:613-615`), which `bup_status_osd.sv` does not show: since `b4ea8a9` its row 0 shows the capture's `seq_err` and `lost` and the receiver's overrun from `dbg_load`'s `clk_sys` bits (`bup_status_osd.sv:113`), so synthesis removes the chain. Corrected in the D fix round (2026-10-14, `dfbe37d`), after Q5 seed 1 failed (c), (f) and (k') on this row alone; `f3_crossings.txt` and `step7_report.tcl`'s table say the same, and `selftest.sh` checks that those two agree. `daria_sync.tcl`'s FORCED line for it (`:49`) and its comment (`:34`) now match no build; they go with the next change to `src/`, which the owner put after 2.2.1 at the final review (2026-10-16: `src/` stays as verified; `record.md`, "After 2.2.1: `src/` clean-ups") |
 | `clk_arm` → `clk_sys` | `ready_s[0]` (`:372`) | yes | yes |
-| | `halted_s[0]` (`:372`) | no: `daria_halted` has no load until step 8 (2.5) | no |
+| | `halted_s[0]` (`:372`) | no: `daria_halted` has no load until step 8 (2.5) | no. *2026-10-21 (Stage 2 review):* step 8's status overlay does not load `daria_halted` either (the wrapper leaves it open and shows the halt from `dbg_status`), so no build has the chain; its FORCED mark in `daria_sync.tcl`, which the fitter listed as ignored in Q2 and Q5, is removed (13 marks) |
 | | `run_s[0]` (`:455`) | yes | yes |
 | | `ftog_s[0]` (`:498`) | yes | yes |
 | | `en_s[0]`, `w_s[0]` (`daria_mmio.sv:183-184`) | yes | yes |

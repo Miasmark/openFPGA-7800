@@ -7,12 +7,13 @@
 # Five projects, each compiled (quartus_map, quartus_fit) and then
 # reported (quartus_sta -t step7_report.tcl, step7_checks.py), and two
 # reported again on one of them with its SDC edited (quartus_sta only):
-#   allmarks_qip every register daria.qip marks is present (SMOKE_Q5,
-#                SMOKE_ALLMARKS), with QIP_FILE daria.qip: each of the 15 must
+#   allmarks_qip every register daria.qip marks is present (SMOKE_Q5: since
+#                the marks without a chain in any build went, the design is
+#                q5_clean's), with QIP_FILE daria.qip: each of the 13 must
 #                head a chain whose "Method of Synchronizer Identification" is
 #                "User Specified", no mark may be reported ignored, and the
 #                compile may report no error or warning about them
-#   allmarks_noqip the same without daria.qip: none of the 15 is "User
+#   allmarks_noqip the same without daria.qip: none of the 13 is "User
 #                Specified" (each is "Automatic" or not a chain), so the marks
 #                above come from the qip
 #   q5_clean     a Q5 build (SMOKE_Q5) with daria.qip: (c.cells), (f), (k),
@@ -189,8 +190,8 @@ if [ "${CHECK_ONLY:-0}" = 0 ]; then
 		case "$n" in q5_g1_nopair|q5_g1_odd) variant "$n" "${n#q5_g1_}"; continue ;; esac
 		[ "${REPORT_ONLY:-0}" = 0 ] || { [ -d "$WORK/$n/fpga/db" ] || die "REPORT_ONLY: $WORK/$n has no database"; compile "$n"; continue; }
 		case "$n" in
-			allmarks_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 SMOKE_ALLMARKS ;;
-			allmarks_noqip) QIP=""                project "$n" SMOKE_Q5 SMOKE_ALLMARKS ;;
+			allmarks_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 ;;
+			allmarks_noqip) QIP=""                project "$n" SMOKE_Q5 ;;
 			q5_clean)    QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 ;;
 			q5_mut)      QIP="$QIPMUT"         project "$n" SMOKE_Q5 SMOKE_MUT ;;
 			q5_g1)       QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5
@@ -226,7 +227,7 @@ def glob_re(pat):
 
 marks = [m.replace("\\[", "[").replace("\\]", "]") for m in
          re.findall(r'(?m)^set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "([^"]+)"', rd(qip))]
-say(len(marks) == 15, f"daria_sync.tcl marks {len(marks)} registers (15 expected)")
+say(len(marks) == 13, f"daria_sync.tcl marks {len(marks)} registers (13 expected)")
 
 def chains(n):
     out = {}

@@ -16,8 +16,6 @@
 // Variants (macros):
 //   SMOKE_Q5     BUP_DEBUG's chains (the snapshot's rq_s0/ak_s0): a Q5
 //                build, whose expected crossings f3_crossings.txt lists
-//   SMOKE_ALLMARKS also pause_a and halted_s, absent from the release
-//                build: all 15 registers daria.qip marks are present
 //   SMOKE_MUT    planted faults, each of which (k') must report:
 //                prof_a[0]  samples an XOR of two clk_sys registers (a
 //                           two-register cone)
@@ -270,15 +268,10 @@ module bupchip_pocket (
 		ram32_a <= {ram32_a[0], ~daria_ram32_n};
 		mres_a <= {mres_a[0], daria_mreset};
 	end
-`ifdef SMOKE_ALLMARKS
-	logic pause = 1'b0;
-	always_ff @(posedge clk_sys) pause <= a[1];
-	logic [1:0] pause_a = 2'b00;
-	always_ff @(posedge clk_arm) pause_a <= {pause_a[0], pause};
-	wire paused = pause_a[1];
-`else
+	// No pause_a and no halted_s (below): pause_core is tied 0 and
+	// daria_halted is left open in every build, so no build has those
+	// chains, and daria_sync.tcl does not mark them (plan 2.7)
 	wire paused = 1'b0;
-`endif
 
 	// ---- the $8007 command toggle and its held byte -----------------------------------------------
 	logic       cmd_tog = 1'b0;
@@ -321,13 +314,7 @@ module bupchip_pocket (
 		run_s <= {run_s[0], cpu_run};
 `endif
 	end
-`ifdef SMOKE_ALLMARKS
-	logic [1:0] halted_s = 2'b00;
-	always_ff @(posedge clk_sys) halted_s <= {halted_s[0], halted};
-	wire halt_seen = halted_s[1];
-`else
 	wire halt_seen = 1'b0;
-`endif
 
 	// ---- the audio frame toggle and its held frame -----------------------------------------------------
 	logic        frame_tog = 1'b0;
