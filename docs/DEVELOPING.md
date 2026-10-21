@@ -146,6 +146,10 @@ become `logic`), builds two testbenches, and runs them:
 - `tb_load`: loads files through the real APF data loader. This is the
   testbench to use for anything cart-related (and the BupChip's slot).
 - `tb_pll_region`, `tb_audio_filter`, `tb_virtual_axis`: unit tests.
+- `tb_vaxis5` (`run_vaxis5.sh`): `virtual_axis5.sv`, the five axes the core
+  builds as one time-shared engine, against five `virtual_axis.sv` whose ticks
+  are delayed 0-4 clocks as the engine staggers them, on every clock of four
+  random-stimulus seeds (4 x 10^7 clocks), and a planted fault it must catch.
 
 What the sim does **not** model:
 

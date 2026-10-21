@@ -189,6 +189,9 @@ def run_sim_cases(log, w):
         # a bench that exited non-zero in a piped case (its %Fatal line went
         # to grep): run_sim.sh's sim prints this line past the pipe
         "simulator_exit": sub1(r"^(-- border hidden:\n)", r"\g<1>SIMULATOR EXIT 1: ./obj/vtb +audf=0 +hide_border\n"),
+        # tb_vaxis5: a seed with mismatches, and the planted fault not caught
+        "vaxis5_mismatch": sub1(r"^(VAXIS5 seed 3 .* mismatches )0$", r"\g<1>7"),
+        "vaxis5_planted_missed": sub1(r"^(VAXIS5 planted fault .*: )caught, \d+ mismatches$", r"\g<1>caught, 0 mismatches"),
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)

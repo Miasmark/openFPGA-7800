@@ -24,6 +24,8 @@ against its expected lines and fails on:
     drops the "%Fatal" line);
   - the load, PLL retune, audio filter and virtual axis lines other than
     expected;
+  - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
+    with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
   - "exit N" with N != 0 when the log records the script's exit status.
 DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 "POCKET_DARIA 1" line) "DARIA pass" is required. In the plain build the
@@ -89,6 +91,12 @@ AXIS = [
     r"AXIS stick 60 -> position 60 after 40 ms",
     r"AXIS D-pad press \(rest now 60\), then stick 250: 250",
     r"AXIS driving, stick pushed fully right 1 s: 31 gray steps, 32 ms apart",
+]
+# tb_vaxis5 through sim/run_vaxis5.sh's defaults: seeds 1-4, 10^7 clocks each
+VAXIS5 = [r"VAXIS5 seed %d cycles 10000000 ticks [1-9]\d* resets [1-9]\d* \(on a tick [1-9]\d*, "
+          r"1-4 clocks after one [1-9]\d*\) mismatches 0" % k for k in (1, 2, 3, 4)] + [
+    r"VAXIS5 planted fault \(axis 4 reads axis 3's slow\), seed 1: caught, [1-9]\d* mismatches",
+    r"VAXIS5 pass",
 ]
 # BIOS cases: title prefix -> (required patterns, does its TONE line have to pass)
 BIOS_CASES = [
@@ -373,6 +381,12 @@ def check(log, build, audfs, only=None):
     h, b = L.section("-- virtual paddle")
     for p in AXIS:
         need(b, p, "virtual axis")
+    # the five axes as one engine
+    h, b = L.section("-- the five virtual axes")
+    for p in VAXIS5:
+        need(b, p, "tb_vaxis5")
+    if b and any(x.startswith("MISMATCH") for x in b):
+        bad.append("tb_vaxis5: MISMATCH lines")
     return bad, notes, build
 
 

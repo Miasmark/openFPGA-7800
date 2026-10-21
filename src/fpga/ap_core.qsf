@@ -821,7 +821,7 @@ set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pock
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|daria_fe:u_fe"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|detect2600:detect2600"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|paddle_timer:*"
-set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|virtual_axis:*"
+set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|virtual_axis5:vaxes"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|lightgun:lightgun"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|EEPROM_24LC0X:savekey"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|a78_cart_extent:cart_extent"

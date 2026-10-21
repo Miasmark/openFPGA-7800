@@ -719,7 +719,7 @@ endfunction
 wire [7:0] porta_type = menu_port_type(port1_input, header_port_type(joy0_type));
 wire [7:0] portb_type = menu_port_type(port2_input, header_port_type(joy1_type));
 
-// The D-pad and docked analog sticks become positions (virtual_axis.sv).
+// The D-pad and docked analog sticks become positions (virtual_axis5.sv).
 // A or B is the paddle button, fire or trigger; X held moves slowly and
 // finely, Y held moves fast. Controllers 1 and 2 are the two paddles on port
 // 1 (2600 paddles come in pairs), 3 and 4 the two on port 2.
@@ -749,25 +749,13 @@ assign vana[2] = analog2;
 assign vana[3] = analog3;
 
 wire  [7:0] vx_pos [4];
-wire [15:0] vx_phase [4];
+wire [15:0] vx_phase [2];   // driving: ports 1 and 2 only
 wire  [3:0] vbutton;
 genvar vi;
 generate
 	for (vi = 0; vi < 4; vi = vi + 1) begin : vaxis
 		// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X, 12 Y
 		assign vbutton[vi] = vjoy[vi][9] | vjoy[vi][10];
-		virtual_axis ax (
-			.clk      (clk_sys),
-			.reset    (cart_download),
-			.tick     (ms_tick),
-			.neg      (vjoy[vi][1]),
-			.pos      (vjoy[vi][0]),
-			.slow     (vjoy[vi][11]),
-			.fast     (vjoy[vi][12]),
-			.analog   (vana[vi][7:0]),
-			.position (vx_pos[vi]),
-			.phase    (vx_phase[vi])
-		);
 	end
 endgenerate
 
@@ -822,18 +810,30 @@ wire       gun_port = (portb_type == 8'd2) && (porta_type != 8'd2);  // 0: port 
 wire       gun_en   = (porta_type == 8'd2) || gun_port;
 wire [15:0] gun_joy = gun_port ? joyb : joya;
 wire  [7:0] gun_y;
-virtual_axis gun_axis_y (
+
+// The four controllers' axes (0-3) and the gun's Y (4), as one time-shared
+// engine (virtual_axis5.sv): axis k updates k clk_sys after ms_tick.
+wire [39:0] vx_position;
+wire [31:0] vx_phase01;
+virtual_axis5 vaxes (
 	.clk      (clk_sys),
 	.reset    (cart_download),
 	.tick     (ms_tick),
-	.neg      (gun_joy[3]),
-	.pos      (gun_joy[2]),
-	.slow     (gun_joy[11]),
-	.fast     (gun_joy[12]),
-	.analog   (gun_port ? ana_b[15:8] : ana_a[15:8]),
-	.position (gun_y),
-	.phase    ()
+	.neg      ({gun_joy[3],  vjoy[3][1],  vjoy[2][1],  vjoy[1][1],  vjoy[0][1]}),
+	.pos      ({gun_joy[2],  vjoy[3][0],  vjoy[2][0],  vjoy[1][0],  vjoy[0][0]}),
+	.slow     ({gun_joy[11], vjoy[3][11], vjoy[2][11], vjoy[1][11], vjoy[0][11]}),
+	.fast     ({gun_joy[12], vjoy[3][12], vjoy[2][12], vjoy[1][12], vjoy[0][12]}),
+	.analog   ({gun_port ? ana_b[15:8] : ana_a[15:8], vana[3][7:0], vana[2][7:0], vana[1][7:0], vana[0][7:0]}),
+	.position (vx_position),
+	.phase    (vx_phase01)
 );
+assign vx_pos[0]   = vx_position[7:0];
+assign vx_pos[1]   = vx_position[15:8];
+assign vx_pos[2]   = vx_position[23:16];
+assign vx_pos[3]   = vx_position[31:24];
+assign gun_y       = vx_position[39:32];
+assign vx_phase[0] = vx_phase01[15:0];
+assign vx_phase[1] = vx_phase01[31:16];
 wire [7:0] gun_ax = gun_port ? vx_pos[1] : vx_pos[0];
 
 // lightgun.sv's joystick mode (JOY_X/Y offset by 128) puts the crosshair
