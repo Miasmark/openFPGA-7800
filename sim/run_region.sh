@@ -7,8 +7,11 @@
 #   old     2.2.1's logic (RTL-1 and RTL-2 undone): A or B
 #   rtl2    RTL-2 undone: A (3 retunes where 1 is wanted)
 #   rtl1    RTL-1 undone: B (2 retunes after a PAL 2600 image)
-#   sketch  RTL-1 as first sketched (through the whole A78 download): C
-#           (daria_rgn not the PLL's region, or a retune back to back)
+#   sketch  RTL-1 as first sketched (through the whole A78 download): C,
+#           by its hazard: daria_rgn not the PLL's region (rgn_bad > 0) or a
+#           retune back to back (b2b > 0) in some trial. A C trial with 0
+#           retunes instead of 2 does not count: that saves retunes, and the
+#           plain build does it too
 # run_sim.sh runs it after the PLL retune sequence; it also runs alone.
 #   sim/run_region.sh
 # Environment (all optional):
@@ -44,9 +47,15 @@ line() { grep -m1 "^REGION $2 trials" "$WORK/$1.log"; }
 # all <name> <scenario> <retunes>: every trial made <retunes> retunes, rgn_bad 0 and b2b 0
 all() { [[ "$(line "$1" "$2")" =~ ^REGION\ $2\ trials\ ([0-9]+)\ retunes\ $3:([0-9]+)\ rgn_bad\ 0\ b2b\ 0$ ]] \
 	&& [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ]; }
-# alls <name> <scenario> <retunes>: as all, rgn_bad and b2b not judged (the plain build has no daria_rgn)
+# alls <name> <scenario> <retunes>: as all, rgn_bad not judged (the plain build has no daria_rgn); b2b must
+# still be 0. The plain build is judged on A and B only. In C it retunes back to back in most trials (b2b 45 of
+# 49 on afd8269: the second retune starts as the first ends), the behaviour of the build without DARIA, which
+# keeps no region that a second retune could leave stale (docs/DARIA_CORE.md, open item 20)
 alls() { [[ "$(line "$1" "$2")" =~ ^REGION\ $2\ trials\ ([0-9]+)\ retunes\ $3:([0-9]+)\ rgn_bad\ [0-9]+\ b2b\ 0$ ]] \
 	&& [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ]; }
+# hz <name> <scenario>: some trial had daria_rgn wrong or a retune back to back (rgn_bad or b2b > 0)
+hz() { [[ "$(line "$1" "$2")" =~ \ rgn_bad\ ([0-9]+)\ b2b\ ([0-9]+)$ ]] \
+	&& [ $(( BASH_REMATCH[1] + BASH_REMATCH[2] )) -gt 0 ]; }
 
 for b in "daria - -DPOCKET_DARIA" "plain -" "old old -DPOCKET_DARIA" "rtl2 rtl2 -DPOCKET_DARIA" \
 	"rtl1 rtl1 -DPOCKET_DARIA" "sketch sketch -DPOCKET_DARIA"; do
@@ -67,12 +76,13 @@ if [ -f "$WORK/plain.log" ]; then
 fi
 caught() { [ -f "$WORK/$1.log" ] || { v "$1" "no result" 0; return; }
 	hit=0; for s in "${@:2}"; do
-		case "$s" in A) all "$1" A 1 || hit=1 ;; B) all "$1" "B pal" 0 || hit=1 ;; C) all "$1" C 2 || hit=1 ;; esac
+		case "$s" in A) all "$1" A 1 || hit=1 ;; B) all "$1" "B pal" 0 || hit=1 ;; C) all "$1" C 2 || hit=1 ;;
+			Chz) hz "$1" C && hit=1 ;; esac
 	done
 	[ $hit = 1 ] && v "$1" "planted, caught" 1 || v "$1" "planted, NOT caught" 0; }
 caught old A B
 caught rtl2 A
 caught rtl1 B
-caught sketch C
+caught sketch Chz
 [ "$ok" = 1 ] && { echo "REGION pass"; exit 0; }
 echo "REGION FAIL"; exit 1

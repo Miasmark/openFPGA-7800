@@ -34,9 +34,11 @@ against its expected lines and fails on:
   - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
     with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
   - tb_region (sim/run_region.sh) other than its lines for the DARIA and
-    the plain build (every trial of scenarios A, B and C with the retunes
-    wanted, and in the DARIA build daria_rgn exact and no retune back to
-    back), its four planted variants caught and "REGION pass";
+    the plain build (every trial with the retunes wanted, no retune back to
+    back, and in the DARIA build daria_rgn exact: scenarios A, B and C for
+    DARIA, A and B for plain, whose C is not judged), its four planted
+    variants caught, the sketch by its hazard in C (a retune back to back
+    or daria_rgn wrong), and "REGION pass";
   - "exit N" with N != 0 when the log records the script's exit status.
 DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 "POCKET_DARIA 1" line) "DARIA pass" is required. In the plain build the
@@ -110,7 +112,10 @@ VAXIS5 = [r"VAXIS5 seed %d cycles 10000000 ticks [1-9]\d* resets [1-9]\d* \(on a
     r"VAXIS5 pass",
 ]
 # tb_region through sim/run_region.sh: the region logic of both builds in
-# RTL-1's and RTL-2's load sequences, and its planted variants. REGION lines
+# RTL-1's and RTL-2's load sequences, and its planted variants. The plain
+# build's C line is not judged (back-to-back retunes there are the build
+# without DARIA's own, as in 2.2.1). The sketch's C line must show the hazard
+# it was rejected for, so that "caught" means the bench saw it. REGION lines
 # are not in VERDICT_LINE, so a --ref log from before the bench still compares.
 REGION = [
     r"REGION daria A trials 1641 retunes 1:1641 rgn_bad 0 b2b 0",
@@ -120,6 +125,7 @@ REGION = [
     r"REGION plain A trials 1641 retunes 1:1641 rgn_bad \d+ b2b 0",
     r"REGION plain B pal trials 11 retunes 0:11 rgn_bad \d+ b2b 0",
     r"REGION plain B ntsc trials 11 retunes 1:11 rgn_bad \d+ b2b 0",
+    r"REGION sketch C trials 49 retunes [\d: ]+ rgn_bad (?:[1-9]\d* b2b \d+|\d+ b2b [1-9]\d*)",
     r"REGION verdict daria: pass \(.*\)",
     r"REGION verdict plain: pass \(.*\)",
 ] + [r"REGION verdict %s: planted, caught" % v for v in ("old", "rtl2", "rtl1", "sketch")] + [r"REGION pass"]

@@ -195,6 +195,8 @@ def run_sim_cases(log, w):
         # tb_region: a trial with the wrong retunes, a planted variant not caught, the section gone
         "region_retunes": sub1(r"^REGION daria A trials 1641 retunes 1:1641 ", "REGION daria A trials 1641 retunes 1:1608 3:33 "),
         "region_planted_missed": sub1(r"^(REGION verdict rtl1: planted, )caught$", r"\g<1>NOT caught"),
+        # the sketch "caught" only by saving retunes: no back-to-back retune and daria_rgn exact
+        "region_sketch_no_hazard": sub1(r"^(REGION sketch C trials 49 retunes [\d: ]+ rgn_bad )\d+ b2b \d+$", r"\g<1>0 b2b 0"),
         "region_missing": lambda t: re.sub(r"^-- the region asked of the PLL.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
         # the FA2 save slot: the reload lost, a saved byte read back wrong,
         # no save, and the section gone

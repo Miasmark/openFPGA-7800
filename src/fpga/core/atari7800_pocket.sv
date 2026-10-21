@@ -1084,8 +1084,10 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 // on clk_sys: region_pll, taken on the clock after pll_busy_s[1] falls),
 // and daria_rt_pend marks a retune asked for and not yet completed. For
 // daria_rgn to be exact, region_pll changes only when none is pending or
-// under way, so each retune is to the one region asked for since the last,
-// and pll_region never starts a second one as the first ends. region_pll is
+// under way, except in an A78's header and in the withdrawal (below), where
+// pll_region cannot start one; so each retune is to the one region asked
+// for since the last, and pll_region never starts a second one as the first
+// ends. region_pll is
 // - frozen while pll_busy_s[1] is high or a retune is pending, except in an
 //   A78's header (below);
 // - frozen while an ARM image's console is in reset (daria_reset), so that
@@ -1113,7 +1115,11 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 //   back. pll_region starts nothing in the header: loading is high until
 //   allcomplete, after the image's last byte, and the last clk_sys of a
 //   download, where cart_download outlives loading, are past the header,
-//   where region_pll is frozen as before.
+//   where region_pll is frozen as before. That assumes an A78 longer than
+//   its 128-byte header: in one of 128 bytes or less, ioctl_addr stays
+//   below 128 through those clocks, and a Region setting changed in them
+//   (about 4 clk_sys) could give the back-to-back retune of the first
+//   sketch (tb_region's scenario C). No real image is that short.
 // So no retune is pending or under way when F6 starts (daria_rt_mask keeps
 // cart_reset low while one is, and a window-close F6 follows a withdrawal),
 // and none can become pending while F6 runs: no retune starts inside F6.
