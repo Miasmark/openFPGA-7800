@@ -117,7 +117,12 @@
 
 `default_nettype none
 
-module pokey_bus (
+module pokey_bus #(
+	// Pocket: 1 keeps the read strobes and the data pads live for the whole
+	// cycle, not just the o2 half (see pokey_adapter.sv, READ_WHOLE_CYCLE).
+	// 0 is the die, as upstream.
+	parameter bit READ_WHOLE_CYCLE = 1'b0
+) (
 	input  wire       clk,
 
 	// Phase strobes from pokey_clkgen.
@@ -215,7 +220,7 @@ module pokey_bus (
 	// an unqualified strobe only enables a driver onto the internal bus, and
 	// the Cell 7 DISABLE below keeps that bus off the pins.
 	// -----------------------------------------------------------------------
-	assign addr_rd = row_r & {16{~pre_s01}};
+	assign addr_rd = row_r & {16{~pre_s01 | READ_WHOLE_CYCLE}};
 
 	// -----------------------------------------------------------------------
 	// Data pads. Cell 7 per bit, driving the pad from the internal read bus.
@@ -223,7 +228,7 @@ module pokey_bus (
 	// super buffer, so the pads drive only for the o2 half of a selected read.
 	// -----------------------------------------------------------------------
 	wire [7:0] d_r = ~read_bus_n;    // D0r..D7r
-	wire pad_disable = pre_s01 | ~cs_rd;
+	wire pad_disable = (pre_s01 & ~READ_WHOLE_CYCLE) | ~cs_rd;
 	wire [7:0] pad_oe;
 
 	generate

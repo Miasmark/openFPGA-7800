@@ -55,7 +55,9 @@
 
 `default_nettype none
 
-module pokey (
+module pokey #(
+	parameter bit READ_WHOLE_CYCLE = 1'b0   // Pocket: see pokey_bus.sv
+) (
 	input  wire        clk,
 
 	// The two phases of the target 1.79 MHz clock, one clk cycle each.
@@ -120,7 +122,7 @@ module pokey (
 	wire        stimer_strobe, skres_strobe, potgo_strobe;
 	wire  [7:0] read_data;
 
-	pokey_bus u_bus (
+	pokey_bus #(.READ_WHOLE_CYCLE(READ_WHOLE_CYCLE)) u_bus (
 		.clk, .pre_s01, .phi2b,
 		.a, .cs0_n, .cs1, .rw, .d_in,
 		.read_bus_n(~read_data),
