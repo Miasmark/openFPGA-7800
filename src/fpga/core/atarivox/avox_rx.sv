@@ -6,10 +6,16 @@
 //   AtariVox drivers send them (62 CPU cycles on the 2600; 7800basic's loop
 //   comes out the same). The start bit is checked half a bit in; each data
 //   bit is sampled in its middle; a missing stop bit drops the byte.
-// - Serial control mode: a backslash ($5C) enters it and X leaves it. Inside,
-//   R clears the buffer and stops the voice (abort), V asks for "Ready";
-//   everything else (register settings such as 8J0N) is swallowed. None of
-//   it reaches the buffer.
+// - Serial control mode (the SpeakJet manual's SCP): a backslash ($5C) and
+//   the character after it are an escape, both consumed. "\0" enters the
+//   mode (0 is the AtariVox's node); any other character after the backslash
+//   leaves it, or keeps the chip out of it: a digit 1-9 is another node, and
+//   a non-numeric character ends the mode. Star Raiders (7800) sends "\V",
+//   which the first version took as entering the mode and then swallowed the
+//   game's speech. Inside the mode: R clears the buffer and stops the voice
+//   (abort), V says "Ready", W (hard reset) clears and leaves, X leaves;
+//   everything else (register settings such as 8J0N, S and T) is swallowed.
+//   None of it reaches the buffer.
 // - The 64-byte buffer; DOWN reads low ("buffer half full") from 32 bytes,
 //   and a game sends only while it is high.
 //
@@ -74,21 +80,26 @@ module avox_rx #(
 
 	// ---------------------------------------------------------------- serial control mode
 	/* verilator lint_off PROCASSINIT */
-	logic scp = 1'b0;
+	logic scp = 1'b0, esc = 1'b0;
 	/* verilator lint_on PROCASSINIT */
 	logic push;
-	always_comb push = got && !scp && (got_byte != 8'h5C);
+	always_comb push = got && !scp && !esc && (got_byte != 8'h5C);
 	always_ff @(posedge clk) begin
 		abort_set <= 1'b0;
 		ready_set <= 1'b0;
-		if (reset)
+		if (reset) begin
 			scp <= 1'b0;
-		else if (got) begin
-			if (got_byte == 8'h5C)
-				scp <= 1'b1;
+			esc <= 1'b0;
+		end else if (got) begin
+			if (esc) begin                               // the escape's control value
+				esc <= 1'b0;
+				scp <= (got_byte == 8'h30);              // "\0" enters; anything else leaves
+			end else if (got_byte == 8'h5C)
+				esc <= 1'b1;
 			else if (scp) begin
 				case (got_byte)
 					8'h58: scp <= 1'b0;                   // X
+					8'h57: begin scp <= 1'b0; abort_set <= 1'b1; end   // W
 					8'h52: abort_set <= 1'b1;            // R
 					8'h56: ready_set <= 1'b1;            // V
 					default: ;
