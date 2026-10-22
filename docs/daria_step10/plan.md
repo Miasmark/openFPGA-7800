@@ -32,6 +32,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 - Decision 5 is settled by the owner's words of 2026-10-21 (no Harmony cartridge; the model is the evidence), and with it decision 4 for Spiders (section 6). 3.0 item 9 and 3.3 (the real-Harmony check) will not run.
 - Section 4 gains "The trial" (2026-10-20), and decision 11's row says the trial passed and the fix is in `src/`. The fix landed after decision 1 lifted the `src/` freeze (2026-10-20 at 19:01 ET), as release work for F′. Also in section 4: the Rev 0 round's +0.1 ns margin is worded as a margin on (h) hold, "Its gates" names V-rtl as well as the `sram_ctrl.sv` row of 7.6, and any ÷19 bitstream built after the fix re-runs seeds 1-3 before a seed is chosen.
 - 3.0 item 1: the overlay (A2) landed in `src/` on 2026-10-20 (`0d9ce33`), after decision 1, for the next release and `BUP_DEBUG` only, so Rev 0 no longer keeps it in scratch. The paused record's finding on its check is closed (`5d5d591`), and so are the findings of that branch's review. A debug bitstream from `DARIA-dev` now carries decision 11's copy too, so it is a new tree and needs its own Q5 under P29 (3.0 item 1).
+- 3.1 gains a progress block (2026-10-21): what has landed for the release and on which commits, and what is still to come. The owner's seed ruling of 2026-10-21 is recorded in the step-7 plan's P12, and decisions 4 and 5's `ontime` rule in its P13.
 
 **How this plan came about**
 - The owner asked on 2026-10-17: "How would we go about trying to improve Daria at this point? Space and logic is rather full."
@@ -365,6 +366,21 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 
 ### 3.1 The next release: Rev 1 + Rev 2 merged at ÷18 (recommended)
 
+**Progress, 2026-10-21.** The owner chose one release at ÷18 (decisions 2, 3 and 7), landed before Rev 0's session, which still has to confirm ÷18 on silicon. Stage 2's branch is not pushed yet.
+- **In `DARIA-dev`** (`d05cb11`, Stage 1): the L1W+L3 CPU with T2's cures (`bc6a1ec`, decisions 2 and 10), MR in `ap_core.qsf` (`de9a903`, decision 8), and ÷18 with the bench defaults and G1 (`09aa7f8`, decision 3, its own commit so that it can be reverted alone), with their review fixes. The decision 11 hold fix (`7a4bf2c`) and the overlay (A2) were already in.
+- **On branch `rev1/div18-s2`** (Stage 2, on top of `f29794a`):
+  - `8a8bddb` `virtual_axis5` (decision 9), with `tb_vaxis5` in `run_sim.sh`;
+  - `4738c65` the FA2 saves, one shared `fa2.sav` (decision 15): F′ until the Stage 2 review;
+  - `35bf88f` the FA2 port only in 2600 mode, and `core.qip` without `virtual_axis.sv`: F′, the last commit that changes the build without DARIA;
+  - `ba0812c` the identity chain re-based on F′ ("Order of commits", item 2);
+  - `5ad0a6b` RTL-1 and RTL-2, with the unit bench `tb_region` and `tb_wire`'s `pal2600_a78` at no extra retune;
+  - `dd135dd` B5, with the smoke test passing at 15 marks;
+  - `5febe80` B8;
+  - the documents' commit: every item of "Documents" below, except README's timing paragraph, which takes the release's Q2, and the hardware results that wait for the session (open items 7 and 10, IMPROVEMENTS's PAL items). `BUPCHIP_CORE.md`'s three items and `DEVELOPING.md`'s came with Stage 1 (`bc6a1ec`, `09aa7f8`, `9451d56`).
+- **Benches and checkers** from the list below landed with Stage 1 (`s1/check.sh`'s `THUMB=1` gate at 1.4208, `frame_gate.py --overrun ontime`, `l1f.S`, the L1W mutants with `neg_of_rd` and `sbc_carry_inverted` retired, `run_call.py`'s cases, `s1w_cyc`) and with Stage 2 (`tb_vaxis5`, `tb_load`'s FA2 round trip, `tb_region`, the re-based chain).
+- **Still to come**, in this order: F′'s non-DARIA reference fit with its repeat and Q4; B3 needs nothing more (the ÷18 commit made its lines right); the pre-campaign round (Q2 ×3 and Q5 ×3 on the combined tree, Q-mut, the STA mutants); the seed (P12 as amended on 2026-10-21) with B4's comment and B6; the campaign; the review; V-hw.
+  - *2026-10-21, after the pre-campaign round on `ebca01a`:* F′'s repeat and Q4 are byte-equal; Q2 and Q5 seeds 1-3 pass; the STA mutants and Q-mut are caught (Q-mut with a (g) failure explained: "Stage 2's pre-campaign round" below). The seed is applied: `SEED` 3 (P12), with B4's comment and B6, comment- and selection-only (7.6). Left: the campaign, the review, V-hw.
+
 **Contents**
 - **CPU** (`bup_cpu.sv`):
   - T2's R1, R12, R13, R14 and R2, plus L1W+L3, as v4 (md5 `4f224fbf`).
@@ -382,7 +398,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - B5 (`daria_sync.tcl`);
   - Star Castle Arcade's FA2 saves (C5);
   - B8 (`POCKET_CHANGES.md`'s counts), moved here from Rev 0;
-  - after the fits: B3 (the counter[3] line at VCO/18), B4 (the seed comment quoting the new Q2) and B6.
+  - after the fits: B3 (the counter[3] line at VCO/18), B4 (the seed comment quoting the new Q2) and B6. *Done 2026-10-21:* B4 and B6 with `SEED` 3.
 - **Debug only:** A2's overlay.
 - **Benches and checkers (V-bench, before the campaign):**
   - `s1/check.sh`'s song-13 CPI gate (1.383 ±1%) gets the `THUMB=1` reference that Rev 0 measured on the cured RTL with the firmware. `docs/BUPCHIP_CORE.md`'s criterion is updated to match.
@@ -402,7 +418,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
     - Line 219: Spiders "late on the same 16 calls as MiSTer" becomes "on time, as the modelled Harmony chip; MiSTer is late on 16 calls in frames 557-572".
     - The hardware note about the picture shift changes.
     - The FA2 known-limit row (line 144) goes.
-    - The timing paragraph (lines 228-232) takes the release's Q2.
+    - The timing paragraph (lines 228-232) takes the release's Q2. *Done 2026-10-21:* seed 3's figures, with 2.2.1's kept after them.
     - Line 176's "19% of its clock to spare" is the BupChip at 28.6 MHz in the build without DARIA (`docs/BUPCHIP_CORE.md`: 28.636/24.0 − 1). R1 is THUMB-gated and does not touch that build, so the figure stays.
     - If a figure for the DARIA build is added, it uses the same form: 38.18/24.74 − 1 ≈ 54% with R1, against 36.17/23.98 − 1 ≈ 51% today [estimated].
   - **`docs/DARIA_CORE.md`:**
@@ -430,6 +446,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - **Design notes:**
     - G1's reasoning goes into `docs/daria_fe/design.md` 8.2.
     - This document carries plan P12, P13 and 5.4 forward, amended. 5.4's amendment for G1 is already here (section 10). P13's Spiders rule ("on time") and any P12 seed rule (decision 11) are added with the release.
+    - *Done 2026-10-21:* P12 and P13 each carry a dated amendment in the step-7 plan's own rows: P12 the owner's seed ruling of 2026-10-21 (the safest seed that passes everything, expected to be seed 3; `SEED` moves only after the pre-campaign round), P13 the `ontime` rule of decisions 4 and 5. G1's reasoning is in `docs/daria_fe/design.md` 8.2.
   - **The AtariVox change.** The campaign also covers `4fd89ef`'s AtariVox change. The documents do not record plan 7.6's `run_sim`/`extra_tests`/`s4`/`pp_equiv` set for it (the study, 7.3 and 8.3).
 
 **Order of commits** (keeps the non-DARIA identity chain meaningful)
@@ -445,7 +462,9 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
    - `PP_EXPECT` becomes F′'s non-DARIA stream hash.
    - `PP_GUARD_FROM` becomes F′.
    - `pp_guards`' qsf rule must fit that range. From F′ the `ap_core.qsf` diff should be the SEED line and comments only. `--qsf daria` as written expects the three DARIA lines to be added once, and would fail.
-   - **Interim until F′ (2026-10-21):** `PP_GUARD_FROM` = the MR commit (`git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf`), `PP_EXPECT` = `34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21` (the L1W+L3 CPU and the `sram_ctrl` key copy; the MR commit's own stream, `56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd`, has two more lint metacomment lines in `bup_cpu.sv`); `pp_guards` picks `--qsf release` (`sim/step7_gates.sh`'s header).
+   - **Re-based on the new F′ (2026-10-21, after the Stage 2 review):** the review found that an A78 which `detect2600.sv` takes for FA2 could write junk over the shared `fa2.sav`, so the FA2 port is now on only in 2600 mode, and that commit, which also drops `virtual_axis.sv` from `core.qip`, is F′. `PP_GUARD_FROM` names it as the commit that added `fa2_on` to the wrapper: `git log -1 --format=%h -S fa2_on -- src/fpga/core/atari7800_pocket.sv` (`35bf88f` on `rev1/div18-s2`). `PP_EXPECT` = `2fe5aed73e6edfc89866145aa3ec99ec1e757a532169b39a725f168e69f74f4b`, its non-DARIA stream (the line below's, with the wrapper's FA2 gate and without `virtual_axis.sv`). `pp_guards` still picks `--qsf release`. F′'s reference fit, its repeat, Q4 and the pre-campaign round run again on it (`sim/step7_gates.sh`'s header).
+   - **Re-based on F′ (2026-10-21, replaced by the line above):** F′ was the FA2 save slot's commit, then the last one that changed the build without DARIA. `PP_GUARD_FROM` names it as the commit that added `fa2_nvram_bridge` to the wrapper: `git log -1 --format=%h -S fa2_nvram_bridge -- src/fpga/core/atari7800_pocket.sv` (`4738c65` on `rev1/div18-s2`; the expression still finds it if the branch is rebased). `PP_EXPECT` = `8a7e8a3d9dc32f0134b34d78b6467c586daffde69b087cc8f02ae53fc7753b7b`, F′'s non-DARIA stream (MR, `virtual_axis5`, the FA2 slot, the L1W+L3 CPU and the `sram_ctrl` key copy). `pp_guards` picks `--qsf release` from F′: `ap_core.qsf` may change only in its SEED line and comments, so P12's move to seed 3 still fits the chain (`sim/step7_gates.sh`'s header).
+   - **Interim until F′ (2026-10-21, replaced by the line above):** `PP_GUARD_FROM` = the MR commit (`git log -1 --format=%h -S MUX_RESTRUCTURE -- src/fpga/ap_core.qsf`), `PP_EXPECT` = `34b3f60afe45865c931fb8e72a6a0c8333abc7f34dd0528dde2bbdedc740bd21` (the L1W+L3 CPU and the `sram_ctrl` key copy; the MR commit's own stream, `56033140de55bce615ac8217d40ac7ed2efa8d6cb5cee960b62198a4eae498fd`, has two more lint metacomment lines in `bup_cpu.sv`); `pp_guards` picks `--qsf release` (`sim/step7_gates.sh`'s header).
 3. **Then the DARIA-side changes:**
    - G1;
    - the PLL at C3 = 18, with the bench defaults;
@@ -478,8 +497,20 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
   - `clk_sdram` ≥ +1.5 ns;
   - (h) setup ≥ +4.5 ns at ÷18 (v4 ranged +4.696 to +6.103 ns [measured]), and (h) hold ≥ 0;
   - every other 5.4 check.
+- Q-mut (rule amended 2026-10-21, after the round below): it passes when (f) FAILs naming `run_s[0]` and (k') FAILs naming `ready_s[0]`. Any other check that fails on the mutant is listed and explained in the record. Plan 7.2 asks only that each of the two checks catch its mutant; "nothing else fails" (`docs/daria_step7/record.md`) was c76's result, not a rule. A mutant is another netlist, so a check that selects cells by name, such as (g), can move on it without saying anything about the release.
 - If the tree is frozen after this round, with only V-cmt edits such as B3, B4 and B6 to follow, these fits are the campaign's Q2 and Q5. Plan 7.6 counts a result for the tree it ran on.
 - The campaign starts only after this round passes. If it fails, the diagnosis is in "One release or two" below.
+- **Stage 2's pre-campaign round (2026-10-21): passed** [measured: fits on `ebca01a`, status 0; Q5 on `ebca01a` + the `BUP_DEBUG` line; Q-mut on `ebca01a` + its two faults]. After it the tree changes only in comments, documents, the `SEED` line and simulation scripts, so these fits are the campaign's Q2 and Q5.
+  - F′ (`35bf88f`) and its repeat: `.rbf` byte-equal (md5 `6cae7b99`); Q4 on `ebca01a` equals them.
+  - Q2, every check passing on every seed. Seeds 1 / 2 / 3: `clk_arm` +1.982 / +1.248 / +2.195 ns, `clk_sdram` +2.407 / +2.388 / +3.107 ns, worst hold +0.106 / +0.100 / +0.108 ns, (h) +6.306 / +0.264, +6.895 / +0.281 and +6.166 / +0.337 ns, 14,617 / 14,618 / 14,628 ALMs (216 M10K). Seed 3 ships (P12).
+  - Q5 seeds 1-3 pass with P29: `clk_arm` +2.013 / +2.170 / +1.724 ns, worst hold +0.031 / +0.027 / +0.090 ns.
+  - The three I3 STA mutants fail as section 10 expects.
+  - The smoke test passes with 13 marks. P10's regenerated PLL has the tree's `POCKET_DARIA` view (the step-7 plan's P10).
+  - **Q-mut: caught.** (f) names `run_s[0]` and (k') names `ready_s[0]`. (g) also FAILs, with 150 paths, explained as follows:
+    - All 150 start at one register that the fitter's retiming created, `cart2600|mapper_AR|tape_num~0_OTERM2454`. It moved the 6502's address registers forward through `top.sv`'s address mux and a decode LUT that synthesis named after `mapper_AR`'s `tape_num` write decode, which shares it with the 7800 cart's decode.
+    - Every path runs through `cart.sv`'s `cartram_cs`, the 7800 RAM select (101 also through `cartram_wr`), into `sram_ctrl`'s 7800 request logic (`c_rd_q`, `c_wr_q`, `cp_*`, `acc_*`, `sram_a`, `dq_out`, ...). None goes through `read_DB`, and none reaches the SRAM pads. It is the 7800 request, which Fix B lets reach `sram_ctrl` directly, not a 2600 path.
+    - The register exists only with both the faults and `35bf88f`'s FA2 gating. `ebca01a` + the faults with `atari7800_pocket.sv` put back to `afd8269` fails exactly (f) and (k'), and its fit report matches round 1's Q-mut on `afd8269` line for line. Two refits of the mutant reproduce the 150.
+    - No Q2 or Q5 fit has the register. There (g) finds 0 paths, with every 2600 leg reaching `t_*_q` ((g.legs)), so (g)'s PASS on the release stands.
 
 **V-rtl**
 - `run_sim.sh`;

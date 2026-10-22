@@ -178,7 +178,7 @@ Every step is verified against the reference before the next. S1 at 28.636 MHz r
   - `souper_profile` and the command.
   - `pause_core`, which `core_top.v:850` ties to 0.
   - `pll_locked` is the exception. It arrives raw and asynchronous (`core_top.v:819`; its only synchronised copy is on `clk_74a`, `:331`). The wrapper therefore adds two `clk_sys` flops (`pll_locked_s`), as `atari7800_pocket.sv:132-136` does for `pll_busy`.
-- **Adding the counter.** Use the recipe at `DEVELOPING.md:245-271`, with `gui_number_of_clocks=4`, `gui_output_clock_frequency3` and `gui_divide_factor_c3`. That changes `number_of_clocks` (`pll_core.v:52`) and `output_clock_frequency3` (`:62`).
+- **Adding the counter.** Use the recipe in `DEVELOPING.md`, "Regenerate the PLL", with `gui_number_of_clocks=4`, `gui_output_clock_frequency3` and `gui_divide_factor_c3`. That changes `number_of_clocks` (`pll_core.v:52`) and `output_clock_frequency3` (`:62`).
   - M, N and K are unchanged, so `pll_region.v`'s NTSC and PAL fractions stay valid (`DEVELOPING.md:280-285`).
   - Afterwards, check the clock names in the timing report's "Clocks" table (`DEVELOPING.md:336-343`).
 - **SDC.** `core_constraints.sdc:13` already covers `counter[*]`, and the synchronous group is at `:16-20`. Only the header comment (`:3-11`) changes.

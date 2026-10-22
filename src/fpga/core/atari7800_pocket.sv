@@ -116,6 +116,13 @@ module atari7800_pocket
 	input  wire [31:0] sk_bridge_din,   // big endian: [31:24] is the lowest byte
 	output wire [31:0] sk_bridge_dout,  // word latched at the last read strobe
 
+	// FA2 cartridge flash (256 bytes), second port for its save slot (clk_74a)
+	input  wire  [5:0] fa2_bridge_addr, // 32 bit word address
+	input  wire        fa2_bridge_wr,
+	input  wire        fa2_bridge_rd,   // APF read strobe for this region
+	input  wire [31:0] fa2_bridge_din,  // big endian: [31:24] is the lowest byte
+	output wire [31:0] fa2_bridge_dout, // word latched at the last read strobe
+
 	// SDRAM
 	output wire [12:0] SDRAM_A,
 	output wire  [1:0] SDRAM_BA,
@@ -629,6 +636,66 @@ save_ram_dp #(.WORD_ADDR_BITS(13), .BLANK(8'hFF)) sk_ram
 );
 `endif
 
+// FA2 flash: the 256 bytes an FA2 cartridge (Star Castle Arcade) keeps in its
+// flash. mapper_fa2.sv copies its work RAM to and from them through the
+// fa2_nvram_* port, a byte per request/ready handshake. Upstream's
+// fa2_nvram_bridge.sv answers the handshake, as on MiSTer, from a save_ram_dp
+// whose other port is the fa2.sav save slot: one shared file for every FA2
+// game, like hsc.sav. A new file is blank as $FF, as an erased flash (the
+// unconnected port this replaces read $FF too). The Pocket writes the file in
+// before the core runs, so the bridge never waits for a load, and it writes
+// every save slot back itself, so the mapper's dirty pulse has no use here.
+// The port is on only in 2600 mode (fa2_on: tia_mode, set at the end of a
+// load that is no A78). detect2600.sv classifies every image, A78s too, and
+// takes some A78 payloads for FA2 (24 or 28 KiB, or 32 KiB with a zero
+// tail); cart2600.sv then runs mapper_fa2.sv, which in 7800 mode still sees
+// the bus, so a 7800 game's accesses to $x0FF and $xFF4 could start a save
+// and write junk over the shared file. With fa2_on low the bridge sees no
+// request and the mapper gets the answers of the unconnected port this
+// replaces (ready 1, $FF), so it finishes any copy without touching the slot.
+wire       fa2_on = tia_mode;
+wire       fa2_req, fa2_we, fa2_rdy, fa2_ram_we;
+wire [7:0] fa2_addr, fa2_wdata, fa2_rdata, fa2_ram_addr, fa2_ram_d, fa2_ram_q;
+/* verilator lint_off UNUSEDSIGNAL */
+wire       fa2_ram_cs;                  // the bridge's select; save_ram_dp has none
+/* verilator lint_on UNUSEDSIGNAL */
+
+fa2_nvram_bridge fa2_bridge
+(
+	.clk                (clk_sys),
+	.reset              (reset),
+	.new_image          (1'b0),
+	.backing_busy       (1'b0),
+	.file_load_complete (1'b1),
+	.request            (fa2_req & fa2_on),
+	.write              (fa2_we),
+	.addr               (fa2_addr),
+	.wdata              (fa2_wdata),
+	.ready              (fa2_rdy),
+	.rdata              (fa2_rdata),
+	.backing_rdata      (fa2_ram_q),
+	.backing_cs         (fa2_ram_cs),
+	.backing_write      (fa2_ram_we),
+	.backing_addr       (fa2_ram_addr),
+	.backing_wdata      (fa2_ram_d)
+);
+
+save_ram_dp #(.WORD_ADDR_BITS(6), .BLANK(8'hFF)) fa2_ram
+(
+	.clk_a  (clk_sys),
+	.addr_a (fa2_ram_addr),
+	.din_a  (fa2_ram_d),
+	.we_a   (fa2_ram_we),
+	.dout_a (fa2_ram_q),
+
+	.clk_b  (clk_74a),
+	.addr_b (fa2_bridge_addr),
+	.din_b  (fa2_bridge_din),
+	.we_b   (fa2_bridge_wr),
+	.rd_b   (fa2_bridge_rd),
+	.dout_b (fa2_bridge_dout)
+);
+
 //////////////////////////////  INPUT  ////////////////////////////////////
 
 // Turbo: X repeats fire 1 (as A does) and Y fire 2 (as B does), the
@@ -719,7 +786,7 @@ endfunction
 wire [7:0] porta_type = menu_port_type(port1_input, header_port_type(joy0_type));
 wire [7:0] portb_type = menu_port_type(port2_input, header_port_type(joy1_type));
 
-// The D-pad and docked analog sticks become positions (virtual_axis.sv).
+// The D-pad and docked analog sticks become positions (virtual_axis5.sv).
 // A or B is the paddle button, fire or trigger; X held moves slowly and
 // finely, Y held moves fast. Controllers 1 and 2 are the two paddles on port
 // 1 (2600 paddles come in pairs), 3 and 4 the two on port 2.
@@ -749,25 +816,13 @@ assign vana[2] = analog2;
 assign vana[3] = analog3;
 
 wire  [7:0] vx_pos [4];
-wire [15:0] vx_phase [4];
+wire [15:0] vx_phase [2];   // driving: ports 1 and 2 only
 wire  [3:0] vbutton;
 genvar vi;
 generate
 	for (vi = 0; vi < 4; vi = vi + 1) begin : vaxis
 		// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X, 12 Y
 		assign vbutton[vi] = vjoy[vi][9] | vjoy[vi][10];
-		virtual_axis ax (
-			.clk      (clk_sys),
-			.reset    (cart_download),
-			.tick     (ms_tick),
-			.neg      (vjoy[vi][1]),
-			.pos      (vjoy[vi][0]),
-			.slow     (vjoy[vi][11]),
-			.fast     (vjoy[vi][12]),
-			.analog   (vana[vi][7:0]),
-			.position (vx_pos[vi]),
-			.phase    (vx_phase[vi])
-		);
 	end
 endgenerate
 
@@ -822,18 +877,30 @@ wire       gun_port = (portb_type == 8'd2) && (porta_type != 8'd2);  // 0: port 
 wire       gun_en   = (porta_type == 8'd2) || gun_port;
 wire [15:0] gun_joy = gun_port ? joyb : joya;
 wire  [7:0] gun_y;
-virtual_axis gun_axis_y (
+
+// The four controllers' axes (0-3) and the gun's Y (4), as one time-shared
+// engine (virtual_axis5.sv): axis k updates k clk_sys after ms_tick.
+wire [39:0] vx_position;
+wire [31:0] vx_phase01;
+virtual_axis5 vaxes (
 	.clk      (clk_sys),
 	.reset    (cart_download),
 	.tick     (ms_tick),
-	.neg      (gun_joy[3]),
-	.pos      (gun_joy[2]),
-	.slow     (gun_joy[11]),
-	.fast     (gun_joy[12]),
-	.analog   (gun_port ? ana_b[15:8] : ana_a[15:8]),
-	.position (gun_y),
-	.phase    ()
+	.neg      ({gun_joy[3],  vjoy[3][1],  vjoy[2][1],  vjoy[1][1],  vjoy[0][1]}),
+	.pos      ({gun_joy[2],  vjoy[3][0],  vjoy[2][0],  vjoy[1][0],  vjoy[0][0]}),
+	.slow     ({gun_joy[11], vjoy[3][11], vjoy[2][11], vjoy[1][11], vjoy[0][11]}),
+	.fast     ({gun_joy[12], vjoy[3][12], vjoy[2][12], vjoy[1][12], vjoy[0][12]}),
+	.analog   ({gun_port ? ana_b[15:8] : ana_a[15:8], vana[3][7:0], vana[2][7:0], vana[1][7:0], vana[0][7:0]}),
+	.position (vx_position),
+	.phase    (vx_phase01)
 );
+assign vx_pos[0]   = vx_position[7:0];
+assign vx_pos[1]   = vx_position[15:8];
+assign vx_pos[2]   = vx_position[23:16];
+assign vx_pos[3]   = vx_position[31:24];
+assign gun_y       = vx_position[39:32];
+assign vx_phase[0] = vx_phase01[15:0];
+assign vx_phase[1] = vx_phase01[31:16];
 wire [7:0] gun_ax = gun_port ? vx_pos[1] : vx_pos[0];
 
 // lightgun.sv's joystick mode (JOY_X/Y offset by 128) puts the crosshair
@@ -1017,9 +1084,12 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 // on clk_sys: region_pll, taken on the clock after pll_busy_s[1] falls),
 // and daria_rt_pend marks a retune asked for and not yet completed. For
 // daria_rgn to be exact, region_pll changes only when none is pending or
-// under way, so each retune is to the one region asked for since the last,
-// and pll_region never starts a second one as the first ends. region_pll is
-// - frozen while pll_busy_s[1] is high or a retune is pending;
+// under way, except in an A78's header and in the withdrawal (below), where
+// pll_region cannot start one; so each retune is to the one region asked
+// for since the last, and pll_region never starts a second one as the first
+// ends. region_pll is
+// - frozen while pll_busy_s[1] is high or a retune is pending, except in an
+//   A78's header (below);
 // - frozen while an ARM image's console is in reset (daria_reset), so that
 //   it never changes on the clock where daria_fe sees a reset rise (tia_en,
 //   which region_pll_hold reads, falls a clock after the reset rises) or
@@ -1032,7 +1102,24 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 //   the slot's requestwrite, 4 clk_sys before cart_download, so it starts
 //   nothing as region_pll returns to the PLL's region; the image's own
 //   region is asked for when its console is released, on P20's mid-game
-//   path, which runs F6 again after the retune.
+//   path, which runs F6 again after the retune. The withdrawal takes
+//   daria_rgn's next value (daria_rgn_nx): on the clock where a retune
+//   ends, daria_rgn's old value is the region the PLL has just left, and
+//   region_pll would ask for it for one clk_sys, which a load sequence
+//   that ends on that clock would turn into two more retunes (RTL-2);
+// - free to follow region_select in an A78's 128-byte header, even with a
+//   retune pending (RTL-1): Auto reads cart_region[0] there, which keeps
+//   the last image's region (0 after a 2600 image) until byte 57 sets the
+//   A78's own, so a retune asked for in the header from the stale region
+//   would otherwise be held, run at the load's end, and be followed by one
+//   back. pll_region starts nothing in the header: loading is high until
+//   allcomplete, after the image's last byte, and the last clk_sys of a
+//   download, where cart_download outlives loading, are past the header,
+//   where region_pll is frozen as before. That assumes an A78 longer than
+//   its 128-byte header: in one of 128 bytes or less, ioctl_addr stays
+//   below 128 through those clocks, and a Region setting changed in them
+//   (about 4 clk_sys) could give the back-to-back retune of the first
+//   sketch (tb_region's scenario C). No real image is that short.
 // So no retune is pending or under way when F6 starts (daria_rt_mask keeps
 // cart_reset low while one is, and a window-close F6 follows a withdrawal),
 // and none can become pending while F6 runs: no retune starts inside F6.
@@ -1043,13 +1130,14 @@ wire region_pll_hold = ((cart_download | old_cart_download) & ~cart_is_7800) | (
 reg  daria_rgn = 1'b0;
 /* verilator lint_on PROCASSINIT */
 assign daria_rt_pend = region_pll != daria_rgn;
+wire daria_rgn_nx  = (!pll_busy_s[1] && daria_rt_cnt == 4'd15) ? region_pll : daria_rgn;
+wire daria_a78_hdr = cart_download & cart_is_7800 & (ioctl_addr < 25'd128);
 always @(posedge clk_sys) begin
-	if (!pll_busy_s[1] && daria_rt_cnt == 4'd15)
-		daria_rgn <= region_pll;
+	daria_rgn <= daria_rgn_nx;
 	if (!pll_busy_s[1]) begin
 		if ((cart_download | old_cart_download) & ~cart_is_7800)
-			region_pll <= daria_rgn;
-		else if (!region_pll_hold && !daria_rt_pend && !(daria_reset & daria_arm))
+			region_pll <= daria_rgn_nx;
+		else if (!region_pll_hold && (!daria_rt_pend || daria_a78_hdr) && !(daria_reset & daria_arm))
 			region_pll <= region_select;
 	end
 end
@@ -1284,12 +1372,12 @@ Atari7800 main
 	.mapper_load_end  (old_cart_download && ~cart_download),
 	.mapper_load_wait (),
 	.mapper_init_busy (mapper_init_busy),
-	.fa2_nvram_request(),
-	.fa2_nvram_write  (),
-	.fa2_nvram_addr   (),
-	.fa2_nvram_wdata  (),
-	.fa2_nvram_rdata  (8'hFF),
-	.fa2_nvram_ready  (1'b1),
+	.fa2_nvram_request(fa2_req),
+	.fa2_nvram_write  (fa2_we),
+	.fa2_nvram_addr   (fa2_addr),
+	.fa2_nvram_wdata  (fa2_wdata),
+	.fa2_nvram_rdata  (fa2_on ? fa2_rdata : 8'hFF),
+	.fa2_nvram_ready  (fa2_on ? fa2_rdy : 1'b1),
 	.fa2_nvram_dirty  (),
 	.ddram_clk        (),
 	.ddram_addr       (),

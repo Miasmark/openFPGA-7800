@@ -189,6 +189,29 @@ def run_sim_cases(log, w):
         # a bench that exited non-zero in a piped case (its %Fatal line went
         # to grep): run_sim.sh's sim prints this line past the pipe
         "simulator_exit": sub1(r"^(-- border hidden:\n)", r"\g<1>SIMULATOR EXIT 1: ./obj/vtb +audf=0 +hide_border\n"),
+        # tb_vaxis5: a seed with mismatches, and the planted fault not caught
+        "vaxis5_mismatch": sub1(r"^(VAXIS5 seed 3 .* mismatches )0$", r"\g<1>7"),
+        "vaxis5_planted_missed": sub1(r"^(VAXIS5 planted fault .*: )caught, \d+ mismatches$", r"\g<1>caught, 0 mismatches"),
+        # tb_region: a trial with the wrong retunes, a planted variant not caught, the section gone
+        "region_retunes": sub1(r"^REGION daria A trials 1641 retunes 1:1641 ", "REGION daria A trials 1641 retunes 1:1608 3:33 "),
+        "region_planted_missed": sub1(r"^(REGION verdict rtl1: planted, )caught$", r"\g<1>NOT caught"),
+        # the sketch "caught" only by saving retunes: no back-to-back retune and daria_rgn exact
+        "region_sketch_no_hazard": sub1(r"^(REGION sketch C trials 49 retunes [\d: ]+ rgn_bad )\d+ b2b \d+$", r"\g<1>0 b2b 0"),
+        "region_missing": lambda t: re.sub(r"^-- the region asked of the PLL.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
+        # the FA2 save slot: the reload lost, a saved byte read back wrong,
+        # no save, and the section gone
+        "fa2_reload_lost": sub1(r"^(FA2 work RAM after the reload: )0( of 255)", r"\g<1>255\g<2>"),
+        "fa2_slot_differs": sub1(r"^(FA2 save slot read back \(APF read protocol\): )0( of 256)", r"\g<1>4\g<2>"),
+        "fa2_no_save": sub1(r"^(FA2 program: .*flash loads 2, saves )1(, slot RAM writes )256$", r"\g<1>0\g<2>0"),
+        "fa2_a78_overwrote": sub1(r"^(FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>"),
+        # the A78 taken for FA2: its save reached the slot (as before the
+        # wrapper's fa2_on gate: 255 of 256 bytes), or it was not taken for
+        # FA2 at all, so the run could not fail
+        "fa2_a78fa2_overwrote": sub1(r"^(FA2 image: 2600 mapper 25, .*saves 1, slot RAM writes )0(\n(?:.*\n)*?"
+                                     r"FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>255\g<3>"),
+        "fa2_a78fa2_not_fa2": sub1(r"^(FA2 image: 2600 mapper )25(, cart_is_7800 1, tia_mode 0; flash loads 0, )saves 1",
+                                   r"\g<1>0\g<2>saves 0"),
+        "fa2_missing": lambda t: re.sub(r"^-- FA2 flash save slot.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)

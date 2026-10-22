@@ -49,7 +49,10 @@ module altsyncram #(
 	input  wire clocken0, clocken1, clocken2, clocken3, rden_a, rden_b,
 	output wire eccstatus
 );
+	// A true dual-port RAM: both ports write mem, each on its own clock.
+	/* verilator lint_off MULTIDRIVEN */
 	reg [width_a-1:0] mem [0:numwords_a-1];
+	/* verilator lint_on MULTIDRIVEN */
 	initial for (int i = 0; i < numwords_a; i++) mem[i] = '0;
 	always @(posedge clock0) begin
 		if (wren_a) mem[address_a] <= data_a;

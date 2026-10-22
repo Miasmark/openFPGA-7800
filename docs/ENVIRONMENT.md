@@ -352,7 +352,7 @@ Python is 3.11.15. The only third-party imports in tracked files are unicorn and
 `sim/extra_tests.sh` fetches its inputs from the network:
 
 - **Firmware files.** It uses curl to fetch `mem4.hex` and `ar.hex` from raw.githubusercontent.com (`MiSTer-unstable-nightlies/Atari7800_MiSTer`), at the commit in `src/fpga/mister/UPSTREAM_COMMIT` (lines 106-108).
-- **Test-cart tools.** It shallow-clones and builds its own dasm and 7800basic from GitHub into `$WORK/extra` (lines 22-29). Here that dasm is `sim/work/extra/dasm/bin/dasm`.
+- **Test-cart tools.** It fetches and builds its own dasm and 7800basic from GitHub into `$WORK/extra`, each at the commit the script pins (`DASM_REF`, `B78_REF`; 7800basic's later commits run its compiler under valgrind, which a build machine may not have). Here that dasm is `sim/work/extra/dasm/bin/dasm`.
 - **Requirements.** It needs git, a C compiler, libpng-dev, flex and Pillow (lines 2-4).
 
 ### 5.6 Outside the repo

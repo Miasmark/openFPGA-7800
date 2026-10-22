@@ -18,10 +18,12 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Eight upstream files are modified (`top.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `video_mux.sv`, `EEPROM_24LC256.sv`, and for the firmware switch
-`cart.sv`, `cart2600.sv`, `banks2600.sv`), three firmware images are removed, and the POKEY is swapped
-for an older one.
+Eleven upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
+`banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv`,
+`video_mux.sv`, `TIA.sv`, `bram.v` and `Pokey/pokey_adapter.sv`. The sections
+below describe each. Three firmware images are removed. The build uses
+upstream's POKEY (`rtl/Pokey/`, with a changed adapter); Watson's older one,
+which releases up to 2.0.20 used, stays in `rtl/PokeyWatson/` for simulation.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
 
@@ -104,7 +106,10 @@ The Pocket build defines all six (`NO_ARM_MAPPER`, `NO_DDRAM`,
 `../ap_core.qsf`. A build without the DARIA front end deletes
 `POCKET_DARIA` there, with the qsf's two other DARIA lines (`core/daria.qip`
 and `core/daria_constraints.sdc`).
-Without the macros the changed files are identical to upstream in behaviour.
+Without the macros, `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`,
+`EEPROM_24LC256.sv`, `video_mux.sv` and `bram.v` are identical to upstream in
+behaviour; the changes to `TIA.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv` and
+`Pokey/pokey_adapter.sv` have no macro.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
 
@@ -278,10 +283,20 @@ the files are unchanged from upstream.
 
 ## Updating
 
-Copy a newer upstream `rtl/` over this one, re-apply the `ifdef` blocks in
-`top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv` and `EEPROM_24LC256.sv`, and the holey DMA fix
-in `Maria/DMA.sv` (unless upstream has fixed it; check with
-`sim/extra_tests.sh`). Delete `rtl/mem4.*`, `rtl/ar.*` and `rtl/bupchip.hex`/`.mif` again, update
+Copy a newer upstream `rtl/` over this one and re-apply the changes to all
+eleven modified files:
+
+- the `ifdef` blocks in `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`
+  and `EEPROM_24LC256.sv`;
+- the holey DMA fix in `Maria/DMA.sv` (unless upstream has fixed it; check
+  with `sim/extra_tests.sh`);
+- the 224 line window in `Maria/video_sync.sv`;
+- the SRAM frame port in `video_mux.sv` and the memory editor's removal in
+  `bram.v`;
+- the stabilised window's end in `TIA.sv`;
+- the write hold and the halved level in `Pokey/pokey_adapter.sv`.
+
+Delete `rtl/mem4.*`, `rtl/ar.*` and `rtl/bupchip.hex`/`.mif` again, update
 `UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.
 New upstream source files need adding to `../core/core.qip` (and to
 `sim/run_sim.sh`).

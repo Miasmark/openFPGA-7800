@@ -12,10 +12,12 @@ Ideas that are worth doing but are not needed for the release they were found in
 - **Two area wins** [measured: fits]:
   - MR, `MUX_RESTRUCTURE ON` on 13 `clk_sys`-domain entities (13 qsf lines, no RTL): 909-918 fewer ALMs at ÷19 on seeds 1-3, with every ÷19 gate passing.
   - `virtual_axis5`, the five virtual axes as one time-shared engine: 409 fewer again on top of MR, 1,318 fewer than 2.2.1 in all (one seed). It staggers the axes' 1 ms update by 0-4 `clk_sys`. It equals five instances with their ticks delayed that way on every clock over 4 × 10^7 random-stimulus clocks (a bench, not a proof).
+  - *2026-10-21:* both are in the release tree. MR is `de9a903` (in `DARIA-dev`); `virtual_axis5` is `8a8bddb`, with its bench `tb_vaxis5` in `run_sim.sh` (seeds 1-4 of 10^7 clocks, 0 mismatches) and the whole-core input test (paddles, driving and gun) identical to the tree before it. The release's Q2 measures the area. *Measured (the release's Q2, seeds 1-3 on `ebca01a`):* 14,617-14,628 ALMs (79%); the shipped seed's 14,628 is 1,211 fewer than 2.2.1's 15,839, with every gate and check passing; 216 M10K blocks, against 212 in 2.2.1 and on `09aa7f8`.
 - **The clock.** Five restructurings in `bup_cpu.sv` (T2), with the guard pair re-bounded to [0.5, 8.0] ns (G1), meet ÷18 with `clk_arm` +2.298 to +2.464 ns on seeds 1-3 [measured: fits]. They cost the BupChip's firmware 3.1-3.2% more clocks [measured: model].
 - **L1W+L3, Spiders' late calls.** One-clock aligned Thumb word loads (L1W), and one clock off Thumb LDMIA and POP (L3). On top of T2 they bring Spiders' worst call at ÷18 from 104.05% to 89.33% of its budget, with 0 of 1,399 calls late [measured: RTL]. Frames 557-572 become normal 262-line frames [measured: whole-core simulation]. The cost is about 30 ALMs over T2 [measured: fits].
 - **The hold path.** On one of six seeds the candidate fails a `clk_sdram` hold in `sram_ctrl` by 0.503 ns (`t_wr_q` → `t_last[17]`, two registers in one LAB) [measured: fit]. Rev 0 tries a fix (plan, section 4).
 - **What the plan does with the items below.** S3 is no longer needed for Spiders. The ÷19 guard is not needed at ÷18. The overlay and the PAL session are in Rev 0. The aligned audio gate is deferred. MR, `virtual_axis5`, T2 with L1W+L3, RTL-1, the clean-ups and the FA2 saves go into one release at ÷18, the plan's recommendation; the owner decides after Rev 0 (plan, section 6).
+  - *2026-10-21:* the owner chose one release at ÷18, landed before the Rev 0 session, which still has to confirm ÷18 on silicon (plan, decisions 2, 3 and 7). MR, `virtual_axis5`, T2 with L1W+L3, RTL-1 and the FA2 saves are now in the release tree (branch `rev1/div18-s2` on top of `DARIA-dev`), and so are the clean-ups except the two that wait for the release's fits ("After 2.2.1", items 4 and 6). The PAL session waits for Rev 0's Pocket session. Each entry below says where it stands.
 
 ### A shared-edge guard that works at ÷19
 
@@ -42,6 +44,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 - **When.** After hardware tests, especially if Galagon or Mappy show audio clicks.
   - *2026-10-17:* in step 8's hardware tests the owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. The report gave no click count (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
   - *2026-10-19:* not needed at ÷18, where the guard locks. The plan for the next release recommends ÷18 (`docs/daria_step10/plan.md`, decision 3, open until after Rev 0). This item comes back only if ÷18 fails on a Pocket.
+  - *2026-10-21:* the release tree is at ÷18 (`09aa7f8`, its own commit so that it can be reverted alone), where the guard locks in simulation. A1 applies only if ÷18 is ever left: if the Pocket session finds the guard does not lock on silicon, the ÷19 fallback brings this item back.
 
 ### The step-8 DARIA status overlay
 
@@ -69,7 +72,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 - **What it would show.** Step 8's checklist items D1 and D2 on a Pocket:
   - D1: a PAL 2600 ARM image on Region Auto restarts once, about 1 s after loading, then runs in PAL at 50 Hz;
-  - D2: a PAL A78 loaded after a PAL 2600 image ends in PAL, with RTL-1's two extra retunes (`docs/DARIA_CORE.md`, open item 20).
+  - D2: a PAL A78 loaded after a PAL 2600 image ends in PAL, with RTL-1's two extra retunes in 2.2.1 (`docs/DARIA_CORE.md`, open item 20). With RTL-1 fixed (`5ad0a6b`, the release after 2.2.1) the release's debug build should retune once, as the build without DARIA does.
 - **Why it is not done.** The PAL versions the owner has all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Region Auto treats as NTSC; Stay Frosty 2's PAL build is one (`docs/DARIA_CORE.md`, "The added images"). So neither item could be completed in step 8 (`docs/daria_step7/progress.md`, "Step 8: hardware tests of daria-test1 (2026-10-17)").
 - **What covers them today.** Simulation only: `tb_wire`'s `pal_dpc`, `pal2600`, `pal2600_a78` and `seq_*` scenarios (`sim/bupchip/daria/wire/wire.py`). All pass in c78's `wire` gate (`docs/daria_step7/record.md`, "Plan 7.7's fresh-clone run: c78").
 - **What it needs.**
@@ -85,7 +88,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 ### Smaller items
 
-- **S3, the faster CPU pipeline.** It would end Spiders' 16 late calls at the start of play, the same calls upstream misses. On hardware the owner sees Spiders' late calls as the picture shifting down for a couple of frames before a level loads, and they do not seem to affect play (step 8, 2026-10-17). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3; "stays a later revision").
+- **S3, the faster CPU pipeline**, kept only as a reserve. A second register-file write port, so that a load's data reaches the next instruction a clock earlier: more margin on every heavy call. It was first meant to end Spiders' 16 late calls; L1W+L3 does that at ÷18 with one write port, and that is in the release tree (`docs/DARIA_CORE.md`, decision 7). Cost: a new pipeline, 150-560 ALMs (`docs/DARIA_CORE.md`, open item 3).
   - *2026-10-19:* no longer needed for Spiders. L1W+L3 ends those calls at ÷18 with one write port (above). S3 stays only as a reserve (`docs/daria_step10/plan.md`, decision 20, open).
 - **The C flag after a Thumb MUL** is marked unknown and halts with code 8 if read. Revisit if a game ever halts with code 8 (`docs/DARIA_CORE.md`, open item 4).
 - **Code or LDM above the 64 KB window** halts (codes 4 and 7). A fetch stall in front of `rom_q` would run it, if a larger CDFJ+ game needs it (`docs/DARIA_CORE.md`, open item 5).
@@ -107,22 +110,24 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
 
 *Added 2026-10-16, from step 7's final review. The owner froze `src/` for 2.2.1 that day, so each item waits for the first `src/` change after the release. The numbers are those of `docs/daria_step7/record.md`, "After 2.2.1: `src/` clean-ups", which has the details and the line numbers.*
 
-1. **RTL-1: a PAL A78 after a PAL 2600 image, Region on Auto** (`docs/DARIA_CORE.md`, open item 20).
+1. **RTL-1: a PAL A78 after a PAL 2600 image, Region on Auto** (`docs/DARIA_CORE.md`, open item 20). **Done** for the release after 2.2.1, in `5ad0a6b`: `region_pll` follows the region while an A78's 128-byte header downloads, which is narrower than the sketch below so that a download's last `clk_sys` keeps the freeze. `tb_wire`'s `pal2600_a78` now expects no extra retune, and the new unit bench `tb_region` (`sim/run_region.sh`, in `run_sim.sh`) checks it with planted variants.
    - **What it would fix.** In the DARIA build such an A78 costs two extra retunes, to NTSC and back to PAL, and its console is released 62 µs later than without DARIA. The final region is right. Main and the build without DARIA make no extra retune. The owner accepted it for 2.2.1 as a known minor issue.
    - **Cost.** A few lines in `atari7800_pocket.sv`: let `region_pll` follow the region while an A78 downloads, even with a retune pending. The last few `clk_sys` of a download need checking against the `seq_*` scenarios and the mutants. As a change to DARIA's RTL it re-runs the gates of `docs/daria_step7/plan.md` 7.6, with a new Q2.
    - **Evidence.** `tb_wire`'s scenario `pal2600_a78` runs on both builds and pins the DARIA build's two extra retunes; the build without DARIA makes none. Its expected DARIA count drops to 0 with the fix.
    - **When.** The next revision after 2.2.1.
-2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1.
-3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`.
-4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, before the AtariVox build's seeds that 2.2.1 added, and still asks for a fix in `sram_ctrl` that Fix B made.
-5. **`daria_sync.tcl`'s FORCED mark on `cap_err_a[0]`** matches no build, and Quartus lists it as ignored.
-6. **`core_top.v`'s audio comment** says 298 samples per output, about 48 kHz. `audio_filter.sv` averages 256, about 55.9 kHz.
-7. **`pll_core.v`'s comment** says the VCO/19 display strings are "one digit lower". Only two of the four are.
-8. **`src/fpga/mister/POCKET_CHANGES.md`** counts eight modified upstream files where there are eleven, and its "Updating" list re-applies six. Until it is fixed, `docs/DEVELOPING.md`, "Update the MiSTer core", lists all eleven.
+2. **RTL-2.** During a 2600 download `region_pll` is set back to the region of the last retune. On the clock where a retune completes it takes the old region, for one `clk_sys`. A unit bench saw 3 retunes instead of 1 with a 70-byte download; no real image is that short. Cost: one line, best done with RTL-1. **Done** with RTL-1 in `5ad0a6b`: the withdrawal takes `daria_rgn`'s next value; `tb_region` catches the old line (3 retunes in 33 of 1,641 trials).
+3. **`core_constraints.sdc`'s comment** gives VCO/18's lattice ("only every 3 `clk_sys`"). At VCO/19 the edges meet every 19 `clk_sys`. **Done** by the move back to ÷18 (`09aa7f8`): the lattice line is right again, and the counter[3] line says VCO/18, 38.18 MHz.
+4. **`ap_core.qsf`'s seed comment** gives 2.1.1's margins, before the AtariVox build's seeds that 2.2.1 added, and still asks for a fix in `sram_ctrl` that Fix B made. **Done** with the seed move (`SEED` 3, 2026-10-21): the comment quotes the release's Q2, seeds 1-3 on `ebca01a`.
+5. **`daria_sync.tcl`'s FORCED mark on `cap_err_a[0]`** matches no build, and Quartus lists it as ignored. **Done** in `dd135dd`: the mark is gone (15 marks), and the smoke test, which now expects 15, passes. *2026-10-21 (Stage 2 review):* the marks on `pause_a[0]` and `halted_s[0]` matched no build either (`pause_core` is tied 0, and the wrapper leaves `daria_halted` open, the overlay included), and the fitter listed both as ignored in Q2 and Q5; they are removed too (13 marks), and the smoke test expects 13.
+6. **`core_top.v`'s audio comment** says 298 samples per output, about 48 kHz. `audio_filter.sv` averages 256, about 55.9 kHz. **Done** with item 4 (2026-10-21): the comment says 256 and about 55.9 kHz.
+7. **`pll_core.v`'s comment** says the VCO/19 display strings are "one digit lower". Only two of the four are. **Done** with the ÷18 PLL change (`09aa7f8`): the header is rewritten for C3 = 18, and the sentence is gone.
+8. **`src/fpga/mister/POCKET_CHANGES.md`** counts eight modified upstream files where there are eleven, and its "Updating" list re-applies six. Until it is fixed, `docs/DEVELOPING.md`, "Update the MiSTer core", lists all eleven. **Done** in `5febe80`: `POCKET_CHANGES.md` counts eleven and its "Updating" list names them all; `DEVELOPING.md`'s workaround is shortened.
 
 - **Cost of items 3-8.** Items 3, 4, 6 and 7 change comments only. They need plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Item 5 changes an assignment file, so it needs a new Q2 and the smoke test. Item 8 is a document.
 - **When.** Items 1 and 2 in the next revision; the rest with the first `src/` change after 2.2.1.
   - *2026-10-19:* the plan puts items 1-8 into the next release (`docs/daria_step10/plan.md` 3.1). At ÷18 item 3's lattice line is right again, but its counter[3] line must then say VCO/18, 38.18 MHz. Item 7 goes with the ÷18 PLL change. Item 8 waits for the release too: Rev 0 changes nothing under `src/`.
+  - *2026-10-21:* items 1, 2, 3, 5, 7 and 8 are done (above). Items 4 and 6 are left. Item 4 waits for the release's Q2, whose figures the seed comment will quote, and goes in with the seed (`docs/daria_step7/plan.md` P12, as amended 2026-10-21). Item 6 is a comment and goes in with it, under plan 7.6's proof.
+  - *2026-10-21, after the release's Q2:* items 4 and 6 are done, with `SEED` 3 (P12): every `pp_equiv` stream is unchanged, and `ap_core.qsf` differs only in the `SEED` line with comments stripped.
 
 ## The 7800 core (both builds: with and without DARIA)
 
@@ -131,7 +136,7 @@ Terms: `clk_sys` is VCO/48 (14.32 MHz), the console's clock; `clk_arm` is DARIA'
   - A suggestion, untested: start the TIA's `pal_mode` after the reset from the wrapper's `tia_pal_seen` latch. That changes upstream's `TIA.sv`.
 - **A Sega Genesis pad for 2600 games.** The Pocket reads a 2600 image's paddle inputs as 0 with a joystick, as a real 2600 does, so Genesis-aware games (Galagon, SF2fix, Turbo) start in single-button mode. A "Genesis pad" Port Input option would let them offer their second-button functions. It would present INPT1 (port 1) and INPT3 (port 2) high while a mapped second button is released, and low while it is pressed. It would change every 2600 game that reads those inputs (`docs/daria_step7/progress.md`, "Frame runs on D against R1").
 - **An A78 image the BIOS drops into 2600 mode** is not covered by the region hold, and could loop between regions if its 2600-mode video measured PAL against an NTSC header. It is not simulated, and main's 2.1.3 has the same exposure (`docs/daria_step7/progress.md`, "Fit Q1' and commit P").
-- **FA2 saves: Star Castle Arcade's high scores.** *Added 2026-10-17, from the owner's finding on the Pocket, for a release after 2.2.1.*
+- **FA2 saves: Star Castle Arcade's high scores.** *Added 2026-10-17, from the owner's finding on the Pocket, for a release after 2.2.1.* **Done** for the release after 2.2.1, in `4738c65`, with the port gated to 2600 mode in `35bf88f` (an A78 that `detect2600.sv` takes for FA2 could otherwise write over the file; `run_sim.sh` runs one): one shared `fa2.sav` of 256 bytes beside `hsc.sav` and `savekey.sav` (the owner, 2026-10-21: "Shared for the time being."), behind upstream's `fa2_nvram_bridge.sv`. `run_sim.sh` checks the round trip with a synthetic FA2 cartridge. The release's Q2 (seeds 1-3 on `ebca01a`) passes every gate and check. Still to come: a Pocket test (Star Castle Arcade keeping its scores across a power cycle).
   - **What it would fix.** Star Castle Arcade, an FA2 game, does not keep its high-score saves on the Pocket.
     - The FA2 mapper (`mapper_fa2.sv`) copies its 256-byte work RAM to and from the cartridge's flash through the `fa2_nvram_*` port.
     - The Pocket wrapper leaves that port unconnected (`atari7800_pocket.sv:1282-1288` in 2.2.1). Every read returns $FF, as from a blank flash, every request is ready at once, and every write is dropped.

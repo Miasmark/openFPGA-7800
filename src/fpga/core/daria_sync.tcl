@@ -18,7 +18,7 @@
 # "SYNCHRONIZER_IDENTIFICATION" assignment is illegal"), which stops Analysis
 # & Synthesis. Assignments from a SOURCE_TCL_SCRIPT_FILE are not tagged.
 # Checked on a fitted design with the core's names four levels deep
-# (sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh): all 16 marks read
+# (sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh): all 13 marks read
 # "User Specified", none is reported ignored, and without daria.qip the same
 # registers read "Automatic" or head no chain.
 #
@@ -28,25 +28,26 @@
 # is no synchroniser (SYNCHRONIZER_IDENTIFICATION OFF in daria_fe_guard.sv;
 # its SDC pair is in daria_constraints.sdc).
 #
-# Three of these chains are absent from the release build and are marked
-# for the builds that have them: pause_a (its input, pause_core, is tied 0,
-# so synthesis removes it), halted_s (daria_halted has no load before
-# step 8) and cap_err_a (BUP_DEBUG only).
+# Three first flops have no mark, because no build has their chain (plan
+# 2.7), the BUP_DEBUG build among them: bupchip_pocket.sv's cap_err_a feeds
+# only the status word's bit 11, which bup_status_osd.sv does not show;
+# pause_a's input, pause_core, is tied 0 in every build; and halted_s feeds
+# only daria_halted, which the wrapper leaves open (the status overlay shows
+# the halt from dbg_status instead). The fitter listed the marks they had as
+# ignored in the release and the BUP_DEBUG fits. A build that drives
+# pause_core or loads daria_halted needs their marks back.
 #
 # Form: -to "*|<entity>:*|<register>[0]" (brackets escaped for Tcl).
 
 # clk_sys -> clk_arm
-# bupchip/bupchip_pocket.sv: the hold and pause levels
+# bupchip/bupchip_pocket.sv: the hold level
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|hold_a\[0\]"
-set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|pause_a\[0\]"
 # bupchip/bupchip_pocket.sv: the profile, the 32 KB cart RAM flag, the mapper reset
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|prof_a\[0\]"
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|ram32_a\[0\]"
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|mres_a\[0\]"
 # bupchip/bupchip_pocket.sv: the $8007 command toggle (cmd_byte held)
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|cmd_s\[0\]"
-# bupchip/bupchip_pocket.sv, BUP_DEBUG: the capture's sticky error flags
-set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|cap_err_a\[0\]"
 # bupchip/daria_call.sv: call_tog
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|daria_call:*|tog_s\[0\]"
 # bupchip/daria_mmio.sv: the TC snapshot toggle (hold, hold_tok held)
@@ -55,9 +56,8 @@ set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|daria_mm
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bup_asset_wr:*|t1"
 
 # clk_arm -> clk_sys
-# bupchip/bupchip_pocket.sv: CPU ready and halted
+# bupchip/bupchip_pocket.sv: CPU ready
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|ready_s\[0\]"
-set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|halted_s\[0\]"
 # bupchip/bupchip_pocket.sv: cpu_run, for daria_mmio's clk_sys reset
 set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "*|bupchip_pocket:*|run_s\[0\]"
 # bupchip/bupchip_pocket.sv: the audio frame toggle (frame_arm held)

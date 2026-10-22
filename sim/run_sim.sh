@@ -110,7 +110,7 @@ SRCS=(
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
 	"$FPGA/core/atarivox/avox_rx.sv" "$FPGA/core/atarivox/avox_engine.sv" "$FPGA/core/atarivox/atarivox.sv"
-	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
+	"$FPGA/core/virtual_axis.sv" "$FPGA/core/virtual_axis5.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 	"$RTL/bupchip_peripheral.sv" "$FPGA/pocket_utils/psram.sv"
@@ -263,6 +263,31 @@ python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.s
 # grep -a: the LOAD line prints the image's first bytes as its header, raw;
 # in a UTF-8 locale grep would hold that line back ("binary file matches").
 sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -aE "LOAD|TONE"
+
+# The FA2 flash's save slot (fa2.sav, 0x40000000): sim/fa2_test.py's
+# synthetic FA2 cartridge (no game data) loads the flash through the
+# mapper's fa2_nvram_* port, saves it changed, and loads it again; tb_load
+# writes the file in before the run and reads the slot back afterwards with
+# the APF read protocol (+fa2save, +fa2expect, +fa2prog). Two A78 runs, each
+# with the file loaded, must leave it as it was: load_test.a78, which
+# detect2600.sv does not take for FA2 (mapper_fa2 stays in reset), and
+# fa2_test.py's a78 image, which it does take for FA2 (mapper 25) and which
+# issues a save command in 7800 mode; the wrapper's fa2_on keeps that save
+# off the slot (saves 1, slot RAM writes 0).
+echo "-- FA2 flash save slot (fa2.sav): a synthetic FA2 cartridge loads, saves and reloads it through the mapper's port:"
+python3 "$HERE/fa2_test.py" image > fa2_test.a26
+python3 "$HERE/fa2_test.py" flash 256 > fa2_flash.bin
+python3 "$HERE/fa2_test.py" expect 256 > fa2_flash_expect.bin
+python3 "$HERE/fa2_test.py" expect > fa2_blank_expect.bin
+echo "  a saved flash file (expect 2 loads, 1 save, 256 slot RAM writes; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2save=fa2_flash.bin +fa2expect=fa2_flash_expect.bin +fa2prog $(fp fa2_file) | grep -aE "^ *FA2"
+echo "  no file, a blank flash read as \$FF (expect the same counts; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2expect=fa2_blank_expect.bin +fa2prog $(fp fa2_blank) | grep -aE "^ *FA2"
+echo "  an A78 game with the file loaded, not taken for FA2 (expect 0 bytes differ):"
+sim ./obj_load/vtb +image=load_test.a78 +audf=7 +fa2save=fa2_flash.bin $(fp fa2_a78) | grep -aE "^ *FA2"
+python3 "$HERE/fa2_test.py" a78 > fa2_test.a78
+echo "  an A78 game taken for FA2 that issues a save command in 7800 mode, the file loaded (expect mapper 25, 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a78 +fa2save=fa2_flash.bin $(fp fa2_a78fa2) | grep -aE "^ *FA2"
 
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
@@ -559,6 +584,9 @@ echo "-- PAL/NTSC PLL retune sequence:"
 	|| { grep -m20 "%Error" "$WORK/obj_pllr.log"; exit 1; }
 sim ./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
 
+echo "-- the region asked of the PLL (atari7800_pocket.sv's region_pll with pll_region.v, tb_region; RTL-1, RTL-2):"
+WORK="$WORK/region" bash "$HERE/run_region.sh" | grep -E "^REGION " || true
+
 echo "-- audio filter:"
 "${VERILATOR:-verilator}" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_audio_filter \
 	-Mdir "$WORK/obj_af" -o vtb "$FPGA/core/audio_filter.sv" "$HERE/tb_audio_filter.sv" > "$WORK/obj_af.log" 2>&1 \
@@ -570,3 +598,6 @@ echo "-- virtual paddle / driving / light-gun axis:"
 	-Mdir "$WORK/obj_va" -o vtb "$FPGA/core/virtual_axis.sv" "$HERE/tb_virtual_axis.sv" > "$WORK/obj_va.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_va.log"; exit 1; }
 sim ./obj_va/vtb | grep AXIS
+
+echo "-- the five virtual axes as one engine (virtual_axis5.sv, tb_vaxis5):"
+WORK="$WORK/vaxis5" bash "$HERE/run_vaxis5.sh" | grep -E "^VAXIS5 (seed|planted|pass|FAIL|build)|^MISMATCH" || true

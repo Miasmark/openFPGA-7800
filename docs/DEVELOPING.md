@@ -14,8 +14,9 @@ Related documents:
   (no more than 4 minutes between a subagent's calls, restarts and resuming, simulation slots,
   disk).
 - [IMPROVEMENTS.md](IMPROVEMENTS.md): improvements found but left for a
-  later release (a guard that works at ÷19, S3, a cartridge EEPROM, the
-  `src/` clean-ups after 2.2.1), each with what it would fix and its cost.
+  later release (a guard that works at ÷19 if ÷18 is ever left, S3 as a
+  reserve, a cartridge EEPROM, the two `src/` comment clean-ups left after
+  2.2.1), each with what it would fix and its cost, and the items done since.
 - [HARMONY_MODEL.md](HARMONY_MODEL.md): the bench's model of a real Harmony
   cartridge's chip (LPC2103), a second timing reference for the 2600 ARM
   calls beside MiSTer's core: the settings per game, its limits, and the
@@ -146,6 +147,15 @@ become `logic`), builds two testbenches, and runs them:
 - `tb_load`: loads files through the real APF data loader. This is the
   testbench to use for anything cart-related (and the BupChip's slot).
 - `tb_pll_region`, `tb_audio_filter`, `tb_virtual_axis`: unit tests.
+- `tb_vaxis5` (`run_vaxis5.sh`): `virtual_axis5.sv`, the five axes the core
+  builds as one time-shared engine, against five `virtual_axis.sv` whose ticks
+  are delayed 0-4 clocks as the engine staggers them, on every clock of four
+  random-stimulus seeds (4 x 10^7 clocks), and a planted fault it must catch.
+- `tb_region` (`run_region.sh`): the wrapper's region logic (`region_pll`
+  and, with DARIA, `daria_rgn`), cut out of `atari7800_pocket.sv` as the
+  tree has it by `region_unit.py`, with `pll_region.v` in the load sequences
+  of RTL-1 and RTL-2 (`docs/IMPROVEMENTS.md`), on both builds, and four
+  planted variants it must catch (2.2.1's logic among them).
 
 What the sim does **not** model:
 
@@ -173,6 +183,8 @@ Something that fails only on hardware is most likely in one of those.
 | `save=FILE` | Preload a 2 KiB `hsc.sav`, check it survives |
 | `sk_on`, `sk_auto` | SaveKey setting (default Off) |
 | `sksave=FILE`, `skcheck` | Preload/check the SaveKey image |
+| `fa2save=FILE`, `fa2expect=FILE` | Preload a 256-byte `fa2.sav`; check what the slot holds at the end (default: the preloaded file, or blank $FF). Without `fa2prog` the `FA2 image:` line also gives the 2600 mapper, the mode and the FA2 port's copies (`fa2_test.py a78` writes an A78 taken for FA2) |
+| `fa2prog` | For `fa2_test.py`'s FA2 image: wait for its load, save and reload through the FA2 port, then check the work RAM and the slot |
 | `pokeyirq` | POKEY IRQ setting on |
 | `pokeylog` | Every POKEY write to `pokey_writes.txt` |
 | `i2ctrace`, `i2craw_from/_to=MS` | Decode the SaveKey I2C bus; dump raw lines |
@@ -191,24 +203,19 @@ cd sim/work && ./obj_load/vtb +image=input_test.a26 +inputtest +port1=2 +port2=2
 ```
 
 Firmware files and commercial ROMs are never stored in this repository.
-`extra_tests.sh` builds its carts from 7800basic samples, and fetches
-MiSTer's firmware images from GitHub at test time.
+`extra_tests.sh` builds its carts from 7800basic samples (dasm and
+7800basic at the commits it pins), and fetches MiSTer's firmware images
+from GitHub at test time.
 
 ## Recipes
 
 ### Update the MiSTer core
 
-Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`, but re-apply the
-Pocket changes to all eleven modified upstream files: `top.sv`, `cart.sv`,
-`cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v` and
-`Pokey/pokey_adapter.sv`. POCKET_CHANGES.md's own summary counts eight and
-its "Updating" list names six, which would drop the TIA window fix, the
-SRAM frame port, the memory-editor removal and the POKEY write hold; its
-sections describe all eleven. It is under `src/`, which stays as verified
-for 2.2.1, so it is corrected after 2.2.1
-([daria_step7/record.md](daria_step7/record.md), "After 2.2.1: `src/`
-clean-ups"). Then:
+Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`: it re-applies
+the Pocket changes to all eleven modified upstream files (`top.sv`,
+`cart.sv`, `cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`,
+`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`
+and `Pokey/pokey_adapter.sv`). Then:
 
 1. Add any new upstream source files to `core/core.qip` **and** `sim/run_sim.sh`.
 2. Run `sim/run_sim.sh` and `sim/extra_tests.sh`. `extra_tests.sh` catches
@@ -288,8 +295,9 @@ port has already had:
    reads the size before it writes the settings, so a size that depends on a
    setting is wrong when it matters. A size of 0 can make it drop or
    truncate the file.
-3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey; the
-   next is `0x40000000`) and add it to the `bridge_rd_data` mux.
+3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey,
+   `0x40000000` FA2; the next is `0x50000000`) and add it to the
+   `bridge_rd_data` mux.
 4. Decide what a new, blank file should hold. The FPGA's RAM powers up as
    zeros. A real SaveKey is blank as `$FF`, so `save_ram_dp` has a `BLANK`
    parameter. A zero-filled SaveKey broke Triple Punch.
@@ -547,9 +555,10 @@ The Cyclone V 5CEBA4 has 18,480 ALMs and **308 M10K blocks**. Block count,
 not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 *bits* because every memory rounds up to whole blocks.
 
-Current use (2.2.1, with DARIA and the AtariVox voice, fitter seed 2) is
-15,839 of 18,480 ALMs (86%) and 212 of 308 M10K blocks (README,
-"Verification"). DARIA's verified tree, without the voice, used
+Current use (the release after 2.2.1, DARIA at ÷18 with the AtariVox voice,
+fitter seed 3) is 14,628 of 18,480 ALMs (79%) and 216 of 308 M10K blocks
+(README, "Verification"); 2.2.1 used 15,839 ALMs (86%) and 212 M10K blocks.
+DARIA's verified tree, without the voice, used
 15,600-15,625 ALMs (85%), 195 M10K blocks and 1,767-1,770 of 1,848 LABs
 over seeds 1-3, with a peak interconnect use of 60.4-60.8%. Its ALM count is
 77-102 ALMs over the 84% that DARIA's design took as a guide, which
@@ -566,13 +575,13 @@ the BupChip, used 69% ALMs and 46 M10K, and 2.1.3, with the BupChip,
 paths in `sram_ctrl` (into `fbn_*` on seeds 1 and 2 of DARIA's verified tree,
 from `fbn_addr` on seed 3). They still depend on placement: `core_constraints.sdc` asks the
 fitter alone for 1.5 ns of extra setup margin there, and `ap_core.qsf` sets
-the fitter seed, one already fitted on the release tree. Its comment still
-gives 2.1.1's seeds and margins (+0.26, +0.44 and +0.28 ns at 79%), with
-the AtariVox build's seeds after them since 2.2.1; the 2.1.1 part is
-corrected after 2.2.1. The verified tree's seeds 1, 2 and 3 gave `clk_sdram`
-+2.462, +2.683 and +2.919 ns, and seed 2 was kept as the only one that
-passed every step-7 check as first written
-([daria_step7/plan.md](daria_step7/plan.md) 5.2, P12). After any change,
+the fitter seed, one already fitted on the release tree, and its comment
+gives that tree's seeds 1-3. In the release after 2.2.1 they gave
+`clk_sdram` +2.407, +2.388 and +3.107 ns, every check passing on each, and
+seed 3, the safest, ships ([daria_step7/plan.md](daria_step7/plan.md) P12,
+as amended 2026-10-21). For 2.2.1, DARIA's verified tree gave +2.462,
++2.683 and +2.919 ns, and seed 2 was kept as the only one that passed every
+step-7 check as first written (plan 5.2, P12). After any change,
 check the `clk_sdram` slack again on seeds 1, 2 and 3; the release gate is
 +1.5 ns at the worse slow corner on each ([DARIA_CORE.md](DARIA_CORE.md),
 "Fix B", 5). Up to 2.0.20 all

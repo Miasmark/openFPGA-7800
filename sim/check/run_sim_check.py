@@ -24,6 +24,21 @@ against its expected lines and fails on:
     drops the "%Fatal" line);
   - the load, PLL retune, audio filter and virtual axis lines other than
     expected;
+  - the FA2 flash save slot's lines (fa2.sav, sim/fa2_test.py's program)
+    other than expected: each FA2 program run done with 2 flash loads, 1
+    save and 256 writes into the slot's RAM, 0 bytes wrong in the work RAM
+    after the reload and in the slot read back, and both A78 runs leaving
+    the file as it was: load_test.a78 (not taken for FA2) and fa2_test.py's
+    a78 image (taken for FA2, mapper 25, its save done with no write into
+    the slot's RAM);
+  - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
+    with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
+  - tb_region (sim/run_region.sh) other than its lines for the DARIA and
+    the plain build (every trial with the retunes wanted, no retune back to
+    back, and in the DARIA build daria_rgn exact: scenarios A, B and C for
+    DARIA, A and B for plain, whose C is not judged), its four planted
+    variants caught, the sketch by its hazard in C (a retune back to back
+    or daria_rgn wrong), and "REGION pass";
   - "exit N" with N != 0 when the log records the script's exit status.
 DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 "POCKET_DARIA 1" line) "DARIA pass" is required. In the plain build the
@@ -89,6 +104,45 @@ AXIS = [
     r"AXIS stick 60 -> position 60 after 40 ms",
     r"AXIS D-pad press \(rest now 60\), then stick 250: 250",
     r"AXIS driving, stick pushed fully right 1 s: 31 gray steps, 32 ms apart",
+]
+# tb_vaxis5 through sim/run_vaxis5.sh's defaults: seeds 1-4, 10^7 clocks each
+VAXIS5 = [r"VAXIS5 seed %d cycles 10000000 ticks [1-9]\d* resets [1-9]\d* \(on a tick [1-9]\d*, "
+          r"1-4 clocks after one [1-9]\d*\) mismatches 0" % k for k in (1, 2, 3, 4)] + [
+    r"VAXIS5 planted fault \(axis 4 reads axis 3's slow\), seed 1: caught, [1-9]\d* mismatches",
+    r"VAXIS5 pass",
+]
+# tb_region through sim/run_region.sh: the region logic of both builds in
+# RTL-1's and RTL-2's load sequences, and its planted variants. The plain
+# build's C line is not judged (back-to-back retunes there are the build
+# without DARIA's own, as in 2.2.1). The sketch's C line must show the hazard
+# it was rejected for, so that "caught" means the bench saw it. REGION lines
+# are not in VERDICT_LINE, so a --ref log from before the bench still compares.
+REGION = [
+    r"REGION daria A trials 1641 retunes 1:1641 rgn_bad 0 b2b 0",
+    r"REGION daria B pal trials 11 retunes 0:11 rgn_bad 0 b2b 0",
+    r"REGION daria B ntsc trials 11 retunes 1:11 rgn_bad 0 b2b 0",
+    r"REGION daria C trials 49 retunes 2:49 rgn_bad 0 b2b 0",
+    r"REGION plain A trials 1641 retunes 1:1641 rgn_bad \d+ b2b 0",
+    r"REGION plain B pal trials 11 retunes 0:11 rgn_bad \d+ b2b 0",
+    r"REGION plain B ntsc trials 11 retunes 1:11 rgn_bad \d+ b2b 0",
+    r"REGION sketch C trials 49 retunes [\d: ]+ rgn_bad (?:[1-9]\d* b2b \d+|\d+ b2b [1-9]\d*)",
+    r"REGION verdict daria: pass \(.*\)",
+    r"REGION verdict plain: pass \(.*\)",
+] + [r"REGION verdict %s: planted, caught" % v for v in ("old", "rtl2", "rtl1", "sketch")] + [r"REGION pass"]
+# The FA2 flash save slot (fa2.sav): each pattern and how many times the
+# section must hold it (the two FA2 program runs, then the two A78 runs; mapper
+# 25 is detect2600.sv's BANKFA2). The second A78 run is the one that can fail:
+# an A78 taken for FA2 whose save command, in 7800 mode, must not reach the
+# slot (before the wrapper's fa2_on gate it wrote 255 of 256 bytes). FA2 lines
+# are not in VERDICT_LINE, so a --ref log from before the slot still compares.
+FA2 = [
+    (r"FA2 program: mapper 25, done after \d+ ms; flash loads 2, saves 1, slot RAM writes 256", 2),
+    (r"FA2 work RAM after the reload: 0 of 255 bytes differ from the expected file", 2),
+    (r"FA2 save slot read back \(APF read protocol\): 0 of 256 bytes differ from the expected file", 2),
+    (r"FA2 image: 2600 mapper (?!25,)\d+, cart_is_7800 1, tia_mode 0; flash loads 0, saves 0, slot RAM writes 0", 1),
+    (r"FA2 image: 2600 mapper 25, cart_is_7800 1, tia_mode 0; flash loads 0, saves 1, slot RAM writes 0", 1),
+    (r"FA2 save slot after load, reset and 300 ms of running \(APF read protocol\): "
+     r"0 of 256 bytes differ from the expected file", 2),
 ]
 # BIOS cases: title prefix -> (required patterns, does its TONE line have to pass)
 BIOS_CASES = [
@@ -283,6 +337,16 @@ def check(log, build, audfs, only=None):
     need(b, r"LOAD 4096 bytes, header .*, cart_is_7800=0, cart_size=4096, tia_mode=1, payload mismatches=0", "2600 load")
     if not b or not any(tone_ok(x, 14) for x in b):
         bad.append("2600 load: no tone AUDF0=14 with ratio 0.990-1.010")
+    h, b = L.section("-- FA2 flash save slot")
+    if b is None:
+        bad.append("FA2 save slot: section missing")
+    else:
+        for pat, n in FA2:
+            k = sum(1 for x in b if re.fullmatch(pat, x.strip()))
+            if k != n:
+                bad.append(f"FA2 save slot: {k} of {n} lines /{pat}/")
+        if any(x.strip().startswith("FA2 byte") for x in b):
+            bad.append("FA2 save slot: bytes differ ('FA2 byte' lines)")
 
     # BIOS boot rule
     h, b = L.section("-- 7800 BIOS")
@@ -369,10 +433,23 @@ def check(log, build, audfs, only=None):
         m = re.fullmatch(r"AUDIO silence after 2 s: (-?\d+) \(expect near 0\)", x.strip()) or m
     if not m or abs(int(m.group(1))) > 16:
         bad.append("audio filter: silence not near 0")
+    # the region asked of the PLL
+    h, b = L.section("-- the region asked of the PLL")
+    if b is None:
+        bad.append("tb_region: section missing")
+    else:
+        for p in REGION:
+            need(b, p, "tb_region")
     # virtual axis
     h, b = L.section("-- virtual paddle")
     for p in AXIS:
         need(b, p, "virtual axis")
+    # the five axes as one engine
+    h, b = L.section("-- the five virtual axes")
+    for p in VAXIS5:
+        need(b, p, "tb_vaxis5")
+    if b and any(x.startswith("MISMATCH") for x in b):
+        bad.append("tb_vaxis5: MISMATCH lines")
     return bad, notes, build
 
 

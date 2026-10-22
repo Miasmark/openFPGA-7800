@@ -74,20 +74,45 @@ fi
 python3 "$HERE/cartram2600_test.py" matrix --work "$WORK" "${CT_FP[@]}" "${CT_TAPE[@]}" || true
 python3 "$HERE/cartram2600_test.py" s19 --work "$WORK" "${CT_FP[@]}" || true
 
-if [ ! -x "$X/dasm/bin/dasm" ]; then
-	git clone -q --depth 1 https://github.com/dasm-assembler/dasm "$X/dasm"
-	make -C "$X/dasm" -j4 >/dev/null
+# The two tool clones are pinned, so every run builds the same carts. dasm
+# at c361b82 (2026-07-08). 7800basic at 4b17165 (2025-11-02), the newest
+# commit whose 7800basic.native.sh runs the compiler itself: from 398ac79
+# (2025-11-04) to its head of 2026-10-10 (e7c18d2) it runs it under
+# valgrind, and without valgrind installed every compile fails (the script
+# still exits 0). A cached clone at another commit is built again.
+DASM_REF=c361b8201320e66c2452c58b248030b34be38495
+B78_REF=4b17165b263718d079714303b1f11a536e2e01dd
+fetch_at() {   # fetch_at <dir> <url> <commit>: that commit alone, no history
+	rm -rf "$1"; git init -q "$1"
+	git -C "$1" fetch -q --depth 1 "$2" "$3" && git -C "$1" checkout -q FETCH_HEAD
+}
+at_ref() { [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$2" ]; }
+if [ ! -x "$X/dasm/bin/dasm" ] || ! at_ref "$X/dasm" "$DASM_REF"; then
+	fetch_at "$X/dasm" https://github.com/dasm-assembler/dasm "$DASM_REF"
+	make -C "$X/dasm" -j4 > "$X/dasm.make.log" 2>&1 \
+		|| { echo "dasm: make failed (last lines of $X/dasm.make.log):"; tail -5 "$X/dasm.make.log"; exit 1; }
 fi
-if [ ! -x "$X/7800basic/7800basic" ]; then
-	git clone -q --depth 1 https://github.com/7800-devtools/7800basic "$X/7800basic"
-	make -C "$X/7800basic" -j4 all >/dev/null 2>&1
+# 7800basic's makefile is serial only: its 7800preprocess and 7800optimize
+# rules both write and delete lex.yy.c in the source directory, so with -j
+# they can compile each other's half-written file and fail (e7c18d2 did
+# with -j4). Its output goes to a log, so that a failure shows; a partial
+# build is removed, so the next run builds again.
+if [ ! -x "$X/7800basic/7800preprocess" ] || ! at_ref "$X/7800basic" "$B78_REF"; then
+	fetch_at "$X/7800basic" https://github.com/7800-devtools/7800basic "$B78_REF"
+	make -C "$X/7800basic" all > "$X/7800basic.make.log" 2>&1 \
+		|| { echo "7800basic: make failed (last lines of $X/7800basic.make.log):"; tail -5 "$X/7800basic.make.log"; rm -rf "$X/7800basic"; exit 1; }
 fi
+echo "-- tools: dasm $(git -C "$X/dasm" rev-parse --short HEAD 2>/dev/null), 7800basic $(git -C "$X/7800basic" rev-parse --short HEAD 2>/dev/null)"
 export PATH="$X/dasm/bin:$X/7800basic:$PATH" bas7800dir="$X/7800basic"
 
+# 7800basic.native.sh exits 0 even when the compile fails, so a cart counts
+# as built only when its .a78 is there; otherwise the compile's output (kept
+# in <name>/build.log) is shown and the script stops.
 build() {   # build <name> <sample> <sed expression or "">
-	rm -rf "$X/$1"; cp -r "$X/7800basic/samples/$2" "$X/$1"
+	rm -rf "$X/$1"; cp -r "$X/7800basic/samples/$2" "$X/$1"; rm -f "$X/$1/$2.bas.a78"
 	[ -n "$3" ] && sed -i "$3" "$X/$1/$2.bas"
-	(cd "$X/$1" && sh "$X/7800basic/7800basic.native.sh" "$2.bas" >/dev/null 2>&1)
+	(cd "$X/$1" && sh "$X/7800basic/7800basic.native.sh" "$2.bas" > build.log 2>&1) || true
+	[ -s "$X/$1/$2.bas.a78" ] || { echo "7800basic: $2.bas did not build for $1 (last lines of $X/$1/build.log):"; tail -15 "$X/$1/build.log"; exit 1; }
 	ln -sfn "$WORK/rtl" "$X/$1/rtl"
 }
 

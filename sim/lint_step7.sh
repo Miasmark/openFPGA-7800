@@ -88,6 +88,8 @@ lint() {
 			SRCS=("${CORE[@]}" "$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
 				"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$P/paddles.sv"
 				"$RTL/lightgun.sv" "$FPGA/pocket_utils/data_loader.sv" "$FPGA/core/audio_filter.sv" "${BUP[@]}")
+			# the five virtual axes as one engine (virtual_axis5.sv); trees before it have none
+			[ -f "$FPGA/core/virtual_axis5.sv" ] && SRCS+=("$FPGA/core/virtual_axis5.sv")
 			# the AtariVox (32e3ede), in core.qip's order; trees before it have none
 			for f in avox_rx avox_engine atarivox; do
 				[ -f "$FPGA/core/atarivox/$f.sv" ] && SRCS+=("$FPGA/core/atarivox/$f.sv")
