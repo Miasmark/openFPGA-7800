@@ -27,6 +27,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
 - Decisions 6 and 13 are settled by the owner's words of 2026-10-19 (section 6).
 - 3.0 item 8: `lint_step7.sh`'s missing AtariVox sources are done by the owner's own commit `6e2e880`. B8 waits for the release, because `POCKET_CHANGES.md` is under `src/`.
 - Section 10 carries the amendment of step-7 plan 5.4 for G1, from Rev 0's fit-script lane.
+- Decision 16 is settled yes by the owner's words of 2026-10-22: the campaign runs from a fresh clone (section 6).
 - Decision 9 (`virtual_axis5`) is settled yes, and decision 15 as one shared `fa2.sav` for the time being, by the owner's words of 2026-10-21 (section 6).
 - Decisions 7, 8 and 10 are settled by the owner's choices of 2026-10-21 (one release; MR in `ap_core.qsf`; accept R1's cost and the amended CPI gate), and decisions 2 and 3 proceed on the owner's direction of that day to land ÷18 for the release before the Rev 0 session, which still has to confirm them on silicon (section 6). The owner also chose to land the minimum first (the CPU, MR and ÷18, with ÷18 as its own commit), with one non-DARIA reference at F′.
 - Decision 5 is settled by the owner's words of 2026-10-21 (no Harmony cartridge; the model is the evidence), and with it decision 4 for Spiders (section 6). 3.0 item 9 and 3.3 (the real-Harmony check) will not run.
@@ -870,7 +871,7 @@ The study's numbers are in brackets. "When" says when each decision is needed. T
 
 | # | Decision | Recommendation | Status |
 |---|---|---|---|
-| 16 | [12] Run the campaign from a fresh clone, so that it is also plan 7.7's run | Yes. It saves a c78: 28 h 49 min of wall time [measured] | Open |
+| 16 | [12] Run the campaign from a fresh clone, so that it is also plan 7.7's run | Yes. It saves a c78: 28 h 49 min of wall time [measured] | **Settled 2026-10-22: yes.** The owner: "yes, should be plenty of room now." The campaign runs from a fresh clone, so it is also plan 7.7's run |
 | 17 | [13] Plan 7.6 as written for small changes | Keep it; do not narrow it | Open (recommended as is) |
 | 18 | [14] BUS and ELF stay out | Yes | **Settled** by `docs/DARIA_CORE.md` decision 6: BUS among the decisions of 2026-10-04; ELF by the owner, 2026-10-07. Nothing found argues otherwise |
 | 19 | [15] The PAL image generator | Commit it under `sim/` (V-bench and hygiene; it holds no game data) | Open |
