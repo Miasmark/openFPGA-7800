@@ -178,7 +178,7 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
 1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
-the whole core used 79% of the FPGA in 2.1.1 (86% in 2.2.1, with DARIA and the AtariVox voice).
+the whole core used 79% of the FPGA in 2.1.1 (86% in 2.2.1, with DARIA and the AtariVox voice, and 79% again in the release after it).
 From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges: at 36.17 MHz in 2.2.1, and at 38.18 MHz from the release after it. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
@@ -234,14 +234,20 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build (2.2.1, fitter seed 2) meets timing on all four corners.
-Worst setup slack: +2.345 ns on clk_sdram (against a release gate of
-+1.5 ns), +1.474 ns on DARIA's CPU clock, and +0.193 ns on the one 6 ns
-path of DARIA's front end (its phase detector), which moves with any change
-to the design: seeds 1 and 3 gave +0.084 and -0.262 ns there. Worst hold
-slack +0.082 ns. It uses 15,839 of 18,480 ALMs (86%), 212 of 308 M10K blocks
-and 13 DSP blocks; the AtariVox voice is about 230 ALMs, 17 M10K and one DSP
-of that.
+The Quartus build of the release after 2.2.1 (fitter seed 3, DARIA's CPU
+clock at 38.18 MHz) meets timing on all four corners. Worst setup slack:
++3.107 ns on clk_sdram (against a release gate of +1.5 ns), +2.195 ns on
+DARIA's CPU clock, and +3.282 ns on the one path of DARIA's front end that
+is timed on its own (its phase detector, bounded at 8.0 / 0.5 ns), whose
+hold slack is +0.392 ns. Worst hold slack +0.108 ns. Seeds 1 and 2 pass
+every check too, with +2.407 and +2.388 ns on clk_sdram; seed 3 has the
+most margin. It uses 14,628 of 18,480 ALMs (79%), 216 of 308 M10K blocks
+and 13 DSP blocks.
+2.2.1 (fitter seed 2, DARIA at 36.17 MHz) had +2.345 ns on clk_sdram,
++1.474 ns on DARIA's CPU clock and +0.193 ns on the phase detector, then a
+6 ns path (seeds 1 and 3 gave +0.084 and -0.262 ns there), worst hold
++0.082 ns, and used 15,839 ALMs (86%), 212 M10K blocks and 13 DSP blocks;
+the AtariVox voice is about 230 ALMs, 17 M10K and one DSP of that.
 2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3

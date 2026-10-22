@@ -1062,8 +1062,9 @@ assign video_hs   = vid_hs;
 // Audio
 //
 // The core's mix is 16 bit unsigned around a midpoint at clk_sys rate. It is
-// box filtered down to ~48 kHz (298 clk_sys samples per output), the DC
-// offset is removed, and the result goes to the I2S DAC.
+// box filtered down to ~55.9 kHz (256 clk_sys samples per output,
+// core/audio_filter.sv), the DC offset is removed, and the result goes to the
+// I2S DAC.
 ////////////////////////////////////////////////////////////////////////////////
 
     wire    [15:0]  aud_l_f, aud_r_f;

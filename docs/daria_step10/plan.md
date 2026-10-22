@@ -397,7 +397,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - B5 (`daria_sync.tcl`);
   - Star Castle Arcade's FA2 saves (C5);
   - B8 (`POCKET_CHANGES.md`'s counts), moved here from Rev 0;
-  - after the fits: B3 (the counter[3] line at VCO/18), B4 (the seed comment quoting the new Q2) and B6.
+  - after the fits: B3 (the counter[3] line at VCO/18), B4 (the seed comment quoting the new Q2) and B6. *Done 2026-10-21:* B4 and B6 with `SEED` 3.
 - **Debug only:** A2's overlay.
 - **Benches and checkers (V-bench, before the campaign):**
   - `s1/check.sh`'s song-13 CPI gate (1.383 ±1%) gets the `THUMB=1` reference that Rev 0 measured on the cured RTL with the firmware. `docs/BUPCHIP_CORE.md`'s criterion is updated to match.
@@ -417,7 +417,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
     - Line 219: Spiders "late on the same 16 calls as MiSTer" becomes "on time, as the modelled Harmony chip; MiSTer is late on 16 calls in frames 557-572".
     - The hardware note about the picture shift changes.
     - The FA2 known-limit row (line 144) goes.
-    - The timing paragraph (lines 228-232) takes the release's Q2.
+    - The timing paragraph (lines 228-232) takes the release's Q2. *Done 2026-10-21:* seed 3's figures, with 2.2.1's kept after them.
     - Line 176's "19% of its clock to spare" is the BupChip at 28.6 MHz in the build without DARIA (`docs/BUPCHIP_CORE.md`: 28.636/24.0 − 1). R1 is THUMB-gated and does not touch that build, so the figure stays.
     - If a figure for the DARIA build is added, it uses the same form: 38.18/24.74 − 1 ≈ 54% with R1, against 36.17/23.98 − 1 ≈ 51% today [estimated].
   - **`docs/DARIA_CORE.md`:**
