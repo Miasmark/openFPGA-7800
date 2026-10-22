@@ -241,7 +241,7 @@ DARIA's CPU clock, and +3.282 ns on the one path of DARIA's front end that
 is timed on its own (its phase detector, bounded at 8.0 / 0.5 ns), whose
 hold slack is +0.392 ns. Worst hold slack +0.108 ns. Seeds 1 and 2 pass
 every check too, with +2.407 and +2.388 ns on clk_sdram; seed 3 has the
-most margin. It uses 14,628 of 18,480 ALMs (79%), 216 of 308 M10K blocks
+most clk_sdram margin (and the most clk_arm and hold margin). It uses 14,628 of 18,480 ALMs (79%), 216 of 308 M10K blocks
 and 13 DSP blocks.
 2.2.1 (fitter seed 2, DARIA at 36.17 MHz) had +2.345 ns on clk_sdram,
 +1.474 ns on DARIA's CPU clock and +0.193 ns on the phase detector, then a
