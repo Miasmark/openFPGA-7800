@@ -1218,12 +1218,23 @@ module tb_load;
 		end
 	end
 
+	// The cart's tone is counted on the console's own mix, before the
+	// AtariVox voice. With POCKET_ATARIVOX the voice runs whenever the SaveKey
+	// does and the AtariVox Voice setting is not Off (tb default Normal), and
+	// AUDIO_L then carries it on a +32,768 bias (atari7800_pocket.sv, vox_add),
+	// so it never returns to 0 and the SaveKey runs' tone read 0 Hz. With the
+	// voice off, vox_add is 0 and core_audio_l is AUDIO_L.
+`ifdef POCKET_ATARIVOX
+	wire [15:0] tone_aud = dut.core_audio_l;
+`else
+	wire [15:0] tone_aud = AUDIO_L;
+`endif
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
 	always @(posedge clk_sys) begin
-		old_aud <= AUDIO_L;
-		if (counting && AUDIO_L > old_aud && old_aud == 16'd0)
+		old_aud <= tone_aud;
+		if (counting && tone_aud > old_aud && old_aud == 16'd0)
 			rises <= rises + 1;
 	end
 
