@@ -203,8 +203,9 @@ cd sim/work && ./obj_load/vtb +image=input_test.a26 +inputtest +port1=2 +port2=2
 ```
 
 Firmware files and commercial ROMs are never stored in this repository.
-`extra_tests.sh` builds its carts from 7800basic samples, and fetches
-MiSTer's firmware images from GitHub at test time.
+`extra_tests.sh` builds its carts from 7800basic samples (dasm and
+7800basic at the commits it pins), and fetches MiSTer's firmware images
+from GitHub at test time.
 
 ## Recipes
 
