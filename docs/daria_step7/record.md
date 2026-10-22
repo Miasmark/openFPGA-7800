@@ -133,6 +133,7 @@ Figures are in ns. Setup is at the worse slow corner, and the guard pair's slack
   - Every other check passes on all three seeds, (c) included: neither the guard pair nor any first flop is duplicated or retimed.
 - **Q4** passes every gating check, and its `.rbf` equals Q1''s: the build without DARIA is the same bitstream as commit P's.
 - **Q-mut:** (f) names `run_s[0]`, and (k') names `ready_s[0]`. Nothing else fails.
+  - *2026-10-21:* "Nothing else fails" is c76's result, not a rule: plan 7.2 asks that (f) and (k') each catch their mutant. From the release after 2.2.1, Q-mut passes when (f) names `run_s[0]` and (k') names `ready_s[0]`, and any other failure is explained. That round's Q-mut also failed (g), with 150 paths of the 7800 cart-RAM request from a register that the fitter's retiming named after `mapper_AR`'s `tape_num` decode; no release fit has it (`docs/daria_step10/plan.md` 3.1, "Stage 2's pre-campaign round").
 - **The I3 STA mutants,** run `REPORT_ONLY` on copies of the `KEEP_DB` refit, fail as plan 7.2 requires:
   - the guard pair removed fails (a), (b), (k) and (e), because the path is timed at 20 ns instead of 6 / 1;
   - a clock-group cut added after the ±20 ns lines fails (a), (b), (k), (e) and (k');

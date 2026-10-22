@@ -379,6 +379,7 @@ Written 2026-10-19 for the owner, on `DARIA-dev` with the tree of `04a0e69` (2.2
   - the documents' commit: every item of "Documents" below, except README's timing paragraph, which takes the release's Q2, and the hardware results that wait for the session (open items 7 and 10, IMPROVEMENTS's PAL items). `BUPCHIP_CORE.md`'s three items and `DEVELOPING.md`'s came with Stage 1 (`bc6a1ec`, `09aa7f8`, `9451d56`).
 - **Benches and checkers** from the list below landed with Stage 1 (`s1/check.sh`'s `THUMB=1` gate at 1.4208, `frame_gate.py --overrun ontime`, `l1f.S`, the L1W mutants with `neg_of_rd` and `sbc_carry_inverted` retired, `run_call.py`'s cases, `s1w_cyc`) and with Stage 2 (`tb_vaxis5`, `tb_load`'s FA2 round trip, `tb_region`, the re-based chain).
 - **Still to come**, in this order: F′'s non-DARIA reference fit with its repeat and Q4; B3 needs nothing more (the ÷18 commit made its lines right); the pre-campaign round (Q2 ×3 and Q5 ×3 on the combined tree, Q-mut, the STA mutants); the seed (P12 as amended on 2026-10-21) with B4's comment and B6; the campaign; the review; V-hw.
+  - *2026-10-21, after the pre-campaign round on `ebca01a`:* F′'s repeat and Q4 are byte-equal; Q2 and Q5 seeds 1-3 pass; the STA mutants and Q-mut are caught (Q-mut with a (g) failure explained: "Stage 2's pre-campaign round" below). The seed is applied: `SEED` 3 (P12), with B4's comment and B6, comment- and selection-only (7.6). Left: the campaign, the review, V-hw.
 
 **Contents**
 - **CPU** (`bup_cpu.sv`):
@@ -496,8 +497,20 @@ Today, MR in `ap_core.qsf` fails `pp_guards`' qsf rule by construction ("exactly
   - `clk_sdram` ≥ +1.5 ns;
   - (h) setup ≥ +4.5 ns at ÷18 (v4 ranged +4.696 to +6.103 ns [measured]), and (h) hold ≥ 0;
   - every other 5.4 check.
+- Q-mut (rule amended 2026-10-21, after the round below): it passes when (f) FAILs naming `run_s[0]` and (k') FAILs naming `ready_s[0]`. Any other check that fails on the mutant is listed and explained in the record. Plan 7.2 asks only that each of the two checks catch its mutant; "nothing else fails" (`docs/daria_step7/record.md`) was c76's result, not a rule. A mutant is another netlist, so a check that selects cells by name, such as (g), can move on it without saying anything about the release.
 - If the tree is frozen after this round, with only V-cmt edits such as B3, B4 and B6 to follow, these fits are the campaign's Q2 and Q5. Plan 7.6 counts a result for the tree it ran on.
 - The campaign starts only after this round passes. If it fails, the diagnosis is in "One release or two" below.
+- **Stage 2's pre-campaign round (2026-10-21): passed** [measured: fits on `ebca01a`, status 0; Q5 on `ebca01a` + the `BUP_DEBUG` line; Q-mut on `ebca01a` + its two faults]. After it the tree changes only in comments, documents, the `SEED` line and simulation scripts, so these fits are the campaign's Q2 and Q5.
+  - F′ (`35bf88f`) and its repeat: `.rbf` byte-equal (md5 `6cae7b99`); Q4 on `ebca01a` equals them.
+  - Q2, every check passing on every seed. Seeds 1 / 2 / 3: `clk_arm` +1.982 / +1.248 / +2.195 ns, `clk_sdram` +2.407 / +2.388 / +3.107 ns, worst hold +0.106 / +0.100 / +0.108 ns, (h) +6.306 / +0.264, +6.895 / +0.281 and +6.166 / +0.337 ns, 14,617 / 14,618 / 14,628 ALMs (216 M10K). Seed 3 ships (P12).
+  - Q5 seeds 1-3 pass with P29: `clk_arm` +2.013 / +2.170 / +1.724 ns, worst hold +0.031 / +0.027 / +0.090 ns.
+  - The three I3 STA mutants fail as section 10 expects.
+  - The smoke test passes with 13 marks. P10's regenerated PLL has the tree's `POCKET_DARIA` view (the step-7 plan's P10).
+  - **Q-mut: caught.** (f) names `run_s[0]` and (k') names `ready_s[0]`. (g) also FAILs, with 150 paths, explained as follows:
+    - All 150 start at one register that the fitter's retiming created, `cart2600|mapper_AR|tape_num~0_OTERM2454`. It moved the 6502's address registers forward through `top.sv`'s address mux and a decode LUT that synthesis named after `mapper_AR`'s `tape_num` write decode, which shares it with the 7800 cart's decode.
+    - Every path runs through `cart.sv`'s `cartram_cs`, the 7800 RAM select (101 also through `cartram_wr`), into `sram_ctrl`'s 7800 request logic (`c_rd_q`, `c_wr_q`, `cp_*`, `acc_*`, `sram_a`, `dq_out`, ...). None goes through `read_DB`, and none reaches the SRAM pads. It is the 7800 request, which Fix B lets reach `sram_ctrl` directly, not a 2600 path.
+    - The register exists only with both the faults and `35bf88f`'s FA2 gating. `ebca01a` + the faults with `atari7800_pocket.sv` put back to `afd8269` fails exactly (f) and (k'), and its fit report matches round 1's Q-mut on `afd8269` line for line. Two refits of the mutant reproduce the 150.
+    - No Q2 or Q5 fit has the register. There (g) finds 0 paths, with every 2600 leg reaching `t_*_q` ((g.legs)), so (g)'s PASS on the release stands.
 
 **V-rtl**
 - `run_sim.sh`;
