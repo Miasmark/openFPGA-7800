@@ -40,7 +40,7 @@ The rows follow the session checklist's part B (kept outside the repository). Th
 | B1, B2: Spiders through its first level load | "just tested spiders arcade. no screen shift either. no indication of collisions as far... nothing is red anyway." The photos show row 0's boxes 1 and 2 green (ARM running, guard locked), its boxes 4-7 grey (no halt, no load error), rows 1, 2 and 3 grey (no halt or fault code, 0 late calls, 0 guard unlocks), and rows 4 and 5 blue (the running call count) | **Pass.** On silicon at ÷18 the guard locks with 0 unlocks, no call is late, and the picture shift of 2.2.1 (daria-test1) is gone |
 | B4: the PAL 50 Hz test image (D1) | "works as expected for the pal test." After the restart, row 3 "stayed all grey" | **Pass.** One restart, then PAL. The guard keeps 0 unlocks through the retune, the case of the retune prediction in which the retune keeps the guard's phase |
 | B5: a PAL A78 after the image (D2) | "loading triple punch pal after the pal test image did not blink extra or anything" | **Pass.** No extra retune: RTL-1 works on silicon |
-| B6: Rikki & Vikki | Works fine | **Pass.** The BupChip and the PSRAM run at 38.18 MHz |
+| B6: Rikki & Vikki | "Rikki and Vikki work fine as well." | **Pass.** The BupChip and the PSRAM run at 38.18 MHz |
 | B7: Turbo | "turbo seems to function as expected as well" | **Pass.** Its reads beyond the 64 KB window come through the PSRAM cache at 38.18 MHz |
 | FA2: Star Castle Arcade | "star castle test passed." The high score is kept across quitting and reopening the core | **Pass.** `fa2.sav` holds it (decision 15) |
 
@@ -65,7 +65,7 @@ A hardware result belongs to its netlist. The session covers the ÷18 tree befor
 - The merge does bring 2.2.2's POKEY read fix (`pokey_bus.sv`, `pokey.sv`, `pokey_adapter.sv`) and its AtariVox escape fix (`avox_rx.sv`), in a new placement. Those fixes have run on silicon only in 2.2.2's ÷19 build.
 - Seed 2, which 2.2.4 ships, has not run on hardware at ÷18.
 
-**Owed before 2.2.4 is tagged:** one session on a debug build of the final tree. The build is the merged tree's Q5 seed-2 `.rbf` (md5 `d318d6af15b18afc18960e1f45353462`), the seed the release uses. The session covers:
+**Held on 2026-10-23, before 2.2.4 is tagged:** one session on a debug build of the final tree (`Atari7800_Pocket_2.2.4-rc-debug.zip`, zip md5 `6a6441c91d6ee698b01907a4f9286e2e`). The owner, after the checks below: "tests pass". The build is the merged tree's Q5 seed-2 `.rbf` (md5 `d318d6af15b18afc18960e1f45353462`), the seed the release uses. The session covers:
 - Star Raiders: its title, and its AtariVox saying "Star Raiders";
 - POKEY music: Ballblazer or Commando;
 - AtariVox speech: Juno First and Stratovox;

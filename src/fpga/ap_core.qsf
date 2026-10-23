@@ -767,7 +767,7 @@ set_global_assignment -name VERILOG_MACRO "POCKET_ATARIVOX=1"
 # of docs/daria_step7/plan.md 5.4 passed on all three, and seed 2 has the
 # most clk_sdram margin (P12, the owner's ruling of 2026-10-21).
 # Worst setup at the worse slow corner on clk_arm and on clk_sdram (release
-# gate +1.5 ns), worst hold, sram_ctrl's t_*_q -> clk_sdram setup / hold
+# gates: clk_sdram >= +1.5 ns, clk_arm >= +0.5 ns), worst hold, sram_ctrl's t_*_q -> clk_sdram setup / hold
 # ((h), gates +4.5 / 0 ns), and ALMs (of 18,480):
 #   seed 1: clk_arm +2.284, clk_sdram +2.515, hold +0.109, (h) +6.476 / +0.243, 14,653
 #   seed 2: clk_arm +1.482, clk_sdram +3.020, hold +0.095, (h) +6.209 / +0.260, 14,639

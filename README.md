@@ -149,8 +149,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 2.2.4 is 2.2.2 with these additions:
 
 - **DARIA at 38.18 MHz** (36.17 MHz in 2.2.1 and 2.2.2), with a faster
-  CPU: aligned Thumb word loads take one clock, and LDMIA and POP without
-  the PC one clock less. In simulation every call of the tested games is
+  CPU: aligned Thumb word loads take one clock, and Thumb LDMIA and POP
+  without the PC one clock less. In simulation every call of the tested games is
   on time, including Spiders' 16 calls before its first level loads,
   which 2.2.2 and MiSTer's core are late on, so Spiders' picture no longer
   shifts down there. At this clock the front end's shared-edge guard
@@ -276,11 +276,12 @@ and +3.107 ns on clk_sdram, and seed 3 was chosen.
 +1.095 ns on DARIA's CPU clock and +0.086 ns on the phase detector's 6 ns
 path (seeds 2 and 3 gave +0.145 and -0.217 ns there), worst hold +0.093 ns,
 and used 15,917 ALMs (86%). Its clk_sdram figure is quoted from 2.2.2's
-own README, which gave 2.2.1 as +2.433 ns, the slow 85 °C value, so it is
-most likely at slow 85 °C too; 2.2.2's fit report is not kept with this
-tree, so its worse-slow-corner value is not given here.
+own README, which gave 2.2.1 as +2.433 ns where this tree's record gives
+the worse-slow-corner +2.345 ns, so 2.2.2's figure is probably not at the
+worse slow corner either; 2.2.2's fit report is not kept with this tree,
+so its worse-slow-corner value is not given here.
 2.2.1 (fitter seed 2, DARIA at 36.17 MHz) had +2.345 ns on clk_sdram at the
-worse slow corner (+2.433 ns at slow 85 °C),
+worse slow corner (2.2.2's README gave +2.433 ns for it),
 +1.474 ns on DARIA's CPU clock and +0.193 ns on the phase detector, then a
 6 ns path (seeds 1 and 3 gave +0.084 and -0.262 ns there), worst hold
 +0.082 ns, and used 15,839 ALMs (86%), 212 M10K blocks and 13 DSP blocks;
@@ -341,6 +342,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | DARIA's test build (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay was not built at the time; it has landed since ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
 | DARIA's known differences seen on hardware (daria-test1) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware could not count them then: the DARIA status overlay did not exist yet (it has landed since). From 2.2.4, at 38.18 MHz, these calls are on time in simulation and those frames stay 262 lines, and on the 2.2.4 candidate's debug build the shift is gone (next row). Play does not seem affected: a couple of levels beaten |
 | DARIA at 38.18 MHz: the 2.2.4 candidate's debug build (the owner's Pocket session of 2026-10-21) | The RC debug build of the ÷18 tree before the merge of 2.2.2 (seed 3, with the DARIA status overlay). Spiders: "no screen shift", and nothing red on the overlay; the photos show row 0's box 2 green (the shared-edge guard locked) and rows 2 and 3 grey (0 late calls, 0 guard unlocks). The PAL 50 Hz test image: "works as expected", one restart and then PAL, with row 3 "all grey" after the restart. Triple Punch (PAL) loaded after it "did not blink extra or anything": no extra retune, as in the build without DARIA (RTL-1). Rikki & Vikki's BupChip music works (the BupChip and the PSRAM at 38.18 MHz), and Turbo, which reads beyond DARIA's 64 KB window through the PSRAM cache, works. Star Castle Arcade keeps its high score in `fa2.sav` across quitting and reopening the core: "star castle test passed". The merge of 2.2.2 changes none of DARIA's files, but its POKEY read fix and AtariVox escape fix have been tested on 2.2.2's 36.17 MHz build only; on the 2.2.4 candidate itself, Star Raiders, POKEY music and AtariVox speech are still to be tested |
+| 2.2.4's debug build of the final tree (the owner's Pocket session of 2026-10-23) | The merged tree (÷18 with 2.2.2's POKEY read fix and AtariVox escape fix), fitter seed 2, with the DARIA status overlay. Checked: Star Raiders (its title, and the AtariVox saying "Star Raiders"), POKEY music (Ballblazer or Commando), Juno First and Stratovox speech, and Spiders' overlay (row 0 box 2 green, rows 2 and 3 grey). The owner: "tests pass". |
 | Star Raiders, POKEY reads and the AtariVox escape (2.2.2 test build) | Star Raiders (7800, 2026) shows its title and its AtariVox says "Star Raiders"; Ballblazer or Commando's POKEY music is unchanged; Juno First and Stratovox still speak. Before, it stayed on a black screen: every POKEY read returned $FF (2.0.21 to 2.2.1), and the voice swallowed the game's speech after its "\V" escape (2.2.1) |
 | AtariVox voice (2.2.1 test builds) | Clearly says its words at every *AtariVox Voice* level. The first test build mixed it at x1/x2/x4 and it was hard to hear against the TIA even on Loud; from the second, x4/x8/x16 |
 
