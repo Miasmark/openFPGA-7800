@@ -20,18 +20,27 @@
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
 #                the qsf has POCKET_DARIA, --qsf release when PP_GUARD_FROM's
 #                qsf has it too, else --qsf comments). The release's chain
-#                (docs/daria_step10/plan.md 3.1, re-based 2026-10-21) runs
+#                (docs/daria_step10/plan.md 3.1, re-based 2026-10-22) runs
 #                from F′, the last commit that changes the build without
-#                DARIA: the FA2 port's gate to 2600 mode, the commit that
-#                added fa2_on to the wrapper
-#                (git log -1 --format=%h -S fa2_on -- src/fpga/core/atari7800_pocket.sv;
-#                35bf88f on rev1/div18-s2), with PP_EXPECT
-#                2fe5aed73e6edfc89866145aa3ec99ec1e757a532169b39a725f168e69f74f4b,
-#                F′'s non-DARIA stream (MR, virtual_axis5 without
+#                DARIA: the merge of 2.2.2 (origin/main d38fd13: the POKEY
+#                read fix and the AtariVox escape fix) into the ÷18 tree,
+#                found as the first-parent commit that brought
+#                READ_WHOLE_CYCLE in
+#                (git log -1 --format=%h --first-parent -S READ_WHOLE_CYCLE -- src/fpga/mister/rtl/Pokey/pokey_bus.sv,
+#                run on the branch the merge is on, rev1/merge-222: a080f6f;
+#                without --first-parent it finds 9aa125a, 2.2.2's own POKEY
+#                commit, whose ÷19 tree cannot start the chain), with
+#                PP_EXPECT
+#                b1b706d3b6a2e3af4668de257b284aa652f19a1e67448521270e2466ce9e877c,
+#                F′'s non-DARIA stream (the stream below with pokey.sv,
+#                pokey_bus.sv, pokey_adapter.sv and avox_rx.sv from 2.2.2).
+#                pp_guards then takes --qsf release: from F′ only
+#                ap_core.qsf's SEED line and comments may change. Before it
+#                the chain ran from the commit that added fa2_on to the
+#                wrapper (-S fa2_on -- src/fpga/core/atari7800_pocket.sv,
+#                35bf88f) with 2fe5aed7...4f4b (MR, virtual_axis5 without
 #                virtual_axis.sv, the FA2 slot in 2600 mode, the L1W+L3 CPU,
-#                the sram_ctrl key copy). pp_guards then takes --qsf
-#                release: from F′ only ap_core.qsf's SEED line and comments
-#                may change. Before it the chain ran from the FA2 slot's
+#                the sram_ctrl key copy); before that from the FA2 slot's
 #                first commit (-S fa2_nvram_bridge, 4738c65) with
 #                8a7e8a3d...3b7b, until the Stage 2 review found that an A78
 #                could write the slot; before that, from the MR commit
