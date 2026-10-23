@@ -575,6 +575,39 @@ module tb_load;
 		if (!old_wr4k && !dut.RW && dut.bios_addr == 16'h4000) audf_writes <= audf_writes + 1;
 	end
 
+	// ---------------- CPU probe (+cpuprobe) ----------------
+	// MARIA register writes (the first 300, and every CTRL write), and at 1,
+	// 3 and 5 s 96 consecutive bus addresses (repeats dropped): where a game
+	// that shows nothing is spending its time.
+	logic cp_on = 1'b0, cp_old_w = 1'b0;
+	int   cp_mw = 0, cp_win = 0, cp_rnd = 0;
+	logic cp_rnd_prev = 1'b0;
+	logic [7:0] cp_rnd_db = 8'd0;
+	logic [15:0] cp_last = 16'hFFFF;
+	initial cp_on = $test$plusargs("cpuprobe");
+	always @(posedge clk_sys) if (cp_on && !reset_in) begin
+		automatic longint ms = longint'($realtime / 1.0e6);
+		cp_old_w <= !dut.RW && dut.main.cs_maria;
+		if (!cp_old_w && !dut.RW && dut.main.cs_maria && (cp_mw < 300 || dut.bios_addr[5:0] == 6'h3C)) begin
+			$display("MARIA %0d ms: $%04x = $%02x", ms, dut.bios_addr, dut.main.write_DB);
+			cp_mw <= cp_mw + 1;
+		end
+		if ((ms == 1000 || ms == 3000 || ms == 5000) && cp_win == 0) cp_win <= 96;
+		if (cp_win > 0 && dut.bios_addr != cp_last) begin
+			$display("PC %0d ms: $%04x %s", ms, dut.bios_addr, dut.RW ? "r" : "w");
+			cp_last <= dut.bios_addr;
+			cp_win <= (cp_win == 1) ? -1 : cp_win - 1;
+		end
+		if (cp_win < 0 && ms != 1000 && ms != 3000 && ms != 5000) cp_win <= 0;
+		// POKEY RANDOM at $450 + $A: the value on the bus as each read ends
+		cp_rnd_prev <= (dut.RW && dut.bios_addr == 16'h045A);
+		cp_rnd_db   <= dut.main.read_DB;
+		if (cp_rnd_prev && !(dut.RW && dut.bios_addr == 16'h045A) && cp_rnd < 40) begin
+			$display("RANDOM %0d ms: $%02x", ms, cp_rnd_db);
+			cp_rnd <= cp_rnd + 1;
+		end
+	end
+
 	// ---------------- boot probe ----------------
 	// At each release of the core's reset (top.sv's effective_reset): the
 	// BIOS switch as the core got it (use_bios, and top.sv's bypass_bios,

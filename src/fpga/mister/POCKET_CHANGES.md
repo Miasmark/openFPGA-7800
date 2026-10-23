@@ -20,17 +20,36 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 Eight upstream files are modified (`top.sv`, `Maria/DMA.sv`,
 `Maria/video_sync.sv`, `video_mux.sv`, `EEPROM_24LC256.sv`, and for the firmware switch
-`cart.sv`, `cart2600.sv`, `banks2600.sv`), three firmware images are removed, and the POKEY is swapped
-for an older one.
+`cart.sv`, `cart2600.sv`, `banks2600.sv`), three firmware images are removed, and three of the
+POKEY's files are changed (`Pokey/pokey_adapter.sv`, `pokey.sv`, `pokey_bus.sv`; below).
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
 
 Since 2.0.21 the Pocket build uses upstream's `rtl/Pokey/` again, with two
 changes in `Pokey/pokey_adapter.sv`: the write hold described below (the
-cause of the Ballblazer fault), and half the output level. The new mixer's
+cause of the Ballblazer fault), and half the output level. From 2.2.2 a
+third, the read fix below, in `pokey_adapter.sv`, `pokey.sv` and
+`pokey_bus.sv`. The new mixer's
 curve gives about twice the level of Watson's linear sum for the same music,
 and the core's mix was set for Watson's; the curve's compression of loud
 passages is kept. Confirmed on hardware: Ballblazer plays a full match.
+
+**Reads (2.2.2).** The die drives its data pads, and fires the read strobes
+behind them, only in the o2 half of the cycle. Through the adapter, o2
+starts at `PHI2_EN`, which `cart.sv` drives from pclk0: the clk on which the
+CPU latches a read. So every POKEY read saw the precharged bus and returned
+$FF, apart from the odd stretched cycle. Music was unaffected (it is all
+writes); a game that reads POKEY was not. Star Raiders (7800, 2026) loops on
+RANDOM for a free slot in a 128-entry table and stayed on a black screen:
+39 of its first 40 RANDOM reads were $FF. `pokey_bus.sv` has a parameter,
+`READ_WHOLE_CYCLE` (default 0, the die as upstream), that keeps the read
+strobes and pads live in o1 too; `pokey.sv` passes it on and the adapter
+sets it. Reads have no side effects in this POKEY, and the address latch is
+transparent in o1, so the CPU gets the addressed register. Watson's POKEY,
+up to 2.0.20, read the same way. Upstream (MiSTer's nightly ffc4719 and its
+release 0dc8ad2) wires and gates reads the same as before this fix, so it
+very likely has the fault too. Confirmed on hardware: Star Raiders reaches
+its title; Ballblazer or Commando's music is unchanged.
 
 What follows is the history up to 2.0.20.
 
