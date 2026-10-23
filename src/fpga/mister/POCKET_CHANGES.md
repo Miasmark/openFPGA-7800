@@ -18,21 +18,42 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Eleven upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
+Thirteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
 `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv`,
-`video_mux.sv`, `TIA.sv`, `bram.v` and `Pokey/pokey_adapter.sv`. The sections
-below describe each. Three firmware images are removed. The build uses
-upstream's POKEY (`rtl/Pokey/`, with a changed adapter); Watson's older one,
-which releases up to 2.0.20 used, stays in `rtl/PokeyWatson/` for simulation.
+`video_mux.sv`, `TIA.sv`, `bram.v`, and three of the POKEY's,
+`Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`. The
+sections below describe each. Three firmware images are removed. The build
+uses upstream's POKEY (`rtl/Pokey/`, with a changed adapter and, from 2.2.2,
+the read fix); Watson's older one, which releases up to 2.0.20 used, stays in
+`rtl/PokeyWatson/` for simulation.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
 
 Since 2.0.21 the Pocket build uses upstream's `rtl/Pokey/` again, with two
 changes in `Pokey/pokey_adapter.sv`: the write hold described below (the
-cause of the Ballblazer fault), and half the output level. The new mixer's
+cause of the Ballblazer fault), and half the output level. From 2.2.2 a
+third, the read fix below, in `pokey_adapter.sv`, `pokey.sv` and
+`pokey_bus.sv`. The new mixer's
 curve gives about twice the level of Watson's linear sum for the same music,
 and the core's mix was set for Watson's; the curve's compression of loud
 passages is kept. Confirmed on hardware: Ballblazer plays a full match.
+
+**Reads (2.2.2).** The die drives its data pads, and fires the read strobes
+behind them, only in the o2 half of the cycle. Through the adapter, o2
+starts at `PHI2_EN`, which `cart.sv` drives from pclk0: the clk on which the
+CPU latches a read. So every POKEY read saw the precharged bus and returned
+$FF, apart from the odd stretched cycle. Music was unaffected (it is all
+writes); a game that reads POKEY was not. Star Raiders (7800, 2026) loops on
+RANDOM for a free slot in a 128-entry table and stayed on a black screen:
+39 of its first 40 RANDOM reads were $FF. `pokey_bus.sv` has a parameter,
+`READ_WHOLE_CYCLE` (default 0, the die as upstream), that keeps the read
+strobes and pads live in o1 too; `pokey.sv` passes it on and the adapter
+sets it. Reads have no side effects in this POKEY, and the address latch is
+transparent in o1, so the CPU gets the addressed register. Watson's POKEY,
+up to 2.0.20, read the same way. Upstream (MiSTer's nightly ffc4719 and its
+release 0dc8ad2) wires and gates reads the same as before this fix, so it
+very likely has the fault too. Confirmed on hardware: Star Raiders reaches
+its title; Ballblazer or Commando's music is unchanged.
 
 What follows is the history up to 2.0.20.
 
@@ -109,7 +130,9 @@ and `core/daria_constraints.sdc`).
 Without the macros, `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`,
 `EEPROM_24LC256.sv`, `video_mux.sv` and `bram.v` are identical to upstream in
 behaviour; the changes to `TIA.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv` and
-`Pokey/pokey_adapter.sv` have no macro.
+`Pokey/pokey_adapter.sv` have no macro. `Pokey/pokey.sv` and
+`Pokey/pokey_bus.sv` have none either: their `READ_WHOLE_CYCLE` parameter
+defaults to upstream's behaviour, and the adapter sets it.
 
 ### Firmware loaded at run time (`EXTERNAL_FIRMWARE`)
 
@@ -284,7 +307,7 @@ the files are unchanged from upstream.
 ## Updating
 
 Copy a newer upstream `rtl/` over this one and re-apply the changes to all
-eleven modified files:
+thirteen modified files:
 
 - the `ifdef` blocks in `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`
   and `EEPROM_24LC256.sv`;
@@ -294,7 +317,11 @@ eleven modified files:
 - the SRAM frame port in `video_mux.sv` and the memory editor's removal in
   `bram.v`;
 - the stabilised window's end in `TIA.sv`;
-- the write hold and the halved level in `Pokey/pokey_adapter.sv`.
+- the write hold and the halved level in `Pokey/pokey_adapter.sv`;
+- the read fix (2.2.2): the `READ_WHOLE_CYCLE` parameter in `Pokey/pokey_bus.sv`,
+  passed on by `Pokey/pokey.sv` and set by `Pokey/pokey_adapter.sv` (unless
+  upstream has fixed its reads; check with `sim/tb_load.sv`'s `+cpuprobe` on
+  a game that reads RANDOM).
 
 Delete `rtl/mem4.*`, `rtl/ar.*` and `rtl/bupchip.hex`/`.mif` again, update
 `UPSTREAM_COMMIT`, then build and run `sim/run_sim.sh`.

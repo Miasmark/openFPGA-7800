@@ -187,7 +187,17 @@ module pokey_adapter (
 	// compression of loud passages is kept.
 	wire [15:0] aud_i;
 
-	pokey u_pokey (
+	// Pocket: reads. The die drives its pads, and fires the read strobes
+	// behind them, only in the o2 half. Here o2 starts at PHI2_EN, which is
+	// pclk0, the clk on which the CPU latches a read, so a read saw the
+	// precharged bus: every register read $FF, RANDOM included, apart from
+	// the odd stretched cycle. Star Raiders (7800, 2026) loops on RANDOM for a
+	// free slot in a 128-entry table and hung on a black screen. With
+	// READ_WHOLE_CYCLE the strobes and pads are live through o1 too; reads
+	// have no side effects in this POKEY (pokey_bus.sv), and the address latch
+	// is transparent in o1, so the CPU gets the addressed register. Watson's
+	// POKEY, up to 2.0.20, read the same way.
+	pokey #(.READ_WHOLE_CYCLE(1'b1)) u_pokey (
 		.clk    (CLK),
 		.ph1_en (PHI1_EN),
 		.ph2_en (PHI2_EN),
