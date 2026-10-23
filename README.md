@@ -235,24 +235,33 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of the release after 2.2.1 (fitter seed 3, DARIA's CPU
-clock at 38.18 MHz) meets timing on all four corners. Worst setup slack:
-+3.107 ns on clk_sdram (against a release gate of +1.5 ns), +2.195 ns on
-DARIA's CPU clock, and +3.282 ns on the one path of DARIA's front end that
-is timed on its own (its phase detector, bounded at 8.0 / 0.5 ns), whose
-hold slack is +0.392 ns. Worst hold slack +0.108 ns. Seeds 1 and 2 pass
-every check too, with +2.407 and +2.388 ns on clk_sdram; seed 3 has the
-most clk_sdram margin (and the most clk_arm and hold margin). It uses 14,628 of 18,480 ALMs (79%), 216 of 308 M10K blocks
-and 13 DSP blocks.
+The Quartus build of 2.2.4 (fitter seed 2, DARIA's CPU clock at 38.18 MHz)
+meets timing on all four corners. Worst setup slack at the worse slow
+corner: +3.020 ns on clk_sdram (against a release gate of +1.5 ns),
++1.482 ns on DARIA's CPU clock (gate +0.5 ns), and +3.128 ns on the one
+path of DARIA's front end that is timed on its own (its phase detector,
+bounded at 8.0 / 0.5 ns), whose hold slack is +0.421 ns. Worst hold slack
++0.095 ns. Seeds 1 and 3 pass every check too, with +2.515 and +2.229 ns
+on clk_sdram; seed 2 has the most clk_sdram margin, which decides
+(seed 1 has more on DARIA's clock, +2.284 ns, and on hold, +0.109 ns).
+It uses 14,639 of 18,480 ALMs (79%), 216 of 308 M10K blocks and 13 DSP
+blocks. Before the merge of 2.2.2 the same ÷18 tree gave +2.407, +2.388
+and +3.107 ns on clk_sdram, and seed 3 was chosen.
 2.2.2 (fitter seed 1, DARIA at 36.17 MHz) had +2.523 ns on clk_sdram,
 +1.095 ns on DARIA's CPU clock and +0.086 ns on the phase detector's 6 ns
 path (seeds 2 and 3 gave +0.145 and -0.217 ns there), worst hold +0.093 ns,
-and used 15,917 ALMs (86%).
-2.2.1 (fitter seed 2, DARIA at 36.17 MHz) had +2.345 ns on clk_sdram,
+and used 15,917 ALMs (86%). Its clk_sdram figure is quoted from 2.2.2's
+own README, which gave 2.2.1 as +2.433 ns, the slow 85 °C value, so it is
+most likely at slow 85 °C too; 2.2.2's fit report is not kept with this
+tree, so its worse-slow-corner value is not given here.
+2.2.1 (fitter seed 2, DARIA at 36.17 MHz) had +2.345 ns on clk_sdram at the
+worse slow corner (+2.433 ns at slow 85 °C),
 +1.474 ns on DARIA's CPU clock and +0.193 ns on the phase detector, then a
 6 ns path (seeds 1 and 3 gave +0.084 and -0.262 ns there), worst hold
 +0.082 ns, and used 15,839 ALMs (86%), 212 M10K blocks and 13 DSP blocks;
-the AtariVox voice is about 230 ALMs, 17 M10K and one DSP of that.
+the AtariVox voice is about 210 ALMs of that (15,839 against DARIA's tree
+without the voice, 15,625, both seed 2: [docs/ATARIVOX.md](docs/ATARIVOX.md),
+"The full build"), 17 M10K and one DSP.
 2.2.1 has Fix B, the structural fix in the SRAM controller: the 2600 mappers'
 cartridge-RAM request reaches it through registers of its own, off the
 SRAM's request path ([docs/SRAM_TIMING.md](docs/SRAM_TIMING.md)). 2.1.3
