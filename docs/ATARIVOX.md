@@ -75,9 +75,16 @@ apply the envelope; mixer 5 sums and applies the master volume.
 | 200-254 | Effects: robot, alarm, beep, "biological" (10 each), DTMF 0-9 * #, sonar ping, pistol shot, "WOW" |
 | 255 | End of phrase |
 
-**Serial control mode.** `\` (`$5C`) and a node digit enter a mode that sets
-synthesizer registers directly (`8J0N`, `1J500N`, ...), until `X` or another
-escape. A receiver has to recognise it, at least so as not to speak it.
+**Serial control mode.** `\` (`$5C`) and the character after it are an
+escape, both consumed. `\0` enters a mode that sets synthesizer registers
+directly (`8J0N`, `1J500N`, ...); a backslash followed by anything else
+leaves it, or keeps the chip out of it (a digit 1-7 is another node; a
+non-numeric character ends the mode). Inside it, `R` clears the 64-byte
+buffer, `V` says "Ready", `W` resets, `X` leaves, `S` and `T` stop and
+restart speaking. A receiver has to recognise all of it, at least so as not
+to speak it. Star Raiders (7800, 2026) opens with `\V0 ` and its speech; the
+first version of the receiver took `\V` as entering the mode and swallowed
+the rest (fixed in 2.2.2).
 
 **Not published:** the "MSA" database, the oscillator settings and
 movements behind each allophone and effect. Ours will be written by ear.
@@ -287,7 +294,7 @@ and it computes the sound.
 
 | Part | What |
 |---|---|
-| `avox_rx.sv` | The serial input: 8N1, a bit every 744 clk_sys; serial control mode (`\` ... `X`: R clears and stops, V says "Ready", the rest is swallowed); the 64-byte buffer, with DOWN low from 32 bytes |
+| `avox_rx.sv` | The serial input: 8N1, a bit every 744 clk_sys; serial control mode (`\0` enters; `\` and anything else, or `X`, leaves; R clears and stops, V says "Ready", W resets, the rest is swallowed); the 64-byte buffer, with DOWN low from 32 bytes |
 | `avox_engine.sv` | 4 clocks an instruction (3.6 million a second); 64 registers and 192 words of data memory in two block RAM copies; one 27x27 multiplier; a 4,096 x 20-bit data ROM; a 1,024 x 40-bit program ROM |
 | `atarivox.sv` | The 16,384 Hz tick (874 clk_sys, 866 on the PAL clock) and the two above |
 | `tools/atarivox/voxprog.py` | The program: the synthesizer (every other tick: the voice's envelope oscillator, five tone oscillators, noise on 4 and 5, the envelope and master volume, 8,192 samples a second), the output low-pass (every tick: two poles at 2.2 kHz) and the interpreter (on the other ticks, as a coroutine) |
