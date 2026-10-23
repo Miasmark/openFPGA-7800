@@ -212,18 +212,20 @@ from GitHub at test time.
 ### Update the MiSTer core
 
 Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`: it re-applies
-the Pocket changes to all eleven modified upstream files (`top.sv`,
+the Pocket changes to all thirteen modified upstream files (`top.sv`,
 `cart.sv`, `cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`,
-`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`
-and `Pokey/pokey_adapter.sv`). Then:
+`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`,
+`Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`). Then:
 
 1. Add any new upstream source files to `core/core.qip` **and** `sim/run_sim.sh`.
 2. Run `sim/run_sim.sh` and `sim/extra_tests.sh`. `extra_tests.sh` catches
    the holey DMA regression.
 3. Build, and check timing and resource use (see "Resource budget").
 4. Check `rtl/Pokey/pokey_adapter.sv` still holds the CPU's write through
-   phase 2 and halves the level (POCKET_CHANGES.md): an upstream update to
-   that file would drop both.
+   phase 2, halves the level and sets `READ_WHOLE_CYCLE`, and that
+   `pokey_bus.sv` and `pokey.sv` still have that parameter (the read fix of
+   2.2.2, POCKET_CHANGES.md): an upstream update to these files would drop
+   them.
 5. Check any new file's license header and update THIRD_PARTY_NOTICES.md.
 
 ### Add a menu setting
