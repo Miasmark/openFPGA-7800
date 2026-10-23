@@ -24,12 +24,20 @@
 #                from F′, the last commit that changes the build without
 #                DARIA: the merge of 2.2.2 (origin/main d38fd13: the POKEY
 #                read fix and the AtariVox escape fix) into the ÷18 tree,
-#                found as the first-parent commit that brought
+#                PP_GUARD_FROM=a080f6f6c8cc8d40cd17d0271e132df7b8bee6f9.
+#                It was found as the first-parent commit that brought
 #                READ_WHOLE_CYCLE in
 #                (git log -1 --format=%h --first-parent -S READ_WHOLE_CYCLE -- src/fpga/mister/rtl/Pokey/pokey_bus.sv,
-#                run on the branch the merge is on, rev1/merge-222: a080f6f;
+#                run on rev1/merge-222, the branch the merge is on); pass the
+#                full hash, not the expression. The expression names F′ only
+#                on a branch that has the merge on its first-parent line:
 #                without --first-parent it finds 9aa125a, 2.2.2's own POKEY
-#                commit, whose ÷19 tree cannot start the chain), with
+#                commit, whose ÷19 tree cannot start the chain; after a
+#                --no-ff merge of the release into DARIA-dev it finds that
+#                later merge (use the merge's ^2, or take the branch into
+#                DARIA-dev by fast-forward); and on main, after the PR's
+#                merge, it finds d38fd13, 2.2.2's ÷19 tree, where
+#                --qsf release fails. Never evaluate it on main. F′ has
 #                PP_EXPECT
 #                b1b706d3b6a2e3af4668de257b284aa652f19a1e67448521270e2466ce9e877c,
 #                F′'s non-DARIA stream (the stream below with pokey.sv,
