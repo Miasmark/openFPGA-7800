@@ -39,15 +39,15 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   and CDFJ+), the Harmony and Melody games such as the Champ Games releases.
   On MiSTer they run on a soft ARM7TDMI that doesn't fit the Pocket; this
   port runs them on **DARIA**, ARIA (the BupChip's CPU, below) extended with
-  Thumb, at 38.18 MHz (36.17 MHz in 2.2.1), with its own front end for the
+  Thumb, at 38.18 MHz from 2.2.4 (36.17 MHz in 2.2.1 and 2.2.2), with its own front end for the
   cartridge's 6507 side ([docs/DARIA_CORE.md](docs/DARIA_CORE.md)). In
   simulation every tested game runs the same ARM code as on MiSTer, call for
   call, with the same picture on every frame after the first. The one
   exception is by design: at the start of Spiders' play, MiSTer is late on 16
   calls in frames 557-572 and stretches those frames, while DARIA is on time
   there, as the project's model of the real cartridge's chip is
-  ([docs/HARMONY_MODEL.md](docs/HARMONY_MODEL.md)). 2.2.1 was late on them,
-  as MiSTer is. Sound effects and music are the
+  ([docs/HARMONY_MODEL.md](docs/HARMONY_MODEL.md)). 2.2.1 and 2.2.2 were late
+  on them, as MiSTer is. Sound effects and music are the
   same writes, landing slightly earlier or later in time (the verification
   table below). Limits: BUS and ELF cartridges are not supported (no
   released game uses BUS); ARM code beyond the first 64 KB of an image halts
@@ -68,7 +68,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   on port 2); 2600 SaveKey games need it set to On. Unlike MiSTer, the high
   score cart stays available alongside it, since each has its own file: a
   cart whose header asks for both (such as Triple Punch) gets both.
-- **FA2 saves** (Star Castle Arcade's high scores): the 256 bytes an FA2
+- **FA2 saves** (Star Castle Arcade's high scores, from 2.2.4): the 256 bytes an FA2
   cartridge keeps in its flash go in **one shared file**, `fa2.sav`, beside
   `hsc.sav` and `savekey.sav`. A new file starts blank ($FF), as an erased
   flash. Every FA2 game shares it; Star Castle Arcade is the only one known.
@@ -144,6 +144,31 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.
 
+### New in 2.2.4
+
+2.2.4 is 2.2.2 with these additions:
+
+- **DARIA at 38.18 MHz** (36.17 MHz in 2.2.1 and 2.2.2), with a faster
+  CPU: aligned Thumb word loads take one clock, and LDMIA and POP without
+  the PC one clock less. In simulation every call of the tested games is
+  on time, including Spiders' 16 calls before its first level loads,
+  which 2.2.2 and MiSTer's core are late on, so Spiders' picture no longer
+  shifts down there. At this clock the front end's shared-edge guard
+  locks, so none of its audio reads can race a DARIA store
+  ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 7 and open item 7).
+  The BupChip runs on the same CPU and clock; its music is unchanged
+  (PCM identical to MiSTer's in simulation).
+- **FA2 saves**: Star Castle Arcade keeps its high scores, in `fa2.sav`
+  (above).
+- **PAL regions**: a PAL A78 loaded after a PAL 2600 game on *Region*
+  Auto no longer retunes the PLL twice more (to NTSC and back), which
+  showed as extra blinks, and a 2600 load that ends on the clock a retune
+  ends no longer asks the PLL for the region it just left.
+- **About 1,300 fewer ALMs** (79% of the FPGA, from 86%), mostly because
+  the paddle and driving controllers' five virtual axes share one engine
+  (`virtual_axis5`) and 13 of the core's modules are synthesised with
+  Quartus's multiplexer restructuring. Nothing changes in play.
+
 ### Not included
 
 | Feature | Why |
@@ -178,8 +203,8 @@ Running the BupChip on the Pocket needed a much smaller ARM implementation:
 MIT-licensed ARMv4 core with only what the CoreTone firmware uses. Anything
 else halts it rather than running wrongly. It runs the firmware in about
 1,810 ALMs at 28.6 MHz, with its music in PSRAM behind a small cache, and
-the whole core used 79% of the FPGA in 2.1.1 (86% in 2.2.1, with DARIA and the AtariVox voice, and 79% again in the release after it).
-From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges: at 36.17 MHz in 2.2.1, and at 38.18 MHz from the release after it. In simulation its output matches
+the whole core used 79% of the FPGA in 2.1.1 (86% in 2.2.1 and 2.2.2, with DARIA and the AtariVox voice, and 79% again in 2.2.4).
+From 2.2.1 the same CPU, extended with Thumb as **DARIA**, also runs the 2600 ARM cartridges: at 36.17 MHz in 2.2.1 and 2.2.2, and at 38.18 MHz from 2.2.4. In simulation its output matches
 MiSTer's bit for bit, and its busiest song (Never_Lose) leaves 19% of its clock to spare.
 
 [docs/BUPCHIP.md](docs/BUPCHIP.md) has the details it started from:
@@ -225,7 +250,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
 | BupChip, end to end (2.1.1) | The firmware slot after the cartridge, as the Pocket loads them, then a game-free Souper cartridge with a synthetic music block: the ROM equals the firmware file, the block's 5,192 bytes are in the PSRAM model with no timing violation, and the song's PCM equals the Python model's frame for frame, as pushed and as returned to the core clock. Without the firmware the same cartridge leaves the BupChip held and silent. `sim/bupchip/` checks the CPU in lockstep with MiSTer's ARM7TDMI and the wrapper with Rikki & Vikki's songs (`s1/check.sh`, `s4/check.sh`) |
 | 2600 ARM cartridges, whole core (2.2.1) | The 15 Champ Games demos and Stratovox, 1,500 frames each (frames 1-1,499 compared, 23,984 in all), against MiSTer's core with its ARM7TDMI: frame length, picture and RIOT RAM equal on every frame (the first frame's picture excused on 3 games, whose first call holds the console for a different time), and every ARM call runs the same number of instructions. Spiders is late on the same 16 calls as on MiSTer. The sound is the same writes at slightly other times: 8,928 of the 23,984 frames (37.2%) carry an audio difference, 0 on Elevator Agent and 1,025 on Zaxxon. No CPU halt, no PSRAM timing violation |
-| Spiders and Galagon at 38.18 MHz (after 2.2.1) | The same comparison, 1,500 frames each: Spiders' frames 557-572 stay 262-line frames with no late call, where MiSTer's core is late on 16 calls and draws 354 lines; frame length, picture and RIOT RAM equal on every other frame, every call the same number of instructions (2,999 calls each), and the front end's shared-edge guard locked with 0 unlocks. Galagon passes the same way. The sound is counted, not compared, as in the row above: 678 of Spiders' frames and 285 of Galagon's carry an audio difference. The full set of 16 images runs before the release |
+| Spiders and Galagon at 38.18 MHz (2.2.4) | The same comparison, 1,500 frames each: Spiders' frames 557-572 stay 262-line frames with no late call, where MiSTer's core is late on 16 calls and draws 354 lines; frame length, picture and RIOT RAM equal on every other frame, every call the same number of instructions (2,999 calls each), and the front end's shared-edge guard locked with 0 unlocks. Galagon passes the same way. The sound is counted, not compared, as in the row above: 678 of Spiders' frames and 285 of Galagon's carry an audio difference. The release campaign ran the full set of 16 images the same way, with the guard locked and Spiders on time: every image passed (on the ÷18 tree before the merge of 2.2.2, whose DARIA side the merge does not change) |
 | DARIA's CPU and front end against MiSTer's | Every call of 21 images compared with MiSTer's ARM: registers at return, every RAM write, the audio values. The front end clock by clock beside MiSTer's on 30 images, 1,500 frames each. With DARIA's own CPU at its real clock ratio, 19 runs: every call equal to MiSTer's |
 | Everything else unchanged by DARIA (2.2.1) | `run_sim.sh`, `extra_tests.sh` and the 2600 cartridge-RAM matrix give the same frame-by-frame fingerprints with and without DARIA; the BupChip's songs are identical by PCM |
 | PAL 2600 game, Region on Auto (2.2.1) | One retune, to PAL, at 955 ms, then the game runs in PAL. With the region logic of 2.1.3 and earlier, the same simulation retuned 41,293 times in 1.3 s and ended in NTSC |
@@ -281,7 +306,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.2.1, Analogue Pocket)
+### Hardware testing (2.0.2 to the 2.2.4 candidate, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -314,7 +339,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 | DARIA's test build (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay was not built at the time; it has landed since ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
-| DARIA's known differences seen on hardware (daria-test1) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware could not count them then: the DARIA status overlay did not exist yet (it has landed since). After 2.2.1, at 38.18 MHz, these calls are on time in simulation and those frames stay 262 lines; that the shift is gone is still to be seen on a Pocket. Play does not seem affected: a couple of levels beaten |
+| DARIA's known differences seen on hardware (daria-test1) | Spiders: before a level loads, the whole picture shifts down for a couple of frames. The owner ties the shift to the late calls. In simulation the first such overrun is 16 calls in frames 557-572, late on MiSTer's core too; the hardware could not count them then: the DARIA status overlay did not exist yet (it has landed since). From 2.2.4, at 38.18 MHz, these calls are on time in simulation and those frames stay 262 lines, and on the 2.2.4 candidate's debug build the shift is gone (next row). Play does not seem affected: a couple of levels beaten |
+| DARIA at 38.18 MHz: the 2.2.4 candidate's debug build (the owner's Pocket session of 2026-10-21) | The RC debug build of the ÷18 tree before the merge of 2.2.2 (seed 3, with the DARIA status overlay). Spiders: "no screen shift", and nothing red on the overlay; the photos show row 0's box 2 green (the shared-edge guard locked) and rows 2 and 3 grey (0 late calls, 0 guard unlocks). The PAL 50 Hz test image: "works as expected", one restart and then PAL, with row 3 "all grey" after the restart. Triple Punch (PAL) loaded after it "did not blink extra or anything": no extra retune, as in the build without DARIA (RTL-1). Rikki & Vikki's BupChip music works (the BupChip and the PSRAM at 38.18 MHz), and Turbo, which reads beyond DARIA's 64 KB window through the PSRAM cache, works. Star Castle Arcade keeps its high score in `fa2.sav` across quitting and reopening the core: "star castle test passed". The merge of 2.2.2 changes none of DARIA's files, but its POKEY read fix and AtariVox escape fix have been tested on 2.2.2's 36.17 MHz build only; on the 2.2.4 candidate itself, Star Raiders, POKEY music and AtariVox speech are still to be tested |
 | Star Raiders, POKEY reads and the AtariVox escape (2.2.2 test build) | Star Raiders (7800, 2026) shows its title and its AtariVox says "Star Raiders"; Ballblazer or Commando's POKEY music is unchanged; Juno First and Stratovox still speak. Before, it stayed on a black screen: every POKEY read returned $FF (2.0.21 to 2.2.1), and the voice swallowed the game's speech after its "\V" escape (2.2.1) |
 | AtariVox voice (2.2.1 test builds) | Clearly says its words at every *AtariVox Voice* level. The first test build mixed it at x1/x2/x4 and it was hard to hear against the TIA even on Loud; from the second, x4/x8/x16 |
 

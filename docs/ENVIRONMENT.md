@@ -664,7 +664,7 @@ The VM does not stop when a session goes idle, and has no 13-hour limit (section
 
 ### 11.7 Headroom measured on 2026-10-18
 
-A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
+A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable; since 2026-10-21 at least about 22 GiB stay with the VM, 11.8). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
 
 - **Method:** a simulation job was `tb_fe_guard` (built by `sim/bupchip/daria/fe_unit/run_unit.sh`, about 24 s a run, one thread) run back to back under `nice -n 10`, each run timed. The Quartus job was the CI-form full compile (section 3.4) of a copy of `src/fpga` in `$RAM_WORK`. `vmstat` and `/proc/pressure` (PSI) were sampled every 5 s. All runs passed and both compiles succeeded. The driver script was not committed.
 - **Simulations:**
@@ -692,5 +692,8 @@ A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, wi
 
 - **Symptom:** the VM has a virtio balloon device (`/sys/bus/virtio/drivers/virtio_balloon/virtio3`). On 2026-10-18 `free` showed about 17 GiB used at idle, while processes held about 1 GiB and kernel memory and page cache about 2.5 GiB. The rest matches the balloon taking memory back for the host, which leaves about 14 GiB usable of the 30 GiB. Reading the balloon's size needs root (`/sys/kernel/debug/virtio-balloon`) and was not done.
 - **Cause:** the host's ZFS ARC (its read cache), which takes memory back from the VM through the balloon (the owner, 2026-10-18).
-- **Effect:** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
-- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too. Whether either has been done is [not recorded].
+- **Effect (before the cap below):** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
+- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too.
+- **Capped on 2026-10-21 (the owner):** the host may now reclaim at most 8 GiB from the VM, so at least about 22 of the 30 GiB stay with the VM, against about 14 under the old balloon. How the cap is set on the host is [not recorded]. On 2026-10-23 `free -g` showed 30 GiB total and 20 GiB available, with 17 GiB of it page cache [measured].
+- **What the cap means for 11.4:** one RAM scratch mount filled to its 13 GB cap fits in the 22 GiB beside a Quartus job (3.9 GB peak virtual memory, 11.7) and the simulations. Both mounts filled at once (26 GB) would not, because tmpfs pages live in RAM or swap (a 4 GB swap file). Keep their combined use well under what the 22 GiB leaves after the running jobs.
+- **What the cap means for 11.7:** the headroom test ran with about 14 GiB usable and saw no memory pressure (free memory never below 7.6 GiB), so its memory findings hold with room to spare. Its limits were set by CPU contention, and 11.6's job limits stand unchanged.

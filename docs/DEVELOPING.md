@@ -543,6 +543,11 @@ gives +2.462, +2.683 and +2.919 ns on seeds 1-3, and its worst
 and ships the AtariVox build's own seed-2 fit: `clk_sdram` +2.345 ns. The
 [README](../README.md) ("Verification") has its other figures, and
 [ATARIVOX.md](ATARIVOX.md) the voice build's seeds.
+2.2.4 (DARIA at ÷18, merged with 2.2.2) ships its Q2's seed-2 bitstream
+unchanged (`ap_core.rbf` md5 `09104319831d415502c90c0db4933e02`, fitted on
+`7701ee9`, whose tree differs from the release's only in the qsf's `SEED`
+line and comments): `clk_sdram` +3.020 ns, `clk_arm` +1.482 ns, the guard
+pair +3.128 / +0.421 ns and worst hold +0.095 ns.
 
 ## Resource budget
 
@@ -557,9 +562,10 @@ The Cyclone V 5CEBA4 has 18,480 ALMs and **308 M10K blocks**. Block count,
 not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 *bits* because every memory rounds up to whole blocks.
 
-Current use (the release after 2.2.1, DARIA at ÷18 with the AtariVox voice,
-fitter seed 3) is 14,628 of 18,480 ALMs (79%) and 216 of 308 M10K blocks
-(README, "Verification"); 2.2.1 used 15,839 ALMs (86%) and 212 M10K blocks.
+Current use (2.2.4, DARIA at ÷18 with the AtariVox voice, fitter seed 2) is
+14,639 of 18,480 ALMs (79%), 216 of 308 M10K blocks and 13 DSP blocks
+(README, "Verification"); 2.2.2 used 15,917 ALMs (86%), and 2.2.1 15,839
+ALMs (86%) and 212 M10K blocks.
 DARIA's verified tree, without the voice, used
 15,600-15,625 ALMs (85%), 195 M10K blocks and 1,767-1,770 of 1,848 LABs
 over seeds 1-3, with a peak interconnect use of 60.4-60.8%. Its ALM count is
@@ -578,10 +584,11 @@ paths in `sram_ctrl` (into `fbn_*` on seeds 1 and 2 of DARIA's verified tree,
 from `fbn_addr` on seed 3). They still depend on placement: `core_constraints.sdc` asks the
 fitter alone for 1.5 ns of extra setup margin there, and `ap_core.qsf` sets
 the fitter seed, one already fitted on the release tree, and its comment
-gives that tree's seeds 1-3. In the release after 2.2.1 they gave
-`clk_sdram` +2.407, +2.388 and +3.107 ns, every check passing on each, and
-seed 3, the safest, ships ([daria_step7/plan.md](daria_step7/plan.md) P12,
-as amended 2026-10-21). For 2.2.1, DARIA's verified tree gave +2.462,
+gives that tree's seeds 1-3. In 2.2.4 they gave `clk_sdram` +2.515,
++3.020 and +2.229 ns, every check passing on each, and seed 2, the safest,
+ships ([daria_step7/plan.md](daria_step7/plan.md) P12, as amended
+2026-10-21); the ÷18 tree before the merge of 2.2.2 gave +2.407, +2.388
+and +3.107 ns, and chose seed 3. For 2.2.1, DARIA's verified tree gave +2.462,
 +2.683 and +2.919 ns, and seed 2 was kept as the only one that passed every
 step-7 check as first written (plan 5.2, P12). After any change,
 check the `clk_sdram` slack again on seeds 1, 2 and 3; the release gate is
