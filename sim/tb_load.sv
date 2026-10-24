@@ -37,17 +37,15 @@ module tb_load;
 `ifdef POCKET_DARIA
 	// clk_arm on the PLL's lattice (docs/daria_step7/plan.md, F5). The VCO
 	// is 48 x clk_sys (687.27 MHz, 1.455 ns): clk_sdram is VCO/12 and
-	// clk_arm, by default, VCO/19 (36.17 MHz; pll_core.v's divider, plan
-	// 5.2): rising edges every 19 VCO periods (27.645 ns), PLL phase 0, so
-	// one meets a clk_sys rising edge every 19 clk_sys (48 clk_arm), the
-	// falling edge 9.5 VCO periods after (the counter's odd duty
-	// correction), which the bench's 1 ps step gives as 13.823 ns high,
-	// 13.822 ns low. +arm_div=18 selects VCO/18 (38.18 MHz), half period
-	// 13.095 ns = 1.5 x T_HALF_SDRAM, a rising edge on a clk_sys rising edge
-	// every 3 clk_sys (8 clk_arm). +arm_ofs=PS starts the lattice PS ps late
-	// (the phase runs). The check below stops the run if an edge leaves its
-	// lattice.
-	int arm_div = 19, arm_ofs = 0;
+	// clk_arm VCO/18 (38.18 MHz), half period 13.095 ns = 1.5 x
+	// T_HALF_SDRAM, PLL phase 0 (pll_core.v): a clk_arm rising edge meets a
+	// clk_sys rising edge every 3 clk_sys (8 clk_arm). +arm_div=19 selects
+	// the fallback, VCO/19 (36.17 MHz): rising edges every 19 VCO periods
+	// (27.645 ns), the falling edge 9.5 VCO periods after (the counter's odd
+	// duty correction), which the bench's 1 ps step gives as 13.823 ns high,
+	// 13.822 ns low. +arm_ofs=PS starts the lattice PS ps late (the phase
+	// runs). The check below stops the run if an edge leaves its lattice.
+	int arm_div = 18, arm_ofs = 0;
 	bit arm_init = 1'b0, arm_ph = 1'b0;
 	always begin
 		if (!arm_init) begin
@@ -84,6 +82,7 @@ module tb_load;
 	logic [8:0] hsc_addr = 0; logic hsc_wr = 0; logic hsc_rd = 0;
 	logic [1:0] sk_setting = 2'd2; logic [1:0] vox_setting = 2'd2; logic [12:0] sk_addr = 0; logic sk_wr = 0, sk_rd = 0;
 	logic [31:0] sk_din = 0; wire [31:0] sk_dout; logic [31:0] hsc_din = 0; wire [31:0] hsc_dout;
+	logic [5:0] fa2_addr = 0; logic fa2_wr = 0, fa2_rd = 0; logic [31:0] fa2_din = 0; wire [31:0] fa2_dout;
 	logic cart_download = 1'b0;
 	logic hscfw_download = 1'b0, arfw_download = 1'b0, bupfw_download = 1'b0;
 	// +bios=FILE: a 7800 BIOS through its data slot, before the cartridge
@@ -199,6 +198,8 @@ module tb_load;
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
+		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),
+		.fa2_bridge_dout(fa2_dout),
 		.SDRAM_A(), .SDRAM_BA(), .SDRAM_DQ(SDRAM_DQ), .SDRAM_DQML(), .SDRAM_DQMH(),
 		.SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(), .SDRAM_CLK(), .SDRAM_CKE(),
 		.SRAM_A(SRAM_A), .SRAM_DQ(SRAM_DQ), .SRAM_OE_N(SRAM_OE_N), .SRAM_WE_N(SRAM_WE_N),
@@ -391,9 +392,9 @@ module tb_load;
 `ifdef POCKET_DARIA
 	// ---------------- P18: psram.sv's CLOCK_SPEED ----------------
 	// 50.0 under POCKET_DARIA (docs/daria_step7/plan.md P18). No PSRAM model
-	// run told it from 28.636364 at 38.18 MHz (VCO/18, DARIA's clock when
-	// this check was written; the benches now default to VCO/19, 36.17 MHz),
-	// so the parameter is checked.
+	// run told it from 28.636364 at 38.18 MHz (VCO/18, DARIA's clock, and at
+	// VCO/19, 36.17 MHz, its clock from 2026-10-12 until the L1W+L3 CPU), so
+	// the parameter is checked.
 	initial begin
 		$display("P18 bup_psram CLOCK_SPEED %0.6f", dut.bup_psram.CLOCK_SPEED);
 		if (dut.bup_psram.CLOCK_SPEED != 50.0)
@@ -425,6 +426,353 @@ module tb_load;
 		if (dr_on_a && dut.u_fe.ret_tog != dr_rt) dr_rets++;
 	end
 `endif
+`ifdef BUP_DEBUG
+`ifdef SIM_DARIA_FE
+	// ---------------- the DARIA status overlay (BUP_DEBUG builds) ----------------
+	// daria_dbg_status's counts and copy of the RIOT's timer (dut.u_dstat),
+	// and bup_status_osd.sv's DARIA rows (its header has the layout):
+	//   ovl_b_calls the calls posted since the console's last reset (call_tog
+	//               flips counted while daria_reset is low, cleared while it
+	//               is high: u_dstat's own epoch, so a reset after a call, a
+	//               hard reset, a menu or slot load, a +retune, compares as
+	//               well as the first; dr_calls, from power-up, stays the
+	//               DARIA result's and its meta check's)
+	//   ovl_b_unl   dbg_unlock pulses since power-up, as u_dstat counts them,
+	//               read on the net u_dstat is wired to (daria_dbg_unlock)
+	//   ovl_lk_bad  clk_sys on which u_dstat's guard bit is not daria_dbg_locked
+	//               of the clock before (u_dstat registers it once); ovl_lk_n
+	//               the clk_sys with that net high
+	//   ovl_rows_bad frames that drew any of rows 6-8 while the status word's
+	//               halt bit (bup_status_osd's st[28]) was 0 at the frame's
+	//               end (rows 6-8 only while halted); not judged under the
+	//               pattern, which forces the halt
+	//   ovl_rt_bad  clk_sys on which the copy (timer, prescaler, incr,
+	//               rollover) differs from the RIOT's own (M6532.sv), while
+	//               the DARIA profile runs and the console is out of reset;
+	//               ovl_rt_n the clk_sys compared
+	//   ovl_px_bad  cells read back from the picture that differ from the
+	//               layout: on each frame, the centre pixel of every cell (the
+	//               line through the row's centre) must be the row's colour
+	//               where the bit is 1, grey where it is 0 and black where the
+	//               cell is not drawn, the bit taken by this bench's own map
+	//               from the source: DARIA's counts from u_dstat's registers
+	//               (ovl_src_q: one clk_sys later, as the overlay registers
+	//               its dstat input), so a miswired dstat port is a
+	//               difference; the status word, halt PC and load flags from
+	//               the overlay's registers; under +ovl_pattern_at, the
+	//               forced pattern itself. ovl_px_n counts the cells read
+	//   ovl_last    the rows read back from the last whole frame (lit = 1),
+	//               ovl_last_rows the rows drawn in it
+	// What was checked must be enough, or the verdict is FAIL: a run that
+	// reads no cell checks nothing (run_sim.sh's DARIA section gives each
+	// image its own requirement):
+	//   +ovl_rows=HEX  rows each of whose 12 cells must have been read at
+	//                  least once (default 3F: rows 0-5, a frame's six; 1FF
+	//                  with the halt rows; 0 waives it, and the line says so)
+	//   +ovl_cells=N   at least N cells read in all (default 1; 0 waives it)
+	//   +ovl_timer=1   the timer path exercised: the RIOT's timer written and
+	//                  read, and late calls above 0 and below the calls (an
+	//                  image that writes its timer before some calls and lets
+	//                  it run out, and not before others: frame_cdfj)
+	//   +ovl_late=N    with +ovl_timer=1: exactly N late calls, not merely
+	//                  some (frame_cdfj's .meta gives N for its run length)
+	//   +ovl_resets=N  the console's reset released at least N times (a run
+	//                  with +retune: the second epoch is the one compared)
+	//   +ovl_guard=N   (with +ovl_guard_at=MS, default 100) MS ms after the
+	//                  reset release, the net daria_dbg_locked is forced high
+	//                  for 20 ms and daria_dbg_unlock pulsed N times, one
+	//                  clk_sys each, 64 apart, on the falling edge: u_dstat
+	//                  must count them as this bench does, so the guard and
+	//                  unlock terms compare nonzero values at any divider (the
+	//                  guard never locks at VCO/19). Verilator makes the net
+	//                  and daria_fe's ports one variable, so dr_unlocks (the
+	//                  DARIA result's unlocks) counts the pulses too, and
+	//                  run_sim.sh expects exactly N there; the guard's own
+	//                  register (daria_fe_guard's lk, which guard_on and
+	//                  phb_next read) is not forced
+	// and the RIOT copy compared on at least one clk_sys. Undrawn cells (row 0
+	// columns 2 and 7-11, row 6 columns 0-3) are read as black, so a row
+	// counts as complete when all 12 have been read.
+	//   +ovl_pattern_at=MS  MS ms after the reset release, at a frame's end,
+	//                  the overlay's inputs (daria_dstat, the status word,
+	//                  halt PC and load flags) are forced to a pattern that
+	//                  lights every row and colour, nine rows (halted); two
+	//                  whole frames later to its complement (the halt bit
+	//                  kept), so every drawn cell is lit in one of the two.
+	//                  Each must read back as forced: the last whole frame of
+	//                  each phase, all nine rows. The counts compared below
+	//                  are u_dstat's, which the forces do not reach.
+	// tb_frames, on a game, also compares the counts with its own (calls,
+	// late calls, unlocks, the guard) at every frame's end.
+	int unsigned ovl_rt_bad = 0, ovl_px_bad = 0, ovl_px_n = 0, ovl_frames = 0, ovl_rt_n = 0;
+	int unsigned ovl_tw_n = 0, ovl_tr_n = 0;
+	logic [11:0] ovl_cur [0:8], ovl_last [0:8], ovl_seen [0:8];
+	logic  [8:0] ovl_cur_rows = '0, ovl_last_rows = '0;
+	logic        ovl_vb_q = 1'b1;
+	int unsigned ovl_need_cells = 1;
+	logic  [8:0] ovl_need_rows = 9'h03F;
+	bit          ovl_need_timer = 1'b0;
+	int          ovl_need_late = -1, ovl_need_resets = 0;
+	int unsigned ovl_guard_n = 0, ovl_guard_ms = 100;
+	initial begin
+		for (int i = 0; i < 9; i++) begin ovl_cur[i] = '0; ovl_last[i] = '0; ovl_seen[i] = '0; end
+		void'($value$plusargs("ovl_rows=%h", ovl_need_rows));
+		void'($value$plusargs("ovl_cells=%d", ovl_need_cells));
+		ovl_need_timer = $test$plusargs("ovl_timer=1");
+		void'($value$plusargs("ovl_late=%d", ovl_need_late));
+		void'($value$plusargs("ovl_resets=%d", ovl_need_resets));
+		void'($value$plusargs("ovl_guard=%d", ovl_guard_n));
+		void'($value$plusargs("ovl_guard_at=%d", ovl_guard_ms));
+	end
+	// the bench's counts, in u_dstat's epochs (above)
+	longint      ovl_b_calls = 0, ovl_b_unl = 0;
+	int unsigned ovl_lk_bad = 0, ovl_lk_n = 0, ovl_rel_n = 0, ovl_rows_bad = 0;
+	logic        ovl_ct = 1'b0, ovl_lk_q = 1'b0, ovl_ul_q = 1'b0, ovl_rst_q = 1'b1;
+	always @(posedge clk_sys) begin
+		ovl_ct <= dut.u_fe.call_tog;
+		if (dut.daria_reset) ovl_b_calls = 0;
+		else if (dr_on && dut.u_fe.call_tog != ovl_ct) ovl_b_calls++;
+		if (ovl_rst_q && !dut.daria_reset) ovl_rel_n++;
+		ovl_rst_q <= dut.daria_reset;
+		if (dut.u_dstat.locked !== ovl_lk_q) begin
+			if (ovl_lk_bad < 5)
+				$display("OVERLAY guard bit %0d at %0.3f ms, daria_dbg_locked was %0d", dut.u_dstat.locked, now_ns() / 1.0e6, ovl_lk_q);
+			ovl_lk_bad++;
+		end
+		ovl_lk_q = dut.daria_dbg_locked;
+		if (ovl_lk_q) ovl_lk_n++;
+		if (ovl_ul_q) ovl_b_unl++;
+		ovl_ul_q = dut.daria_dbg_unlock;
+	end
+	// the source of DARIA's counts, as the overlay's ds register holds them
+	logic [48:0] ovl_src_q = '0;
+	always @(posedge clk_sys) ovl_src_q <= {dut.u_dstat.locked, dut.u_dstat.late, dut.u_dstat.unl, dut.u_dstat.calls};
+
+	// the forced pattern (+ovl_pattern_at): phase 1, then its complement
+	// with the halt bit (status 28) kept, so rows 6-8 stay drawn
+	localparam logic [48:0]  OVL_P1_DS = {1'b1, 12'hA5C, 12'h3A5, 24'h5AC3A5};
+	localparam logic [31:0]  OVL_P1_ST = 32'h9A05_C000;    // running, halted, halt code A, fault code 5C
+	localparam logic [31:0]  OVL_P1_PC = 32'hA5C3_96F0;
+	localparam logic [110:0] OVL_P1_LD = {3'b101, 108'd0}; // seq_err, overrun
+	localparam logic [48:0]  OVL_P2_DS = ~OVL_P1_DS;
+	localparam logic [31:0]  OVL_P2_ST = 32'h150A_3000;    // halted, halt code 5, fault code A3
+	localparam logic [31:0]  OVL_P2_PC = ~OVL_P1_PC;
+	localparam logic [110:0] OVL_P2_LD = {3'b010, 108'd0}; // lost
+	int unsigned ovl_pat_ms = 0, ovl_t_sys = 0, ovl_pat_f0 = 0;
+	int          ovl_pat = 0;                              // 0 off, 1 or 2 the phase forced
+	bit          ovl_pat_ok1 = 1'b0, ovl_pat_done1 = 1'b0;
+	initial void'($value$plusargs("ovl_pattern_at=%d", ovl_pat_ms));
+
+	// +ovl_guard=N: the forced guard (above), on the falling edge of clk_sys
+	// so every register samples each pulse on exactly one rising edge
+	initial begin
+		@(posedge clk_sys);                                // the plusargs are read
+		if (ovl_guard_n > 0) begin
+			wait (ovl_t_sys >= ovl_guard_ms * 14318);
+			@(negedge clk_sys);
+			force dut.daria_dbg_locked = 1'b1;
+			$display("OVERLAY guard forced at %0.3f ms: daria_dbg_locked high, %0d unlock pulses", now_ns() / 1.0e6, ovl_guard_n);
+			for (int i = 0; i < ovl_guard_n; i++) begin
+				repeat (64) @(negedge clk_sys);
+				force dut.daria_dbg_unlock = 1'b1;
+				@(negedge clk_sys);
+				release dut.daria_dbg_unlock;
+			end
+			wait (ovl_t_sys >= (ovl_guard_ms + 20) * 14318);
+			@(negedge clk_sys);
+			release dut.daria_dbg_locked;
+			$display("OVERLAY guard released at %0.3f ms", now_ns() / 1.0e6);
+		end
+	end
+
+	// the layout, cell by cell (bup_status_osd.sv's header): whether the
+	// cell is drawn, its bit, and its lit colour, from the given inputs
+	task automatic ovl_cell(input int r, input int c, input logic [48:0] ds, input logic [31:0] st, input logic [31:0] pc,
+		input logic [110:0] ld, output bit shown, output bit b, output logic [23:0] rgb);
+		shown = 1'b1; b = 1'b0; rgb = 24'h40A0FF;
+		case (r)
+			0: begin
+				case (c)
+					0: b = st[31];                      // CPU running
+					1: b = ds[48];                      // guard locked
+					3: b = st[28];                      // halted
+					4: b = ld[110];                     // capture seq_err
+					5: b = ld[109];                     // capture lost
+					6: b = ld[108];                     // receiver overrun
+					default: shown = 1'b0;
+				endcase
+				rgb = c < 2 ? 24'h00E000 : 24'hFF2020;
+			end
+			1: begin b = c < 4 ? st[27 - c] : st[19 - (c - 4)]; rgb = c < 4 ? 24'hFFE000 : 24'hFF8000; end
+			2: begin b = ds[47 - c]; rgb = 24'hFF2020; end   // late calls
+			3: begin b = ds[35 - c]; rgb = 24'hFF40FF; end   // unlocks
+			4: b = ds[23 - c];                               // calls 23:12
+			5: b = ds[11 - c];                               // calls 11:0
+			6: begin if (c < 4) shown = 1'b0; else b = pc[31 - (c - 4)]; rgb = 24'hFFFFFF; end
+			7: begin b = pc[23 - c]; rgb = 24'hFFFFFF; end
+			default: begin b = pc[11 - c]; rgb = 24'hFFFFFF; end
+		endcase
+	endtask
+
+	// a pattern phase's nine rows as they must read back (lit = 1)
+	function automatic bit ovl_pat_match(input int ph);
+		bit shown, b;
+		logic [23:0] rgb;
+		for (int r = 0; r < 9; r++)
+			for (int c = 0; c < 12; c++) begin
+				if (ph == 1) ovl_cell(r, c, OVL_P1_DS, OVL_P1_ST, OVL_P1_PC, OVL_P1_LD, shown, b, rgb);
+				else ovl_cell(r, c, OVL_P2_DS, OVL_P2_ST, OVL_P2_PC, OVL_P2_LD, shown, b, rgb);
+				if (ovl_last[r][11 - c] != (shown && b)) return 1'b0;
+			end
+		return ovl_last_rows == 9'h1FF;
+	endfunction
+
+	task automatic ovl_force(input int ph);
+		if (ph == 1) begin
+			force dut.daria_dstat = OVL_P1_DS;
+			force dut.bup_dbg_status = OVL_P1_ST;
+			force dut.bup_dbg_halt_pc = OVL_P1_PC;
+			force dut.bup_dbg_load = OVL_P1_LD;
+		end else begin
+			force dut.daria_dstat = OVL_P2_DS;
+			force dut.bup_dbg_status = OVL_P2_ST;
+			force dut.bup_dbg_halt_pc = OVL_P2_PC;
+			force dut.bup_dbg_load = OVL_P2_LD;
+		end
+		ovl_pat = ph;
+		ovl_pat_f0 = ovl_frames;
+		$display("OVERLAY pattern %0d forced at %0.3f ms (overlay frame %0d)", ph, now_ns() / 1.0e6, ovl_frames);
+	endtask
+
+	always @(posedge clk_sys) begin
+		// the RIOT's timer and its copy
+		if (dut.daria_profile && !dut.daria_reset) begin
+			ovl_rt_n++;
+			if (dut.u_dstat.t_timer !== dut.main.riot_inst.timer || dut.u_dstat.t_pre !== dut.main.riot_inst.prescaler ||
+				dut.u_dstat.t_incr !== dut.main.riot_inst.incr || dut.u_dstat.t_roll !== dut.main.riot_inst.rollover) begin
+				if (ovl_rt_bad < 5)
+					$display("OVERLAY RIOT copy differs at %0.3f ms: timer %02x/%02x, prescaler %0d/%0d, incr %0d/%0d, rollover %0d/%0d (copy/RIOT)",
+						now_ns() / 1.0e6, dut.u_dstat.t_timer, dut.main.riot_inst.timer, dut.u_dstat.t_pre, dut.main.riot_inst.prescaler,
+						dut.u_dstat.t_incr, dut.main.riot_inst.incr, dut.u_dstat.t_roll, dut.main.riot_inst.rollover);
+				ovl_rt_bad++;
+			end
+			// the RIOT's own timer accesses (its chip select, RAM select and A2)
+			if (dut.main.riot_inst.ce && dut.main.riot_inst.CS1 && !dut.main.riot_inst.CS2_n && dut.main.riot_inst.RS_n &&
+				dut.main.riot_inst.addr[2]) begin
+				if (!dut.main.riot_inst.RW_n && dut.main.riot_inst.addr[4]) ovl_tw_n++;
+				if (dut.main.riot_inst.RW_n) ovl_tr_n++;
+			end
+		end
+		// the picture: one pixel per cell, at its centre
+		if (dut.bup_osd.dar && dut.bup_osd.ce_pix && dut.bup_osd.in_osd &&
+			dut.bup_osd.xc[2:0] == 3'd3 && dut.bup_osd.yc[2:0] == 3'd3) begin
+			int r, c;
+			bit shown, b;
+			logic [23:0] rgb, px, want;
+			r = int'(dut.bup_osd.row);
+			c = int'(dut.bup_osd.col);
+			px = {dut.bup_osd.r_out, dut.bup_osd.g_out, dut.bup_osd.b_out};
+			case (ovl_pat)
+				1: ovl_cell(r, c, OVL_P1_DS, OVL_P1_ST, OVL_P1_PC, OVL_P1_LD, shown, b, rgb);
+				2: ovl_cell(r, c, OVL_P2_DS, OVL_P2_ST, OVL_P2_PC, OVL_P2_LD, shown, b, rgb);
+				default: ovl_cell(r, c, ovl_src_q, dut.bup_osd.st, dut.bup_osd.hpc, dut.bup_osd.ld, shown, b, rgb);
+			endcase
+			want = !shown ? 24'h000000 : b ? rgb : (c[2] ? 24'h585858 : 24'h303030);
+			ovl_px_n++;
+			if (px !== want) begin
+				if (ovl_px_bad < 5)
+					$display("OVERLAY cell row %0d column %0d at %0.3f ms: pixel %06x, the layout says %06x", r, c, now_ns() / 1.0e6, px, want);
+				ovl_px_bad++;
+			end
+			if (r < 9 && c < 12) begin
+				ovl_cur[r][11 - c] = !(px == 24'h000000 || px == 24'h303030 || px == 24'h585858);
+				ovl_cur_rows[r] = 1'b1;
+				ovl_seen[r][11 - c] = 1'b1;
+			end
+		end
+		// a frame ends: keep what it showed
+		ovl_vb_q <= dut.bup_osd.vblank;
+		if (dut.bup_osd.vblank && !ovl_vb_q) begin
+			// rows 6-8 only while halted (not judged under the forced pattern)
+			if (ovl_pat == 0 && ovl_cur_rows[8:6] != '0 && !dut.bup_osd.st[28]) begin
+				if (ovl_rows_bad < 5)
+					$display("OVERLAY rows %09b drawn at %0.3f ms, not halted: rows 6-8 only while halted", ovl_cur_rows, now_ns() / 1.0e6);
+				ovl_rows_bad++;
+			end
+			if (ovl_cur_rows != '0) begin
+				ovl_last = ovl_cur;
+				ovl_last_rows = ovl_cur_rows;
+				ovl_cur_rows = '0;
+				ovl_frames++;
+			end
+			// the pattern's phases, each switched at a frame's end
+			if (ovl_pat_ms > 0 && ovl_pat == 0 && !ovl_pat_done1 && ovl_t_sys >= ovl_pat_ms * 14318)
+				ovl_force(1);
+			else if (ovl_pat == 1 && ovl_frames >= ovl_pat_f0 + 2) begin
+				ovl_pat_ok1 = ovl_pat_match(1);
+				ovl_pat_done1 = 1'b1;
+				$display("OVERLAY pattern 1 read back from overlay frame %0d: %0s", ovl_frames, ovl_pat_ok1 ? "as forced" : "NOT as forced");
+				ovl_force(2);
+			end
+		end
+		if (!reset_in) ovl_t_sys++;
+	end
+
+	// the coverage rules above: 1 when what was checked is enough
+	function automatic logic [8:0] ovl_rows_done();
+		logic [8:0] m;
+		for (int i = 0; i < 9; i++) m[i] = ovl_seen[i] == 12'hFFF;
+		return m;
+	endfunction
+	function automatic bit ovl_cover_ok();
+		if ((ovl_rows_done() & ovl_need_rows) != ovl_need_rows) return 1'b0;
+		if (ovl_rel_n < ovl_need_resets) return 1'b0;
+		if (ovl_guard_n > 0 && (ovl_b_unl < ovl_guard_n || ovl_lk_n == 0)) return 1'b0;
+		return ovl_px_n >= ovl_need_cells && ovl_rt_n > 0;
+	endfunction
+	function automatic bit ovl_timer_ok();
+		if (!ovl_need_timer) return 1'b1;
+		if (ovl_tw_n == 0 || ovl_tr_n == 0) return 1'b0;
+		if (ovl_need_late >= 0) return int'(dut.u_dstat.late) == ovl_need_late;
+		return dut.u_dstat.late > 0 && 24'(dut.u_dstat.late) < dut.u_dstat.calls;
+	endfunction
+	// the pattern's verdict: both phases read back as forced (when asked for)
+	function automatic bit ovl_pat_ok();
+		return ovl_pat_ms == 0 || (ovl_pat_ok1 && ovl_pat == 2 && ovl_frames >= ovl_pat_f0 + 2 && ovl_pat_match(2));
+	endfunction
+	function automatic string ovl_checked();
+		string t;
+		t = $sformatf("checked: %0d cells (rows complete %09b, required %09b, at least %0d cells), RIOT copy on %0d clk_sys, timer writes %0d, reads %0d",
+			ovl_px_n, ovl_rows_done(), ovl_need_rows, ovl_need_cells, ovl_rt_n, ovl_tw_n, ovl_tr_n);
+		if (ovl_need_timer && ovl_need_late >= 0) t = {t, $sformatf(" (required, with exactly %0d late calls)", ovl_need_late)};
+		else if (ovl_need_timer) t = {t, " (required, with late calls above 0 and below the calls)"};
+		t = {t, $sformatf(", reset releases %0d", ovl_rel_n)};
+		if (ovl_need_resets > 0) t = {t, $sformatf(" (required at least %0d)", ovl_need_resets)};
+		if (ovl_guard_n > 0)
+			t = {t, $sformatf(", guard forced: %0d unlock pulses counted, locked on %0d clk_sys (required at least %0d pulses)",
+				ovl_b_unl, ovl_lk_n, ovl_guard_n)};
+		return t;
+	endfunction
+
+	// what the last whole frame showed, as numbers
+	function automatic string ovl_shown();
+		string t;
+		if (ovl_frames == 0) return "the picture showed no DARIA rows";
+		// each value only where its rows were drawn in that frame: a short
+		// frame (a test image's) may end before the lower rows
+		t = $sformatf("the picture (frame %0d of the overlay, rows %09b drawn, row 0 on the right):", ovl_frames, ovl_last_rows);
+		if (ovl_last_rows[0])
+			t = {t, $sformatf(" running %0d, guard %0s, halted %0d,", ovl_last[0][11], ovl_last[0][10] ? "locked" : "unlocked", ovl_last[0][8])};
+		if (ovl_last_rows[1]) t = {t, $sformatf(" halt code %0d, fault code %0d,", ovl_last[1][11:8], ovl_last[1][7:0])};
+		if (ovl_last_rows[2]) t = {t, $sformatf(" late calls %0d,", ovl_last[2])};
+		if (ovl_last_rows[3]) t = {t, $sformatf(" unlocks %0d,", ovl_last[3])};
+		if (ovl_last_rows[5:4] == 2'b11) t = {t, $sformatf(" calls %0d,", {ovl_last[4], ovl_last[5]})};
+		if (ovl_last_rows[8:6] == 3'b111) t = {t, $sformatf(" halt PC %02x%03x%03x,", ovl_last[6][7:0], ovl_last[7], ovl_last[8])};
+		return t.substr(0, t.len() - 2);
+	endfunction
+`endif
+`endif
+
 	task automatic daria_report();
 		$display("DARIA result: marker %0d, self-check errors %0d, calls %0d, returns %0d, psram_viol %0d, halted %0d, guard %0s, unlocks %0d",
 			dut.main.riot_inst.riot_ram.mem_q[127], dut.main.riot_inst.riot_ram.mem_q[126], dr_calls, dr_rets,
@@ -435,6 +783,36 @@ module tb_load;
 			"absent (atari7800_pocket.sv has no daria_fe u_fe)",
 `endif
 			dr_unlocks);
+`ifdef BUP_DEBUG
+`ifdef SIM_DARIA_FE
+		// The overlay's own line: its counts against this bench's, the RIOT
+		// copy, the cells read back, what was checked against what this run
+		// requires (+ovl_rows, +ovl_cells, +ovl_timer), the pattern's phases
+		// (+ovl_pattern_at), what the picture showed in the last whole frame,
+		// and the verdict: PASS, or FAIL with the terms that failed.
+		begin
+			string why, pat, res;
+			why = "";
+			if (dut.u_dstat.calls != 24'(ovl_b_calls)) why = {why, " calls"};
+			if (dut.u_dstat.unl != 12'(ovl_b_unl > 4095 ? 4095 : ovl_b_unl)) why = {why, " unlocks"};
+			if (ovl_lk_bad != 0 || dut.u_dstat.locked !== dut.daria_dbg_locked) why = {why, " guard"};
+			if (ovl_rt_bad != 0) why = {why, " riot-copy"};
+			if (ovl_px_bad != 0) why = {why, " cells"};
+			if (ovl_rows_bad != 0) why = {why, " rows"};
+			if (!ovl_cover_ok()) why = {why, " coverage"};
+			if (!ovl_timer_ok()) why = {why, " timer"};
+			if (!ovl_pat_ok()) why = {why, " pattern"};
+			if (ovl_pat_ms == 0) pat = "not forced";
+			else if (ovl_pat_ok()) pat = "read back as forced (both phases, nine rows)";
+			else pat = "NOT read back as forced";
+			if (why == "") res = "PASS";
+			else res = {"FAIL (", why.substr(1, why.len() - 1), ")"};
+			$display("DARIA overlay: calls %0d (bench %0d since the last reset, %0d since power-up), late calls %0d, unlocks %0d (bench %0d), guard %0s (differs on %0d clk_sys); RIOT copy differs on %0d clk_sys; %0d of %0d cells read back differ from the layout; %0d frames drew rows 6-8 while not halted; %0s; pattern %0s; %0s; %0s",
+				dut.u_dstat.calls, ovl_b_calls, dr_calls, dut.u_dstat.late, dut.u_dstat.unl, ovl_b_unl, dut.u_dstat.locked ? "locked" : "unlocked",
+				ovl_lk_bad, ovl_rt_bad, ovl_px_bad, ovl_px_n, ovl_rows_bad, ovl_checked(), pat, ovl_shown(), res);
+		end
+`endif
+`endif
 	endtask
 `endif
 
@@ -873,12 +1251,23 @@ module tb_load;
 		end
 	end
 
+	// The cart's tone is counted on the console's own mix, before the
+	// AtariVox voice. With POCKET_ATARIVOX the voice runs whenever the SaveKey
+	// does and the AtariVox Voice setting is not Off (tb default Normal), and
+	// AUDIO_L then carries it on a +32,768 bias (atari7800_pocket.sv, vox_add),
+	// so it never returns to 0 and the SaveKey runs' tone read 0 Hz. With the
+	// voice off, vox_add is 0 and core_audio_l is AUDIO_L.
+`ifdef POCKET_ATARIVOX
+	wire [15:0] tone_aud = dut.core_audio_l;
+`else
+	wire [15:0] tone_aud = AUDIO_L;
+`endif
 	longint rises = 0;
 	logic [15:0] old_aud = 0;
 	logic counting = 0;
 	always @(posedge clk_sys) begin
-		old_aud <= AUDIO_L;
-		if (counting && AUDIO_L > old_aud && old_aud == 16'd0)
+		old_aud <= tone_aud;
+		if (counting && tone_aud > old_aud && old_aud == 16'd0)
 			rises <= rises + 1;
 	end
 
@@ -988,6 +1377,43 @@ module tb_load;
 	logic [7:0] save_img [0:2047];
 	bit have_save = 0;
 	int save_diffs;
+	// The FA2 flash's save slot (fa2.sav, 256 bytes, bridge words 0-63):
+	// +fa2save, +fa2expect and +fa2prog (below). The counters follow
+	// mapper_fa2's copies: a flash load that reached byte $FF, a save's
+	// dirty pulse, and the bridge's writes into the slot's RAM.
+	logic [7:0] fa2_img [0:255];
+	logic [7:0] fa2_exp [0:255];
+	bit have_fa2 = 0, fa2_prog = 0;
+	string fa2_path;
+	int fa2_diffs, fa2_loads = 0, fa2_saves = 0, fa2_port_wr = 0;
+	always @(posedge clk_sys) begin
+		if (dut.fa2_ram_we) fa2_port_wr++;
+		if (dut.main.cart2600.mapper_FA2.copy_state == 3'd1 && dut.main.cart2600.mapper_FA2.nvram_ready
+		    && dut.main.cart2600.mapper_FA2.copy_addr == 8'hFF) fa2_loads++;
+		if (dut.main.cart2600.mapper_FA2.nvram_dirty) fa2_saves++;
+	end
+	// Read the FA2 slot back the way the Pocket saves it, with the HSC's APF
+	// read protocol (below): 65 transactions for 64 words, the last address
+	// wrapping to word 0. fa2_diffs counts the bytes that differ from fa2_exp.
+	task automatic fa2_readback();
+		fa2_diffs = 0;
+		for (int t = 0; t <= 64; t++) begin
+			logic [31:0] got;
+			@(posedge clk_74a); fa2_addr = t[5:0];
+			repeat (4) @(posedge clk_74a);
+			got = fa2_dout;
+			fa2_rd = 1'b1; @(posedge clk_74a); fa2_rd = 1'b0;
+			repeat (2) @(posedge clk_74a);
+			if (t > 0)
+				for (int k = 0; k < 4; k++)
+					if (got[31 - 8*k -: 8] !== fa2_exp[4*(t-1) + k]) begin
+						if (fa2_diffs < 8)
+							$display("  FA2 byte %02x: expected %02x, read back %02x", 4*(t-1) + k,
+								fa2_exp[4*(t-1) + k], got[31 - 8*k -: 8]);
+						fa2_diffs++;
+					end
+		end
+	endtask
 
 	// +bios=FILE: the 7800 BIOS through its data slot (0x103, bridge address
 	// 0x02000000, data.json's), at most 16 KiB.
@@ -1118,6 +1544,37 @@ module tb_load;
 			end
 			have_save = 1;
 		end
+		// +fa2save=FILE: write a 256-byte FA2 flash file through its save slot
+		// port while the core is held in reset, as for +save. +fa2expect=FILE:
+		// what the slot must hold when it is read back at the end (default:
+		// the +fa2save file, or blank $FF without one). Either one turns the
+		// read-back on.
+		for (int i = 0; i < 256; i++) fa2_img[i] = 8'hFF;
+		if ($value$plusargs("fa2save=%s", fa2_path)) begin
+			fd = $fopen(fa2_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fa2_path); $finish; end
+			for (int i = 0; i < 256; i++) begin c = $fgetc(fd); fa2_img[i] = c[7:0]; end
+			$fclose(fd);
+			for (int i = 0; i < 64; i++) begin
+				@(posedge clk_74a);
+				fa2_addr = i[5:0];
+				fa2_din = {fa2_img[4*i], fa2_img[4*i+1], fa2_img[4*i+2], fa2_img[4*i+3]};
+				fa2_wr = 1'b1;
+				@(posedge clk_74a);
+				fa2_wr = 1'b0;
+				repeat (20) @(posedge clk_74a);
+			end
+			have_fa2 = 1;
+		end
+		for (int i = 0; i < 256; i++) fa2_exp[i] = fa2_img[i];
+		if ($value$plusargs("fa2expect=%s", fa2_path)) begin
+			fd = $fopen(fa2_path, "rb");
+			if (fd == 0) begin $display("cannot open %s", fa2_path); $finish; end
+			for (int i = 0; i < 256; i++) begin c = $fgetc(fd); fa2_exp[i] = c[7:0]; end
+			$fclose(fd);
+			have_fa2 = 1;
+		end
+		fa2_prog = $test$plusargs("fa2prog");
 		if (!$test$plusargs("bioslast")) load_bios();
 		// +hscfw=FILE / +arfw=FILE: load the HSC firmware / Supercharger BIOS
 		// through their data slots first, as the Pocket does at core start.
@@ -1272,6 +1729,30 @@ module tb_load;
 			$finish;
 		end
 `endif
+		if (fa2_prog) begin
+			// +fa2prog: the cartridge is sim/fa2_test.py's FA2 program. It
+			// loads the flash into the mapper's work RAM (command 1), writes
+			// bytes 0-254 back inverted, saves the work RAM (command 2), fills
+			// bytes 0-254 with $5A, loads the flash again and stores $A5 at
+			// $80. Wait for that (at most 2 s), then check the reload in the
+			// work RAM and the save slot through the APF read protocol.
+			automatic int ms = 0;
+			while (dut.main.riot_inst.riot_ram.mem_q[0] !== 8'hA5 && ms < 2000) begin
+				repeat (14318) @(posedge clk_sys);
+				ms++;
+			end
+			$display("FA2 program: mapper %0d, %0s after %0d ms; flash loads %0d, saves %0d, slot RAM writes %0d",
+				dut.main.cart2600.mapper, dut.main.riot_inst.riot_ram.mem_q[0] === 8'hA5 ? "done" : "not done",
+				ms, fa2_loads, fa2_saves, fa2_port_wr);
+			fa2_diffs = 0;
+			for (int i = 0; i < 255; i++)
+				if (dut.main.cart2600.mapper_FA2.working_ram.u_ram.mem_q[i] !== fa2_exp[i]) fa2_diffs++;
+			$display("FA2 work RAM after the reload: %0d of 255 bytes differ from the expected file", fa2_diffs);
+			run74 = 1'b1;
+			fa2_readback();
+			$display("FA2 save slot read back (APF read protocol): %0d of 256 bytes differ from the expected file", fa2_diffs);
+			$finish;
+		end
 		if ($test$plusargs("inputtest")) begin
 			// joy bits: 0 R, 1 L, 2 D, 3 U, 9 A, 10 B, 11 X (slow), 12 Y (fast)
 			$display("INPUT port types: A %0d, B %0d, gun on port %0d", dut.porta_type, dut.portb_type, dut.gun_port + 1);
@@ -1481,6 +1962,16 @@ module tb_load;
 						end
 			end
 			$display("SAVEKEY save after load, reset and running: %0d of 32768 bytes differ from the save file", sk_diffs);
+		end
+		if (have_fa2) begin
+			// What ran beside the file: the 2600 mapper detect2600.sv chose
+			// (25 = BANKFA2, which runs mapper_fa2.sv), the mode, and
+			// mapper_fa2's copies (a save counts once it is done, whether
+			// or not it reached the slot) and the slot RAM's writes.
+			$display("FA2 image: 2600 mapper %0d, cart_is_7800 %0d, tia_mode %0d; flash loads %0d, saves %0d, slot RAM writes %0d",
+				dut.main.cart2600.mapper, dut.cart_is_7800, dut.tia_mode, fa2_loads, fa2_saves, fa2_port_wr);
+			fa2_readback();
+			$display("FA2 save slot after load, reset and 300 ms of running (APF read protocol): %0d of 256 bytes differ from the expected file", fa2_diffs);
 		end
 		if ($test$plusargs("skcheck")) begin
 			// What the test cart wrote over I2C must be in the RAM that gets

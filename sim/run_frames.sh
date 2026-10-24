@@ -19,12 +19,21 @@
 #                with a joystick)
 #   DARIA, ARM_DIV, VERILATOR, VL_JOBS, RTL_TREE: passed to run_sim.sh's build
 #                (ARM_DIV=18 or 19 also adds +arm_div to the run; tb_load's
-#                default is 19, pll_core.v's divider)
+#                default is 18, pll_core.v's divider)
+#   FRAMES_DEBUG=1  passed to run_sim.sh's build too: BUP_DEBUG, and the
+#                DARIA status overlay's checks (tb_frames.sv's header).
+#                run_sim.sh records the build's mode in WORK/obj_frames.mode
+#                with the binary's md5; a binary whose recorded mode is not
+#                the one asked for (FRAMES_DEBUG, default 0), or has none, is
+#                rebuilt, and with NOBUILD=1 the run is refused. run.log
+#                names the mode, and with FRAMES_DEBUG=1 the run passes only
+#                with "OVERLAY result: PASS" in it too
 # Writes WORK/runs/NAME/{fp,calls,slack,zero,frames}.csv and run.log; run.log
 # starts with the tree's HEAD and status, the Verilator and the binary's md5
 # (plan P23), then the bench's output, its exit status and the wall time per
 # emulated second. Exit status: the bench's (0 when its FRAMES result line
-# says PASS). Every file there derives from the game image: keep it in
+# says PASS, and with FRAMES_DEBUG=1 its OVERLAY result line too; 2 when the
+# binary's mode is not the one asked for). Every file there derives from the game image: keep it in
 # sim/work.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
@@ -37,11 +46,22 @@ mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
 BIN="$WORK/obj_frames/vtb"
 TREE="$(cd "${RTL_TREE:-$HERE/..}" && pwd)"
-if [ ! -x "$BIN" ] || { [ "${NOBUILD:-0}" = 0 ] && [ -n "$(find "$TREE/src/fpga" "$HERE/tb_frames.sv" "$HERE/tb_load.sv" \
+FDBG="${FRAMES_DEBUG:-0}"
+[ "$FDBG" = 1 ] || FDBG=0
+# the binary's mode as run_sim.sh recorded it, if the record is this binary's
+mode() { [ -x "$BIN" ] && sed -n "s/^FRAMES_DEBUG=\([01]\) md5 $(md5sum < "$BIN" | cut -d' ' -f1)\$/\1/p" "$WORK/obj_frames.mode" 2>/dev/null; }
+if [ ! -x "$BIN" ] || [ "$(mode)" != "$FDBG" ] || { [ "${NOBUILD:-0}" = 0 ] && [ -n "$(find "$TREE/src/fpga" "$HERE/tb_frames.sv" "$HERE/tb_load.sv" \
 		"$HERE/run_sim.sh" "$HERE/sim_stubs.sv" "$HERE/bupchip/s4/psram_model.sv" -newer "$BIN" \
 		\( -name '*.sv' -o -name '*.v' -o -name '*.sh' -o -name '*.qsf' -o -name '*.hex' \) 2>/dev/null | head -1)" ]; }; then
-	echo "building $BIN ..." >&2
-	WORK="$WORK" BUILD_TOP=tb_frames VL_JOBS="${VL_JOBS:-2}" nice -n 10 bash "$HERE/run_sim.sh" >&2
+	if [ "${NOBUILD:-0}" != 0 ] && [ -x "$BIN" ]; then
+		m="$(mode || true)"
+		if [ -n "$m" ]; then m="a FRAMES_DEBUG=$m build"; else m="a build with no mode recorded for it"; fi
+		echo "run_frames.sh: NOBUILD=1, but $BIN is $m, not FRAMES_DEBUG=$FDBG" >&2
+		exit 2
+	fi
+	echo "building $BIN (FRAMES_DEBUG=$FDBG) ..." >&2
+	WORK="$WORK" BUILD_TOP=tb_frames FRAMES_DEBUG="$FDBG" VL_JOBS="${VL_JOBS:-2}" nice -n 10 bash "$HERE/run_sim.sh" >&2
+	[ "$(mode)" = "$FDBG" ] || { echo "run_frames.sh: the build did not record FRAMES_DEBUG=$FDBG (BUPCHIP=0 has no BUP_DEBUG)" >&2; exit 2; }
 fi
 NAME="${NAME:-$(basename "$IMG" .bin)}"
 OUT="$WORK/runs/$NAME"
@@ -58,7 +78,7 @@ esac
 	echo "status: [$(git -C "$HERE/.." status --porcelain | tr '\n' ';')]"
 	[ "$TREE" = "$(cd "$HERE/.." && pwd)" ] || echo "RTL tree $TREE HEAD $(git -C "$TREE" rev-parse HEAD) status: [$(git -C "$TREE" status --porcelain | tr '\n' ';')]"
 	echo "verilator $VERILATOR ($("$VERILATOR" --version))"
-	echo "binary $BIN md5 $(md5sum < "$BIN" | cut -c1-32)"
+	echo "binary $BIN md5 $(md5sum < "$BIN" | cut -c1-32), FRAMES_DEBUG=$(mode)"
 	echo "args ${ARGS[*]} $*"
 } > "$OUT/run.log"
 start=$(date +%s.%N)
@@ -78,4 +98,9 @@ with open(log, "a") as f:
     f.write(f"wall {t1 - t0:.1f} s" + (f", {(t1 - t0) / emu:.1f} s of wall time per emulated second ({emu:.3f} s emulated from time 0)" if emu else "") + "\n")
 PY
 tail -n 4 "$OUT/run.log"
-grep -q "^FRAMES result: PASS" "$OUT/run.log" && [ "$rc" = 0 ]
+grep -aq "^FRAMES result: PASS" "$OUT/run.log" && [ "$rc" = 0 ] || exit 1
+# a FRAMES_DEBUG=1 run checks the overlay: a missing line fails
+if [ "$FDBG" = 1 ] && ! grep -aq "^OVERLAY result: PASS" "$OUT/run.log"; then
+	echo "run_frames.sh: FRAMES_DEBUG=1, and run.log has no 'OVERLAY result: PASS'" | tee -a "$OUT/run.log" >&2
+	exit 1
+fi

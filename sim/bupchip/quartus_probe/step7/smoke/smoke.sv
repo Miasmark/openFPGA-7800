@@ -16,9 +16,6 @@
 // Variants (macros):
 //   SMOKE_Q5     BUP_DEBUG's chains (the snapshot's rq_s0/ak_s0): a Q5
 //                build, whose expected crossings f3_crossings.txt lists
-//   SMOKE_ALL16  also pause_a, halted_s and cap_err_a, absent from the
-//                release build (cap_err_a from Q5 too, plan 2.7): all 16
-//                registers daria.qip marks are present
 //   SMOKE_MUT    planted faults, each of which (k') must report:
 //                prof_a[0]  samples an XOR of two clk_sys registers (a
 //                           two-register cone)
@@ -271,15 +268,10 @@ module bupchip_pocket (
 		ram32_a <= {ram32_a[0], ~daria_ram32_n};
 		mres_a <= {mres_a[0], daria_mreset};
 	end
-`ifdef SMOKE_ALL16
-	logic pause = 1'b0;
-	always_ff @(posedge clk_sys) pause <= a[1];
-	logic [1:0] pause_a = 2'b00;
-	always_ff @(posedge clk_arm) pause_a <= {pause_a[0], pause};
-	wire paused = pause_a[1];
-`else
+	// No pause_a and no halted_s (below): pause_core is tied 0 and
+	// daria_halted is left open in every build, so no build has those
+	// chains, and daria_sync.tcl does not mark them (plan 2.7)
 	wire paused = 1'b0;
-`endif
 
 	// ---- the $8007 command toggle and its held byte -----------------------------------------------
 	logic       cmd_tog = 1'b0;
@@ -322,13 +314,7 @@ module bupchip_pocket (
 		run_s <= {run_s[0], cpu_run};
 `endif
 	end
-`ifdef SMOKE_ALL16
-	logic [1:0] halted_s = 2'b00;
-	always_ff @(posedge clk_sys) halted_s <= {halted_s[0], halted};
-	wire halt_seen = halted_s[1];
-`else
 	wire halt_seen = 1'b0;
-`endif
 
 	// ---- the audio frame toggle and its held frame -----------------------------------------------------
 	logic        frame_tog = 1'b0;
@@ -354,21 +340,13 @@ module bupchip_pocket (
 	wire raw = 1'b0;
 `endif
 
-	// ---- BUP_DEBUG: the status word's snapshot, and the capture's error flags -------------------------------
-	// cap_err_a only with SMOKE_ALL16: the core's has no load in any build
-	// (bup_status_osd.sv does not show the status word's bit 11), so a Q5
-	// build has no such chain (plan 2.7)
+	// ---- BUP_DEBUG: the status word's snapshot -------------------------------------------------------------
+	// No cap_err_a: the core's has no load in any build (bup_status_osd.sv
+	// does not show the status word's bit 11), so no build has that chain
+	// and daria_sync.tcl does not mark it (plan 2.7)
 	wire [7:0] dbg;
 `ifdef SMOKE_Q5
-`ifdef SMOKE_ALL16
-	logic cap_err_sys = 1'b0;
-	always_ff @(posedge clk_sys) cap_err_sys <= cap_err_sys | (a == 8'hA5);
-	logic [1:0] cap_err_a = 2'b00;
-	always_ff @(posedge clk_arm) cap_err_a <= {cap_err_a[0], cap_err_sys};
-	bup_dbg_snap #(.N(8)) dbg_snap (.clk_sys, .clk_arm, .d_arm(frame_arm[7:0] ^ {7'd0, cap_err_a[1]}), .q_sys(dbg));
-`else
 	bup_dbg_snap #(.N(8)) dbg_snap (.clk_sys, .clk_arm, .d_arm(frame_arm[7:0]), .q_sys(dbg));
-`endif
 `else
 	assign dbg = 8'd0;
 `endif

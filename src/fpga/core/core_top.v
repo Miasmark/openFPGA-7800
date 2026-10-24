@@ -310,7 +310,7 @@ assign vpll_feed = 1'bZ;
 // the CPU and hands the TIA a 7.16 MHz (2x colour clock) enable; that ratio
 // is what puts TIA audio at the right pitch, so nothing here may run the
 // system from any other clock. clk_arm, from the same VCO, runs only the
-// BupChip (POCKET_BUPCHIP): 2 x clk_sys, or VCO/19 (36.17 MHz) with DARIA
+// BupChip (POCKET_BUPCHIP): 2 x clk_sys, or VCO/18 (38.18 MHz) with DARIA
 // (POCKET_DARIA; pll/pll_core.v).
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -354,6 +354,7 @@ synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
 //   0x10000000  settings (interact.json)
 //   0x20000000  high score cartridge RAM (save slot 2, 2 KiB)
 //   0x30000000  SaveKey EEPROM RAM (save slot 3, 32 KiB)
+//   0x40000000  FA2 cartridge flash (save slot 8, 256 bytes)
 //   0xF8000000  APF command interface
 
 localparam [15:0] SLOT_CART = 16'h0100;
@@ -449,6 +450,11 @@ wire hsc_wr  = bridge_wr && hsc_sel;
 wire sk_sel = bridge_addr[31:24] == 8'h30;
 wire sk_wr  = bridge_wr && sk_sel;
 
+// FA2 cartridge flash (fa2.sav): 64 words of 32 bits at 0x40000000, same scheme.
+    wire    [31:0]  fa2_rd_latched;
+wire fa2_sel = bridge_addr[31:24] == 8'h40;
+wire fa2_wr  = bridge_wr && fa2_sel;
+
 // for bridge write data, we just broadcast it to all bus devices
 // for bridge read data, we have to mux it
 always @(*) begin
@@ -461,6 +467,9 @@ always @(*) begin
     end
     32'h30xxxxxx: begin
         bridge_rd_data <= sk_rd_latched;
+    end
+    32'h40xxxxxx: begin
+        bridge_rd_data <= fa2_rd_latched;
     end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
@@ -650,22 +659,30 @@ always @(posedge clk_74a) begin
     end
 end
 
-// Save slot size: 2 KiB, always - one shared hsc.sav for every cart (see
-// hsc_active in atari7800_pocket.sv).
+// Save slot sizes, constants: one shared file each for every cart. The HSC's
+// is 2 KiB, always (see hsc_active in atari7800_pocket.sv). dt_sel rotates
+// over the three save slots, one size field written per clk_74a.
     wire            hsc_active;
     reg             hsc_active_74a;
-    reg             dt_toggle = 1'b0;
+    reg     [1:0]   dt_sel = 2'd0;
 always @(posedge clk_74a) begin
     hsc_active_74a <= hsc_active;
     datatable_wren <= 1'b1;
-    dt_toggle      <= ~dt_toggle;
-    if (dt_toggle) begin
+    dt_sel         <= dt_sel == 2'd2 ? 2'd0 : dt_sel + 2'd1;
+    case (dt_sel)
+    2'd0: begin
         datatable_addr <= 10'd2 * 2 + 1;   // data slot index 2 (HSC), size field
         datatable_data <= hsc_active_74a ? 32'd2048 : 32'd0;
-    end else begin
+    end
+    2'd1: begin
         datatable_addr <= 10'd3 * 2 + 1;   // data slot index 3 (SaveKey), size field
         datatable_data <= 32'd32768;       // always, like the HSC: one shared file
     end
+    default: begin
+        datatable_addr <= 10'd8 * 2 + 1;   // data slot index 8 (FA2), size field
+        datatable_data <= 32'd256;         // always: one shared fa2.sav
+    end
+    endcase
 end
 
 // The loader runs on clk_sdram and holds each byte's write strobe for four
@@ -924,6 +941,11 @@ atari7800_pocket atari (
     .sk_bridge_rd   ( bridge_rd && sk_sel ),
     .sk_bridge_din  ( bridge_wr_data ),
     .sk_bridge_dout ( sk_rd_latched ),
+    .fa2_bridge_addr( bridge_addr[7:2] ),
+    .fa2_bridge_wr  ( fa2_wr ),
+    .fa2_bridge_rd  ( bridge_rd && fa2_sel ),
+    .fa2_bridge_din ( bridge_wr_data ),
+    .fa2_bridge_dout( fa2_rd_latched ),
 
     .SDRAM_A        ( dram_a ),
     .SDRAM_BA       ( dram_ba ),
@@ -1040,8 +1062,9 @@ assign video_hs   = vid_hs;
 // Audio
 //
 // The core's mix is 16 bit unsigned around a midpoint at clk_sys rate. It is
-// box filtered down to ~48 kHz (298 clk_sys samples per output), the DC
-// offset is removed, and the result goes to the I2S DAC.
+// box filtered down to ~55.9 kHz (256 clk_sys samples per output,
+// core/audio_filter.sv), the DC offset is removed, and the result goes to the
+// I2S DAC.
 ////////////////////////////////////////////////////////////////////////////////
 
     wire    [15:0]  aud_l_f, aud_r_f;

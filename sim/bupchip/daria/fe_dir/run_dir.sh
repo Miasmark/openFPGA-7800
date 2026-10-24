@@ -5,7 +5,8 @@
 # each image in mode A (upstream's ARM runs the calls) and judge it
 # (dircheck.py): 0 in every bad count of the front-end shadow, and every
 # coverage bin the test needs reached.
-#   ./run_dir.sh [TEST ...]          (default: every test in tests.py)
+#   ./run_dir.sh [TEST ...]          (default: every test in tests.py's
+#                                     TESTS; CORE_TESTS only by name)
 # Environment:
 #   FLAVOR   name of the build and its work directory (default s0):
 #            sim/work/bupchip/daria/fe_dir/<FLAVOR>/ holds img/, obj_fe/ and
@@ -45,7 +46,9 @@ fi
 python3 "$HERE/mkimg.py" "$W/img" "$@" > "$W/mkimg.log"
 cat "$W/mkimg.log"
 TESTS=("$@")
-[ ${#TESTS[@]} -gt 0 ] || mapfile -t TESTS < <(cd "$W/img" && ls *.meta | sed 's/\.meta$//')
+# by default the tests mkimg.py just built (tests.TESTS), not every .meta in
+# img/: an image built by name from tests.CORE_TESTS earlier is not one of them
+[ ${#TESTS[@]} -gt 0 ] || mapfile -t TESTS < <(awk '{print $1}' "$W/mkimg.log" | sort)
 
 # Build from scratch whenever any input changed (a stamp of their contents):
 # run_daria.sh's own check sees its patched copies as new on every call, and an

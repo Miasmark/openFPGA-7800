@@ -50,7 +50,10 @@ the input-dependent groups below that did not run for want of their input
                    pp_guards.py (a directive in an added comment, an
                    attribute in a comment, a .vhd and a .mif change, an extra
                    and a missing DARIA qsf line, an SDC code change, a
-                   removed translate_off/on pair, a new daria_ or
+                   removed translate_off/on pair, --qsf release's cases (a
+                   qsf line added or removed, a second SEED line, a code
+                   change in an SDC file other than daria_constraints.sdc,
+                   a FROM without the DARIA lines), a new daria_ or
                    bup_dbg_snap file with `define, `undef, `timescale or
                    left at `default_nettype none; and the changes it must
                    let through), hygiene.sh (a cartridge image, a PNG, a
@@ -186,6 +189,29 @@ def run_sim_cases(log, w):
         # a bench that exited non-zero in a piped case (its %Fatal line went
         # to grep): run_sim.sh's sim prints this line past the pipe
         "simulator_exit": sub1(r"^(-- border hidden:\n)", r"\g<1>SIMULATOR EXIT 1: ./obj/vtb +audf=0 +hide_border\n"),
+        # tb_vaxis5: a seed with mismatches, and the planted fault not caught
+        "vaxis5_mismatch": sub1(r"^(VAXIS5 seed 3 .* mismatches )0$", r"\g<1>7"),
+        "vaxis5_planted_missed": sub1(r"^(VAXIS5 planted fault .*: )caught, \d+ mismatches$", r"\g<1>caught, 0 mismatches"),
+        # tb_region: a trial with the wrong retunes, a planted variant not caught, the section gone
+        "region_retunes": sub1(r"^REGION daria A trials 1641 retunes 1:1641 ", "REGION daria A trials 1641 retunes 1:1608 3:33 "),
+        "region_planted_missed": sub1(r"^(REGION verdict rtl1: planted, )caught$", r"\g<1>NOT caught"),
+        # the sketch "caught" only by saving retunes: no back-to-back retune and daria_rgn exact
+        "region_sketch_no_hazard": sub1(r"^(REGION sketch C trials 49 retunes [\d: ]+ rgn_bad )\d+ b2b \d+$", r"\g<1>0 b2b 0"),
+        "region_missing": lambda t: re.sub(r"^-- the region asked of the PLL.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
+        # the FA2 save slot: the reload lost, a saved byte read back wrong,
+        # no save, and the section gone
+        "fa2_reload_lost": sub1(r"^(FA2 work RAM after the reload: )0( of 255)", r"\g<1>255\g<2>"),
+        "fa2_slot_differs": sub1(r"^(FA2 save slot read back \(APF read protocol\): )0( of 256)", r"\g<1>4\g<2>"),
+        "fa2_no_save": sub1(r"^(FA2 program: .*flash loads 2, saves )1(, slot RAM writes )256$", r"\g<1>0\g<2>0"),
+        "fa2_a78_overwrote": sub1(r"^(FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>"),
+        # the A78 taken for FA2: its save reached the slot (as before the
+        # wrapper's fa2_on gate: 255 of 256 bytes), or it was not taken for
+        # FA2 at all, so the run could not fail
+        "fa2_a78fa2_overwrote": sub1(r"^(FA2 image: 2600 mapper 25, .*saves 1, slot RAM writes )0(\n(?:.*\n)*?"
+                                     r"FA2 save slot after load, reset .*: )0( of 256)", r"\g<1>256\g<2>255\g<3>"),
+        "fa2_a78fa2_not_fa2": sub1(r"^(FA2 image: 2600 mapper )25(, cart_is_7800 1, tia_mode 0; flash loads 0, )saves 1",
+                                   r"\g<1>0\g<2>saves 0"),
+        "fa2_missing": lambda t: re.sub(r"^-- FA2 flash save slot.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)
@@ -551,6 +577,66 @@ def guard_cases(w):
         g("commit", "-q", "-m", name)
         expect(name, [pg, "--repo", d, "--from", "base", "--to", "HEAD", "--qsf", q], want)
         g("checkout", "-q", "-f", "base")
+    # --qsf release: from a commit that has the DARIA lines (and an MR line);
+    # only the SEED line and comments of ap_core.qsf may change, and
+    # daria_constraints.sdc, which only the DARIA build reads
+    mr = 'set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|x:y"\n'
+    rel_qsf = QSF + daria3 + mr
+    write(d, "src/fpga/ap_core.qsf", rel_qsf)
+    write(d, "src/fpga/core/daria_constraints.sdc", "# guard pair\nset_max_delay 6.0 -from a -to b\n")
+    g("add", "-A")
+    g("commit", "-q", "-m", "base_rel")
+    g("tag", "base_rel")
+    rel_cases = [
+        ("release: SEED, a qsf comment and daria_constraints.sdc's bounds", lambda: (
+            write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("SEED 1", "SEED 2").replace("# test project", "# seed 2 chosen")),
+            edit("src/fpga/core/daria_constraints.sdc", "6.0", "8.0")), True),
+        ("release: an SDC comment only", lambda: edit("src/fpga/core/core_constraints.sdc", "# clocks", "# the clocks"), True),
+        ("release: an extra qsf line", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf + mr.replace("x:y", "x:z")), False),
+        ("release: the MR line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3), False),
+        ("release: a DARIA qsf line removed", lambda: write(d, "src/fpga/ap_core.qsf", QSF + daria3.split("\n", 1)[1] + mr), False),
+        ("release: a second SEED line", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf + "set_global_assignment -name SEED 3\n"), False),
+        # a lost SEED line would ship Quartus' default seed, not P12's
+        ("release: the SEED line removed", lambda: write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("set_global_assignment -name SEED 1\n", "")),
+         False),
+        ("release: an SDC code change in core_constraints.sdc",
+         lambda: edit("src/fpga/core/core_constraints.sdc", "69.841", "69.000"), False),
+    ]
+    for name, fn, want in rel_cases:
+        g("checkout", "-q", "-f", "base_rel")
+        fn()
+        g("add", "-A")
+        g("commit", "-q", "-m", name)
+        expect(name, [pg, "--repo", d, "--from", "base_rel", "--to", "HEAD", "--qsf", "release"], want,
+               check=(lambda out, rc: "" if "expected exactly one SEED line" in out else "the SEED count is not named")
+               if "SEED line" in name and not want else None)
+        g("checkout", "-q", "-f", "base_rel")
+    # from base, which lacks the DARIA lines, the release rule must refuse; base..base
+    # leaves the qsf unchanged, so only the missing DARIA lines can fail it
+    expect("release: FROM without the DARIA lines", [pg, "--repo", d, "--from", "base", "--to", "base", "--qsf", "release"], False,
+           check=lambda out, rc: "" if "lacks the DARIA line" in out else "the missing DARIA lines are not named")
+    # step7_gates.sh's pp_guards gate picks the qsf mode itself: release when
+    # PP_GUARD_FROM's qsf has POCKET_DARIA too, daria when only the tree's has it
+    g("checkout", "-q", "-f", "base_rel")
+    write(d, "src/fpga/ap_core.qsf", rel_qsf.replace("SEED 1", "SEED 2"))
+    g("add", "-A")
+    g("commit", "-q", "-m", "seed 2")
+    for rel, src in (("sim/step7_gates.sh", os.path.join(SIM, "step7_gates.sh")), ("sim/tools/pp_guards.py", pg),
+                     ("sim/tools/pp_equiv.py", os.path.join(SIM, "tools", "pp_equiv.py"))):
+        os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+        shutil.copy2(src, os.path.join(d, rel))   # untracked: the guards read committed blobs only
+    env = {k: v for k, v in os.environ.items() if k not in ("SIM_LOCK", "PP_GUARD_FROM")}
+    for frm, mode, want in (("base_rel", "release", True), ("base", "daria", False)):
+        out = os.path.join(w, "gates_pp_guards_" + frm)
+        shutil.rmtree(out, ignore_errors=True)
+
+        def check(o, rc, out=out, mode=mode):
+            p = os.path.join(out, "pp_guards.log")
+            t = open(p).read() if os.path.exists(p) else ""
+            return "" if f"GUARD qsf {mode}:" in t else f"pp_guards.log does not show 'GUARD qsf {mode}'"
+        expect(f"step7_gates.sh --only pp_guards, PP_GUARD_FROM {frm}: --qsf {mode}",
+               ["bash", os.path.join(d, "sim", "step7_gates.sh"), "--out", out, "--only", "pp_guards"], want, py=False,
+               env=dict(env, PP_GUARD_FROM=frm, VERILATOR="true"), check=check)
 
 
 def hygiene_cases(w):
@@ -689,13 +775,13 @@ def pp_equiv_cases(w):
 
 
 # ---------------------------------------------------------------- synthetic R1/R2
-def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="unlocked", frames=False, cross=(), scheme=23,
+def synth(w, name, n=200, calls_per=2, mutate=None, late=(), status="locked", frames=False, cross=(), scheme=23,
           inputs="tb_daria's"):
     """A tb_daria-style run directory. frames=True also writes frames.csv
     (each frame's start on the t_req_sys clock); the first call of each frame
     in cross is requested 1,000 clk_sys before its frame ends, so that its
-    hold reaches into the next frame. The guard's status is unlocked, as at
-    VCO/19 (frame_gate.py's default --expect-guard); run.log says the paddle
+    hold reaches into the next frame. The guard's status is locked, as at
+    VCO/18 (frame_gate.py's default --expect-guard); run.log says the paddle
     inputs were tb_daria's (bench parity) unless inputs is None."""
     rnd = random.Random(1)
     d = os.path.join(w, name)
@@ -743,21 +829,25 @@ DIV_SITES = [   # (file, the default's text at VCO/19, the same at VCO/18)
     ("sim/step7_gates.sh", "${FRAMES_GUARD:-unlocked}", "${FRAMES_GUARD:-locked}"),
     ("sim/step7_gates.sh", "\tDARIA=1 ARM19=1 PSRAM_CS=", "\tDARIA=1 ARM38=1 PSRAM_CS="),
     ("sim/bupchip/quartus_probe/step7/step7_report.tcl", "fixb 1 div 19}", "fixb 1 div 18}"),
-    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV=19'),
-    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-18}"'),
+]
+# sites that follow the tree's divider: the planted fault is a fixed number,
+# the other divider ({o})
+DIV_FOLLOW = [
+    ("sim/bupchip/quartus_probe/step7/run_step7.sh", '[ -n "$DIV" ] || DIV="$TREE_DIV"', '[ -n "$DIV" ] || DIV={o}'),
+    ("sim/bupchip/daria/run_daria.sh", 'D_DIV="${D_DIV:-$TREE_DIV}"', 'D_DIV="${D_DIV:-{o}}"'),
 ]
 
 
 def div_cases(w):
     """div_check.py on a scratch copy of the files it reads (the tree's, at
-    VCO/19): it passes; each site moved to the other divider fails it; and
-    pll_core.v's counter 3 at VCO/18 (step7_prep.py's own C3 table) with
-    the benches left at 19 fails it."""
+    VCO/18 or VCO/19): it passes; each site moved to the other divider fails
+    it; and pll_core.v's counter 3 at the other divider (step7_prep.py's own
+    C3 table) with the benches left at the tree's fails it."""
     dc = os.path.join(HERE, "div_check.py")
     repo = os.path.dirname(SIM)
     d = os.path.join(w, "divtree")
     print("div_check.py on a copy of the tree's divider sites:")
-    files = sorted({s[0] for s in DIV_SITES} | {"src/fpga/core/pll/pll_core.v",
+    files = sorted({s[0] for s in DIV_SITES + DIV_FOLLOW} | {"src/fpga/core/pll/pll_core.v",
                                                   "sim/bupchip/quartus_probe/step7/step7_prep.py"})
 
     def fresh():
@@ -768,24 +858,28 @@ def div_cases(w):
     fresh()
     tree = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
                            os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
-    if tree != "19":
-        print(f"  (the tree's divider is {tree or 'unreadable'}, not 19: the planted cases assume 19; skipped)")
-        expect("div_check on the tree's copy", [dc, "--repo", d], True)
+    if tree not in ("18", "19"):
+        print(f"  WRONG the tree's divider is {tree or 'unreadable'}, not 18 or 19: the planted cases need one of them")
+        results.append(False)
         return
-    expect("div_check on the tree's copy", [dc, "--repo", d], True)
-    for f, at19, at18 in DIV_SITES:
+    div = int(tree)
+    other = 37 - div
+    expect(f"div_check on the tree's copy (VCO/{div})", [dc, "--repo", d], True)
+    sites = [(f, a19 if div == 19 else a18, a18 if div == 19 else a19) for f, a19, a18 in DIV_SITES]
+    sites += [(f, good, bad.replace("{o}", str(other))) for f, good, bad in DIV_FOLLOW]
+    for f, here, there in sites:
         fresh()
         p = os.path.join(d, f)
         t = open(p).read()
-        if t.count(at19) != 1:
-            print(f"  WRONG the site's text in {f} is not there once: {at19!r}")
+        if t.count(here) != 1:
+            print(f"  WRONG the site's text in {f} is not there once: {here!r}")
             results.append(False)
             continue
-        open(p, "w").write(t.replace(at19, at18))
-        expect(f"div_check with {f} at the other divider", [dc, "--repo", d], False)
-    # pll_core.v moved to C3 = 18 (step7_prep.py's table of ip-generate's
+        open(p, "w").write(t.replace(here, there))
+        expect(f"div_check with {f} at VCO/{other}", [dc, "--repo", d], False)
+    # pll_core.v moved to the other C3 (step7_prep.py's table of ip-generate's
     # values, read from its source: the script runs at import), the benches
-    # left at 19
+    # left at the tree's
     fresh()
     import ast
     src = open(os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py")).read()
@@ -797,18 +891,19 @@ def div_cases(w):
     n, out = 0, []
     for line in open(p).read().split("\n"):
         m = re.match(r"^\s*\.(\w+)\((.*)\),?\s*$", line)
-        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][19]]:
-            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][18]], 1)
+        if m and m.group(1) in tab.get("C3_VALUES", {}) and m.group(2) == tab["C3_VALUES"][m.group(1)][tab["C3_COL"][div]] \
+                and m.group(2) != tab["C3_VALUES"][m.group(1)][tab["C3_COL"][other]]:
+            line = line.replace(m.group(2), tab["C3_VALUES"][m.group(1)][tab["C3_COL"][other]], 1)
             n += 1
         out.append(line)
     open(p, "w").write("\n".join(out))
     got = subprocess.run([sys.executable, os.path.join(d, "sim/bupchip/quartus_probe/step7/step7_prep.py"),
                           os.path.join(d, "src/fpga"), "--tree-div"], capture_output=True, text=True).stdout.strip()
-    if got != "18":
-        print(f"  WRONG pll_core.v's copy did not move to C3 = 18 ({n} lines edited; --tree-div {got or 'failed'})")
+    if got != str(other):
+        print(f"  WRONG pll_core.v's copy did not move to C3 = {other} ({n} lines edited; --tree-div {got or 'failed'})")
         results.append(False)
     else:
-        expect(f"div_check with pll_core.v at C3 = 18 ({n} lines), the benches at 19", [dc, "--repo", d], False)
+        expect(f"div_check with pll_core.v at C3 = {other} ({n} lines), the benches at {div}", [dc, "--repo", d], False)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -1110,8 +1205,8 @@ def gate_cases(w):
     lines = open(cp).read().splitlines()
     open(cp, "w").write("".join(",".join(l.split(",")[:7]) + "\n" for l in lines))
     expect("v1_calls_without_thumb_and_arm", [fg, ref, noi, "--frames", "200"], False)
-    expect("v1_status_guard_locked_expected", [fg, synth(w, "ref_lk", status="locked"), synth(w, "v1_lk", status="locked"),
-                                               "--frames", "200", "--expect-guard", "locked"], True)
+    expect("v1_status_guard_unlocked_expected", [fg, synth(w, "ref_ul", status="unlocked"), synth(w, "v1_ul", status="unlocked"),
+                                                 "--frames", "200", "--expect-guard", "unlocked"], True)
 
     # ---- the strict rule (--rule shift): riot and audio equal or release_shift
     S("release_shift_riot_3_frames", m_shift(50, 52), want=True)
@@ -1187,7 +1282,7 @@ def gate_cases(w):
         R("status_halt", lambda fp, c, s, st: st.__setitem__("halts", 1), want=False)
         R("status_psram", lambda fp, c, s, st: st.__setitem__("psram_viol", 2), want=False)
         R("status_unlock", lambda fp, c, s, st: st.__setitem__("unlocks", 1), want=False)
-        R("status_guard_locked", lambda fp, c, s, st: st.__setitem__("guard", "locked"), want=False)
+        R("status_guard_unlocked", lambda fp, c, s, st: st.__setitem__("guard", "unlocked"), want=False)
     # P27: a reference whose load was not seen (no calls)
     void = synth(w, "ref_void", calls_per=0)
     expect("reference_without_calls", [fg, void, synth(w, "cand_void", calls_per=0), "--frames", "200"], False)
@@ -1237,6 +1332,7 @@ def gate_cases(w):
       synth(w, "auto_f4_riot", calls_per=0, scheme=6, mutate=lambda fp, c, s, st: setcol(fp, 90, "riot")), False)
     A("auto_non_arm_with_calls", nref, synth(w, "auto_f4_calls", calls_per=1, scheme=6), False)
     # Spiders: overrun frames 150-165 excused when they are the late frames on both sides
+    # (--overrun late, the rule up to 2.2.1; the --overrun ontime cases follow these)
     late = tuple(range(150, 166))
     sref = synth(w, "spiders_ref", late=late)
 
@@ -1260,28 +1356,60 @@ def gate_cases(w):
     for rule in ([], ["--rule", "shift"]):
         tag = "" if not rule else "shift: "
         expect(tag + "spiders_excused", [fg, sref, synth(w, "spiders_ok", mutate=sp(), late=late), "--frames", "200",
-                                         "--excuse", "150-165"] + rule, True)
+                                         "--excuse", "150-165", "--overrun", "late"] + rule, True)
         expect(tag + "spiders_differs_after", [fg, sref, synth(w, "spiders_bad", mutate=sp(True), late=late), "--frames",
-                                               "200", "--excuse", "150-165"] + rule, False)
+                                               "200", "--excuse", "150-165", "--overrun", "late"] + rule, False)
         expect(tag + "spiders_not_the_late_frames", [fg, ref, synth(w, "spiders_nolate", mutate=sp()), "--frames", "200",
-                                                     "--excuse", "150-165"] + rule, False)
+                                                     "--excuse", "150-165", "--overrun", "late"] + rule, False)
     expect("v1_spiders_audio_differs_after (counted)",
            [fg, sref, synth(w, "spiders_aud", mutate=sp(audio_after=True), late=late), "--frames", "200",
-            "--excuse", "150-165"], True)
+            "--excuse", "150-165", "--overrun", "late"], True)
     expect("shift: spiders_audio_differs_after",
            [fg, sref, synth(w, "spiders_aud_s", mutate=sp(audio_after=True), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], False)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], False)
     # a release_shift run must settle on truly equal frames: the excused
     # overrun frames (riot differing there too) do not count
     expect("shift: spiders_release_shift_3_frames_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_near", mutate=sp(riot_run=(145, 147)), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], False)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], False)
     expect("shift: spiders_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165", "--rule", "shift"], True)
+            "--excuse", "150-165", "--overrun", "late", "--rule", "shift"], True)
+    # --overrun ontime (the default; step-10 plan decision 4): REF overruns in
+    # 150-165, CAND is on time there (no late call, every frame as long as frame 149)
+    def spo(long_frame=False, riot_after=False):
+        def m(fp, c, s, st):
+            for f in range(150, 166):
+                setcol(fp, f, "video")
+            if long_frame:
+                setcol(fp, 157, "len_sys")
+            if riot_after:
+                setcol(fp, 170, "riot")
+        return m
+    for rule in ([], ["--rule", "shift"]):
+        tag = "" if not rule else "shift: "
+        expect(tag + "spiders_ontime", [fg, sref, synth(w, "spiders_on", mutate=spo()), "--frames", "200",
+                                        "--excuse", "150-165", "--overrun", "ontime"] + rule, True)
+        expect(tag + "spiders_ontime_by_default (no --overrun)", [fg, sref, synth(w, "spiders_on_d", mutate=spo()),
+                                                                  "--frames", "200", "--excuse", "150-165"] + rule, True)
+        expect(tag + "spiders_ontime_but_late", [fg, sref, synth(w, "spiders_on_late", mutate=sp(), late=late),
+                                                 "--frames", "200", "--excuse", "150-165", "--overrun", "ontime"] + rule, False)
+        expect(tag + "spiders_ontime_one_long_frame", [fg, sref, synth(w, "spiders_on_long", mutate=spo(long_frame=True)),
+                                                       "--frames", "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_ontime_differs_after", [fg, sref, synth(w, "spiders_on_after", mutate=spo(riot_after=True)),
+                                                      "--frames", "200", "--excuse", "150-165"] + rule, False)
+        expect(tag + "spiders_ontime_ref_not_late", [fg, ref, synth(w, "spiders_on_noref", mutate=spo()),
+                                                     "--frames", "200", "--excuse", "150-165"] + rule, False)
+        # CAND without slack.csv: its late calls cannot be checked, so the frames are not
+        # excused (with --no-status the STATUS line does not stand in for it)
+        noslack = synth(w, "spiders_on_noslack", mutate=spo())
+        os.remove(os.path.join(noslack, "slack.csv"))
+        expect(tag + "spiders_ontime_cand_without_slack", [fg, sref, noslack, "--frames", "200", "--excuse", "150-165",
+                                                           "--no-status"] + rule, False,
+               check=lambda out, rc: "" if "CAND has no slack.csv" in out else "the missing slack.csv is not named")
     expect("v1_spiders_riot_release_shift_well_before_the_overrun",
            [fg, sref, synth(w, "spiders_rs_far_v1", mutate=sp(riot_run=(120, 122)), late=late), "--frames", "200",
-            "--excuse", "150-165"], False)
+            "--excuse", "150-165", "--overrun", "late"], False)
 
 
 def main():

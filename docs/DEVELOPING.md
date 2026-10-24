@@ -11,11 +11,16 @@ Related documents:
   Quartus in Docker, simulators, where data lives, every bench and its
   command, working conventions and pitfalls).
 - [AGENT_RUNS.md](AGENT_RUNS.md): running long multi-agent work here
-  (poll at most every 4 minutes, restarts and resuming, simulation slots,
+  (no more than 4 minutes between a subagent's calls, restarts and resuming, simulation slots,
   disk).
 - [IMPROVEMENTS.md](IMPROVEMENTS.md): improvements found but left for a
-  later release (a guard that works at ÷19, S3, a cartridge EEPROM, the
-  `src/` clean-ups after 2.2.1), each with what it would fix and its cost.
+  later release (a guard that works at ÷19 if ÷18 is ever left, S3 as a
+  reserve, a cartridge EEPROM, the two `src/` comment clean-ups left after
+  2.2.1), each with what it would fix and its cost, and the items done since.
+- [HARMONY_MODEL.md](HARMONY_MODEL.md): the bench's model of a real Harmony
+  cartridge's chip (LPC2103), a second timing reference for the 2600 ARM
+  calls beside MiSTer's core: the settings per game, its limits, and the
+  owner's rule for using it.
 - [README.md](../README.md): features, installing, credits, test results.
 - [src/fpga/mister/POCKET_CHANGES.md](../src/fpga/mister/POCKET_CHANGES.md):
   every change made to the vendored MiSTer sources, and how to update them.
@@ -47,7 +52,7 @@ Related documents:
 | `NO_ARM_MAPPER` | Upstream's: leaves out the ARM7TDMI (2600 DPC+/CDF), which doesn't fit. With `POCKET_DARIA` those cartridges run on DARIA instead. |
 | `NO_BUPCHIP` | Leaves out upstream's BupChip player (an ARM7TDMI with its assets in DDR3). Doesn't fit; see [BUPCHIP.md](BUPCHIP.md). |
 | `POCKET_BUPCHIP` | The Pocket's own BupChip, ARIA (`core/bupchip/`, [BUPCHIP_CORE.md](BUPCHIP_CORE.md)), in its place: `top.sv` exports the `$8007` command and takes the audio back; the firmware comes from the `bupchip.bin` data slot, the music from the cartridge file's ARSC block, kept in PSRAM `cram0`. Needs `NO_BUPCHIP`. |
-| `POCKET_DARIA` | DARIA ([DARIA_CORE.md](DARIA_CORE.md)), on since 2.2.1: the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+) on the BupChip's CPU extended with Thumb, at VCO/19 (36.17 MHz), with its own front end (`daria_fe`) in place of upstream's left-out one. Its own `QIP_FILE core/daria.qip` and `SDC_FILE core/daria_constraints.sdc` lines follow in `ap_core.qsf` ("Timing constraints"). Needs `POCKET_BUPCHIP` and `NO_ARM_MAPPER`. |
+| `POCKET_DARIA` | DARIA ([DARIA_CORE.md](DARIA_CORE.md)), on since 2.2.1: the 2600 ARM cartridges (DPC+, CDF, CDFJ, CDFJ+) on the BupChip's CPU extended with Thumb, at VCO/18 (38.18 MHz; VCO/19, 36.17 MHz, in 2.2.1), with its own front end (`daria_fe`) in place of upstream's left-out one. Its own `QIP_FILE core/daria.qip` and `SDC_FILE core/daria_constraints.sdc` lines follow in `ap_core.qsf` ("Timing constraints"). Needs `POCKET_BUPCHIP` and `NO_ARM_MAPPER`. |
 | `BUP_DEBUG` | Hardware test builds only: the BupChip's status word, shadow FIFO counters, and its status cells over the picture's top-left corner while a Souper cartridge runs (`core/bupchip/bup_status_osd.sv`). Off in releases. |
 | `NO_DDRAM` | Leaves out the DDR3 bridge. The Pocket has no DDR3. |
 | `EXTERNAL_FIRMWARE` | HSC firmware and Supercharger BIOS loaded from files, not built in. |
@@ -85,9 +90,9 @@ docker run --rm -v "$PWD:/build" -w /build/src/fpga raetro/quartus:21.1 \
 ```
 
 After every build, check `src/fpga/output_files/ap_core.sta.summary`. All
-setup and hold slacks must be positive (in the DARIA build, one setup path
-aside: the front end's guard pair, which at ÷19 is reported, not gated; see
-"Regenerate the PLL"). A negative slack with a PLL clock
+setup and hold slacks must be positive (in the DARIA build at ÷19, the
+fallback divider, one setup path aside: the front end's guard pair, which
+there is reported, not gated; see "Regenerate the PLL"). A negative slack with a PLL clock
 name you don't recognise usually means the constraints no longer match the
 clock names (see "Timing constraints").
 
@@ -115,11 +120,12 @@ BUPCHIP=0 WORK=sim/work_nobup sim/run_sim.sh   # without the Pocket BupChip, as 
 `run_sim.sh` builds the same macros as the qsf, the BupChip
 (`POCKET_BUPCHIP`, `BUP_DEBUG`) and DARIA (`POCKET_DARIA`) included, and
 puts a PSRAM model (`sim/bupchip/s4/psram_model.sv`) on `cram0`. The
-testbenches run `clk_arm` as the PLL does: at VCO/19 (36.17 MHz) on its
-lattice with `clk_sys` in the DARIA build (`tb_load.sv`'s `arm_div`, 19 by
+testbenches run `clk_arm` as the PLL does: at VCO/18 (38.18 MHz) on its
+lattice with `clk_sys` in the DARIA build (`tb_load.sv`'s `arm_div`, 18 by
 default), and at 2 x `clk_sys` without DARIA. `DARIA=0` or `DARIA=1`
-overrides the qsf's setting, and `ARM_DIV=18` runs the DARIA build at
-VCO/18 (38.18 MHz), the divider before 2026-10-12. The DARIA build adds a
+overrides the qsf's setting, and `ARM_DIV=19` runs the DARIA build at
+VCO/19 (36.17 MHz), the fallback divider (2.2.1's, from 2026-10-12 until
+the L1W+L3 CPU). The DARIA build adds a
 game-free DARIA section: three synthetic ARM images in the whole core.
 With the user's firmware at `src/fpga/mister/rtl/bupchip.hex` (gitignored; [BUPCHIP.md](BUPCHIP.md)) it also runs the BupChip end to end in
 the whole core: the firmware through its data slot after the cartridge, as
@@ -141,6 +147,15 @@ become `logic`), builds two testbenches, and runs them:
 - `tb_load`: loads files through the real APF data loader. This is the
   testbench to use for anything cart-related (and the BupChip's slot).
 - `tb_pll_region`, `tb_audio_filter`, `tb_virtual_axis`: unit tests.
+- `tb_vaxis5` (`run_vaxis5.sh`): `virtual_axis5.sv`, the five axes the core
+  builds as one time-shared engine, against five `virtual_axis.sv` whose ticks
+  are delayed 0-4 clocks as the engine staggers them, on every clock of four
+  random-stimulus seeds (4 x 10^7 clocks), and a planted fault it must catch.
+- `tb_region` (`run_region.sh`): the wrapper's region logic (`region_pll`
+  and, with DARIA, `daria_rgn`), cut out of `atari7800_pocket.sv` as the
+  tree has it by `region_unit.py`, with `pll_region.v` in the load sequences
+  of RTL-1 and RTL-2 (`docs/IMPROVEMENTS.md`), on both builds, and four
+  planted variants it must catch (2.2.1's logic among them).
 
 What the sim does **not** model:
 
@@ -168,6 +183,8 @@ Something that fails only on hardware is most likely in one of those.
 | `save=FILE` | Preload a 2 KiB `hsc.sav`, check it survives |
 | `sk_on`, `sk_auto` | SaveKey setting (default Off) |
 | `sksave=FILE`, `skcheck` | Preload/check the SaveKey image |
+| `fa2save=FILE`, `fa2expect=FILE` | Preload a 256-byte `fa2.sav`; check what the slot holds at the end (default: the preloaded file, or blank $FF). Without `fa2prog` the `FA2 image:` line also gives the 2600 mapper, the mode and the FA2 port's copies (`fa2_test.py a78` writes an A78 taken for FA2) |
+| `fa2prog` | For `fa2_test.py`'s FA2 image: wait for its load, save and reload through the FA2 port, then check the work RAM and the slot |
 | `pokeyirq` | POKEY IRQ setting on |
 | `pokeylog` | Every POKEY write to `pokey_writes.txt` |
 | `i2ctrace`, `i2craw_from/_to=MS` | Decode the SaveKey I2C bus; dump raw lines |
@@ -186,32 +203,29 @@ cd sim/work && ./obj_load/vtb +image=input_test.a26 +inputtest +port1=2 +port2=2
 ```
 
 Firmware files and commercial ROMs are never stored in this repository.
-`extra_tests.sh` builds its carts from 7800basic samples, and fetches
-MiSTer's firmware images from GitHub at test time.
+`extra_tests.sh` builds its carts from 7800basic samples (dasm and
+7800basic at the commits it pins), and fetches MiSTer's firmware images
+from GitHub at test time.
 
 ## Recipes
 
 ### Update the MiSTer core
 
-Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`, but re-apply the
-Pocket changes to all eleven modified upstream files: `top.sv`, `cart.sv`,
-`cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`,
-`Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v` and
-`Pokey/pokey_adapter.sv`. POCKET_CHANGES.md's own summary counts eight and
-its "Updating" list names six, which would drop the TIA window fix, the
-SRAM frame port, the memory-editor removal and the POKEY write hold; its
-sections describe all eleven. It is under `src/`, which stays as verified
-for 2.2.1, so it is corrected after 2.2.1
-([daria_step7/record.md](daria_step7/record.md), "After 2.2.1: `src/`
-clean-ups"). Then:
+Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`: it re-applies
+the Pocket changes to all thirteen modified upstream files (`top.sv`,
+`cart.sv`, `cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`,
+`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`,
+`Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`). Then:
 
 1. Add any new upstream source files to `core/core.qip` **and** `sim/run_sim.sh`.
 2. Run `sim/run_sim.sh` and `sim/extra_tests.sh`. `extra_tests.sh` catches
    the holey DMA regression.
 3. Build, and check timing and resource use (see "Resource budget").
 4. Check `rtl/Pokey/pokey_adapter.sv` still holds the CPU's write through
-   phase 2 and halves the level (POCKET_CHANGES.md): an upstream update to
-   that file would drop both.
+   phase 2, halves the level and sets `READ_WHOLE_CYCLE`, and that
+   `pokey_bus.sv` and `pokey.sv` still have that parameter (the read fix of
+   2.2.2, POCKET_CHANGES.md): an upstream update to these files would drop
+   them.
 5. Check any new file's license header and update THIRD_PARTY_NOTICES.md.
 
 ### Add a menu setting
@@ -283,8 +297,9 @@ port has already had:
    reads the size before it writes the settings, so a size that depends on a
    setting is wrong when it matters. A size of 0 can make it drop or
    truncate the file.
-3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey; the
-   next is `0x40000000`) and add it to the `bridge_rd_data` mux.
+3. Give it its own bridge region (`0x20000000` HSC, `0x30000000` SaveKey,
+   `0x40000000` FA2; the next is `0x50000000`) and add it to the
+   `bridge_rd_data` mux.
 4. Decide what a new, blank file should hold. The FPGA's RAM powers up as
    zeros. A real SaveKey is blank as `$FF`, so `save_ram_dp` has a `BLANK`
    parameter. A zero-filled SaveKey broke Triple Punch.
@@ -298,11 +313,11 @@ port has already had:
 `src/fpga/core/pll/` is generated. Don't edit the parameter list by hand.
 The tool writes a scratch file, never the tree's `pll_core.v`, which holds
 two settings (below). From the repository root, for the `POCKET_DARIA`
-setting, C3 = 19 (`sim/work/` is not tracked):
+setting, C3 = 18 (`sim/work/` is not tracked):
 
 ```sh
-mkdir -p sim/work/pll/c19
-docker run --rm -v "$PWD/sim/work/pll/c19:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
+mkdir -p sim/work/pll/c18
+docker run --rm -v "$PWD/sim/work/pll/c18:/out" raetro/quartus:21.1 bash -c 'cd /tmp &&
  ip-generate --remove-qsys-generate-warning --project-directory=/tmp --output-directory=/tmp/pll_core \
   --file-set=QUARTUS_SYNTH --component-name=altera_pll --output-name=pll_core \
   --system-info=DEVICE_FAMILY="Cyclone V" --system-info=DEVICE=5CEBA4F23C8 --system-info=DEVICE_SPEEDGRADE=8_H6 \
@@ -312,53 +327,59 @@ docker run --rm -v "$PWD/sim/work/pll/c19:/out" raetro/quartus:21.1 bash -c 'cd 
   --component-parameter=gui_en_reconf=true --component-parameter=gui_number_of_clocks=4 \
   --component-parameter=gui_output_clock_frequency0=14.318181 --component-parameter=gui_output_clock_frequency1=57.272727 \
   --component-parameter=gui_output_clock_frequency2=14.318181 --component-parameter=gui_ps_units2=degrees \
-  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=36.172249 \
+  --component-parameter=gui_phase_shift_deg2=90.0 --component-parameter=gui_output_clock_frequency3=38.181818 \
   --component-parameter=gui_en_adv_params=true \
   --component-parameter=gui_multiply_factor=9 --component-parameter=gui_frac_multiply_factor=1100363522 \
   --component-parameter=gui_divide_factor_n=1 --component-parameter=gui_divide_factor_c0=48 \
   --component-parameter=gui_divide_factor_c1=12 --component-parameter=gui_divide_factor_c2=48 \
-  --component-parameter=gui_divide_factor_c3=19 \
+  --component-parameter=gui_divide_factor_c3=18 \
   --component-parameter=gui_pll_auto_reset=Off &&
  cp /tmp/pll_core/pll_core.v /out/'
 ```
 
-`pll_core.v` holds two settings, selected by `ifdef POCKET_DARIA`: C3 = 19
-(VCO/19, 36.172249 MHz) for DARIA, and C3 = 24 (28.64 MHz, 2 × `clk_sys`)
+`pll_core.v` holds two settings, selected by `ifdef POCKET_DARIA`: C3 = 18
+(VCO/18, 38.181818 MHz) for DARIA, and C3 = 24 (28.64 MHz, 2 × `clk_sys`)
 otherwise. Each is the tool's output for its C3; only the selection is by
-hand. ÷19 is DARIA's divider since 2026-10-12: at C3 = 18 (38.18 MHz)
-`clk_arm` missed setup on one of three seeds, with or without fitter
-padding ([daria_step7/plan.md](daria_step7/plan.md) 5.2). To regenerate,
-run the command once as above and once with `gui_divide_factor_c3=24` and
+hand. ÷18 is DARIA's divider again with the L1W+L3 CPU, which meets
+`clk_arm`'s setup there on every seed fitted
+([daria_step10/plan.md](daria_step10/plan.md) 3.1, decision 3); 2.2.1
+shipped ÷19, because its CPU missed setup at ÷18 on one of three seeds
+([daria_step7/plan.md](daria_step7/plan.md) 5.2). To regenerate, run the
+command once as above and once with `gui_divide_factor_c3=24` and
 `gui_output_clock_frequency3=28.636363` into `sim/work/pll/c24`. Diff each
-against the tree's file. At C3 = 19 eight lines differ from C3 = 24's:
-counter 3's (`output_clock_frequency3`, `c_cnt_hi_div3(10)`,
-`c_cnt_lo_div3(9)`, `c_cnt_odd_div_duty_en3("true")`) and four display
-strings, which the tool prints slightly lower for the same M, N, K and
-C0-C2: `output_clock_frequency0` and `2`, 14.318180 against 14.318181 MHz;
-`output_clock_frequency1`, 57.272722 against 57.272724 MHz; and
-`pll_output_clk_frequency`, the VCO, 687.272644 against 687.272687 MHz.
-(`pll_core.v`'s header comment calls this "one digit lower", which holds
-for C0 and C2 alone; it is corrected after 2.2.1.)
-Copy those lines into the matching `ifdef` branch, the C3 = 19 output under
-`POCKET_DARIA` and the C3 = 24 output in its `else`; the rest of the tree's
-file, the selection and the explanatory header comment included, stays as
-it is. Copying a whole generated file over it would drop the selection,
-and a build without DARIA would then run `clk_arm` at the other setting.
+against the tree's file. At C3 = 18 only counter 3's lines differ from
+C3 = 24's (`output_clock_frequency3`, `c_cnt_hi_div3(9)`,
+`c_cnt_lo_div3(9)`), so the file selects those alone: copy them into the
+matching `ifdef` branch, the C3 = 18 output under `POCKET_DARIA` and the
+C3 = 24 output in its `else`; the rest of the tree's file, the selection
+and the explanatory header comment included, stays as it is. Copying a
+whole generated file over it would drop the selection, and a build without
+DARIA would then run `clk_arm` at the other setting.
 `sim/bupchip/quartus_probe/step7/step7_prep.py --tree-div` reads which
 output the `POCKET_DARIA` view is (18, 19 or 24, from all eight values),
 and the step-7 gate `divider` (`sim/check/div_check.py`) holds every
 bench's and gate's default divider to it. With advanced parameters on, the
 tool takes the counters from the `gui_divide_factor_*` values; the
-frequency strings it writes are computed from them. C3 = 18 (38.181818 MHz)
-is generated the same way and differs from C3 = 24 in counter 3's lines
-alone.
+frequency strings it writes are computed from them.
+The ÷19 fallback (C3 = 19, `gui_output_clock_frequency3=36.172249`) is
+generated the same way. Its counter 3 is `c_cnt_hi_div3(10)`,
+`c_cnt_lo_div3(9)` and `c_cnt_odd_div_duty_en3("true")`, and the tool then
+also prints four display strings slightly lower for the same M, N, K and
+C0-C2 (`output_clock_frequency0` and `2`, 14.318180 against 14.318181 MHz;
+`output_clock_frequency1`, 57.272722 against 57.272724 MHz;
+`pll_output_clk_frequency`, the VCO, 687.272644 against 687.272687 MHz),
+which go under `POCKET_DARIA` with counter 3 (2.2.1's file, `b177e64`).
+The ÷19 fallback tree, the L1W+L3 CPU and MR at ÷19 (what a revert of the
+commit that moved DARIA to VCO/18 leaves), has no fit yet: such a revert
+is followed by three ÷19 fits, seeds 1-3, before it ships
+([daria_step10/plan.md](daria_step10/plan.md) 3.1, "If ÷18 fails on silicon").
 The reconfiguration controller (`pll/pll_cfg/`) comes from
 `--component-name=altera_pll_reconfig --output-name=pll_cfg`.
 
 The PLL has four outputs: `clk_sys` (C0 = 48), `clk_sdram` (C1 = 12),
 `clk_sys_90` (C2 = 48, 90 degrees) and `clk_arm`, the BupChip's CPU
-([BUPCHIP_CORE.md](BUPCHIP_CORE.md), "Clocking"): C3 = 19 (VCO/19,
-36.17 MHz) with `POCKET_DARIA` ([DARIA_CORE.md](DARIA_CORE.md), decision 7),
+([BUPCHIP_CORE.md](BUPCHIP_CORE.md), "Clocking"): C3 = 18 (VCO/18,
+38.18 MHz) with `POCKET_DARIA` ([DARIA_CORE.md](DARIA_CORE.md), decision 7),
 otherwise C3 = 24 (2 × `clk_sys`, 28.636 MHz, ARIA). The clock plan has four
 rules:
 
@@ -376,44 +397,42 @@ rules:
   Adding or changing a C counter alone (as C3 was added) leaves M, N and
   both values as they are.
 - `clk_arm` comes from the same VCO, so every BupChip crossing to and from
-  `clk_sys` is timed. At C3 = 24 its edges are `clk_sys`'s; at C3 = 19 they
-  meet every 19 `clk_sys` (48 `clk_arm`; at C3 = 18 every 3 `clk_sys`), and
+  `clk_sys` is timed. At C3 = 24 its edges are `clk_sys`'s; at C3 = 18 they
+  meet every 3 `clk_sys` (8 `clk_arm`; at C3 = 19 every 19 `clk_sys`), and
   every crossing is a synchroniser with held data, bounded at ±20 ns in
   `core/daria_constraints.sdc`. Its 48 kHz pop runs from `clk_74a`.
   `psram.sv`'s `CLOCK_SPEED` is 50.0 under `POCKET_DARIA` and 28.636364
   otherwise: it sets the controller's read and write state sequence, and
   50.0 adds a clock after `oe_n` falls ([DARIA_CORE.md](DARIA_CORE.md),
   7.4); it is the value for both C3 = 18 and 19. A retune scales `clk_arm`
-  with the rest (in PAL, 28.375 MHz at C3 = 24 or 35.842 MHz at C3 = 19)
+  with the rest (in PAL, 28.375 MHz at C3 = 24 or 37.834 MHz at C3 = 18)
   and holds the BupChip. `pll_region.v` writes only the fraction and the
   start register, so C3 is kept.
-- Two DARIA-only fitter settings come with C3 = 19, both for daria_fe's
-  shared-edge guard pair `u_guard|pd_tog` → `pd_rx`, which the Timing
-  Analyzer holds to 6 ns setup and 1 ns hold
-  ([daria_fe/design.md](daria_fe/design.md) 8.2-8.3). `core/daria_sync.tcl`
-  ends with `ROUTER_REGISTER_DUPLICATION OFF`: the router copied the pair's
-  registers for routability in 8 of 12 step-7 fits, which breaks the single
-  path the guard's checks need, and Quartus 21.1 takes the router's
-  duplication settings only globally (a per-instance form stops the
-  compile). It applies to DARIA builds only, since `daria.qip` sources the
-  file. And `core/daria_constraints.sdc`'s fitter-only block asks the
-  fitter for 5.5 ns on the pair (a `set_max_delay` read only by
-  `quartus_fit`), 0.5 ns under the 6 ns that the Timing Analyzer checks:
-  without it one of three ÷19 seeds missed the window by 0.109 ns, through
-  clock skew. The rung does not close the window at ÷19. On the shipping
-  tree the fitter reached 5.5 ns on none of the six fits that had it, and
-  seed 3 still misses 6 ns, by 0.046 ns at slow 85 °C (Q5 seed 3: 0.060
-  ns). The window there is set by the clock skew between corners and the
-  1 ns hold bound, not by placement. At ÷19 the guard cannot lock whatever
-  this path's delay, so the window guards no function, and the step-7
-  checks report the pair's setup slack without gating on it
+- Two DARIA-only fitter settings go with daria_fe's shared-edge guard
+  pair `u_guard|pd_tog` → `pd_rx`, which the Timing Analyzer holds to
+  [0.5, 8.0] ns (G1: [daria_step10/plan.md](daria_step10/plan.md)
+  section 10; [daria_fe/design.md](daria_fe/design.md) 8.2-8.3; 2.2.1 had
+  [1, 6] ns). `core/daria_sync.tcl` ends with
+  `ROUTER_REGISTER_DUPLICATION OFF`: the router copied the pair's registers
+  for routability in 8 of 12 step-7 fits, which breaks the single path the
+  guard's checks need, and Quartus 21.1 takes the router's duplication
+  settings only globally (a per-instance form stops the compile). It
+  applies to DARIA builds only, since `daria.qip` sources the file. And
+  `core/daria_constraints.sdc`'s fitter-only block asks the fitter for
+  7.5 ns on the pair (a `set_max_delay` read only by `quartus_fit`), 0.5 ns
+  under the 8 ns that the Timing Analyzer checks, as the first pair asked
+  5.5 ns for 6 after one of three ÷19 seeds missed 6 ns by 0.109 ns through
+  clock skew. At ÷18 the pair is gated: the guard locks only if the toggle
+  launched 8.73 ns before a `clk_sys` edge is caught there and the one
+  launched on the shared edge is not. At ÷19, the fallback, the guard cannot
+  lock whatever this path's delay, so the step-7 checks report the pair's
+  setup slack without gating on it
   ([daria_step7/plan.md](daria_step7/plan.md) 5.4 (a) and (l), the lead's
-  decision of 2026-10-14). A negative `clk_sys` setup slack on
-  `pd_tog` -> `pd_rx` alone is therefore not a timing failure at ÷19;
+  decision of 2026-10-14): a negative `clk_sys` setup slack on `pd_tog` ->
+  `pd_rx` alone is not a timing failure there;
   `sim/bupchip/quartus_probe/step7/step7_checks.py` judges it (it passes
   only when it is the only failing `clk_sys` endpoint and `pd_rx`'s only
-  fan-in is `pd_tog`). Any other negative slack is. 2.2.1's fit, seed 2,
-  meets the 6 ns as well (+0.193 ns; [README](../README.md), "Verification").
+  fan-in is `pd_tog`). Any other negative slack is.
 
 ### Change the PAL/NTSC switch
 
@@ -492,10 +511,9 @@ DARIA (`POCKET_DARIA`) adds two files through its own lines in
 above: `core/daria_constraints.sdc` (an `SDC_FILE` line after the
 `QIP_FILE` lines, so it is read after the PLL clocks exist), which bounds
 the `clk_sys` <-> `clk_arm` crossings at ±20 ns and holds the front end's
-phase detector pair (`pd_tog` -> `pd_rx`) to 6 / 1 ns (the header comment
-of `core_constraints.sdc` says that with DARIA the edges meet "only every
-3 `clk_sys`": that is VCO/18's lattice, stale since ÷19, and it is
-corrected after 2.2.1; at VCO/19 they meet every 19 `clk_sys`); and
+phase detector pair (`pd_tog` -> `pd_rx`) to [0.5, 8.0] ns (G1; 6 / 1 ns
+in 2.2.1). With DARIA at VCO/18 the edges meet every 3 `clk_sys`; at
+VCO/19, the fallback, every 19; and
 `core/daria.qip`, which marks the first flop of each synchroniser that
 shares its declaration `SYNCHRONIZER_IDENTIFICATION FORCED`, bit by bit.
 The marks are in `core/daria_sync.tcl`, which `daria.qip` sources
@@ -522,9 +540,14 @@ on each of seeds 1, 2 and 3. DARIA's verified tree (`317eaa8`), with Fix B,
 gives +2.462, +2.683 and +2.919 ns on seeds 1-3, and its worst
 `clk_sdram` paths are Flicker Blend's half-period paths in `sram_ctrl`.
 2.2.1 adds the AtariVox voice to that tree, with DARIA's RTL unchanged,
-and ships the AtariVox build's own seed-2 fit: `clk_sdram` +2.433 ns. The
+and ships the AtariVox build's own seed-2 fit: `clk_sdram` +2.345 ns. The
 [README](../README.md) ("Verification") has its other figures, and
 [ATARIVOX.md](ATARIVOX.md) the voice build's seeds.
+2.2.4 (DARIA at ÷18, merged with 2.2.2) ships its Q2's seed-2 bitstream
+unchanged (`ap_core.rbf` md5 `09104319831d415502c90c0db4933e02`, fitted on
+`7701ee9`, whose tree differs from the release's only in the qsf's `SEED`
+line and comments): `clk_sdram` +3.020 ns, `clk_arm` +1.482 ns, the guard
+pair +3.128 / +0.421 ns and worst hold +0.095 ns.
 
 ## Resource budget
 
@@ -539,9 +562,11 @@ The Cyclone V 5CEBA4 has 18,480 ALMs and **308 M10K blocks**. Block count,
 not bit count, is the usual limit. The fitter can fail at 75% of the RAM
 *bits* because every memory rounds up to whole blocks.
 
-Current use (2.2.1, with DARIA and the AtariVox voice, fitter seed 2) is
-15,839 of 18,480 ALMs (86%) and 212 of 308 M10K blocks (README,
-"Verification"). DARIA's verified tree, without the voice, used
+Current use (2.2.4, DARIA at ÷18 with the AtariVox voice, fitter seed 2) is
+14,639 of 18,480 ALMs (79%), 216 of 308 M10K blocks and 13 DSP blocks
+(README, "Verification"); 2.2.2 used 15,917 ALMs (86%), and 2.2.1 15,839
+ALMs (86%) and 212 M10K blocks.
+DARIA's verified tree, without the voice, used
 15,600-15,625 ALMs (85%), 195 M10K blocks and 1,767-1,770 of 1,848 LABs
 over seeds 1-3, with a peak interconnect use of 60.4-60.8%. Its ALM count is
 77-102 ALMs over the 84% that DARIA's design took as a guide, which
@@ -558,13 +583,14 @@ the BupChip, used 69% ALMs and 46 M10K, and 2.1.3, with the BupChip,
 paths in `sram_ctrl` (into `fbn_*` on seeds 1 and 2 of DARIA's verified tree,
 from `fbn_addr` on seed 3). They still depend on placement: `core_constraints.sdc` asks the
 fitter alone for 1.5 ns of extra setup margin there, and `ap_core.qsf` sets
-the fitter seed, one already fitted on the release tree. Its comment still
-gives 2.1.1's seeds and margins (+0.26, +0.44 and +0.28 ns at 79%), with
-the AtariVox build's seeds after them since 2.2.1; the 2.1.1 part is
-corrected after 2.2.1. The verified tree's seeds 1, 2 and 3 gave `clk_sdram`
-+2.462, +2.683 and +2.919 ns, and seed 2 was kept as the only one that
-passed every step-7 check as first written
-([daria_step7/plan.md](daria_step7/plan.md) 5.2, P12). After any change,
+the fitter seed, one already fitted on the release tree, and its comment
+gives that tree's seeds 1-3. In 2.2.4 they gave `clk_sdram` +2.515,
++3.020 and +2.229 ns, every check passing on each, and seed 2, the safest,
+ships ([daria_step7/plan.md](daria_step7/plan.md) P12, as amended
+2026-10-21); the ÷18 tree before the merge of 2.2.2 gave +2.407, +2.388
+and +3.107 ns, and chose seed 3. For 2.2.1, DARIA's verified tree gave +2.462,
++2.683 and +2.919 ns, and seed 2 was kept as the only one that passed every
+step-7 check as first written (plan 5.2, P12). After any change,
 check the `clk_sdram` slack again on seeds 1, 2 and 3; the release gate is
 +1.5 ns at the worse slow corner on each ([DARIA_CORE.md](DARIA_CORE.md),
 "Fix B", 5). Up to 2.0.20 all
@@ -615,8 +641,8 @@ constant drivers") but only a warning in the sim.
 2. `BUP_DEBUG` is out of `ap_core.qsf` (it is for hardware test builds), and
    `BUP_DEBUG=0 sim/run_sim.sh` passes.
 3. The build meets timing on every corner. Note the ALM and M10K numbers.
-   In the DARIA build at ÷19 the front end's guard pair (`pd_tog` ->
-   `pd_rx`) is reported, not gated ("Regenerate the PLL"); run
+   In the DARIA build the front end's guard pair (`pd_tog` -> `pd_rx`) is
+   gated at ÷18 and reported, not gated, at ÷19 ("Regenerate the PLL"); run
    `sim/bupchip/quartus_probe/step7/run_step7.sh` for the step-7 checks.
 4. Bump `core.json`'s version. Update README (features, verification table,
    hardware results) and POCKET_CHANGES.md for any upstream change.

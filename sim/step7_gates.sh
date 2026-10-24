@@ -12,12 +12,48 @@
 #                macros without POCKET_DARIA, the new DARIA files excluded,
 #                which pp_equiv refuses when one holds a directive that
 #                would reach the files after it) has 0 'daria' tokens, and
-#                its hash is PP_EXPECT (F's; on aeee6d2 fc52edb6...6f52);
+#                its hash is PP_EXPECT (F's, on aeee6d2 fc52edb6...6f52;
+#                for the release, F′'s: see pp_guards);
 #                and top.sv with cart2600.sv preprocess to PP_ORACLE_BASE's
 #                (default aeee6d2) with tb_daria's two macro sets, plain and
 #                WRAPPER (plan 2.8: upstream's oracle untouched)
 #   pp_guards    sim/tools/pp_guards.py PP_GUARD_FROM..HEAD (--qsf daria when
-#                the qsf has POCKET_DARIA, else --qsf comments)
+#                the qsf has POCKET_DARIA, --qsf release when PP_GUARD_FROM's
+#                qsf has it too, else --qsf comments). The release's chain
+#                (docs/daria_step10/plan.md 3.1, re-based 2026-10-22) runs
+#                from F′, the last commit that changes the build without
+#                DARIA: the merge of 2.2.2 (origin/main d38fd13: the POKEY
+#                read fix and the AtariVox escape fix) into the ÷18 tree,
+#                PP_GUARD_FROM=a080f6f6c8cc8d40cd17d0271e132df7b8bee6f9.
+#                It was found as the first-parent commit that brought
+#                READ_WHOLE_CYCLE in
+#                (git log -1 --format=%h --first-parent -S READ_WHOLE_CYCLE -- src/fpga/mister/rtl/Pokey/pokey_bus.sv,
+#                run on rev1/merge-222, the branch the merge is on); pass the
+#                full hash, not the expression. The expression names F′ only
+#                on a branch that has the merge on its first-parent line:
+#                without --first-parent it finds 9aa125a, 2.2.2's own POKEY
+#                commit, whose ÷19 tree cannot start the chain; after a
+#                --no-ff merge of the release into DARIA-dev it finds that
+#                later merge (use the merge's ^2, or take the branch into
+#                DARIA-dev by fast-forward); and on main, after the PR's
+#                merge, it finds d38fd13, 2.2.2's ÷19 tree, where
+#                --qsf release fails. Never evaluate it on main. F′ has
+#                PP_EXPECT
+#                b1b706d3b6a2e3af4668de257b284aa652f19a1e67448521270e2466ce9e877c,
+#                F′'s non-DARIA stream (the stream below with pokey.sv,
+#                pokey_bus.sv, pokey_adapter.sv and avox_rx.sv from 2.2.2).
+#                pp_guards then takes --qsf release: from F′ only
+#                ap_core.qsf's SEED line and comments may change. Before it
+#                the chain ran from the commit that added fa2_on to the
+#                wrapper (-S fa2_on -- src/fpga/core/atari7800_pocket.sv,
+#                35bf88f) with 2fe5aed7...4f4b (MR, virtual_axis5 without
+#                virtual_axis.sv, the FA2 slot in 2600 mode, the L1W+L3 CPU,
+#                the sram_ctrl key copy); before that from the FA2 slot's
+#                first commit (-S fa2_nvram_bridge, 4738c65) with
+#                8a7e8a3d...3b7b, until the Stage 2 review found that an A78
+#                could write the slot; before that, from the MR commit
+#                (git log -1 --format=%h -S MUX_RESTRUCTURE --
+#                src/fpga/ap_core.qsf) with 34b3f60a...bd21
 #   divider      sim/check/div_check.py: every bench's and gate's default
 #                clk_arm divider (tb_load's and tb_system's arm_div, wire.py's
 #                ARM_DIV, run_sim.sh's and this script's guard expectations
@@ -84,8 +120,8 @@
 #                the tests that copy src/fpga and is PARTIAL
 #   s4_check     sim/bupchip/s4/check.sh with JOBS=S4_JOBS (default 2:
 #                that many simulations at once), both sets of plan 1.2
-#                row 5: the non-DARIA one and DARIA=1 ARM19=1 (VCO/19,
-#                pll_core.v's divider; plan 5.2's tb_s4 check at it)
+#                row 5: the non-DARIA one and DARIA=1 ARM38=1 (VCO/18,
+#                pll_core.v's divider)
 #                PSRAM_CS=50.0, the latter with SNAP_REQUIRED=1 once
 #                bup_dbg_snap.sv is in the tree (every tb_s4 run must then
 #                print "snap: ok": the snapshot check of plan 1.2 rows 5 and
@@ -94,10 +130,12 @@
 #                src/fpga/mister/rtl/bupchip.hex): without them the jobs
 #                that can run must pass and the gate reports PARTIAL, which
 #                is not a pass
-#   lint         sim/lint_step7.sh: Verilator -Wall over the three macro
-#                sets of plan 3.3 item 1 (the shipped set, the shipped set
-#                without POCKET_DARIA, run_daria.sh's WRAPPER set), no
-#                warning added against aeee6d2
+#   lint         sim/lint_step7.sh --debug: Verilator -Wall over the three
+#                macro sets of plan 3.3 item 1 (the shipped set, the shipped
+#                set without POCKET_DARIA, run_daria.sh's WRAPPER set) and the
+#                shipped set with BUP_DEBUG (the hardware test builds' set,
+#                which holds the DARIA status overlay), no warning added
+#                against aeee6d2 (about 20 s)
 #   wire         lane I1's whole-core checks of the DARIA wiring (plan 7.3,
 #                1.2 row 1; sim/bupchip/daria/wire/wire.py): tb_wire built in
 #                both builds, every scenario (DIRECTED=1: the whole-core
@@ -120,6 +158,18 @@
 #                Needs POCKET_DARIA in the qsf; about 6 hours in one slot
 #   daria_smp    sim/bupchip/daria/smp/run_smp.sh gate (lane I1)
 #   dbg_snap     sim/bupchip/dbgsnap/run_dbgsnap.sh (lane I3)
+#   dbg_overlay  opt-in (only with --only dbg_overlay; not in a run without
+#                --only): the DARIA status overlay of the BUP_DEBUG builds.
+#                sim/bupchip/dstat/run_dstat.sh (daria_dbg_status against
+#                M6532.sv and tb_frames' late rule, its mutations caught),
+#                then sim/bupchip/dstat/run_ovl.sh: run_sim.sh's DARIA
+#                section alone in a BUP_DEBUG build (each run's overlay line
+#                with its coverage, the pattern run, the section's "overlay
+#                cells:" line), and its RTL mutants each CAUGHT; ARM_DIV
+#                passes through (default 18, pll_core.v's divider). Then
+#                run_ovl.sh's control again with ARM_DIV=19, the other
+#                lattice, where the guard never locks. About
+#                an hour and a half in one slot. Needs POCKET_DARIA in the qsf
 #   frames       the frame gate on game images (plan P13, 7.4): tb_frames
 #                (sim/run_frames.sh, INPUTS=tb_daria: the TIA's paddle inputs
 #                as R1's bench presents them, bench parity) against R1's
@@ -138,8 +188,8 @@
 #                no call (P27: the load shown by detect2600's scheme alone;
 #                an R1 run with no calls.csv is void); any
 #                other --strict (every column equal, no call on either side)
-#                (FRAMES_GUARD: locked, unlocked or none; default unlocked,
-#                as at VCO/19, pll_core.v's divider and tb_load's default).
+#                (FRAMES_GUARD: locked, unlocked or none; default locked,
+#                as at VCO/18, pll_core.v's divider and tb_load's default).
 #                The images are read by path, never copied; the runs go to
 #                OUT/frames/runs. Needs GAMES and R1_DIR
 # A gate whose script or input does not exist yet is NOT AVAILABLE, and one
@@ -183,7 +233,9 @@ OUT="$(cd "$OUT" && pwd)"
 QSF="$REPO/src/fpga/ap_core.qsf"
 QSF_DARIA=0
 grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' "$QSF" && QSF_DARIA=1
-GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames)
+GATES=(hygiene pp_equiv pp_guards divider cartram run_sim extra_tests selftest fit_selftest s4_check lint wire daria_smp dbg_snap frames dbg_overlay)
+# opt-in gates: run only when --only names them
+OPTIN=" dbg_overlay "
 # --only and --skip name gates of GATES only: a misspelt name would select nothing
 for g in ${ONLY//,/ } ${SKIP//,/ }; do
 	[[ " ${GATES[*]} " == *" $g "* ]] || { echo "step7_gates.sh: unknown gate '$g' in --only or --skip (the gates: ${GATES[*]})" >&2; exit 2; }
@@ -220,6 +272,8 @@ avail() {
 			elif [ "$QSF_DARIA" != 1 ]; then echo "POCKET_DARIA is not in the qsf (tb_wire checks the DARIA wiring)"; fi ;;
 		daria_smp) [ -f "$HERE/bupchip/daria/smp/run_smp.sh" ] || echo "sim/bupchip/daria/smp/run_smp.sh does not exist yet (lane I1)" ;;
 		dbg_snap) [ -f "$HERE/bupchip/dbgsnap/run_dbgsnap.sh" ] || echo "sim/bupchip/dbgsnap/run_dbgsnap.sh does not exist yet (lane I3)" ;;
+		dbg_overlay) if [ ! -f "$HERE/bupchip/dstat/run_ovl.sh" ]; then echo "sim/bupchip/dstat/run_ovl.sh does not exist"
+			elif [ "$QSF_DARIA" != 1 ]; then echo "POCKET_DARIA is not in the qsf (the overlay's DARIA rows)"; fi ;;
 		frames) if [ ! -f "$HERE/tb_frames.sv" ]; then echo "sim/tb_frames.sv does not exist"
 			elif [ -z "${GAMES:-}" ] || [ ! -d "${GAMES:-}" ]; then echo "GAMES (the directory of game images) not given"
 			elif [ -z "${R1_DIR:-}" ] || [ ! -d "${R1_DIR:-}" ]; then echo "R1_DIR (the reference runs) not given"; fi ;;
@@ -228,12 +282,14 @@ avail() {
 
 selected() {
 	[ -z "$ONLY" ] || [[ "$ONLY" == *",$1,"* ]] || return 1
+	[[ "$OPTIN" != *" $1 "* ]] || [[ "$ONLY" == *",$1,"* ]] || return 1
 	[[ "$SKIP" != *",$1,"* ]]
 }
 
 if [ "$LIST" = 1 ]; then
 	for g in "${GATES[@]}"; do
 		w="$(avail "$g")"
+		[[ "$OPTIN" != *" $g "* ]] || w="${w:-available} (opt-in: --only $g)"
 		printf '%-12s %s\n' "$g" "${w:-available}"
 	done
 	exit 0
@@ -295,7 +351,12 @@ g_pp_equiv() {
 	return $rc
 }
 g_pp_guards() {
-	local q=comments; [ "$QSF_DARIA" = 1 ] && q=daria
+	local q=comments
+	if [ "$QSF_DARIA" = 1 ]; then
+		q=daria
+		git -C "$REPO" show "$PP_GUARD_FROM:src/fpga/ap_core.qsf" 2> /dev/null \
+			| grep -q '^set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"' && q=release
+	fi
 	python3 "$REPO/sim/tools/pp_guards.py" --repo "$REPO" --from "$PP_GUARD_FROM" --to HEAD --qsf "$q"
 }
 g_divider() { python3 "$HERE/check/div_check.py" --repo "$REPO"; }
@@ -362,7 +423,7 @@ g_selftest() {
 		miss+=("--reset ($OUT/cartram_work/cartram/logs/rst_hif8_rd_rst_k0.log: the cartram gate, with Fix B in the tree)")
 	fi
 	if [ -f "$OUT/rs/cartram/logs/artape_b0.log" ]; then args+=(--artape "$OUT/rs/cartram/logs/artape_b0.log")
-	else miss+=("--artape ($OUT/rs/cartram/logs/artape_b0.log: the run_sim gate)"); fi
+	else miss+=("--artape ($OUT/rs/cartram/logs/artape_b0.log: the extra_tests gate with AR_TAPE=1)"); fi
 	if [ -f "$OUT/extra_tests.out" ] && [ -n "${EXTRA_REF:-}" ]; then
 		args+=(--extra "$OUT/extra_tests.out" --extra-ref "$EXTRA_REF" --extra-dir "$OUT/rs/extra")
 	else miss+=("--extra ($OUT/extra_tests.out and EXTRA_REF: the extra_tests gate)"); fi
@@ -401,8 +462,8 @@ g_s4_check() {
 	JOBS="${S4_JOBS:-2}" WORK="$OUT/s4" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	local snap=0
 	[ -f "$REPO/src/fpga/core/bupchip/bup_dbg_snap.sv" ] && snap=1
-	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
-	DARIA=1 ARM19=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
+	echo "== s4/check.sh, the DARIA set (DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap)"
+	DARIA=1 ARM38=1 PSRAM_CS=50.0 SNAP_REQUIRED=$snap JOBS="${S4_JOBS:-2}" WORK="$OUT/s4_daria" slot bash "$HERE/bupchip/s4/check.sh" "${game[@]}" || rc=1
 	[ $rc = 0 ] || return 1
 	[ -f "$REPO/src/fpga/mister/rtl/bupchip.hex" ] || why="no firmware in the tree (check.sh reads src/fpga/mister/rtl/bupchip.hex)"
 	[ -n "${S4_GAME:-}" ] || why="${why:+$why; }no S4_GAME and REFDIR"
@@ -412,7 +473,7 @@ g_s4_check() {
 	fi
 	return 0
 }
-g_lint() { bash "$HERE/lint_step7.sh"; }
+g_lint() { bash "$HERE/lint_step7.sh" --debug; }
 g_wire() {
 	local w="$OUT/wire" wp="$HERE/bupchip/daria/wire/wire.py" r rc=0 m mut t tdir="" why="" scn=()
 	if [ -n "${GAMES:-}" ] && [ -d "${GAMES:-}" ]; then
@@ -446,6 +507,13 @@ g_wire() {
 }
 g_daria_smp() { WORK="$OUT/smp" slot bash "$HERE/bupchip/daria/smp/run_smp.sh" gate; }
 g_dbg_snap() { WORK="$OUT/dbgsnap" slot bash "$HERE/bupchip/dbgsnap/run_dbgsnap.sh"; }
+g_dbg_overlay() {
+	local rc=0
+	WORK="$OUT/dstat" slot bash "$HERE/bupchip/dstat/run_dstat.sh" || rc=1
+	WORK="$OUT/ovl" slot bash "$HERE/bupchip/dstat/run_ovl.sh" || rc=1
+	WORK="$OUT/ovl19" ARM_DIV=19 slot bash "$HERE/bupchip/dstat/run_ovl.sh" control || rc=1
+	return $rc
+}
 g_frames() {
 	local rc=0 name img ref n d="$OUT/frames" left=()
 	mkdir -p "$d"
@@ -464,7 +532,7 @@ g_frames() {
 		# video differ from R1's for a reason outside DARIA.
 		WORK="$d" NAME="$name" FRAMES="$n" INPUTS=tb_daria slot bash "$HERE/run_frames.sh" "$img" || rc=1
 		python3 "$HERE/check/frame_gate.py" --auto "$ref" "$d/runs/$name" --frames "$n" --name "$name" \
-			--expect-guard "${FRAMES_GUARD:-unlocked}" --rule "${FRAMES_RULE:-v1}" || rc=1
+			--expect-guard "${FRAMES_GUARD:-locked}" --rule "${FRAMES_RULE:-v1}" || rc=1
 	done
 	for name in $FRAMES16; do
 		[[ " $(echo ${FRAMES_LIST:-$FRAMES16}) " == *" $name "* ]] || left+=("$name")
@@ -478,7 +546,11 @@ g_frames() {
 
 declare -A RES
 for g in "${GATES[@]}"; do
-	selected "$g" || { RES[$g]="not selected"; continue; }
+	if ! selected "$g"; then
+		RES[$g]="not selected"
+		[[ "$OPTIN" != *" $g "* ]] || RES[$g]="not selected (opt-in: --only $g)"
+		continue
+	fi
 	why="$(avail "$g")"
 	if [ -n "$why" ]; then
 		RES[$g]="NOT AVAILABLE: $why"

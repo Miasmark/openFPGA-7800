@@ -268,21 +268,22 @@ real-time arrival is still how the FPGA version will work.
 
 ## Which AtariVox games the core can run
 
-Several AtariVox games are ARM cartridges, which the Pocket build leaves out
-until DARIA (`NO_ARM_MAPPER`; they get the unsupported-cartridge screen):
+Several AtariVox games are ARM cartridges. Before 2.2.1 the Pocket build
+left them out (`NO_ARM_MAPPER`; they got the unsupported-cartridge screen).
+From 2.2.1 DARIA runs them (`docs/DARIA_CORE.md`):
 
-| Game (Champ Games demo ROMs) | Scheme | Runs today |
+| Game (Champ Games demo ROMs) | Scheme | Runs in 2.2.1 |
 |---|---|---|
 | Juno First | plain bank switching | Yes |
-| Stratovox | DPC+ | No: needs DARIA |
-| Wizard of Wor Arcade | CDFJ (detected as CDF) | No: needs DARIA |
-| Gorf Arcade | CDFJ | No: needs DARIA |
-| rubyQ | CDFJ (ELF) | No: needs DARIA |
+| Stratovox | DPC+ | Yes, with DARIA |
+| Wizard of Wor Arcade | CDFJ (detected as CDF) | Yes, with DARIA |
+| Gorf Arcade | CDFJ | Yes, with DARIA |
+| rubyQ | CDFJ (revision 2) | Yes, with DARIA |
 
-Their phrase tables can still be read from the ROMs (above), but their speech
-can't be logged in simulation until DARIA. So the AtariVox's usefulness on
-the Pocket depends on DARIA too, beyond homebrews on plain bank switching
-(Juno First, the speech testers).
+Their phrase tables can still be read from the ROMs (above). With DARIA their
+speech can also be logged in whole-core simulation, as Stratovox's is below.
+So the AtariVox's usefulness on the Pocket depends on DARIA too, beyond
+homebrews on plain bank switching (Juno First, the speech testers).
 
 ## The engine
 
@@ -337,7 +338,7 @@ speed factor x FAST/SLOW, from the same tables as the model.
   the first AtariVox build (15,880 ALMs) seeds 1, 2 and 3 gave +0.391,
   -0.162 and +0.067 ns there, so the qsf used seed 1. With the voice made
   louder (a few ALMs in the mix) they gave +0.084, +0.193 and -0.262 ns,
-  so it uses seed 2 (clk_arm +1.474, clk_sdram +2.433, worst hold +0.082).
+  so it uses seed 2 (clk_arm +1.474, clk_sdram +2.345, worst hold +0.082).
 
 **Differences from `sjsynth.py`,** all small:
 

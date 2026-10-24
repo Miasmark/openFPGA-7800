@@ -31,6 +31,16 @@
 # build's divider: plan 5.4 as amended 2026-10-14 at VCO/19 (the guard pair's
 # setup slack reported, not gated, in (a) and left out of (l); (h) at +3.0
 # ns), as first written at any other. Keep those lines' format.
+#
+# The guard pair's bounds ((a), (b), (k); step7_checks.py's (e)) are not
+# fixed here: they are read from the SDC the fit was made with, as the
+# Timing Analyzer read it (report_sdc, sdc.rpt), and must be one of the
+# known pairs of guard_pairs below (plan 5.4 as amended for G1, 2026-10-19;
+# the amendment is docs/daria_step10/plan.md section 10).
+# The bounds used are written to checks.txt ("# guard bounds: ..."), and
+# step7_checks.py judges (a), (b) and (k) again by sdc.rpt's bounds from the
+# per-corner pd_tog -> pd_rx lines and crossings.tsv. A report written before
+# this change held the pair to 6 / 1 ns whatever the SDC said.
 
 project_open ap_core
 # "post_map" as an argument: the netlist after synthesis only (a smoke test
@@ -44,7 +54,7 @@ read_sdc
 update_timing_netlist
 
 # ---- the build ---------------------------------------------------------------------------
-array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 19}
+array set prep {kind daria daria 1 bup_debug 0 fixb 1 div 18}
 if {[file exists step7_prep.txt]} {
 	set fh [open step7_prep.txt]
 	foreach line [split [read $fh] "\n"] {
@@ -134,6 +144,25 @@ set ff_table {
 	{*|daria_fe_audio:u_audio|ack_s1} 1 1
 	{*|bup_dbg_snap:*|ak_s0} 0 1
 	{*|daria_fe_guard:u_guard|pd_rx} 1 1
+}
+
+# The known bounds of the guard pair pd_tog -> pd_rx (docs/daria_fe/design.md
+# 8.1-8.2; plan 5.4 (a), (b), (e), (k)). Columns: the Timing Analyzer's
+# set_max_delay and set_min_delay (ns), the fitter-only set_max_delay of
+# daria_constraints.sdc's quartus_fit block (ns), and the pair's name.
+#   first  design.md 8.2 as first written: 6 ns (a toggle launched 8.73 ns
+#          before a clk_sys edge is caught there), 1 ns (the toggle launched
+#          on the shared edge is never caught on it); fitter 5.5 (618b5c3).
+#   G1     [0.5, 8.0] ns, fitter 7.5 (docs/daria_step10/plan.md: G1 in its
+#          summary, and section 10; Rev 0, 2026-10-19): 6 ns counted the skew and setup twice, since the
+#          Timing Analyzer's check already holds them, so 8.0 keeps 0.73 ns
+#          and 0.5 keeps 0.5 ns of margin beyond the corner models at VCO/18.
+# The bounds are absolute: neither pair belongs to a divider. A pair not in
+# this table fails (a), (b), (k) and (e), so that reading the SDC cannot let
+# a stray value judge itself. step7_checks.py reads this table (the tree's).
+set guard_pairs {
+	{6.000 1.000 5.500 first}
+	{8.000 0.500 7.500 G1}
 }
 
 set slow_corners {}
@@ -257,6 +286,63 @@ set sys90 [get_clocks -nowarn "${pre}2$post"]
 set arm [get_clocks -nowarn "${pre}3$post"]
 
 }
+# ---- the guard pair's bounds, from the SDC as the Timing Analyzer read it -------------------------------
+# report_sdc lists every constraint applied (the fitter-only block of
+# daria_constraints.sdc is not: it runs under quartus_fit alone). The pair's
+# bounds are its one set_max_delay and one set_min_delay from pd_tog to
+# pd_rx; they must be a row of guard_pairs. Otherwise guard_set stays empty,
+# guard_why says why, and (a), (b) and (k) fail on it. A Tcl error here
+# leaves the same. step7_checks.py reads sdc.rpt the same way.
+proc guard_bounds {pairs} {
+	report_sdc -file sdc.rpt
+	set fh [open sdc.rpt]
+	set lines [split [read $fh] "\n"]
+	close $fh
+	set maxv {}
+	set minv {}
+	set maxi {}
+	set mini {}
+	foreach line $lines {
+		set cols {}
+		foreach c [split [string trim [string trim $line] ";"] ";"] { lappend cols [string trim $c] }
+		set cmd [lindex $cols 0]
+		if {$cmd ne "set_max_delay" && $cmd ne "set_min_delay"} { continue }
+		set ti [lsearch -exact $cols "-to"]
+		if {$ti < 1} { continue }
+		set fr [join [lrange $cols 1 [expr {$ti - 1}]] " "]
+		if {![string match "*u_guard|pd_tog*" $fr] || ![string match "*u_guard|pd_rx*" [lindex $cols [expr {$ti + 1}]]]} { continue }
+		set v [lindex $cols [expr {$ti + 2}]]
+		set item "$v at [lindex $cols [expr {$ti + 3}]]"
+		if {$cmd eq "set_max_delay"} { lappend maxv $v; lappend maxi $item } else { lappend minv $v; lappend mini $item }
+	}
+	if {$maxi eq ""} { set maxi none }
+	if {$mini eq ""} { set mini none }
+	set seen "set_max_delay [join $maxi {, }]; set_min_delay [join $mini {, }]"
+	if {[llength $maxv] != 1 || [llength $minv] != 1} {
+		return [list "" "" "" "sdc.rpt has [llength $maxv] set_max_delay and [llength $minv] set_min_delay from pd_tog to pd_rx, not one of each ($seen)"]
+	}
+	set s [lindex $maxv 0]
+	set h [lindex $minv 0]
+	if {[string is double -strict $s] && [string is double -strict $h]} {
+		foreach p $pairs {
+			lassign $p ps ph pf pn
+			if {abs($s - $ps) < 0.0005 && abs($h - $ph) < 0.0005} { return [list $ps $ph $pn "sdc.rpt: $seen"] }
+		}
+	}
+	return [list "" "" "" "the SDC's pair (setup $s, hold $h ns) is not one of the known pairs ($pairs); sdc.rpt: $seen"]
+}
+if {[catch {lassign [guard_bounds $guard_pairs] guard_set guard_hold guard_name guard_why} err]} {
+	set guard_set ""
+	set guard_hold ""
+	set guard_name ""
+	set guard_why "Tcl error while reading the bounds from sdc.rpt: [string map {"\n" " | "} $err]"
+}
+if {$guard_set ne ""} {
+	say "# guard bounds: setup $guard_set hold $guard_hold ($guard_name; $guard_why)"
+} else {
+	say "# guard bounds: none ($guard_why)"
+}
+
 # ---- (a), (b), (d): the guard pair ---------------------------------------------------------------------
 section ab {a b d} {
 say "\n## (a) (b) (d) the guard pair pd_tog -> pd_rx (design.md 8.2)"
@@ -267,12 +353,14 @@ if {[csize $g_tog] == 0 || [csize $g_rx] == 0} {
 	check "b" FAIL "no such cell: pd_tog or pd_rx"
 	check "d" FAIL "no such cell: pd_tog or pd_rx"
 } else {
-	set a_ok 1
-	set b_ok 1
+	# Without known bounds the figures are still listed (step7_checks.py
+	# reads them), and (a) and (b) fail.
+	set a_ok [expr {$guard_set ne ""}]
+	set b_ok $a_ok
 	foreach cond $all_corners {
 		set_operating_conditions $cond
 		update_timing_netlist
-		foreach {which want} {setup 6.000 hold 1.000} {
+		foreach {which want} [list setup $guard_set hold $guard_hold] {
 			set n 0
 			set txt ""
 			foreach_in_collection p [get_timing_paths -$which -from $g_tog -to $g_rx -npaths 10 -nworst 10] {
@@ -282,7 +370,7 @@ if {[csize $g_tog] == 0 || [csize $g_rx] == 0} {
 				set sk [get_path_info $p -clock_skew]
 				set dd [get_path_info $p -data_delay]
 				append txt [format " rel %.3f slack %.3f skew %.3f data %.3f;" $rel $sl $sk $dd]
-				if {abs($rel - $want) > 0.0005 || $sl < 0} { if {$which eq "setup"} { set a_ok 0 } else { set b_ok 0 } }
+				if {$want eq "" || abs($rel - $want) > 0.0005 || $sl < 0} { if {$which eq "setup"} { set a_ok 0 } else { set b_ok 0 } }
 			}
 			if {$n != 1} { if {$which eq "setup"} { set a_ok 0 } else { set b_ok 0 } }
 			say "  $cond $which: $n path(s);$txt"
@@ -292,8 +380,13 @@ if {[csize $g_tog] == 0 || [csize $g_rx] == 0} {
 	update_timing_netlist
 	report_timing -setup -from $g_tog -to $g_rx -npaths 10 -detail full_path -file guard.rpt
 	report_timing -hold -from $g_tog -to $g_rx -npaths 10 -detail full_path -append -file guard.rpt
-	check "a" [expr {$a_ok ? "PASS" : "FAIL"}] "exactly one setup path pd_tog -> pd_rx at every corner, relationship 6.000 ns, met"
-	check "b" [expr {$b_ok ? "PASS" : "FAIL"}] "exactly one hold path pd_tog -> pd_rx at every corner, relationship 1.000 ns, met"
+	if {$guard_set ne ""} {
+		check "a" [expr {$a_ok ? "PASS" : "FAIL"}] "exactly one setup path pd_tog -> pd_rx at every corner, relationship $guard_set ns (the SDC's, $guard_name), met"
+		check "b" [expr {$b_ok ? "PASS" : "FAIL"}] "exactly one hold path pd_tog -> pd_rx at every corner, relationship $guard_hold ns (the SDC's, $guard_name), met"
+	} else {
+		check "a" FAIL "the guard pair's bounds are not known: $guard_why"
+		check "b" FAIL "the guard pair's bounds are not known: $guard_why"
+	}
 	check "d" INFO "the clock skew on pd_tog -> pd_rx is listed per corner above (skew)"
 }
 
@@ -323,10 +416,11 @@ check "c.cells" [expr {$ff_ok ? "PASS" : "FAIL"}] "each first flop of plan 2.7 i
 # ---- (e): the SDC and the exceptions -------------------------------------------------------------------------
 section e {e.files e} {
 say "\n## (e) report_sdc, report_exceptions (status parsed by step7_checks.py)"
-report_sdc -file sdc.rpt
+# sdc.rpt is written above, where the guard pair's bounds are read from it.
+if {![file exists sdc.rpt]} { report_sdc -file sdc.rpt }
 report_sdc -ignored -file sdc_ignored.rpt
 report_exceptions -file exceptions.rpt
-check "e.files" INFO "sdc.rpt, sdc_ignored.rpt and exceptions.rpt written; step7_checks.py checks the statuses"
+check "e.files" INFO "sdc.rpt, sdc_ignored.rpt and exceptions.rpt written; step7_checks.py checks the statuses and the guard pair's bounds"
 
 }
 # ---- (f): metastability -----------------------------------------------------------------------------------------
@@ -598,16 +692,22 @@ foreach {dir from to} [list s2a $sys $arm a2s $arm $sys] {
 		puts $ct [format "%s\t%.3f\t%.3f\t%s\t%s\t%d\t%s\t%s" $dir $rel $sl $hrel $hsl $lv $f $t]
 		# The guard pair by the registers' own names: a duplicate the router
 		# made ("pd_tog~DUPLICATE", "pd_rx~DUPLICATE") is matched by the SDC's
-		# get_registers patterns as well, so its paths carry the 6 / 1 ns pair
-		# and are judged against it here; (a), (b) and (c) fail the duplicate.
+		# get_registers patterns as well, so its paths carry the guard's bounds
+		# and are judged against them here; (a), (b) and (c) fail the duplicate.
+		# The bounds are the SDC's (guard_set / guard_hold, above).
 		regsub {~DUPLICATE\S*$} $f "" f0
 		regsub {~DUPLICATE\S*$} $t "" t0
 		set guard [expr {[string match {*|daria_fe_guard:u_guard|pd_tog} $f0] && [string match {*|daria_fe_guard:u_guard|pd_rx} $t0]}]
-		set wr [expr {$guard ? 6.0 : 20.0}]
-		set wrh [expr {$guard ? 1.0 : -20.0}]
-		if {abs($rel - $wr) > 0.0005 || $hrel eq "-" || abs($hrel - $wrh) > 0.0005} {
+		if {$guard && $guard_set eq ""} {
 			set k_ok 0
-			say "  $dir: $f -> $t setup rel $rel, hold rel $hrel (expected $wr / $wrh)"
+			say "  $dir: $f -> $t setup rel $rel, hold rel $hrel (the guard pair's bounds are not known)"
+		} else {
+			set wr [expr {$guard ? $guard_set : 20.0}]
+			set wrh [expr {$guard ? $guard_hold : -20.0}]
+			if {abs($rel - $wr) > 0.0005 || $hrel eq "-" || abs($hrel - $wrh) > 0.0005} {
+				set k_ok 0
+				say "  $dir: $f -> $t setup rel $rel, hold rel $hrel (expected $wr / $wrh)"
+			}
 		}
 		if {$ws eq "" || $sl < $ws} { set ws $sl }
 		incr n
@@ -620,8 +720,10 @@ foreach {dir from to} [list s2a $sys $arm a2s $arm $sys] {
 close $ct
 if {$nk == 0} {
 	check "k" FAIL "no clk_sys <-> clk_arm path at all"
+} elseif {$guard_set eq ""} {
+	check "k" FAIL "the guard pair's bounds are not known: $guard_why ($nk pairs; crossings.tsv)"
 } else {
-	check "k" [expr {$k_ok ? "PASS" : "FAIL"}] "every clk_sys <-> clk_arm path pair has the 20 / -20 ns relationship, pd_tog -> pd_rx 6 / 1 ns ($nk pairs; crossings.tsv)"
+	check "k" [expr {$k_ok ? "PASS" : "FAIL"}] "every clk_sys <-> clk_arm path pair has the 20 / -20 ns relationship, pd_tog -> pd_rx $guard_set / $guard_hold ns (the SDC's, $guard_name) ($nk pairs; crossings.tsv)"
 }
 check "k'.files" INFO "crossings.tsv written; step7_checks.py compares its endpoints with plan F3's list (f3_crossings.txt) and checks each first flop's source"
 

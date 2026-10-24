@@ -133,6 +133,7 @@ Figures are in ns. Setup is at the worse slow corner, and the guard pair's slack
   - Every other check passes on all three seeds, (c) included: neither the guard pair nor any first flop is duplicated or retimed.
 - **Q4** passes every gating check, and its `.rbf` equals Q1''s: the build without DARIA is the same bitstream as commit P's.
 - **Q-mut:** (f) names `run_s[0]`, and (k') names `ready_s[0]`. Nothing else fails.
+  - *2026-10-21:* "Nothing else fails" is c76's result, not a rule: plan 7.2 asks that (f) and (k') each catch their mutant. From the release after 2.2.1, Q-mut passes when (f) names `run_s[0]` and (k') names `ready_s[0]`, and any other failure is explained. That round's Q-mut also failed (g), with 150 paths of the 7800 cart-RAM request from a register that the fitter's retiming named after `mapper_AR`'s `tape_num` decode; no release fit has it (`docs/daria_step10/plan.md` 3.1, "Stage 2's pre-campaign round").
 - **The I3 STA mutants,** run `REPORT_ONLY` on copies of the `KEEP_DB` refit, fail as plan 7.2 requires:
   - the guard pair removed fails (a), (b), (k) and (e), because the path is timed at 20 ns instead of 6 / 1;
   - a clock-group cut added after the ±20 ns lines fails (a), (b), (k), (e) and (k');
@@ -328,20 +329,23 @@ Plan section 9, corrected for ÷19 at the final review. At step 7's close (2026-
 
 The owner froze `src/` as verified for 2.2.1 (2026-10-16). These findings change only `src/` and are deferred to the first change after 2.2.1. A comment-only change needs plan 7.6's proof: the same `pp_equiv` hashes on both macro sets, and an SDC or qsf diff that is empty with comments stripped. Any other change re-runs the gates 7.6 names. `docs/IMPROVEMENTS.md`, "After 2.2.1: RTL-1 and the `src/` clean-ups", mirrors this list in short. The line numbers below are `317eaa8`'s. In 2.2.1 the AtariVox voice adds lines above them: 10 in `atari7800_pocket.sv`, 4 in `ap_core.qsf` and 3 in `core_top.v`.
 
-1. **RTL-1** (`DARIA_CORE.md`, open item 20): the freeze of `region_pll` in `atari7800_pocket.sv:1037`. The fix is sketched there; `pal2600_a78`'s expected DARIA count then drops to 0.
+1. **RTL-1** (`DARIA_CORE.md`, open item 20): the freeze of `region_pll` in `atari7800_pocket.sv:1037`. The fix is sketched there; `pal2600_a78`'s expected DARIA count then drops to 0. *Done (2026-10-21) in `5ad0a6b`*, in a narrower form than the sketch (only while an A78's 128-byte header downloads); `pal2600_a78` expects no extra retune.
 2. **RTL-2:** in the withdrawal branch (`atari7800_pocket.sv:1032-1036`), `region_pll <= daria_rgn` uses `daria_rgn`'s old value on the clock where `daria_rgn` updates. `region_pll` then holds the previous region for one `clk_sys`.
    - A unit bench started a retune just before a 70-byte 2600 download. With allcomplete 760-792 `clk_74a` after the request, the DARIA build made 3 retunes instead of 1; the plain build made 1 at every distance. No real image is that short: a 2600 image is at least 2 KB, an ARM image at least 24 KB.
    - The fix: `region_pll <= (daria_rt_cnt == 4'd15) ? region_pll : daria_rgn;`, or compute `daria_rgn`'s next value once. The comments at `:1004-1006` and `:1016-1018` say this cannot happen.
+   - *Done (2026-10-21) in `5ad0a6b`:* the withdrawal takes `daria_rgn`'s next value (`daria_rgn_nx`).
 3. **RTL-3, C3 and DOC-11** (one line): `core_constraints.sdc:15-17` says that with DARIA `clk_arm`'s edges meet `clk_sys`'s "only every 3 `clk_sys`". That is VCO/18's lattice. At VCO/19 they meet every 19 `clk_sys` (48 `clk_arm`), as `daria_constraints.sdc`, `pll_core.v` and `DEVELOPING.md` say.
 4. **C1:** `ap_core.qsf:760-766`, the seed comment, still gives 2.1.1's figures: "79% full", and seeds 1-3 at +0.26, +0.44 and +0.28 ns. It also says a structural fix belongs in `sram_ctrl`; that fix is Fix B, now in. The comment should give:
    - Q2's seeds on the shipping tree: `clk_sdram` +2.462 / +2.683 / +2.919 ns, 15,600-15,625 ALMs (about 85%);
    - the +1.5 ns release gate;
    - why `SEED` 2: the only seed that passed every check as first written.
    - *2.2.1:* the AtariVox voice added its build's seeds after the comment. The 2.1.1 figures and the call for a fix in `sram_ctrl` are still there. The figures to give are now the AtariVox build's, not Q2's.
-5. **C2:** `daria_sync.tcl:49`, the FORCED mark on `cap_err_a[0]`, matches no build, and Quartus lists it as ignored. Its comment at `:31-34` says the BUP_DEBUG build has the chain; Q5 does not. The fix deletes `:49` and corrects `:31-34`. As a non-comment change to an assignment file, it needs a new Q2 and the smoke test.
-6. **`core_top.v:1040`:** the audio comment says the mix is "box filtered down to ~48 kHz (298 clk_sys samples per output)". `core/audio_filter.sv` averages 256 samples, about 55.9 kHz.
+   - *Done (2026-10-21)* with the release after 2.2.1's seed move to 3 (plan P12): the comment gives that release's Q2, seeds 1-3 on `ebca01a`, and the gates.
+5. **C2:** `daria_sync.tcl:49`, the FORCED mark on `cap_err_a[0]`, matches no build, and Quartus lists it as ignored. Its comment at `:31-34` says the BUP_DEBUG build has the chain; Q5 does not. The fix deletes `:49` and corrects `:31-34`. As a non-comment change to an assignment file, it needs a new Q2 and the smoke test. *Done (2026-10-21) in `dd135dd`* (15 marks); the marks on `pause_a[0]` and `halted_s[0]`, which match no build either, went after the Stage 2 review (13 marks).
+6. **`core_top.v:1040`:** the audio comment says the mix is "box filtered down to ~48 kHz (298 clk_sys samples per output)". `core/audio_filter.sv` averages 256 samples, about 55.9 kHz. *Done (2026-10-21)* with item 4.
 7. **`pll_core.v:39-41`:** the comment says the C3 = 19 display strings are "one digit lower". Only C0 and C2's differ by one in the last digit; C1's differs by 2 and the VCO's by 43 (DOC-15).
 8. **`src/fpga/mister/POCKET_CHANGES.md`** (DOC-13):
    - Its summary (`:21-24`) counts eight modified upstream files. There are eleven: it leaves out `TIA.sv`, `bram.v` and `Pokey/pokey_adapter.sv`, which its own sections describe.
    - It says the POKEY is "swapped for an older one". Since 2.0.21 the build uses upstream's `rtl/Pokey/` with a changed adapter.
    - Its "Updating" list (`:281-286`) re-applies only six files. `DEVELOPING.md`'s "Update the MiSTer core" gives all eleven until this is fixed.
+   - *Done (2026-10-21) in `5febe80`:* eleven files, the POKEY sentence, and an "Updating" list that names all eleven.

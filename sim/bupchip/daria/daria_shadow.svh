@@ -88,7 +88,7 @@
 `ifdef FE_MODE_B
 	// On the PLL's lattice (bench.md 6.3): high from time 0, toggling from +d_ofs
 	// on, so the rising edges fall at d_ofs + 26,190 n (n >= 1), 8 per 3 clk_sys.
-	// +d_div=19 (docs/daria_step7/plan.md 5.2; the shipped divider, which
+	// +d_div=19 (docs/daria_step7/plan.md 5.2; the fallback divider, which
 	// run_daria.sh passes by default on a VCO/19 tree): VCO/19,
 	// 13,823 ps high and 13,822 low (9.5 VCO periods each, the counter's odd
 	// duty correction), rising at d_ofs + 27,645 n, together with a clk_sys

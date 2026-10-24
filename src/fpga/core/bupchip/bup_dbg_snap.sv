@@ -2,7 +2,7 @@
 // A clk_arm word seen on clk_sys through a snapshot (BUP_DEBUG; open item 11,
 // docs/DARIA_CORE.md 7.1 row 9; docs/daria_step7/plan.md P15)
 //
-// With DARIA clk_arm is VCO/19, no longer 2 x clk_sys (pll_core.v), so a
+// With DARIA clk_arm is VCO/18, no longer 2 x clk_sys (pll_core.v), so a
 // clk_sys register can no longer sample a clk_arm word directly: the bits
 // would arrive at different times within the SDC's 20 ns bound, and a word
 // could be torn, half old and half new. This takes a copy instead:

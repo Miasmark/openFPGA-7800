@@ -1,7 +1,7 @@
 #!/bin/bash
 # campaign.sh: the 10^8-cycle campaign of the random differential bench
 # (design 12.1, 12.2 step 4; lane E3), split into runs of $CYC cycles (each well
-# under 30 minutes), two at a time (the machine rule), and the self-check.
+# under 30 minutes), two at a time (within docs/ENVIRONMENT.md 7.4), and the self-check.
 #   ./campaign.sh self [G..]  the upstream-vs-upstream self-check (strict, except self_ofs)
 #   ./campaign.sh fe [G..]    daria_fe against upstream: the campaign groups (or those named)
 #   ./campaign.sh rst [G..]   the +rst_bus=1 groups (design 9.5 rst_release), and the same

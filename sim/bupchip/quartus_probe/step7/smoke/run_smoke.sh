@@ -4,14 +4,16 @@
 # synchroniser marks (the instance assignments of core/daria_sync.tcl, which
 # it sources), step7_report.tcl and step7_checks.py on a netlist whose names
 # are the core's, four levels deep, without a 13-minute fit of the core.
-# Four projects, each compiled (quartus_map, quartus_fit) and then
-# reported (quartus_sta -t step7_report.tcl, step7_checks.py):
-#   all16_qip    every register daria.qip marks is present (SMOKE_Q5,
-#                SMOKE_ALL16), with QIP_FILE daria.qip: each of the 16 must
+# Five projects, each compiled (quartus_map, quartus_fit) and then
+# reported (quartus_sta -t step7_report.tcl, step7_checks.py), and two
+# reported again on one of them with its SDC edited (quartus_sta only):
+#   allmarks_qip every register daria.qip marks is present (SMOKE_Q5: since
+#                the marks without a chain in any build went, the design is
+#                q5_clean's), with QIP_FILE daria.qip: each of the 13 must
 #                head a chain whose "Method of Synchronizer Identification" is
 #                "User Specified", no mark may be reported ignored, and the
 #                compile may report no error or warning about them
-#   all16_noqip  the same without daria.qip: none of the 16 is "User
+#   allmarks_noqip the same without daria.qip: none of the 13 is "User
 #                Specified" (each is "Automatic" or not a chain), so the marks
 #                above come from the qip
 #   q5_clean     a Q5 build (SMOKE_Q5) with daria.qip: (c.cells), (f), (k),
@@ -21,14 +23,31 @@
 #                on exactly prof_a[0] (two registers), ready_s[0] (the ready_a
 #                bypass) and run_s[0] (a register of its own clock), and on
 #                the raw endpoint; (f) FAILs on exactly ftog_s[0]
+#   q5_g1        q5_clean with the copy of daria_constraints.sdc set to G1
+#                (the guard pair at [0.500, 8.000] ns, fitter 7.500; plan 5.4
+#                as amended for G1, 2026-10-19, in docs/daria_step10/plan.md
+#                section 10), whatever the tree's SDC says:
+#                the report script reads G1's bounds from sdc.rpt, (a) and (b)
+#                list one path at 8.000 / 0.500 ns at every corner, (k) PASSes
+#                at G1's bounds, (e) lists G1's pair Complete and the fitter's
+#                7.500, and step7_checks.py reads (a), (b), (k) as the report
+#                script did (no misread)
+#   q5_g1_nopair q5_g1's database, quartus_sta only, the two Timing Analyzer
+#                lines of the guard pair removed from the SDC (Q-mut's "guard
+#                pair removed", plan 7.2, under G1): no bounds in sdc.rpt, the
+#                path at the +-20 ns clock bound; (a), (b), (k), (e) FAIL
+#   q5_g1_odd    the same with the pair at [0.700, 7.300] ns, a pair the
+#                report script's table does not hold: (a), (b), (k), (e) FAIL
+# q5_clean must read a known pair from the tree's own SDC.
 # Run it under the machine's Quartus lock, as run_step7.sh:
 #   QUARTUS_LOCK=<the lock file> flock <the lock file> sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh
 # Environment: WORK (default sim/work/step7/smoke), IMAGE (raetro/quartus:21.1),
-# ONLY="name ..." (some of the four), CHECK_ONLY=1 (no Quartus: step7_checks.py
+# ONLY="name ..." (some of the seven), CHECK_ONLY=1 (no Quartus: step7_checks.py
 # and the assertions again on WORK's last results), REPORT_ONLY=1 (no compile:
 # quartus_sta -t step7_report.tcl again on WORK's fitted projects, then the
 # checks; under the lock), QUARTUS_LOCK.
-# About 3 minutes a project. The log starts with the tree's HEAD and status,
+# About 35 s a fitted project and 3 s a quartus_sta run, about 3 minutes for all seven [measured
+# 2026-10-19 at b55b4b3]. The log starts with the tree's HEAD and status,
 # the tool and the md5 of every script (plan P23). Exit 0 when every
 # assertion holds.
 set -e
@@ -39,7 +58,7 @@ CORE="$ROOT/src/fpga/core"
 WORK="$(realpath -m "${WORK:-$ROOT/sim/work/step7/smoke}")"
 IMAGE="${IMAGE:-raetro/quartus:21.1}"
 LOCK="${QUARTUS_LOCK:-}"
-ALL="all16_qip all16_noqip q5_clean q5_mut"
+ALL="allmarks_qip allmarks_noqip q5_clean q5_mut q5_g1 q5_g1_nopair q5_g1_odd"
 ONLY="${ONLY:-$ALL}"
 die() { echo "run_smoke.sh: $*" >&2; exit 2; }
 case "$WORK/" in
@@ -97,6 +116,52 @@ project() {	# NAME MACROS... : the project directory WORK/NAME/fpga
 	printf 'kind q5\ndaria 1\nbup_debug 1\nfixb 0\ndiv 18\nseed -\npin_id 0\noldpad 0\n' > "$d/step7_prep.txt"
 }
 
+guard_sdc() {	# FILE MODE: the guard pair in a copy of daria_constraints.sdc set to G1's bounds (g1), its two
+	# Timing Analyzer lines removed (nopair), or set to a pair no table holds (odd)
+	python3 - "$1" "$2" <<'PY'
+import re, sys
+p, mode = sys.argv[1], sys.argv[2]
+t = open(p).read()
+cmd = re.compile(r"(?m)^([ \t]*)set_(max|min)_delay -from \[get_registers -nowarn \{\*\|daria_fe_guard:u_guard\|pd_tog\}\] \\\n"
+                 r"[ \t]+-to +\[get_registers -nowarn \{\*\|daria_fe_guard:u_guard\|pd_rx\}\] (\S+)\n")
+val = {"g1": {"max": "8.000", "min": "0.500", "fit": "7.500"}, "odd": {"max": "7.300", "min": "0.700"}, "nopair": {}}[mode]
+done = []
+def sub(m):
+    key = "fit" if m.group(1) else m.group(2)       # the quartus_fit block's line is indented
+    if mode == "nopair" and key != "fit":
+        done.append(key)
+        return ""
+    if key in val:
+        done.append(key)
+        return m.group(0)[:m.start(3) - m.start(0)] + val[key] + "\n"
+    return m.group(0)
+t = cmd.sub(sub, t)
+need = {"g1": ["fit", "max", "min"], "odd": ["max", "min"], "nopair": ["max", "min"]}[mode]
+if sorted(done) != need:
+    sys.exit(f"guard_sdc {mode}: changed {sorted(done)}, expected {need} ({p})")
+open(p, "w").write(t)
+print(f"   {p.split('/')[-3]}: the guard pair in daria_constraints.sdc: {mode} ({', '.join(sorted(done))})")
+PY
+}
+
+variant() {	# NAME MODE: q5_g1's fitted project again, quartus_sta only, with the guard pair of its SDC edited
+	local d="$WORK/$1"
+	[ -d "$WORK/q5_g1/fpga/db" ] || die "$1 needs q5_g1's fitted project (its database): run q5_g1 first"
+	rm -rf -- "${WORK:?}/$1"
+	mkdir -p "$d"
+	cp -a "$WORK/q5_g1/fpga" "$d/fpga"
+	cp "$WORK/q5_g1/quartus.log" "$d/quartus.log"
+	rm -f "$d/fpga/checks.txt" "$d/fpga/crossings.tsv" "$d/fpga/fanin.tsv" "$d/fpga/report_rc.txt" "$d/fpga/sdc.rpt" "$d/fpga/exceptions.rpt"
+	cp "$S7/step7_report.tcl" "$d/fpga/"
+	guard_sdc "$d/fpga/daria_constraints.sdc" "$2" || die "cannot edit $1's copy of daria_constraints.sdc"
+	echo "-- $1: quartus_sta -t step7_report.tcl on q5_g1's database ($(date -u '+%H:%M:%S UTC'))"
+	set +e
+	docker run --rm -v "$d:/w" -w /w/fpga "$IMAGE" quartus_sta -t step7_report.tcl > "$d/report.log" 2>&1
+	echo $? > "$d/fpga/report_rc.txt"
+	set -e
+	echo "   quartus_sta exit $(cat "$d/fpga/report_rc.txt")"
+}
+
 compile() {	# NAME
 	local d="$WORK/$1" rc=0
 	echo "-- $1: quartus_map, quartus_fit, quartus_sta -t step7_report.tcl ($(date -u '+%H:%M:%S UTC'))"
@@ -122,12 +187,15 @@ if [ "${CHECK_ONLY:-0}" = 0 ]; then
 	grep -v 'ftog_s' "$CORE/daria_sync.tcl" > "$QIPMUT"
 	[ "$(diff "$CORE/daria_sync.tcl" "$QIPMUT" | grep -c '^<')" = 1 ] || die "daria_sync.tcl has no single ftog_s line to remove"
 	for n in $ONLY; do
+		case "$n" in q5_g1_nopair|q5_g1_odd) variant "$n" "${n#q5_g1_}"; continue ;; esac
 		[ "${REPORT_ONLY:-0}" = 0 ] || { [ -d "$WORK/$n/fpga/db" ] || die "REPORT_ONLY: $WORK/$n has no database"; compile "$n"; continue; }
 		case "$n" in
-			all16_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 SMOKE_ALL16 ;;
-			all16_noqip) QIP=""                project "$n" SMOKE_Q5 SMOKE_ALL16 ;;
+			allmarks_qip)   QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 ;;
+			allmarks_noqip) QIP=""                project "$n" SMOKE_Q5 ;;
 			q5_clean)    QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5 ;;
 			q5_mut)      QIP="$QIPMUT"         project "$n" SMOKE_Q5 SMOKE_MUT ;;
+			q5_g1)       QIP="$CORE/daria_sync.tcl" project "$n" SMOKE_Q5
+			             guard_sdc "$WORK/$n/fpga/daria_constraints.sdc" g1 || die "cannot set G1 in $n's copy of daria_constraints.sdc" ;;
 			*) die "unknown project $n" ;;
 		esac
 		compile "$n"
@@ -159,7 +227,7 @@ def glob_re(pat):
 
 marks = [m.replace("\\[", "[").replace("\\]", "]") for m in
          re.findall(r'(?m)^set_instance_assignment -name SYNCHRONIZER_IDENTIFICATION FORCED -to "([^"]+)"', rd(qip))]
-say(len(marks) == 16, f"daria_sync.tcl marks {len(marks)} registers (16 expected)")
+say(len(marks) == 13, f"daria_sync.tcl marks {len(marks)} registers (13 expected)")
 
 def chains(n):
     out = {}
@@ -203,27 +271,50 @@ def ignored(n):
                     hits.append(os.path.basename(p) + " Ignored Assignments: " + line.strip()[:160])
     return hits
 
-if "all16_qip" in only:
-    c = chains("all16_qip")
-    print(f"-- all16_qip: {len(c)} synchroniser chains")
+if "allmarks_qip" in only:
+    c = chains("allmarks_qip")
+    print(f"-- allmarks_qip: {len(c)} synchroniser chains")
     for m in marks:
         how = [h for node, h in c.items() if glob_re(m).match(node)]
-        say(bool(how) and all(h.lower().startswith("user") for h in how), f"all16_qip: {m} -> {how or 'no chain'}")
-    ig = ignored("all16_qip")
-    err = [l.strip()[:200] for l in rd(os.path.join(work, "all16_qip", "quartus.log")).splitlines()
+        say(bool(how) and all(h.lower().startswith("user") for h in how), f"allmarks_qip: {m} -> {how or 'no chain'}")
+    ig = ignored("allmarks_qip")
+    err = [l.strip()[:200] for l in rd(os.path.join(work, "allmarks_qip", "quartus.log")).splitlines()
            if re.search(r"^(Error|Critical Warning|Warning)", l.strip()) and re.search(r"daria|qip|SYNCHRONIZER|125091", l, re.I)
            and "daria_fe_guard.sv" not in l]
-    say(not ig and not err, f"all16_qip: no mark ignored and no error or warning about daria.qip, daria_sync.tcl or the marks "
+    say(not ig and not err, f"allmarks_qip: no mark ignored and no error or warning about daria.qip, daria_sync.tcl or the marks "
         f"({(ig + err)[:4] or 'none'})")
-if "all16_noqip" in only:
-    c = chains("all16_noqip")
-    print(f"-- all16_noqip: {len(c)} synchroniser chains")
+if "allmarks_noqip" in only:
+    c = chains("allmarks_noqip")
+    print(f"-- allmarks_noqip: {len(c)} synchroniser chains")
     for m in marks:
         how = [h for node, h in c.items() if glob_re(m).match(node)]
-        say(not any(h.lower().startswith("user") for h in how), f"all16_noqip: {m} -> {how or 'no chain'} (not User Specified)")
+        say(not any(h.lower().startswith("user") for h in how), f"allmarks_noqip: {m} -> {how or 'no chain'} (not User Specified)")
+def checks_txt(n):
+    return rd(os.path.join(work, n, "fpga", "checks.txt"))
+
+def bounds_line(n):
+    m = re.search(r"(?m)^# guard bounds: (.*)$", checks_txt(n))
+    return m.group(1) if m else "(no line)"
+
+def pair_rels(n, which):
+    """the relationships, path counts and corners of the guard pair's per-corner lines in checks.txt"""
+    rels, ks, cs, in_ab = set(), set(), 0, False
+    for line in checks_txt(n).splitlines():
+        if line.startswith("## "):
+            in_ab = line.startswith("## (a) (b) (d)")
+            continue
+        m = re.match(r"  (\S+) (setup|hold): (\d+) path\(s\);(.*)$", line)
+        if in_ab and m and m.group(2) == which:
+            cs += 1
+            ks.add(int(m.group(3)))
+            rels |= set(re.findall(r" rel (\S+) slack", m.group(4)))
+    return sorted(rels), sorted(ks), cs
+
 if "q5_clean" in only:
     r = results("q5_clean")
     print("-- q5_clean")
+    bl = bounds_line("q5_clean")
+    say(re.match(r"setup \S+ hold \S+ \(\w+;", bl) is not None, f"q5_clean: the report script read a known pair from the tree's SDC: {bl[:200]}")
     for cid in ("report", "c.cells", "f", "k", "k'"):
         say(verdict(r, cid) == "PASS", f"q5_clean: ({cid}) {verdict(r, cid)}: {text(r, cid)[:600]}")
     lv = re.search(r"logic levels on a one-register fan-in \(not judged\): (.*?); sources named", text(r, "k'"))
@@ -252,6 +343,40 @@ if "q5_mut" in only:
     others = re.findall(r"\|(\w+(?:\[\d+\])?)(?= \(|'|\])", flagged)
     say(verdict(r, "f") == "FAIL" and others == ["ftog_s[0]"],
         f"q5_mut: (f) FAILs on exactly ftog_s[0] (its line removed from daria_sync.tcl): {flagged.strip()}")
+if "q5_g1" in only:
+    r = results("q5_g1")
+    print("-- q5_g1 (the guard pair at G1's [0.500, 8.000] ns, fitter 7.500)")
+    bl = bounds_line("q5_g1")
+    say(bl.startswith("setup 8.000 hold 0.500 (G1;"), f"q5_g1: the report script read G1's bounds from sdc.rpt: {bl[:200]}")
+    for which, want in (("setup", "8.000"), ("hold", "0.500")):
+        rels, ks, cs = pair_rels("q5_g1", which)
+        say(rels == [want] and ks == [1] and cs == 4,
+            f"q5_g1: one {which} path pd_tog -> pd_rx at each of 4 corners, relationship {want}: {rels}, paths {ks}, {cs} corners")
+    say(verdict(r, "k") == "PASS" and "8.000 / 0.500" in text(r, "k"), f"q5_g1: (k) {verdict(r, 'k')}: {text(r, 'k')[:400]}")
+    te = text(r, "e")
+    say(all(x in te for x in ("set_max_delay pd_tog->pd_rx 8.000: Complete", "set_min_delay pd_tog->pd_rx 0.500: Complete",
+                              "fitter-only line: 7.500 ns (the pair's own)")),
+        f"q5_g1: (e) lists G1's pair Complete and the fitter's 7.500 ((e) {verdict(r, 'e')}): {te[:600]}")
+    say(not any(x in text(r, c) for c in ("a", "b", "k") for x in ("misread", "but sdc.rpt gives")),
+        "q5_g1: step7_checks.py reads (a), (b) and (k) as the report script judged them")
+    say(verdict(r, "report") == "PASS", f"q5_g1: (report) {verdict(r, 'report')}")
+    for c in ("a", "b"):
+        print(f"   q5_g1: ({c}) {verdict(r, c)} (information: the smoke design's slack): {text(r, c)[:300]}")
+for n, why, want in (("q5_g1_nopair", "sdc.rpt has 0 set_max_delay and 0 set_min_delay", ("20.000", "-20.000")),
+                     ("q5_g1_odd", "is not one of the known pairs", ("7.300", "0.700"))):
+    if n not in only:
+        continue
+    r = results(n)
+    print(f"-- {n}")
+    bl = bounds_line(n)
+    say(bl.startswith("none") and why in bl, f"{n}: the report script read no known bounds: {bl[:240]}")
+    for which, w in zip(("setup", "hold"), want):
+        rels, ks, cs = pair_rels(n, which)
+        say(rels == [w] and ks == [1] and cs == 4, f"{n}: one {which} path pd_tog -> pd_rx at each corner, at {w} ns as the SDC now has it: "
+            f"{rels}, paths {ks}, {cs} corners")
+    for c in ("a", "b", "k", "e"):
+        say(verdict(r, c) == "FAIL" and why in text(r, c), f"{n}: ({c}) {verdict(r, c)} on the bounds: {text(r, c)[:300]}")
+    say(not any("misread" in text(r, c) for c in ("a", "b", "k")), f"{n}: no misread of (a), (b), (k)")
 print("run_smoke.sh: " + ("PASS" if ok else "FAIL"))
 sys.exit(0 if ok else 1)
 PY

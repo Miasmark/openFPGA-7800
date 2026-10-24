@@ -63,6 +63,16 @@
 //                  and the data written or read           (default 0)
 //   +fp=1          also write fp.csv: one fingerprint line per frame,
 //                  beside its frames.csv line             (default 0)
+//   +mam=1         also estimate each call's time on a Harmony's LPC2103
+//                  (the "MAM timing estimate" block below): columns after
+//                  calls.csv's existing ones (cfn, mam_*, mw_*, mn_*) and
+//                  mam_summary.txt                        (default 0)
+//   +mamtrace=N    with +mam=1, also write mamtrace.txt: every access of
+//                  the first N calls with its wait states (game-derived:
+//                  sim/work only; a whole run's trace runs to gigabytes)
+//                                                         (default 0)
+//   +mamraw=N      write mamraw.txt: the raw accesses and retires of the
+//                  first N calls, for mam/mam_model.py    (default 0)
 //
 // Cache model: direct-mapped, 1/2/4/8/16 KiB, 16 and 32 byte lines, cold at
 // power-up and warm across calls. Stream I is the retired-PC stream in
@@ -433,12 +443,12 @@ module tb_daria;
 	typedef enum int {
 		S_ARMCYC, S_THUMB, S_ARM, S_FREQ, S_FROM, S_FRAM, S_FOTHER, S_RD_ROM, S_RD_RAM,
 		S_WR_RAM, S_RD_MMIO, S_WR_MMIO, S_RD_OTHER, S_WR_OTHER, S_TAKEN, S_EST,
-		S_DPC, S_DL16, S_DL32, S_RD_ROM_B, S_RD_ROM_H, S_RD_ROM_W, S_S1, S_S3, S_N
+		S_DPC, S_DL16, S_DL32, S_RD_ROM_B, S_RD_ROM_H, S_RD_ROM_W, S_S1, S_S3, S_S1W, S_N
 	} stat_t;
 	string sname [S_N] = '{"arm_cyc", "thumb", "arm", "fetch_req", "fetch_rom", "fetch_ram",
 		"fetch_other", "rd_rom", "rd_ram", "wr_ram", "rd_mmio", "wr_mmio", "rd_other",
 		"wr_other", "taken", "est_arm7", "dist_pc", "dist_l16", "dist_l32", "rd_rom_b",
-		"rd_rom_h", "rd_rom_w", "s1_cyc", "s3_cyc"};
+		"rd_rom_h", "rd_rom_w", "s1_cyc", "s3_cyc", "s1w_cyc"};
 	longint cs [S_N];
 	longint gs [S_N];
 	longint kind_cnt [K_N];
@@ -453,6 +463,7 @@ module tb_daria;
 	int     call_id = 0;             // calls started
 	int     dtrace = 0, fd_dt = 0;
 	int     mmiolog = 0, fd_mm = 0;
+	int     mamraw = 0, fd_raw = 0;
 	longint t_arm = 0;               // clk_arm edges since time 0
 	longint unal_rd = 0, unal_wr = 0;
 	int     unal_n = 0;
@@ -461,6 +472,13 @@ module tb_daria;
 	logic        unal_wr_ex [16];
 	logic   in_call = 0;
 	logic   prev_valid = 0;
+	// For s1w_cyc (L1W): the data read seen since the last retire (upstream
+	// reads a load's data before it retires it).
+	/* verilator lint_off PROCASSINIT */  // power-up values (DEVELOPING.md, "Power-up values")
+	logic        pr_v = 0;
+	logic [31:0] pr_addr = 0;
+	logic  [1:0] pr_size = 0;
+	/* verilator lint_on PROCASSINIT */
 	logic [31:0] prev_pc;
 	int     prev_size;
 	kind_t  prev_kind;
@@ -482,6 +500,289 @@ module tb_daria;
 		end
 	endfunction
 
+	// ------------------------------------------- MAM timing estimate (+mam=1)
+	// How the calls would time on a real Harmony cartridge's chip, an NXP
+	// LPC2103 (ARM7TDMI-S, one flash bank behind the Memory Accelerator Module),
+	// beside est_arm7. The model is written from NXP's user manual UM10161,
+	// chapter 4, and has never been checked on silicon: docs/HARMONY_MODEL.md
+	// (its sources, the settings each game runs at, its limits). Off unless
+	// +mam=1; then calls.csv gets columns after the existing ones (which do
+	// not change), the bench writes mam_summary.txt, and +mamtrace=N writes
+	// mamtrace.txt, every access of the first N calls with each
+	// configuration's wait states. +mamraw=N (independent of +mam) writes
+	// mamraw.txt, the raw accesses and retires of the first N calls, which
+	// mam/mam_model.py reads. The tools that read these files and the
+	// directed tests of this block are in mam/ (mam/README.md). A trace of a
+	// game is game-derived: it stays in sim/work, and so do these columns.
+	//
+	// The stream is the core's own: every access arm_mem_req/ready accepts in
+	// a call (fetches, data reads, data writes; address, size, and the S/N the
+	// core announces on mem_seq), in order, and at each retire the retired
+	// instruction's internal (I) cycles, which on the ARM7TDMI come after its
+	// fetch and data cycles and before the next fetch (the core retires an
+	// instruction just before, or at the same clk_arm as, the next one's
+	// first access; the bench handles the retire first). The I cycles per
+	// class are those base_cycles charges: loads, POP/LDMIA, SWP and
+	// shift-by-register 1, MUL 2 (m = 2, as est_arm7), long multiply 3. With
+	// no waits the timeline is est_arm7 plus the pipeline fill's two fetches,
+	// less the return refill's second fetch, which never happens (the call
+	// ends at the sentinel fetch): mam_chk = est_arm7 - (accesses + I - 1) is
+	// 0 for every call.
+	//
+	// Each configuration is a MAM mode (1 partial, 2 full) and MAMTIM T (a
+	// flash read takes T cycles: T - 1 wait states). Model, per configuration:
+	//  * three 16-byte latches: prefetch buffer PB, branch trail BT (code),
+	//    data buffer DB (data); one prefetch at a time, (line, start), ready at
+	//    start + T, held by the flash until the core fetches from that line
+	//    (captured into PB then); fb: the flash is busy until fb;
+	//  * when the fetch stream enters a line L (a latch hit, a capture or a
+	//    flash read), the prefetch of L+1 starts (at once, or when the flash
+	//    is free, or at the end of the read that brought L) unless it is the
+	//    one already pending; capturing L+1 starts L+2 at the capture;
+	//  * an instruction fetch that is sequential ("S" per Table 30) and hits
+	//    PB or BT takes 1 cycle; in mode 2 a non-sequential one hitting them
+	//    does too; in mode 1 a non-sequential fetch always costs a flash read
+	//    (Table 30 note 2: the timing of a read); a fetch of the pending
+	//    prefetch's line waits for it (if not ready) and captures it; any other
+	//    fetch starts a flash read; non-sequential lines go to BT, sequential
+	//    ones to PB;
+	//  * a flash data read in mode 2 hitting DB takes 1 cycle; otherwise it
+	//    is a flash read (mode 1 always: Table 31), it aborts the pending
+	//    prefetch (in flight or completed but not captured) and the prefetch
+	//    restarts when the data read ends;
+	//  * an instruction-side miss aborts an in-flight prefetch (configurations
+	//    "_na": it waits for the prefetch to complete instead); "_as": mode 1
+	//    with "sequential" taken from the address (the previous fetch's
+	//    address + size) instead of the S/N cycle type;
+	//  * SRAM, MMIO and writes: no waits (MMIO as est_arm7 charges it); a
+	//    fetch outside ROM, RAM and MMIO (the return sentinel, which stands
+	//    for the driver's code in flash) is a non-sequential flash read of a
+	//    line nothing holds;
+	//  * each call starts cold: nothing latched, no prefetch, the flash idle.
+	// Wait categories (for flash accesses): br non-sequential fetch not at the
+	// next address (a branch target), ns N fetch at the next address (after
+	// a data access), sx S fetch into a new line (line crossing), si S fetch
+	// in the current line, dr flash data read, ot the sentinel.
+	localparam int MAM_NC = 10;
+	localparam int MAM_NP = 4;          // the primary grid: columns with categories
+	localparam int MAM_NK = 6;
+	localparam int MK_BR = 0, MK_NS = 1, MK_SX = 2, MK_SI = 3, MK_DR = 4, MK_OT = 5;
+	int     mam_on = 0, mam_trace = 0, fd_mt = 0;
+	int     mam_mode [MAM_NC] = '{1, 1, 2, 2, 1, 1, 2, 2, 1, 1};
+	longint mam_tim  [MAM_NC] = '{3, 4, 3, 4, 3, 4, 3, 4, 3, 4};
+	bit     mam_noab [MAM_NC] = '{0, 0, 0, 0, 1, 1, 1, 1, 0, 0};
+	bit     mam_aseq [MAM_NC] = '{0, 0, 0, 0, 0, 0, 0, 0, 1, 1};
+	string  mam_name [MAM_NC] = '{"m1t3", "m1t4", "m2t3", "m2t4", "m1t3_na", "m1t4_na",
+		"m2t3_na", "m2t4_na", "m1t3_as", "m1t4_as"};
+	string  mam_kname [MAM_NK] = '{"br", "ns", "sx", "si", "dr", "ot"};
+	longint mam_now [MAM_NC], mam_fb [MAM_NC], mam_pfs [MAM_NC];
+	int     mam_pb [MAM_NC], mam_bt [MAM_NC], mam_db [MAM_NC], mam_pfl [MAM_NC];
+	bit     mam_pfv [MAM_NC];
+	int     mam_cur;                    // line of the last fetch from flash (-1: none)
+	longint mam_last_ia;                // address after the last fetch (-1: none)
+	longint mam_acc, mam_icyc, mam_ipend, mam_seqn;
+	longint mam_w [MAM_NC], mam_wk [MAM_NC][MAM_NK], mam_nk [MAM_NK];
+	longint done_mam_w [MAM_NC], done_mam_wk [MAM_NC][MAM_NK], done_mam_nk [MAM_NK];
+	longint done_mam_acc, done_mam_icyc;
+	longint g_mam_w [MAM_NC], g_mam_wk [MAM_NC][MAM_NK], g_mam_nk [MAM_NK];
+	longint g_mam_acc = 0, g_mam_icyc = 0, g_mam_badchk = 0;
+	// CALLFUNCTION value of each call: d_in on the clk_sys whose write set a
+	// mapper's call_pending (the clk_sys side, before it sees the request)
+	/* verilator lint_off PROCASSINIT */  // power-up values (DEVELOPING.md, "Power-up values")
+	logic [7:0] cfn_last = 8'h00, cfn_din = 8'h00, req_cfn = 8'h00;
+	logic       cfn_cp = 0, cfn_cpnow = 0;
+	/* verilator lint_on PROCASSINIT */
+
+	// The block samples the design with blocking assignments in clocked
+	// processes, as the rest of this bench does.
+	/* verilator lint_off BLKSEQ */
+	// I cycles of a retired instruction; l is an ARM load/store's L bit (20)
+	function automatic longint mam_icycles(input kind_t k, input logic l);
+		case (k)
+			T4_SHIFTREG, A_DP_REGSHIFT, A_SWP: return 1;
+			T4_MUL, A_MUL: return 2;
+			A_MUL_LONG: return 3;
+			T6_LDRPC, T7_LDR_REG, T8_LDRSX_REG, T9_LDR_IMM, T10_LDRH_IMM, T11_LDR_SP,
+			T14_POP, T15_LDMIA: return 1;
+			A_LDR_STR, A_HALF_SIGNED, A_LDM_STM: return l ? 1 : 0;
+			default: return 0;
+		endcase
+	endfunction
+
+	task automatic mam_start();
+		for (int c = 0; c < MAM_NC; c++) begin
+			mam_now[c] = 0; mam_fb[c] = 0; mam_pfs[c] = 0;
+			mam_pb[c] = -1; mam_bt[c] = -1; mam_db[c] = -1; mam_pfl[c] = -1;
+			mam_pfv[c] = 0;
+			mam_w[c] = 0;
+			for (int k = 0; k < MAM_NK; k++) mam_wk[c][k] = 0;
+		end
+		for (int k = 0; k < MAM_NK; k++) mam_nk[k] = 0;
+		mam_cur = -1; mam_last_ia = -1;
+		mam_acc = 0; mam_icyc = 0; mam_ipend = 0; mam_seqn = 0;
+		if (mam_trace != 0 && call_id <= mam_trace)
+			$fwrite(fd_mt, "C %0d %0d %02x\n", call_id, frame, cfn_last);
+	endtask
+
+	// Forget the pending prefetch; "_na": one in flight still holds the flash.
+	/* verilator lint_off UNUSEDSIGNAL */  // c indexes the ten configurations
+	function automatic void mam_drop_pf(input int c);
+		if (mam_pfv[c]) begin
+			if (mam_noab[c] && mam_pfs[c] <= mam_now[c] && mam_pfs[c] + mam_tim[c] > mam_now[c]
+					&& mam_pfs[c] + mam_tim[c] > mam_fb[c])
+				mam_fb[c] = mam_pfs[c] + mam_tim[c];
+			mam_pfv[c] = 0;
+		end
+	endfunction
+	/* verilator lint_on UNUSEDSIGNAL */
+
+	// A flash read for an instruction fetch starting at mam_now[c]: its waits.
+	function automatic longint mam_iread(input int c, input int line, input bit nonseq);
+		longint s;
+		mam_drop_pf(c);
+		s = mam_fb[c] > mam_now[c] ? mam_fb[c] : mam_now[c];
+		if (nonseq) mam_bt[c] = line; else mam_pb[c] = line;
+		mam_fb[c] = s + mam_tim[c];
+		mam_pfv[c] = 1; mam_pfl[c] = line + 1; mam_pfs[c] = s + mam_tim[c];
+		return s + mam_tim[c] - mam_now[c] - 1;
+	endfunction
+
+	task automatic mam_retire(input logic [31:0] pc, input logic [31:0] ins, input bit thumb, input kind_t k);
+		longint n;
+		n = mam_icycles(k, ins[20]);
+		for (int c = 0; c < MAM_NC; c++) mam_now[c] += n;
+		mam_icyc += n;
+		mam_ipend += n;
+		if (mam_trace != 0 && call_id <= mam_trace)
+			$fwrite(fd_mt, "R %08x %08x %s %0d\n", pc, ins, thumb ? "T" : "A", n);
+	endtask
+
+	task automatic mam_access(input bit fetch, input bit wr, input logic [31:0] a, input logic [1:0] sz,
+			input bit seq);
+		int     line, cat, cur;
+		bit     in_rom, s, hit;
+		longint nxt, ready;
+		longint w [MAM_NC];
+		in_rom = a < rom_size;
+		line = int'(a >> 4);
+		cat = -1;
+		cur = mam_cur;
+		nxt = mam_last_ia;
+		if (fetch) begin
+			mam_last_ia = longint'(a) + (sz == 2'd1 ? 2 : 4);
+			if (in_rom) begin
+				mam_cur = line;
+				if (nxt < 0 || longint'(a) != nxt) cat = MK_BR;
+				else if (!seq) cat = MK_NS;
+				else if (line != cur) cat = MK_SX;
+				else cat = MK_SI;
+			end else if (a[31:28] != 4'h4 && a[31:28] != 4'hE) cat = MK_OT;
+		end else if (!wr && in_rom) cat = MK_DR;
+		for (int c = 0; c < MAM_NC; c++) begin
+			w[c] = 0;
+			if (cat == MK_OT) w[c] = mam_iread(c, -100, 1'b1);
+			else if (cat == MK_DR) begin
+				if (!(mam_mode[c] == 2 && line == mam_db[c])) begin
+					w[c] = mam_tim[c] - 1;
+					mam_db[c] = line;
+					mam_fb[c] = mam_now[c] + mam_tim[c];
+					if (mam_pfv[c]) mam_pfs[c] = mam_now[c] + mam_tim[c];
+				end
+			end else if (cat >= 0) begin
+				s = mam_aseq[c] ? (nxt >= 0 && longint'(a) == nxt) : seq;
+				hit = line == mam_pb[c] || line == mam_bt[c];
+				if (mam_mode[c] == 1 && !s) w[c] = mam_iread(c, line, 1'b1);
+				else if (hit) begin
+					if (line != cur && !(mam_pfv[c] && mam_pfl[c] == line + 1)) begin
+						mam_drop_pf(c);
+						mam_pfv[c] = 1; mam_pfl[c] = line + 1;
+						mam_pfs[c] = mam_fb[c] > mam_now[c] ? mam_fb[c] : mam_now[c];
+					end
+				end else if (mam_pfv[c] && mam_pfl[c] == line) begin
+					ready = mam_pfs[c] + mam_tim[c];
+					w[c] = ready - mam_now[c] - 1 > 0 ? ready - mam_now[c] - 1 : 0;
+					mam_pb[c] = line;
+					mam_pfl[c] = line + 1;
+					mam_pfs[c] = ready > mam_now[c] ? ready : mam_now[c];
+				end else w[c] = mam_iread(c, line, !s);
+			end
+			mam_now[c] += 1 + w[c];
+			mam_w[c] += w[c];
+			if (cat >= 0) mam_wk[c][cat] += w[c];
+		end
+		if (cat >= 0) mam_nk[cat]++;
+		mam_acc++;
+		if (mam_trace != 0 && call_id <= mam_trace) begin
+			string rg, ck;
+			if (in_rom) rg = "rom"; else if (a[31:28] == 4'h4) rg = "ram"; else if (a[31:28] == 4'hE) rg = "mmio";
+			else rg = "oth";
+			if (cat < 0) ck = "-"; else ck = mam_kname[cat];
+			$fwrite(fd_mt, "A %0d %s %08x %0d %s %s %s %0d", mam_seqn, fetch ? "F" : (wr ? "W" : "R"), a, sz,
+				seq ? "S" : "N", rg, ck, mam_ipend);
+			for (int c = 0; c < MAM_NC; c++) $fwrite(fd_mt, " %0d", w[c]);
+			$fwrite(fd_mt, "\n");
+		end
+		mam_ipend = 0;
+		mam_seqn++;
+	endtask
+
+	// at the call's end, after close_prev: est is the call's est_arm7
+	task automatic mam_end(input longint est);
+		foreach (mam_w[c]) begin
+			done_mam_w[c] = mam_w[c];
+			g_mam_w[c] += mam_w[c];
+			for (int k = 0; k < MAM_NK; k++) begin
+				done_mam_wk[c][k] = mam_wk[c][k];
+				g_mam_wk[c][k] += mam_wk[c][k];
+			end
+		end
+		for (int k = 0; k < MAM_NK; k++) begin done_mam_nk[k] = mam_nk[k]; g_mam_nk[k] += mam_nk[k]; end
+		done_mam_acc = mam_acc;
+		done_mam_icyc = mam_icyc;
+		g_mam_acc += mam_acc;
+		g_mam_icyc += mam_icyc;
+		if (est != mam_acc + mam_icyc - 1) g_mam_badchk++;
+		if (mam_trace != 0 && call_id <= mam_trace) begin
+			$fwrite(fd_mt, "E %0d acc %0d icyc %0d est %0d", call_id, mam_acc, mam_icyc, est);
+			for (int c = 0; c < MAM_NC; c++) $fwrite(fd_mt, " %0d", mam_w[c]);
+			$fwrite(fd_mt, "\n");
+		end
+	endtask
+
+	task automatic mam_header();
+		$fwrite(fd_calls, ",cfn,mam_acc,mam_icyc,mam_chk");
+		for (int c = 0; c < MAM_NC; c++) $fwrite(fd_calls, ",mam_%s", mam_name[c]);
+		for (int c = 0; c < MAM_NP; c++)
+			for (int k = 0; k < MAM_NK; k++) $fwrite(fd_calls, ",mw_%s_%s", mam_name[c], mam_kname[k]);
+		for (int k = 0; k < MAM_NK; k++) $fwrite(fd_calls, ",mn_%s", mam_kname[k]);
+	endtask
+
+	task automatic mam_row(input longint est, input logic [7:0] cfn);
+		$fwrite(fd_calls, ",%02x,%0d,%0d,%0d", cfn, done_mam_acc, done_mam_icyc, est - (done_mam_acc + done_mam_icyc - 1));
+		for (int c = 0; c < MAM_NC; c++) $fwrite(fd_calls, ",%0d", est + done_mam_w[c]);
+		for (int c = 0; c < MAM_NP; c++)
+			for (int k = 0; k < MAM_NK; k++) $fwrite(fd_calls, ",%0d", done_mam_wk[c][k]);
+		for (int k = 0; k < MAM_NK; k++) $fwrite(fd_calls, ",%0d", done_mam_nk[k]);
+	endtask
+
+	task automatic mam_summary();
+		int fd;
+		fd = $fopen({out, "mam_summary.txt"}, "w");
+		$fwrite(fd, "est_arm7 %0d accesses %0d icycles %0d bad_chk_calls %0d\n", gs[S_EST], g_mam_acc, g_mam_icyc,
+			g_mam_badchk);
+		$fwrite(fd, "flash_accesses");
+		for (int k = 0; k < MAM_NK; k++) $fwrite(fd, " %s %0d", mam_kname[k], g_mam_nk[k]);
+		$fwrite(fd, "\n");
+		for (int c = 0; c < MAM_NC; c++) begin
+			$fwrite(fd, "cfg %s mode %0d mamtim %0d noabort %0d addrseq %0d cycles %0d waits %0d", mam_name[c],
+				mam_mode[c], mam_tim[c], mam_noab[c], mam_aseq[c], gs[S_EST] + g_mam_w[c], g_mam_w[c]);
+			for (int k = 0; k < MAM_NK; k++) $fwrite(fd, " %s %0d", mam_kname[k], g_mam_wk[c][k]);
+			$fwrite(fd, "\n");
+		end
+		$fclose(fd);
+	endtask
+	/* verilator lint_on BLKSEQ */
+
 	always @(posedge clk_arm) begin
 		// call boundaries
 		if (!in_call && ctl_state == CTRL_RUNNING) begin
@@ -493,11 +794,22 @@ module tb_daria;
 				for (int k = 0; k < NCFG; k++) c_miss[s][k] = 0;
 			end
 			prev_valid = 0;
+			/* verilator lint_off BLKSEQ */  // as the rest of this block
+			pr_v = 0;
+			/* verilator lint_on BLKSEQ */
 			first_bl = 0;
 			if (dtrace != 0) $fwrite(fd_dt, "c %0d %0d\n", call_id, frame);
+			if (mam_on != 0) mam_start();
 		end
 		t_arm++;
 		if (in_call) cs[S_ARMCYC]++;
+		if (mamraw != 0 && in_call && call_id <= mamraw) begin
+			if (a_retire && ce_last) $fwrite(fd_raw, "%0d R %08x %08x %0d\n", t_arm, a_rpc, a_rins, a_rthumb);
+			if (m_req && m_rdy && arm_ce_run) $fwrite(fd_raw, "%0d A %s %08x %0d %0d\n", t_arm,
+				m_fetch ? "F" : (m_wr ? "W" : "R"), m_addr, m_size, dut.arm_host.arm_cpu.mem_seq);
+			if (m_req && !m_rdy) $fwrite(fd_raw, "%0d q %s %08x\n", t_arm, m_fetch ? "F" : (m_wr ? "W" : "R"), m_addr);
+			if (ret_fetch) $fwrite(fd_raw, "%0d END\n", t_arm);
+		end
 
 		if (a_retire && in_call && ce_last) begin
 			kind_t k;
@@ -513,6 +825,26 @@ module tb_daria;
 			cs[S_EST] += base_cycles(k, a_rins);
 			cs[S_S1] += s1_cycles(k, a_rins);
 			cs[S_S3] += s3_cycles(k, a_rins);
+			// s1w_cyc (L1W+L3, docs/BUPCHIP_CORE.md): s1_cyc minus 1 for a
+			// Thumb LDR word load (F6, F7/F9 without B, F11) whose data read is
+			// word-aligned in the window (below 64 KiB) or the cart RAM, and minus
+			// 1 for a Thumb LDMIA, or POP without PC.
+			/* verilator lint_off BLKSEQ */  // as the rest of this block
+			/* verilator lint_off WIDTHEXPAND */
+			begin
+				int c1;
+				bit wl;
+				c1 = s1_cycles(k, a_rins);
+				wl = k == T6_LDRPC || k == T11_LDR_SP || (k == T7_LDR_REG && !a_rins[10]) ||
+				     (k == T9_LDR_IMM && !a_rins[12]);
+				if (a_rthumb && wl && pr_v && pr_size == 2'd2 && pr_addr[1:0] == 2'd0 &&
+				    (pr_addr < 32'h0001_0000 || pr_addr[31:28] == 4'h4)) c1 -= 1;
+				if (a_rthumb && (k == T15_LDMIA || (k == T14_POP && !a_rins[8]))) c1 -= 1;
+				cs[S_S1W] += c1;
+			end
+			pr_v = 0;
+			/* verilator lint_on WIDTHEXPAND */
+			/* verilator lint_on BLKSEQ */
 			if (pc_count.exists(a_rpc)) pc_count[a_rpc]++; else pc_count[a_rpc] = 1;
 			if (a_rpc < rom_size) begin
 				int ix;
@@ -531,6 +863,7 @@ module tb_daria;
 			prev_pc = a_rpc;
 			prev_size = sz;
 			prev_kind = k;
+			if (mam_on != 0) mam_retire(a_rpc, a_rins, a_rthumb, k);
 		end
 
 		if (m_req && m_rdy && in_call && arm_ce_run) begin
@@ -538,6 +871,7 @@ module tb_daria;
 			is_rom  = m_addr < rom_size;
 			is_ram  = m_addr[31:28] == 4'h4;
 			is_mmio = m_addr[31:28] == 4'hE;
+			if (mam_on != 0) mam_access(m_fetch, m_wr, m_addr, m_size, dut.arm_host.arm_cpu.mem_seq);
 			if (!m_fetch && ((m_size == 2'd1 && m_addr[0]) || (m_size == 2'd2 && m_addr[1:0] != 2'd0))) begin
 				if (m_wr) unal_wr++; else unal_rd++;
 				if (unal_n < 16) begin
@@ -560,6 +894,11 @@ module tb_daria;
 					if (mmio_wr.exists(m_addr)) mmio_wr[m_addr]++; else mmio_wr[m_addr] = 1;
 				end else cs[S_WR_OTHER]++;
 			end else begin
+				/* verilator lint_off BLKSEQ */  // as the rest of this block
+				pr_v = 1;
+				pr_addr = m_addr;
+				pr_size = m_size;
+				/* verilator lint_on BLKSEQ */
 				if (is_rom) begin
 					cs[S_RD_ROM]++;
 					rom_rd_kib[m_addr[18:10]]++;
@@ -582,6 +921,7 @@ module tb_daria;
 		if (in_call && ret_fetch) begin
 			// The return's own flow change (BX lr / POP {pc} to the sentinel).
 			close_prev(32'hF0000000, 1'b1);
+			if (mam_on != 0) mam_end(cs[S_EST]);
 			in_call = 0;
 			foreach (cs[s]) begin done_cs[s] = cs[s]; gs[s] += cs[s]; end
 			for (int s = 0; s < NSTR; s++) begin
@@ -663,6 +1003,16 @@ module tb_daria;
 		if (!running) begin
 			old_vs <= vsync_raw;
 		end else begin
+			// ---- +mam: the CALLFUNCTION value (see the MAM block)
+			/* verilator lint_off BLKSEQ */  // as the MAM block
+			if (mam_on != 0) begin
+				cfn_cpnow = dut.cart2600.cdf.call_pending | dut.cart2600.dpcplus.call_pending |
+					dut.cart2600.bus.call_pending;
+				if (cfn_cpnow && !cfn_cp) cfn_last = cfn_din;
+				cfn_cp = cfn_cpnow;
+				cfn_din = dut.cart2600.d_in;
+			end
+			/* verilator lint_on BLKSEQ */
 			// ---- RIOT timer events (phi2)
 			if (r_ce && r_sel && !r_rw && r_a4) begin
 				t_timer_write = now;
@@ -716,6 +1066,9 @@ module tb_daria;
 				stall = 0;
 				req_frame = frame;
 				req_line = int'((now - t_vs) / SYS_PER_LINE);
+				/* verilator lint_off BLKSEQ */  // as the MAM block
+				req_cfn = cfn_last;
+				/* verilator lint_on BLKSEQ */
 				if (pending_slack) begin
 					// The timer never expired before the next call: leave it unresolved.
 					$fwrite(fd_slack, "%0d,2,%0d,0,%04x\n", poll_call, poll_done_t, poll_pc);
@@ -735,6 +1088,7 @@ module tb_daria;
 					$fwrite(fd_calls, ",%0d", done_acc[s]);
 					for (int k = 0; k < NCFG; k++) $fwrite(fd_calls, ",%0d", done_miss[s][k]);
 				end
+				if (mam_on != 0) mam_row(done_cs[S_EST], req_cfn);
 				$fwrite(fd_calls, "\n");
 				f_calls++;
 				f_instr += done_cs[S_THUMB] + done_cs[S_ARM];
@@ -866,6 +1220,28 @@ module tb_daria;
 		void'($value$plusargs("dtrace=%d", dtrace));
 		void'($value$plusargs("mmiolog=%d", mmiolog));
 		void'($value$plusargs("fp=%d", fp_on));
+		void'($value$plusargs("mamraw=%d", mamraw));
+		void'($value$plusargs("mam=%d", mam_on));
+		void'($value$plusargs("mamtrace=%d", mam_trace));
+		if (mam_on == 0) mam_trace = 0;
+		foreach (g_mam_w[c]) begin
+			g_mam_w[c] = 0;
+			for (int k = 0; k < MAM_NK; k++) g_mam_wk[c][k] = 0;
+		end
+		foreach (g_mam_nk[k]) g_mam_nk[k] = 0;
+		if (mam_trace != 0) begin
+			fd_mt = $fopen({out, "mamtrace.txt"}, "w");
+			$fwrite(fd_mt, "# tb_daria +mam trace of the first %0d calls (docs/HARMONY_MODEL.md). Rows:\n", mam_trace);
+			$fwrite(fd_mt, "# C call frame cfn            a call starts (cfn: last CALLFUNCTION value, hex)\n");
+			$fwrite(fd_mt, "# R pc instr T|A icyc         an instruction retires; icyc I cycles follow its accesses\n");
+			$fwrite(fd_mt, "# A n op addr size cyc region cat ibefore w_<cfg>...\n");
+			$fwrite(fd_mt, "#   an access: op F fetch, R read, W write; size 0 byte 1 half 2 word; cyc S/N (mem_seq);\n");
+			$fwrite(fd_mt, "#   region rom/ram/mmio/oth; cat br ns sx si dr ot (- not flash); ibefore I cycles\n");
+			$fwrite(fd_mt, "#   just before it; then the wait states of each configuration:");
+			for (int c = 0; c < MAM_NC; c++) $fwrite(fd_mt, " %s", mam_name[c]);
+			$fwrite(fd_mt, "\n# E call acc N icyc N est N wsum_<cfg>...   the call ends\n");
+		end
+		if (mamraw != 0) fd_raw = $fopen({out, "mamraw.txt"}, "w");
 		if (arm_div > 1) begin
 			force dut.arm_host.ce = arm_ce_run;
 			force dut.cart2600.mem_ce = arm_ce_run;
@@ -906,6 +1282,7 @@ module tb_daria;
 				$fwrite(fd_calls, ",miss_%s_%0dk_%0d", s == 0 ? "I" : s == 1 ? "D" : "U",
 					cfg_bytes[k] / 1024, cfg_line[k]);
 		end
+		if (mam_on != 0) mam_header();
 		$fwrite(fd_calls, "\n");
 		fd_slack = $fopen({out, "slack.csv"}, "w");
 		$fwrite(fd_slack, "call,kind,sys_end_to_poll,slack_sys,poll_pc\n");
@@ -955,6 +1332,8 @@ module tb_daria;
 		secs = real'(now) / SYS_HZ;
 		$display("ran %0d frames, %0d calls", frame, sys_calls);
 		write_summary();
+		if (mam_on != 0) mam_summary();
+		if (mam_trace != 0) $fclose(fd_mt);
 		$fclose(fd_calls);
 		$fclose(fd_slack);
 		$fclose(fd_frames);
@@ -962,6 +1341,7 @@ module tb_daria;
 		if (dtrace != 0) $fclose(fd_dt);
 		if (mmiolog != 0) $fclose(fd_mm);
 		if (fp_on != 0) $fclose(fd_fp);
+		if (mamraw != 0) $fclose(fd_raw);
 		$finish;
 	end
 

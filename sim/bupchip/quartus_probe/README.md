@@ -199,19 +199,31 @@ PASS, 3 a FAIL verdict, 1 a compile failure, 2 a refusal.
 
 - `step7_checks.py` judges a fit again from its own report files without a
   refit: (a), (l) and (h) by the build's divider (amended for VCO/19,
-  2026-10-14), and (c.cells) from `firstflops.tsv` by the tree's table. It
-  prints the verdict as amended and the rules as first written. A change
-  to any other check that `step7_report.tcl` makes, or to what it writes,
-  needs the fit's kept database (`REPORT_ONLY=1`) or a refit (plan 5.4).
+  2026-10-14), (a), (b), (k) and (e) by the guard pair's bounds, and
+  (c.cells) from `firstflops.tsv` by the tree's table. It prints the verdict
+  as amended and the rules as first written. A change to any other check
+  that `step7_report.tcl` makes, or to what it writes, needs the fit's kept
+  database (`REPORT_ONLY=1`) or a refit (plan 5.4).
+- The guard pair `pd_tog` -> `pd_rx` is held to the bounds of the SDC the
+  fit was made with, as the Timing Analyzer read it (`sdc.rpt`), and they
+  must be one of the known pairs in `step7_report.tcl`'s `guard_pairs`:
+  [1.000, 6.000] ns as first written, or G1's [0.500, 8.000] ns (2026-10-19;
+  plan 5.4's amendment for G1 is `docs/daria_step10/plan.md` section 10).
+  Neither pair belongs to a divider. A G1 fit judged by the older report
+  script, which held the pair to 6 / 1 ns, is judged again correctly from
+  its own files.
 - `step7/selftest.sh` tests the driver's refusals, `step7_prep.py` and
-  `step7_checks.py` on made-up report files, without Quartus: 117 cases
-  at `f3a9b49`. It needs 100 MB free on `/`; with less it skips the cases
-  that copy `src/fpga` and exits 3 (PARTIAL). `sim/step7_gates.sh`'s
-  `fit_selftest` gate runs it.
+  `step7_checks.py` on made-up report files, without Quartus: 172 cases
+  (117 before the guard pair's bounds were read from the SDC). It needs
+  100 MB free on `/`; with less it skips the cases that copy `src/fpga` and
+  exits 3 (PARTIAL). `sim/step7_gates.sh`'s `fit_selftest` gate runs it.
 - `step7/smoke/run_smoke.sh` fits a small design whose register names are
-  the core's (`smoke.sv`, four projects of about 3 minutes each) to test
-  `core/daria.qip`'s synchroniser marks, `step7_report.tcl` and
-  `step7_checks.py` against real Quartus output. It needs the lock too.
+  the core's (`smoke.sv`, five projects of about 35 s each, and two
+  `quartus_sta` runs of about 3 s on one of them with the guard pair's SDC
+  lines edited; about 3 minutes in all [measured 2026-10-19 at `b55b4b3`])
+  to test `core/daria.qip`'s synchroniser marks, `step7_report.tcl` and
+  `step7_checks.py` against real Quartus output, the guard pair at the
+  tree's bounds and at G1's. It needs the lock too.
 - `step7/f3_crossings.txt` and the table in `step7_report.tcl` are the two
   copies of plan 2.7's synchroniser table; the self-test checks that they
   agree.

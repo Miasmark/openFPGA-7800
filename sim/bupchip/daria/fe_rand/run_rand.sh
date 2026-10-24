@@ -6,7 +6,7 @@
 #
 #   SELF=1     the upstream-vs-upstream self-check build (-DSELF): must report 0
 #   POISON=1   daria_mem's poisoned RAM model (-DDARIA_RAM_POISON)
-#   JOBS=N     runs in parallel (default 1; the machine rule is at most 2)
+#   JOBS=N     runs in parallel (default 1, at most 3: docs/ENVIRONMENT.md 7.4)
 #   TIMEOUT=S  seconds per run (default 1800)
 #   TAG=name   the run directory's prefix (default fe, self, fe_poison, ...)
 #   VFLAGS     more Verilator options (a separate object directory per set)
@@ -135,7 +135,7 @@ run_one() {
 }
 
 JOBS="${JOBS:-1}"
-[ "$JOBS" -gt 2 ] && JOBS=2
+[ "$JOBS" -gt 3 ] && JOBS=3
 fail=0
 pids=()
 for s in "${SEEDS[@]}"; do

@@ -103,6 +103,19 @@
         ],
         "size_maximum": "0x4000",
         "address": "0x0A000000"
+      },
+      {
+        "name": "FA2 flash",
+        "id": "0x10A",
+        "required": false,
+        "filename": "fa2.sav",
+        "parameters": "0x80",
+        "nonvolatile": true,
+        "extensions": [
+          "sav"
+        ],
+        "size_maximum": "0x100",
+        "address": "0x40000000"
       }
     ]
   }

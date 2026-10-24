@@ -2,7 +2,7 @@
 """Verdict of a run_sim.sh log, as one exit code (DARIA step 7, plan 1.2 row 3).
 
   run_sim_check.py LOG [--build plain|daria|auto] [--audf 0,7,14,31]
-                       [--ref REF_LOG]
+                       [--ref REF_LOG] [--only daria]
 
 run_sim.sh prints measurements and a few verdicts (BIOS_BOOT, BUPCHIP_E2E,
 PLL_REGION, DARIA) and exits 0 whatever they say. This checks every case
@@ -24,12 +24,40 @@ against its expected lines and fails on:
     drops the "%Fatal" line);
   - the load, PLL retune, audio filter and virtual axis lines other than
     expected;
+  - the FA2 flash save slot's lines (fa2.sav, sim/fa2_test.py's program)
+    other than expected: each FA2 program run done with 2 flash loads, 1
+    save and 256 writes into the slot's RAM, 0 bytes wrong in the work RAM
+    after the reload and in the slot read back, and both A78 runs leaving
+    the file as it was: load_test.a78 (not taken for FA2) and fa2_test.py's
+    a78 image (taken for FA2, mapper 25, its save done with no write into
+    the slot's RAM);
+  - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
+    with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
+  - tb_region (sim/run_region.sh) other than its lines for the DARIA and
+    the plain build (every trial with the retunes wanted, no retune back to
+    back, and in the DARIA build daria_rgn exact: scenarios A, B and C for
+    DARIA, A and B for plain, whose C is not judged), its four planted
+    variants caught, the sketch by its hazard in C (a retune back to back
+    or daria_rgn wrong), and "REGION pass";
   - "exit N" with N != 0 when the log records the script's exit status.
 DARIA section: in the DARIA build (--build daria, or auto from run_sim.sh's
 "POCKET_DARIA 1" line) "DARIA pass" is required. In the plain build the
 section prints that it is inactive; that is reported, and is not a pass of
 anything. A log from before step 7 (no "-- run_sim.sh:" line) has no DARIA
 section at all; it is then checked as a plain build.
+In a BUP_DEBUG build of DARIA (the "-- run_sim.sh:" line's defines hold
+-DBUP_DEBUG) the DARIA status overlay's lines are required too: one
+"overlay: ... PASS" line under each of the section's six runs (smoke_dpc,
+smoke_cdf, digital_cdfj, frame_cdfj, frame_cdfj_pattern, frame_cdfj_retune),
+each with its "checked:" field stating the requirement run_sim.sh's OVL
+table gives that run (OVL_REQ below: the rows, the waiver or a cell floor,
+the exact late calls, the forced guard, the pattern, the second reset), and
+the section's "overlay cells: ...; pass" line; a BUP_DEBUG build without
+them fails ("the overlay check did not run"), and so does an overlay line in
+a build without BUP_DEBUG.
+--only daria checks a run_sim.sh ONLY=daria log (tb_load and the DARIA
+section alone): the global rules and the DARIA section only. A log that
+says ONLY=daria fails without it, and one that does not fails with it.
 --ref REF_LOG also compares every measurement and verdict line with another
 log (e.g. the same tree before a bench change): any difference fails.
 Exit status: 0 pass, 1 fail, 2 usage.
@@ -42,8 +70,27 @@ import sys
 NTSC78 = r"238804 clk_sys \(59\.958 Hz\), active lines 224, active pixels/line 372, video PAL 0"
 TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured ([0-9.]+) Hz, "
                   r"TIA reference ([0-9.]+) Hz, ratio ([0-9.]+)$")
+# (frame_ and overlay: lines of BUP_DEBUG builds only, so a reference log of
+# a build without BUP_DEBUG compares as before)
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
-                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_)")
+                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
+OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern", "frame_cdfj_retune")
+# What each run's overlay line must say it required and checked (run_sim.sh's
+# OVL table): a line that passes on a smaller requirement fails here.
+_WAIVED = r"required 000000000, at least 0 cells\)"
+_LATE = r"\(required, with exactly (\d+) late calls\)"
+_SOME_LATE = r"\(required, with late calls above 0 and below the calls\)"
+OVL_REQ = {
+    "smoke_dpc": [_WAIVED],
+    "smoke_cdf": [_WAIVED],
+    "digital_cdfj": [r"required 000000111, at least [1-9]\d* cells\)"],
+    "frame_cdfj": [r"required 000111111, at least [1-9]\d* cells\)", _LATE],
+    "frame_cdfj_pattern": [r"required 111111111, at least [1-9]\d* cells\)", _LATE,
+                           r"guard forced: [1-9]\d* unlock pulses counted, locked on [1-9]\d* clk_sys \(required at least [1-9]\d* pulses\)",
+                           r"; pattern read back as forced \("],
+    "frame_cdfj_retune": [r"required 000111111, at least [1-9]\d* cells\)", _SOME_LATE,
+                          r"reset releases [2-9]\d* \(required at least 2\)"],
+}
 AXIS = [
     r"AXIS start at 128",
     r"AXIS 16 ms tap right: 129",
@@ -57,6 +104,45 @@ AXIS = [
     r"AXIS stick 60 -> position 60 after 40 ms",
     r"AXIS D-pad press \(rest now 60\), then stick 250: 250",
     r"AXIS driving, stick pushed fully right 1 s: 31 gray steps, 32 ms apart",
+]
+# tb_vaxis5 through sim/run_vaxis5.sh's defaults: seeds 1-4, 10^7 clocks each
+VAXIS5 = [r"VAXIS5 seed %d cycles 10000000 ticks [1-9]\d* resets [1-9]\d* \(on a tick [1-9]\d*, "
+          r"1-4 clocks after one [1-9]\d*\) mismatches 0" % k for k in (1, 2, 3, 4)] + [
+    r"VAXIS5 planted fault \(axis 4 reads axis 3's slow\), seed 1: caught, [1-9]\d* mismatches",
+    r"VAXIS5 pass",
+]
+# tb_region through sim/run_region.sh: the region logic of both builds in
+# RTL-1's and RTL-2's load sequences, and its planted variants. The plain
+# build's C line is not judged (back-to-back retunes there are the build
+# without DARIA's own, as in 2.2.1). The sketch's C line must show the hazard
+# it was rejected for, so that "caught" means the bench saw it. REGION lines
+# are not in VERDICT_LINE, so a --ref log from before the bench still compares.
+REGION = [
+    r"REGION daria A trials 1641 retunes 1:1641 rgn_bad 0 b2b 0",
+    r"REGION daria B pal trials 11 retunes 0:11 rgn_bad 0 b2b 0",
+    r"REGION daria B ntsc trials 11 retunes 1:11 rgn_bad 0 b2b 0",
+    r"REGION daria C trials 49 retunes 2:49 rgn_bad 0 b2b 0",
+    r"REGION plain A trials 1641 retunes 1:1641 rgn_bad \d+ b2b 0",
+    r"REGION plain B pal trials 11 retunes 0:11 rgn_bad \d+ b2b 0",
+    r"REGION plain B ntsc trials 11 retunes 1:11 rgn_bad \d+ b2b 0",
+    r"REGION sketch C trials 49 retunes [\d: ]+ rgn_bad (?:[1-9]\d* b2b \d+|\d+ b2b [1-9]\d*)",
+    r"REGION verdict daria: pass \(.*\)",
+    r"REGION verdict plain: pass \(.*\)",
+] + [r"REGION verdict %s: planted, caught" % v for v in ("old", "rtl2", "rtl1", "sketch")] + [r"REGION pass"]
+# The FA2 flash save slot (fa2.sav): each pattern and how many times the
+# section must hold it (the two FA2 program runs, then the two A78 runs; mapper
+# 25 is detect2600.sv's BANKFA2). The second A78 run is the one that can fail:
+# an A78 taken for FA2 whose save command, in 7800 mode, must not reach the
+# slot (before the wrapper's fa2_on gate it wrote 255 of 256 bytes). FA2 lines
+# are not in VERDICT_LINE, so a --ref log from before the slot still compares.
+FA2 = [
+    (r"FA2 program: mapper 25, done after \d+ ms; flash loads 2, saves 1, slot RAM writes 256", 2),
+    (r"FA2 work RAM after the reload: 0 of 255 bytes differ from the expected file", 2),
+    (r"FA2 save slot read back \(APF read protocol\): 0 of 256 bytes differ from the expected file", 2),
+    (r"FA2 image: 2600 mapper (?!25,)\d+, cart_is_7800 1, tia_mode 0; flash loads 0, saves 0, slot RAM writes 0", 1),
+    (r"FA2 image: 2600 mapper 25, cart_is_7800 1, tia_mode 0; flash loads 0, saves 1, slot RAM writes 0", 1),
+    (r"FA2 save slot after load, reset and 300 ms of running \(APF read protocol\): "
+     r"0 of 256 bytes differ from the expected file", 2),
 ]
 # BIOS cases: title prefix -> (required patterns, does its TONE line have to pass)
 BIOS_CASES = [
@@ -132,7 +218,46 @@ def tone_ok(line, audf=None):
     return 0.990 <= float(m.group(4)) <= 1.010
 
 
-def check(log, build, audfs):
+def overlay_check(body, debug, bad, notes):
+    """The DARIA section's overlay lines (BUP_DEBUG builds): each run's
+    "overlay:" line, which must pass and say what it checked, and the
+    section's "overlay cells:" line."""
+    s = [x.rstrip() for x in body]
+    ovl = [x.strip() for x in s if x.strip().startswith("overlay:")]
+    if not debug:
+        if ovl:
+            bad.append("DARIA section: overlay lines in a build without BUP_DEBUG")
+        return
+    if not ovl and not any(x.strip().startswith("overlay cells:") for x in s):
+        bad.append("BUP_DEBUG build: the overlay check did not run (no overlay lines in the DARIA section)")
+        return
+    for run in OVL_RUNS:
+        idx = [i for i, x in enumerate(s) if re.match(r"^  %s: " % re.escape(run), x)]
+        if len(idx) != 1:
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: {len(idx)} result lines, expected 1")
+            continue
+        nxt = [x.strip() for x in s[idx[0] + 1:idx[0] + 3] if x.startswith("    overlay: ")]
+        if not nxt:
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: no overlay line")
+        elif not re.search(r"; checked: \d+ cells \(rows complete [01]{9}, required [01]{9}, at least \d+ cells\)", nxt[0]) \
+                or not nxt[0].endswith("; PASS"):
+            bad.append(f"BUP_DEBUG build: DARIA run {run}: overlay line not a pass with its checked field: {nxt[0][:160]}")
+        else:
+            miss = [r for r in OVL_REQ[run] if not re.search(r, nxt[0])]
+            if miss:
+                bad.append(f"BUP_DEBUG build: DARIA run {run}: overlay line without its requirement: " + "; ".join(miss))
+            m, n = re.search(_LATE, nxt[0]), re.match(r"overlay: calls \d+ .*?, late calls (\d+),", nxt[0])
+            if m and (not n or n.group(1) != m.group(1)):
+                bad.append(f"BUP_DEBUG build: DARIA run {run}: late calls {n.group(1) if n else '?'}, required {m.group(1)}")
+    agg = [x.strip() for x in s if x.strip().startswith("overlay cells:")]
+    if len(agg) != 1 or not re.fullmatch(r"overlay cells: [1-9]\d* read back in the section; rows complete [01]{3}111111 in "
+                                         r"the normal runs, 111111111 in the pattern run \(.*\); pass", agg[0]):
+        bad.append("BUP_DEBUG build: no passing 'overlay cells:' line for the section: %s" % (agg[:1] or "none"))
+    else:
+        notes.append("DARIA status overlay: " + agg[0])
+
+
+def check(log, build, audfs, only=None):
     L = Log(log)
     bad, notes = [], []
 
@@ -158,6 +283,22 @@ def check(log, build, audfs):
     new_format = any(x.startswith("-- run_sim.sh:") for x in L.lines)
     if build == "auto":
         build = "daria" if any(re.match(r"^-- run_sim\.sh: .*POCKET_DARIA 1,", x) for x in L.lines) else "plain"
+    debug = any(re.match(r"^-- run_sim\.sh: .*defines:.* -DBUP_DEBUG( |$)", x) for x in L.lines)
+    said_only = any(x.startswith("-- run_sim.sh ONLY=daria") for x in L.lines)
+    if said_only != (only == "daria"):
+        bad.append("the log is a run_sim.sh ONLY=daria run: check it with --only daria" if said_only
+                   else "--only daria, but the log is not a run_sim.sh ONLY=daria run")
+    if only == "daria":
+        h, b = L.section("-- DARIA")
+        if build != "daria" or h is None or "inactive" in h:
+            bad.append("--only daria: the DARIA section did not run")
+        elif "DARIA pass" not in [x.strip() for x in b]:
+            bad.append("DARIA build: no 'DARIA pass'")
+        else:
+            notes.append("DARIA section: pass (ONLY=daria: no other section ran)")
+        if h is not None:
+            overlay_check(b, debug, bad, notes)
+        return bad, notes, build
 
     # 7800 tones: the lines before "-- border hidden:"
     body = []
@@ -196,6 +337,16 @@ def check(log, build, audfs):
     need(b, r"LOAD 4096 bytes, header .*, cart_is_7800=0, cart_size=4096, tia_mode=1, payload mismatches=0", "2600 load")
     if not b or not any(tone_ok(x, 14) for x in b):
         bad.append("2600 load: no tone AUDF0=14 with ratio 0.990-1.010")
+    h, b = L.section("-- FA2 flash save slot")
+    if b is None:
+        bad.append("FA2 save slot: section missing")
+    else:
+        for pat, n in FA2:
+            k = sum(1 for x in b if re.fullmatch(pat, x.strip()))
+            if k != n:
+                bad.append(f"FA2 save slot: {k} of {n} lines /{pat}/")
+        if any(x.strip().startswith("FA2 byte") for x in b):
+            bad.append("FA2 save slot: bytes differ ('FA2 byte' lines)")
 
     # BIOS boot rule
     h, b = L.section("-- 7800 BIOS")
@@ -249,6 +400,8 @@ def check(log, build, audfs):
             bad.append("DARIA build: no 'DARIA pass'")
         else:
             notes.append("DARIA section: pass")
+        if h is not None and "inactive" not in h:
+            overlay_check(b, debug, bad, notes)
     else:
         if h is None:
             if new_format:
@@ -280,10 +433,23 @@ def check(log, build, audfs):
         m = re.fullmatch(r"AUDIO silence after 2 s: (-?\d+) \(expect near 0\)", x.strip()) or m
     if not m or abs(int(m.group(1))) > 16:
         bad.append("audio filter: silence not near 0")
+    # the region asked of the PLL
+    h, b = L.section("-- the region asked of the PLL")
+    if b is None:
+        bad.append("tb_region: section missing")
+    else:
+        for p in REGION:
+            need(b, p, "tb_region")
     # virtual axis
     h, b = L.section("-- virtual paddle")
     for p in AXIS:
         need(b, p, "virtual axis")
+    # the five axes as one engine
+    h, b = L.section("-- the five virtual axes")
+    for p in VAXIS5:
+        need(b, p, "tb_vaxis5")
+    if b and any(x.startswith("MISMATCH") for x in b):
+        bad.append("tb_vaxis5: MISMATCH lines")
     return bad, notes, build
 
 
@@ -301,8 +467,9 @@ def main():
     p.add_argument("--build", choices=("plain", "daria", "auto"), default="auto")
     p.add_argument("--audf", default="0,7,14,31")
     p.add_argument("--ref")
+    p.add_argument("--only", choices=("daria",))
     a = p.parse_args()
-    bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")])
+    bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")], a.only)
     if a.ref:
         mine, ref = verdict_lines(a.log), verdict_lines(a.ref)
         if mine != ref:

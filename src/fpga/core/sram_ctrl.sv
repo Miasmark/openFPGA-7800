@@ -283,15 +283,32 @@ reg  [7:0] cp_data = 8'd0;
 
 // 2600: one clk_sys register, so the mappers' decode ends there. Address,
 // strobes and data are sampled on the same edge.
-reg        t_rd_q, t_wr_q;
-reg [16:0] t_addr_q;
+//
+// The key {t_wr_q, t_addr_q} has a second copy, t_wr_qd and t_addr_qd,
+// loaded on the same edge from the same inputs, so it always equals the
+// original. t_last takes its data from the copy only; the compare (t_new)
+// keeps the originals. With one register for both, a fit placed t_wr_q in
+// t_last[17]'s LAB, where one LAB input fed both t_last[17] and the
+// compare, so the router could not lengthen that route to meet the
+// clk_sys -> clk_sdram hold without slowing t_new, which is on the 2600
+// request's setup path (docs/daria_step10/plan.md, section 4). Quartus may
+// not merge the copies and the originals (DONT_MERGE_REGISTER on both). The
+// copies keep the t_*_q name pattern of the fit checks.
+reg        t_rd_q;
+(* altera_attribute = "-name DONT_MERGE_REGISTER ON" *) reg        t_wr_q;
+(* altera_attribute = "-name DONT_MERGE_REGISTER ON" *) reg [16:0] t_addr_q;
 reg  [7:0] t_wdata_q;
+(* altera_attribute = "-name DONT_MERGE_REGISTER ON" *) reg        t_wr_qd;
+(* altera_attribute = "-name DONT_MERGE_REGISTER ON" *) reg [16:0] t_addr_qd;
 initial begin t_rd_q = 1'b0; t_wr_q = 1'b0; t_addr_q = 17'd0; t_wdata_q = 8'd0; end
+initial begin t_wr_qd = 1'b0; t_addr_qd = 17'd0; end
 always @(posedge clk_sys) begin
 	t_rd_q    <= t_rd;
 	t_wr_q    <= t_wr;
 	t_addr_q  <= t_addr;
 	t_wdata_q <= t_wdata;
+	t_wr_qd   <= t_wr;
+	t_addr_qd <= t_addr;
 end
 
 // A new 2600 request: the registered strobe with a key not yet served. The
@@ -305,6 +322,7 @@ reg [17:0] t_last;                        // {we, addr} last served
 initial begin t_last_v = 1'b0; t_last = 18'd0; end
 wire [17:0] t_key = {t_wr_q, t_addr_q};
 wire        t_new = (t_rd_q | t_wr_q) & (~t_last_v | (t_key != t_last));
+wire [17:0] t_key_d = {t_wr_qd, t_addr_qd};   // the same key from the copy: t_last's data only
 
 // 7800 and BIOS: the rising strobe only (MARIA's slot timing, served at A),
 // unless a new 2600 request arrives in the same clk_sdram cycle. That
@@ -319,7 +337,7 @@ wire        m_new  = ((c_rd & ~c_rd_q) | (c_wr & ~c_wr_q)) & ~t_new;
 always @(posedge clk) begin
 	c_rd_q <= c_rd;
 	c_wr_q <= c_wr;
-	if (t_new) begin t_last_v <= 1'b1; t_last <= t_key; end
+	if (t_new) begin t_last_v <= 1'b1; t_last <= t_key_d; end
 	if (!t_rd_q && !t_wr_q) t_last_v <= 1'b0;
 end
 

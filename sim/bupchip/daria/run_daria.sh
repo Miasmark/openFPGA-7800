@@ -34,8 +34,8 @@
 # MODE_B=1 builds mode B of the front-end shadow (docs/daria_fe/spec/bench.md
 # 7.1; design.md 12.2 step 8; -DFE_MODE_B): daria_fe posts the calls to DARIA's
 # own CPU (dcall) and shares DARIA's cart RAM (dmem), clk_d is on the PLL's
-# lattice (+d_ofs=PS; +d_div=N, VCO/N, 18 or 19: at VCO/19, the shipped
-# divider, the guard must never lock and port B's coincidences with DARIA are
+# lattice (+d_ofs=PS; +d_div=N, VCO/N, 18 or 19: at VCO/19, the
+# fallback divider, the guard must never lock and port B's coincidences with DARIA are
 # counted, docs/daria_step7/plan.md 5.2), the 6507 is held for daria_fe's
 # calls too. The divider is D_DIV, by default the tree's own (pll_core.v's
 # DARIA counter 3, as step7_prep.py --tree-div reads it): this script adds

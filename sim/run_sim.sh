@@ -13,7 +13,7 @@
 #   FP=1           every run also writes its per-frame fingerprint (tb_load's
 #                  and tb_system's +fp) to $WORK/fp/<case>.csv, for comparing
 #                  two builds frame by frame (sim/check/frame_gate.py --strict)
-#   ARM_DIV=18     the DARIA build's clk_arm at VCO/18 instead of VCO/19 (the
+#   ARM_DIV=19     the DARIA build's clk_arm at VCO/19 instead of VCO/18 (the
 #                  benches' default, pll_core.v's divider)
 #   RTL_TREE=DIR   build the RTL of another checkout (DIR/src/fpga) with this
 #                  checkout's benches, e.g. a lane's worktree
@@ -22,6 +22,15 @@
 #                  tb_frames is built without BUP_DEBUG and with -O3
 #                  --x-assign fast --x-initial fast, as run_daria.sh builds
 #                  tb_daria (docs/daria_step7/plan.md 3.6 I4c)
+#   FRAMES_DEBUG=1 build tb_frames with BUP_DEBUG all the same: its DARIA
+#                  status overlay checks (sim/tb_frames.sv's header). The
+#                  build writes WORK/obj_frames.mode ("FRAMES_DEBUG=0|1 md5
+#                  <the binary's>"), which sim/run_frames.sh checks
+#   ONLY=daria     build tb_load alone and run only the DARIA section (below),
+#                  e.g. the BUP_DEBUG overlay check at another divider or on
+#                  a scratch tree (sim/bupchip/dstat/run_ovl.sh); its log is
+#                  checked with run_sim_check.py --only daria, as it is no
+#                  whole run
 # The checker sim/check/run_sim_check.py turns this script's output into one
 # exit code.
 set -e
@@ -101,7 +110,7 @@ SRCS=(
 	"$RTL/top.sv"
 	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/atari7800_pocket.sv"
 	"$FPGA/core/atarivox/avox_rx.sv" "$FPGA/core/atarivox/avox_engine.sv" "$FPGA/core/atarivox/atarivox.sv"
-	"$FPGA/core/virtual_axis.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
+	"$FPGA/core/virtual_axis.sv" "$FPGA/core/virtual_axis5.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
 	"$FPGA/core/audio_filter.sv"
 	"$RTL/bupchip_peripheral.sv" "$FPGA/pocket_utils/psram.sv"
@@ -179,6 +188,12 @@ build() {   # build <top> <objdir> [more bench sources]
 		|| { grep -m20 "%Error" "$WORK/$obj.log"; exit 1; }
 }
 echo "-- run_sim.sh: VERILATOR ${VERILATOR:-verilator} ($("${VERILATOR:-verilator}" --version)), RTL $(cd "$FPGA/../.." && pwd), POCKET_DARIA $DARIA_ON, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
+case "${ONLY:-}" in
+	"") ;;
+	daria) [ "$DARIA_ON" = 1 ] || { echo "run_sim.sh: ONLY=daria needs the DARIA build (DARIA=1)" >&2; exit 1; }
+		echo "-- run_sim.sh ONLY=daria: tb_load and the DARIA section alone, not a whole run" ;;
+	*) echo "run_sim.sh: ONLY=$ONLY: daria is the one section that runs alone" >&2; exit 1 ;;
+esac
 if [ -n "${BUILD_TOP:-}" ]; then
 	case "$BUILD_TOP" in
 		tb_cartram) o=obj_cartram; build tb_cartram $o "$HERE/tb_load.sv" ;;
@@ -188,18 +203,30 @@ if [ -n "${BUILD_TOP:-}" ]; then
 			o=obj_frames
 			VL_OPT=(-O3 --x-assign fast --x-initial fast)
 			BUP_DEFS="${BUP_DEFS/ -DBUP_DEBUG/}"
-			echo "-- tb_frames: BUP_DEBUG off, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
-			build tb_frames $o "$HERE/tb_load.sv" ;;
+			dbg=off
+			if [ "${FRAMES_DEBUG:-0}" = 1 ] && [ "${BUPCHIP:-1}" = 1 ]; then BUP_DEFS="$BUP_DEFS -DBUP_DEBUG"; dbg="on (FRAMES_DEBUG=1)"; fi
+			echo "-- tb_frames: BUP_DEBUG $dbg, ${VL_OPT[*]}, defines:$SRAM_DEFS $BUP_DEFS $SIM_DEFS"
+			build tb_frames $o "$HERE/tb_load.sv"
+			# the build's mode, for run_frames.sh: BUP_DEBUG or not, and the binary it is for
+			fdbg=0; [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]] && fdbg=1
+			echo "FRAMES_DEBUG=$fdbg md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)" > "$WORK/$o.mode" ;;
 		*) echo "run_sim.sh: BUILD_TOP=$BUILD_TOP: tb_system, tb_load, tb_cartram or tb_frames" >&2; exit 1 ;;
 	esac
 	echo "-- built $BUILD_TOP: $o/vtb md5 $(md5sum < "$WORK/$o/vtb" | cut -d' ' -f1)"
 	exit 0
 fi
+if [ -z "${ONLY:-}" ]; then
 build tb_system obj
 build tb_load obj_load
 echo "-- built: obj/vtb md5 $(md5sum < "$WORK/obj/vtb" | cut -d' ' -f1), obj_load/vtb md5 $(md5sum < "$WORK/obj_load/vtb" | cut -d' ' -f1)"
+else
+build tb_load obj_load
+echo "-- built: obj_load/vtb md5 $(md5sum < "$WORK/obj_load/vtb" | cut -d' ' -f1)"
+fi
 
 cd "$WORK"
+# (ONLY=daria: from here to the DARIA section, every case is left out)
+if [ -z "${ONLY:-}" ]; then
 for audf in ${@:-0 7 14 31}; do
 	rm -f rtl/mem0.hex   # may be a link to the upstream file: never write through it
 	python3 "$HERE/tone_test.py" "$audf" > rtl/mem0.hex
@@ -233,7 +260,34 @@ sim ./obj_load/vtb +image=load_test.a78 +audf=7 $(fp load_a78) | grep -E "LOAD|T
 
 echo "-- load a headerless 2600 image (4 KiB):"
 python3 "$HERE/tone_test.py" 14 2600 | head -4096 | python3 -c "import sys;sys.stdout.buffer.write(bytes(int(l,16) for l in sys.stdin))" > load_test.a26
-sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -E "LOAD|TONE"
+# grep -a: the LOAD line prints the image's first bytes as its header, raw;
+# in a UTF-8 locale grep would hold that line back ("binary file matches").
+sim ./obj_load/vtb +image=load_test.a26 +audf=14 $(fp load_a26) | grep -aE "LOAD|TONE"
+
+# The FA2 flash's save slot (fa2.sav, 0x40000000): sim/fa2_test.py's
+# synthetic FA2 cartridge (no game data) loads the flash through the
+# mapper's fa2_nvram_* port, saves it changed, and loads it again; tb_load
+# writes the file in before the run and reads the slot back afterwards with
+# the APF read protocol (+fa2save, +fa2expect, +fa2prog). Two A78 runs, each
+# with the file loaded, must leave it as it was: load_test.a78, which
+# detect2600.sv does not take for FA2 (mapper_fa2 stays in reset), and
+# fa2_test.py's a78 image, which it does take for FA2 (mapper 25) and which
+# issues a save command in 7800 mode; the wrapper's fa2_on keeps that save
+# off the slot (saves 1, slot RAM writes 0).
+echo "-- FA2 flash save slot (fa2.sav): a synthetic FA2 cartridge loads, saves and reloads it through the mapper's port:"
+python3 "$HERE/fa2_test.py" image > fa2_test.a26
+python3 "$HERE/fa2_test.py" flash 256 > fa2_flash.bin
+python3 "$HERE/fa2_test.py" expect 256 > fa2_flash_expect.bin
+python3 "$HERE/fa2_test.py" expect > fa2_blank_expect.bin
+echo "  a saved flash file (expect 2 loads, 1 save, 256 slot RAM writes; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2save=fa2_flash.bin +fa2expect=fa2_flash_expect.bin +fa2prog $(fp fa2_file) | grep -aE "^ *FA2"
+echo "  no file, a blank flash read as \$FF (expect the same counts; 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a26 +fa2expect=fa2_blank_expect.bin +fa2prog $(fp fa2_blank) | grep -aE "^ *FA2"
+echo "  an A78 game with the file loaded, not taken for FA2 (expect 0 bytes differ):"
+sim ./obj_load/vtb +image=load_test.a78 +audf=7 +fa2save=fa2_flash.bin $(fp fa2_a78) | grep -aE "^ *FA2"
+python3 "$HERE/fa2_test.py" a78 > fa2_test.a78
+echo "  an A78 game taken for FA2 that issues a save command in 7800 mode, the file loaded (expect mapper 25, 0 bytes differ):"
+sim ./obj_load/vtb +image=fa2_test.a78 +fa2save=fa2_flash.bin $(fp fa2_a78fa2) | grep -aE "^ *FA2"
 
 # The BIOS boot rule (docs/DARIA_CORE.md, decision 11). With a BIOS loaded
 # and Skip BIOS off, a 7800 image and an empty slot boot through the BIOS; a
@@ -382,6 +436,7 @@ runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --sec
 		echo "-- BupChip end to end: skipped (no firmware at $BUPFW; set BUPFW=FILE; see docs/BUPCHIP.md)"
 	fi
 fi
+fi   # ONLY
 
 # DARIA in the whole core (docs/daria_step7/plan.md 3.6), game-free: tb_load
 # runs fe_dir's synthetic ARM images (sim/bupchip/daria/fe_dir/mkimg.py: a
@@ -389,25 +444,88 @@ fi
 # 32 KB) through the real loader and wrapper. Each must boot and finish its
 # test bodies (RIOT $FF at least the count its .meta needs, $FE 0: no failed
 # self-check), every call daria_fe posts must return, with 0 PSRAM model
-# violations, no CPU halt, and the guard unlocked with 0 unlocks at VCO/19,
-# the default (the guard never locks there), or locked with 0 unlocks with
-# ARM_DIV=18. Only in the
-# DARIA build; without POCKET_DARIA the section is inactive, which is not a
-# pass (run_sim_check.py).
+# violations, no CPU halt, and the guard locked with 0 unlocks at VCO/18,
+# the default, or unlocked with 0 unlocks with ARM_DIV=19 (the guard never
+# locks there).
+# With BUP_DEBUG, the DARIA status overlay (tb_load.sv's overlay block) too.
+# Each run's "DARIA overlay:" line must pass: the overlay's counts equal the
+# bench's (calls since the console's last reset, unlocks, the guard bit),
+# its copy of the RIOT timer equals the RIOT, its cells read back as its
+# layout says from u_dstat's counts, rows 6-8 only while halted, and it
+# checked what OVL below requires of that run (the rows whose every cell must
+# be read back, at least a given number of cells read; +ovl_timer: the RIOT
+# timer written and read, with late calls and calls on time; +ovl_late=meta:
+# exactly the late calls the image's .meta gives for this run length).
+# smoke_dpc's and smoke_cdf's frames are a few lines long and never reach the
+# TIA's window, which opens at line 19: for them the rows and cells are
+# waived (+ovl_rows=0 +ovl_cells=0), and their lines say so. Three more runs
+# join the section in these builds only: frame_cdfj (fe_dir's
+# tests.CORE_TESTS: 105-line frames, which show the six rows, and the RIOT
+# timer written before each call and read once after it);
+# frame_cdfj_pattern, the same image with the guard's nets forced from 100
+# ms (locked for 20 ms, 4 unlock pulses: +ovl_guard, so the guard and unlock
+# terms compare nonzero values at VCO/19 too) and the overlay's inputs forced
+# from 150 ms to a pattern and then its complement (+ovl_pattern_at), which
+# light every cell, every row and every colour, rows 6-8 included; and
+# frame_cdfj_retune, the same image with a PAL/NTSC retune at 150 ms
+# (+retune), whose console reset clears u_dstat's calls and late calls: the
+# second epoch must compare as the first (+ovl_resets=2). Then the section as
+# a whole: "overlay cells:" sums the cells read back and requires rows 0-5
+# complete in the normal runs and rows 0-8 in the pattern's.
+# sim/check/run_sim_check.py also requires each run's line to state the
+# requirement OVL gives it.
+# Only in the DARIA build; without POCKET_DARIA the section is inactive,
+# which is not a pass (run_sim_check.py).
 if [ "$DARIA_ON" = 1 ]; then
 	echo "-- DARIA: synthetic ARM images in the whole core (fe_dir/mkimg.py):"
 	DR="$WORK/daria"
 	mkdir -p "$DR"; ln -sfn "$WORK/rtl" "$DR/rtl"
-	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" smoke_dpc smoke_cdf digital_cdfj > "$DR/mkimg.log"
+	DIMG=(smoke_dpc smoke_cdf digital_cdfj)
+	RUNS=("${DIMG[@]}")
+	OVL_ON=0
+	if [[ " $BUP_DEFS " == *" -DBUP_DEBUG "* ]]; then
+		OVL_ON=1
+		DIMG+=(frame_cdfj)
+		RUNS+=(frame_cdfj frame_cdfj_pattern frame_cdfj_retune)
+	fi
+	# the overlay's requirement of each run (BUP_DEBUG builds). The cell
+	# floors are about half the cells measured at VCO/19 and /18
+	# (digital_cdfj 4,008; frame_cdfj and its pattern run: run_ovl.sh's logs).
+	# +ovl_late=meta: the .meta's "ovl_late N MS", for +daria=MS only.
+	declare -A OVL=(
+		[smoke_dpc]="+ovl_rows=0 +ovl_cells=0"
+		[smoke_cdf]="+ovl_rows=0 +ovl_cells=0"
+		[digital_cdfj]="+ovl_rows=7 +ovl_cells=2000"
+		[frame_cdfj]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1 +ovl_late=meta"
+		[frame_cdfj_pattern]="+region=1 +ovl_rows=1FF +ovl_cells=2000 +ovl_timer=1 +ovl_late=meta +ovl_guard=4 +ovl_guard_at=100 +ovl_pattern_at=150"
+		[frame_cdfj_retune]="+region=1 +ovl_rows=3F +ovl_cells=1500 +ovl_timer=1 +ovl_resets=2 +retune=150")
+	python3 "$HERE/bupchip/daria/fe_dir/mkimg.py" "$DR/img" "${DIMG[@]}" > "$DR/mkimg.log"
 	daria_ok=1
-	guard=unlocked; [ "${ARM_DIV:-19}" = 18 ] && guard=locked
-	for t in smoke_dpc smoke_cdf digital_cdfj; do
-		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $(fp daria_$t) < /dev/null > "$t.log" 2>&1) || true
-		line="$(grep -m1 "^DARIA result:" "$DR/$t.log" || echo "DARIA result: none (the run did not finish; see $DR/$t.log)")"
-		echo "  $t: ${line#DARIA result: }"
-		python3 - "$DR/img/$t.meta" "$line" "$guard" <<-'PY' || daria_ok=0
+	guard=locked; [ "${ARM_DIV:-18}" = 19 ] && guard=unlocked
+	ovl_n=0; ovl_rows=0; ovl_prows=0
+	for r in "${RUNS[@]}"; do
+		t="${r%_pattern}"; t="${t%_retune}"
+		oa=""; [ "$OVL_ON" = 1 ] && oa="${OVL[$r]}"
+		lfail=""
+		if [[ " $oa " == *" +ovl_late=meta "* ]]; then
+			lm="$(sed -n 's/^ovl_late \([0-9]*\) \([0-9]*\)$/\1 \2/p' "$DR/img/$t.meta")"
+			if [ -n "$lm" ] && [ "${lm#* }" = "${DARIA_MS:-300}" ]; then oa="${oa/+ovl_late=meta/+ovl_late=${lm% *}}"
+			else
+				lfail="$t.meta gives no late count for +daria=${DARIA_MS:-300} (it has: ${lm:-none})"
+				oa="${oa/ +ovl_late=meta/}"
+			fi
+		fi
+		# shellcheck disable=SC2086
+		(cd "$DR" && sim ./../obj_load/vtb +image="img/$t.bin" +daria="${DARIA_MS:-300}" $oa $(fp daria_$r) < /dev/null > "$r.log" 2>&1) || true
+		line="$(grep -m1 "^DARIA result:" "$DR/$r.log" || echo "DARIA result: none (the run did not finish; see $DR/$r.log)")"
+		echo "  $r: ${line#DARIA result: }"
+		[ -z "$lfail" ] || { echo "    FAIL: $lfail"; daria_ok=0; }
+		# +ovl_guard=N forces N unlock pulses on the guard's net, which the
+		# bench's unlock count (this line's) sees too: exactly N, not 0
+		ul=0; [[ " $oa " =~ \ \+ovl_guard=([0-9]+)\  ]] && ul="${BASH_REMATCH[1]}"
+		python3 - "$DR/img/$t.meta" "$line" "$guard" "$ul" <<-'PY' || daria_ok=0
 		import re, sys
-		meta, line, guard = sys.argv[1], sys.argv[2], sys.argv[3]
+		meta, line, guard, ul = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 		need = {"dir_marker": 1, "call_accept": 1}
 		for l in open(meta):
 		    m = re.match(r"need (dir_marker|call_accept) >= (\d+)$", l.strip())
@@ -427,22 +545,47 @@ if [ "$DARIA_ON" = 1 ]; then
 		    if int(viol): bad.append("psram_viol %s" % viol)
 		    if int(halt): bad.append("halted")
 		    if g != guard: bad.append("guard %s, expected %s" % (g, guard))
-		    if int(unl): bad.append("unlocks %s" % unl)
+		    if int(unl) != ul: bad.append("unlocks %s" % unl + (", expected %d (forced)" % ul if ul else ""))
 		if bad:
 		    print("    FAIL: " + "; ".join(bad))
 		sys.exit(1 if bad else 0)
 		PY
+		# BUP_DEBUG builds: the DARIA status overlay's line (tb_load.sv) must pass
+		if [ "$OVL_ON" = 1 ]; then
+			ol="$(grep -m1 "^DARIA overlay:" "$DR/$r.log" || echo "DARIA overlay: none (no line)")"
+			echo "    overlay: ${ol#DARIA overlay: }"
+			[[ "$ol" == *"; PASS" ]] || { echo "    FAIL: the DARIA status overlay ($r)"; daria_ok=0; }
+			n="$(sed -n 's/.*; checked: \([0-9]*\) cells (rows complete \([01]*\),.*/\1/p' <<< "$ol")"
+			m="$(sed -n 's/.*; checked: \([0-9]*\) cells (rows complete \([01]*\),.*/\2/p' <<< "$ol")"
+			ovl_n=$((ovl_n + ${n:-0}))
+			if [ "$r" = frame_cdfj_pattern ]; then ovl_prows=$((ovl_prows | 2#${m:-0}))
+			else ovl_rows=$((ovl_rows | 2#${m:-0})); fi
+		fi
 	done
+	# BUP_DEBUG builds: the section as a whole read cells back, rows 0-5 in
+	# normal frames and rows 0-8 under the pattern (a section whose runs each
+	# met a waived or too small requirement fails here)
+	if [ "$OVL_ON" = 1 ]; then
+		ov="pass"
+		[ "$ovl_n" -gt 0 ] && [ $((ovl_rows & 0x3F)) = $((0x3F)) ] && [ "$ovl_prows" = $((0x1FF)) ] || { ov="FAIL"; daria_ok=0; }
+		bin9() { local i s=""; for i in 8 7 6 5 4 3 2 1 0; do s+=$((($1 >> i) & 1)); done; echo "$s"; }
+		echo "  overlay cells: $ovl_n read back in the section; rows complete $(bin9 $ovl_rows) in the normal runs, $(bin9 $ovl_prows) in the pattern run (required: rows 0-5, rows 0-8); $ov"
+	fi
 	[ "$daria_ok" = 1 ] && echo "DARIA pass" || echo "DARIA FAIL"
 else
 	echo "-- DARIA: inactive (POCKET_DARIA is not in the qsf; DARIA=1 builds it): not run, and not a pass"
 fi
+
+[ -z "${ONLY:-}" ] || exit 0
 
 echo "-- PAL/NTSC PLL retune sequence:"
 "${VERILATOR:-verilator}" --binary --timing -Wno-fatal -Wno-lint --top-module tb_pll_region \
 	-Mdir "$WORK/obj_pllr" -o vtb "$FPGA/core/pll_region.v" "$HERE/tb_pll_region.sv" > "$WORK/obj_pllr.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_pllr.log"; exit 1; }
 sim ./obj_pllr/vtb | grep -E "fraction|PLL_REGION|FAIL"
+
+echo "-- the region asked of the PLL (atari7800_pocket.sv's region_pll with pll_region.v, tb_region; RTL-1, RTL-2):"
+WORK="$WORK/region" bash "$HERE/run_region.sh" | grep -E "^REGION " || true
 
 echo "-- audio filter:"
 "${VERILATOR:-verilator}" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_audio_filter \
@@ -455,3 +598,6 @@ echo "-- virtual paddle / driving / light-gun axis:"
 	-Mdir "$WORK/obj_va" -o vtb "$FPGA/core/virtual_axis.sv" "$HERE/tb_virtual_axis.sv" > "$WORK/obj_va.log" 2>&1 \
 	|| { grep -m20 "%Error" "$WORK/obj_va.log"; exit 1; }
 sim ./obj_va/vtb | grep AXIS
+
+echo "-- the five virtual axes as one engine (virtual_axis5.sv, tb_vaxis5):"
+WORK="$WORK/vaxis5" bash "$HERE/run_vaxis5.sh" | grep -E "^VAXIS5 (seed|planted|pass|FAIL|build)|^MISMATCH" || true

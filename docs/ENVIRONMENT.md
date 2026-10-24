@@ -240,7 +240,7 @@ docker run --rm -v $PWD:/build -w /build/src/fpga raetro/quartus:21.1 quartus_sh
 | `sim/bupchip/quartus_probe/full/run_full.sh` (Docker only) | `fullprobe/<tag>` | line 28 | about 12 min (README.md:144) |
 | `sim/bupchip/daria/frontend_study/run_study.sh` | `daria/frontend_study` | [not recorded] | [not recorded]; runs 4 builds at a time (lines 6-7), so do not run it alongside other Quartus jobs |
 | `sim/bupchip/quartus_probe/step7/run_step7.sh`, the step-7 and release fit driver: one compile of a tree's `src/fpga` as CI compiles it, then `step7_report.tcl` and `step7_checks.py` (plan 5.4's checks); `TREE`, `SEED`, `TAG`, `NODARIA=1`, `PIN_ID=1`, `KEEP_DB=1`, `REPORT_ONLY=1`, `DRYRUN=1` (header) | `sim/work/step7/fit/<TAG>`, outside `sim/work/bupchip/` (`WORK` overrides) | not needed: it mounts the run directory itself; it refuses run_full.sh's and R1's directories | 12-25 min a fit; exit 0 PASS, 3 FAIL verdict, 1 compile failure, 2 refused. Needs `QUARTUS_LOCK` and refuses to start unless an ancestor holds that lock (section 3.5). Its self-test, `step7/selftest.sh`, runs without Quartus and needs 100 MB free |
-| `sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh`, the report script's smoke test on a small fitted design (`daria.qip`'s marks, (c.cells), (f), (k), (k')) | `sim/work/step7/smoke` (`WORK` overrides) | protected directories refused, as above | about 3 min a project, four projects; needs `QUARTUS_LOCK` as `run_step7.sh` |
+| `sim/bupchip/quartus_probe/step7/smoke/run_smoke.sh`, the report script's smoke test on a small fitted design (`daria.qip`'s marks, (c.cells), (f), (k), (k')) | `sim/work/step7/smoke` (`WORK` overrides) | protected directories refused, as above | about 35 s a fitted project, five projects and two `quartus_sta` runs of about 3 s, about 3 min in all [measured 2026-10-19]; needs `QUARTUS_LOCK` as `run_step7.sh` |
 
 Only the `daria_fe_map.sh <block> --fit` invocation is recorded here. Arguments for the other wrappers are in `sim/bupchip/quartus_probe/README.md`.
 
@@ -352,7 +352,7 @@ Python is 3.11.15. The only third-party imports in tracked files are unicorn and
 `sim/extra_tests.sh` fetches its inputs from the network:
 
 - **Firmware files.** It uses curl to fetch `mem4.hex` and `ar.hex` from raw.githubusercontent.com (`MiSTer-unstable-nightlies/Atari7800_MiSTer`), at the commit in `src/fpga/mister/UPSTREAM_COMMIT` (lines 106-108).
-- **Test-cart tools.** It shallow-clones and builds its own dasm and 7800basic from GitHub into `$WORK/extra` (lines 22-29). Here that dasm is `sim/work/extra/dasm/bin/dasm`.
+- **Test-cart tools.** It fetches and builds its own dasm and 7800basic from GitHub into `$WORK/extra`, each at the commit the script pins (`DASM_REF`, `B78_REF`; 7800basic's later commits run its compiler under valgrind, which a build machine may not have). Here that dasm is `sim/work/extra/dasm/bin/dasm`.
 - **Requirements.** It needs git, a C compiler, libpng-dev, flex and Pillow (lines 2-4).
 
 ### 5.6 Outside the repo
@@ -373,7 +373,7 @@ How to read the table:
 - **Commands:** only two invocations are recorded verbatim with their arguments: `sim/run_sim.sh` and the `flock` form of `daria_fe_map.sh`. Other rows give the script path; arguments and environment variables are in the script header or README.
 - **Pass criteria:** where a README or script states the rule or a recorded result, the table gives it. "Not recorded" means read the suite's README or script header before treating a run as good.
 - **Runtimes:** taken from DEVELOPING.md:93-99, the suite READMEs and the script headers.
-- **Limits:** observe the 2-job limit (section 7.4). Detach anything that runs close to an hour (section 8.2).
+- **Limits:** observe the job limits (section 7.4). Detach anything that runs close to an hour (section 8.2).
 
 | Family | Run command | Runtime | Needs | Pass criterion |
 |---|---|---|---|---|
@@ -398,6 +398,7 @@ How to read the table:
 | DARIA regression | `sim/bupchip/daria/run_all.sh` | not recorded | builds once, then exports `NOBUILD=1`; `JOBS` defaults to 2 | Not recorded. |
 | DARIA front-end unit | `sim/bupchip/daria/fe_unit/run_unit.sh` | not recorded | none beyond Verilator 5.040 | Not recorded. |
 | DARIA front-end directed | `sim/bupchip/daria/fe_dir/run_dir.sh` | not recorded | `FLAVOR=s0` builds the stage-0 bench from git `d729ba7` | Not recorded. |
+| Harmony model directed (`+mam`) | `sim/bupchip/daria/mam/run_dir.sh [OUTDIR]` ([HARMONY_MODEL.md](HARMONY_MODEL.md)) | 22 s for the 18 runs with the bench built (2026-10-19), plus a plain `tb_daria` build | Verilator 5.040, Python 3; `WORK`, `NOBUILD=1`, `RUNNER` (a slot wrapper) | `9 tests, 0 failing` (`dircheck.py`) and `18 traces, 0 differing: ALL OK` (`mymam_check.py`), exit 0. Recorded 2026-10-19: both. |
 | DARIA front-end random | `sim/bupchip/daria/fe_rand/run_rand.sh`; campaigns with `sim/bupchip/daria/fe_rand/campaign.sh` | not recorded | `JOBS` defaults to 1 and is capped at 2 (lines 137-138); `campaign.sh` runs two at a time; `SKIP_DONE=1` skips finished seeds on restart | Each log carries a build stamp and a verdict; the verdict text is not recorded. |
 | Thumb | `sim/bupchip/daria/thumb/run_directed.sh`, `sim/bupchip/daria/thumb/run_random.sh`, `sim/bupchip/daria/thumb/run_mutants.sh` | `run_mutants` about 1 h (thumb/README.md:14); others not recorded | arm-none-eabi-gcc; the venv (`run_random`) | Each mutant must make one of the suites fail (thumb/README.md:14); 17 of 17 caught at step 2 (docs/DARIA_CORE.md:214). Others not recorded. |
 | Yosys checks | `sim/bupchip/daria/thumb/aria_equiv.sh`, `sim/bupchip/daria/thumb/index_depth.sh`, `sim/bupchip/daria/thumb/yosys_cells.sh`, `sim/bupchip/model/study/area/run_area.sh` | not recorded | Yosys or YoWASP | Exit with status 2 when no Yosys is found; otherwise not recorded. |
@@ -436,8 +437,8 @@ How to read the table:
 
 ### 7.4 Load
 
-- **At most 3 simulations at once while no Quartus job runs, and 2 while one does** (the owner's rule from 2026-10-09; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used). Quartus itself runs one job at a time, under the lock of 3.5.
-  - `run_rand.sh` defaults to `JOBS=1`, caps it at 2, and states "the machine rule is at most 2".
+- **At most 4 simulations at once while no Quartus job runs, and 3 while one does** (the owner's rule for the self-hosted VM, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Quartus itself runs one job at a time, under the lock of 3.5. The container's rule (2026-10-09) was 3 and 2; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used under it.
+  - `run_rand.sh` defaults to `JOBS=1` and caps it at 3, the most that is allowed while Quartus runs.
   - `campaign.sh` runs two at a time, and `daria/run_all.sh` defaults to `JOBS=2`.
   - `s4/check.sh` defaults to `JOBS=3`, so pass `JOBS=2`.
 - **Quartus parallelism.** `daria/frontend_study/run_study.sh` runs 4 Quartus builds at once. Run it alone.
@@ -551,7 +552,7 @@ This file adds:
 - **Test suites:** the `sim/bupchip` suites (s1, s4 and stress, verif, model, daria with fe_unit, fe_dir, fe_rand, thumb, modes and mmio, and quartus_probe), with run times, inputs and the recorded pass counts.
 - **Rules and machine conventions:**
   - the disk budget and output locations;
-  - the 2-job limit, and the scripts that exceed it by default;
+  - the job limits, and the scripts that exceed them by default;
   - detaching long runs;
   - the clean-room and data rules;
   - the branch, commit-trailer and WIP-snapshot practice.
@@ -659,11 +660,11 @@ The VM does not stop when a session goes idle, and has no 13-hour limit (section
 - **Login:** a long-lived token from the CLI's `setup-token` command, exported in its OAuth-token variable, keeps a login from expiring, but its scope is inference only, so Remote Control refuses it. On 2026-10-19 that export in `~/.bashrc` was commented out for this reason, and the VM uses the normal login, which renews itself with its refresh token.
 - **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
 - **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
-- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Section 7.4's limits (3 and 2) were set for the container's 4 CPUs.
+- **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"), as section 7.4 states. The earlier limits (3 and 2) were set for the container's 4 CPUs.
 
 ### 11.7 Headroom measured on 2026-10-18
 
-A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
+A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, with the balloon of 11.8 inflated (about 14 GiB usable; since 2026-10-21 at least about 22 GiB stay with the VM, 11.8). It is a measurement, not a rule; the owner set the VM's limits afterwards (11.6).
 
 - **Method:** a simulation job was `tb_fe_guard` (built by `sim/bupchip/daria/fe_unit/run_unit.sh`, about 24 s a run, one thread) run back to back under `nice -n 10`, each run timed. The Quartus job was the CI-form full compile (section 3.4) of a copy of `src/fpga` in `$RAM_WORK`. `vmstat` and `/proc/pressure` (PSI) were sampled every 5 s. All runs passed and both compiles succeeded. The driver script was not committed.
 - **Simulations:**
@@ -691,5 +692,8 @@ A test of the VM under concurrent load, on `Mister-Pocket-Port` at `6e2e880`, wi
 
 - **Symptom:** the VM has a virtio balloon device (`/sys/bus/virtio/drivers/virtio_balloon/virtio3`). On 2026-10-18 `free` showed about 17 GiB used at idle, while processes held about 1 GiB and kernel memory and page cache about 2.5 GiB. The rest matches the balloon taking memory back for the host, which leaves about 14 GiB usable of the 30 GiB. Reading the balloon's size needs root (`/sys/kernel/debug/virtio-balloon`) and was not done.
 - **Cause:** the host's ZFS ARC (its read cache), which takes memory back from the VM through the balloon (the owner, 2026-10-18).
-- **Effect:** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
-- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too. Whether either has been done is [not recorded].
+- **Effect (before the cap below):** the RAM scratch caps of 11.4 (13 GB each) assume the full 30 GiB. The headroom test of 11.7 ran under the balloon without memory pressure.
+- **Fix (on the host):** set the VM's minimum memory to its full allocation, or turn ballooning off, then restart the VM. Capping the host's ARC (`zfs_arc_max`) so that the host never needs the VM's memory works too.
+- **Capped on 2026-10-21 (the owner):** the host may now reclaim at most 8 GiB from the VM, so at least about 22 of the 30 GiB stay with the VM, against about 14 under the old balloon. How the cap is set on the host is [not recorded]. On 2026-10-23 `free -g` showed 30 GiB total and 20 GiB available, with 17 GiB of it page cache [measured].
+- **What the cap means for 11.4:** one RAM scratch mount filled to its 13 GB cap fits in the 22 GiB beside a Quartus job (3.9 GB peak virtual memory, 11.7) and the simulations. Both mounts filled at once (26 GB) would not, because tmpfs pages live in RAM or swap (a 4 GB swap file). Keep their combined use well under what the 22 GiB leaves after the running jobs.
+- **What the cap means for 11.7:** the headroom test ran with about 14 GiB usable and saw no memory pressure (free memory never below 7.6 GiB), so its memory findings hold with room to spare. Its limits were set by CPU contention, and 11.6's job limits stand unchanged.
