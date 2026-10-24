@@ -32,9 +32,12 @@
 # starts with the tree's HEAD and status, the Verilator and the binary's md5
 # (plan P23), then the bench's output, its exit status and the wall time per
 # emulated second. Exit status: the bench's (0 when its FRAMES result line
-# says PASS, and with FRAMES_DEBUG=1 its OVERLAY result line too; 2 when the
-# binary's mode is not the one asked for). Every file there derives from the game image: keep it in
-# sim/work.
+# says PASS, and with FRAMES_DEBUG=1 its OVERLAY result line too; 1 when
+# run.log has a "$readmem file not found" line; 2 when the binary's mode is
+# not the one asked for, or before the run when WORK/rtl lacks one of the
+# palette and ROM tables tb_load reads, as when WORK shares another
+# directory's obj_frames without its rtl/). Every file there derives from the
+# game image: keep it in sim/work.
 # SPDX-License-Identifier: MIT
 set -e -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -63,6 +66,16 @@ if [ ! -x "$BIN" ] || [ "$(mode)" != "$FDBG" ] || { [ "${NOBUILD:-0}" = 0 ] && [
 	WORK="$WORK" BUILD_TOP=tb_frames FRAMES_DEBUG="$FDBG" VL_JOBS="${VL_JOBS:-2}" nice -n 10 bash "$HERE/run_sim.sh" >&2
 	[ "$(mode)" = "$FDBG" ] || { echo "run_frames.sh: the build did not record FRAMES_DEBUG=$FDBG (BUPCHIP=0 has no BUP_DEBUG)" >&2; exit 2; }
 fi
+# tb_load reads its palette and ROM tables from WORK/rtl, which run_sim.sh
+# links. Without them Verilator only warns ("$readmem file not found") and the
+# bench runs on zeroed tables: a black picture that shows up later as a video
+# difference (2.2.4's campaign, a WORK that shared obj_frames without rtl/).
+for f in palettes/NWARM.hex palettes/NCOOL.hex palettes/NHOT.hex palettes/PWARM.hex palettes/PCOOL.hex \
+		palettes/PHOT.hex Minnie/minnie_wave.hex ooo.hex ar_stub.hex vox_irom.hex vox_drom.hex; do
+	[ -f "$WORK/rtl/$f" ] && continue
+	echo "run_frames.sh: $WORK/rtl/$f is missing (no rtl/ link, or a dangling one); tb_load reads its palette and ROM tables from WORK/rtl, so the run would be black. Build into this WORK (run_sim.sh links rtl/), or link WORK/rtl to the build's rtl/" >&2
+	exit 2
+done
 NAME="${NAME:-$(basename "$IMG" .bin)}"
 OUT="$WORK/runs/$NAME"
 mkdir -p "$OUT"
@@ -98,6 +111,11 @@ with open(log, "a") as f:
     f.write(f"wall {t1 - t0:.1f} s" + (f", {(t1 - t0) / emu:.1f} s of wall time per emulated second ({emu:.3f} s emulated from time 0)" if emu else "") + "\n")
 PY
 tail -n 4 "$OUT/run.log"
+# any table the bench could not load fails the run, whatever its verdict
+if grep -aq 'readmem file not found' "$OUT/run.log"; then
+	echo "run_frames.sh: the bench could not load a table ($(grep -a -m1 'readmem file not found' "$OUT/run.log")); the run does not count" | tee -a "$OUT/run.log" >&2
+	exit 1
+fi
 grep -aq "^FRAMES result: PASS" "$OUT/run.log" && [ "$rc" = 0 ] || exit 1
 # a FRAMES_DEBUG=1 run checks the overlay: a missing line fails
 if [ "$FDBG" = 1 ] && ! grep -aq "^OVERLAY result: PASS" "$OUT/run.log"; then

@@ -40,6 +40,7 @@ make install
 python3 -m venv sim/work/bupchip/venv
 sim/work/bupchip/venv/bin/pip install -q 'unicorn==2.1.1'
 sim/work/bupchip/venv/bin/pip install -q yowasp-yosys
+sim/work/bupchip/venv/bin/pip install -q numpy   # tools/atarivox (sim/atarivox/run.sh)
 pip install --quiet pillow
 
 # 4. Docker daemon, then the Quartus image (the pull took about 2 min 11 s)
@@ -261,12 +262,13 @@ flock /tmp/daria_quartus.lock sim/bupchip/quartus_probe/daria_fe_map.sh <block> 
 
 ## 4. Python and node dependencies
 
-Python is 3.11.15. The only third-party imports in tracked files are unicorn and PIL.
+Python is 3.11.15. The only third-party imports in tracked files are unicorn, PIL and numpy (`tools/atarivox/sjsynth.py`).
 
 | Package | Where | Version | Install command (recorded) | Used by |
 |---|---|---|---|---|
 | unicorn | venv | 2.1.1 | `pip install -q 'unicorn==2.1.1'` (`sim/bupchip/setup_dev.sh:20-24`) | `sim/bupchip/daria/thumb/thumb_iss.py`, `daria/thumb_expand.py`, `model/sweep.py`, `verif/isa/iss_run.py`, `verif/iss_fw_replay.py` |
 | yowasp-yosys | venv | 0.69.0.0.post1233 | `sim/work/bupchip/venv/bin/pip install -q yowasp-yosys` | the Yosys scripts (section 6) |
+| numpy | venv | 2.5.4 on the VM (11.2), installed 2026-10-23 | `sim/work/bupchip/venv/bin/pip install numpy` | `tools/atarivox/sjsynth.py`, so `sjhw.py --build` and `vox_check.py`: `sim/atarivox/run.sh` runs them with `PYTHON`, else the venv's python, and exits 2 naming this command when that python has no numpy |
 | Pillow | system | 12.3.0 | `pip install --quiet pillow` | `sim/extra_tests.sh:60` and its 7800basic build |
 | markdown | system | 3.11 | pip, 2026-10-09 [command not recorded] | report rendering only; the project does not need it |
 
@@ -277,7 +279,7 @@ Python is 3.11.15. The only third-party imports in tracked files are unicorn and
 - **Finding Yosys:**
   - The scripts honour a `YOSYS` override, then try `yosys` on PATH, then `$VENV/bin/yowasp-yosys`, and otherwise exit with status 2 (for example `sim/bupchip/daria/thumb/aria_equiv.sh:23`).
   - YoWASP caches compiled modules in `~/.cache/YoWASP` (205 MB).
-- **Not needed:** numpy (DEVELOPING.md:59 lists it, but no tracked file imports it) and capstone.
+- **Not needed:** capstone. (numpy was listed here as unused until `tools/atarivox` came in; it is in the venv now, see the table.)
 - **Node:**
   - node v22.22.0, npm 10.9.4 and a global Playwright 1.56.1 (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`) come with the base image.
   - No tracked file uses them. They were used once, ad hoc, for report screenshots, by a script that is not in the repo [R].
@@ -378,7 +380,7 @@ How to read the table:
 | Family | Run command | Runtime | Needs | Pass criterion |
 |---|---|---|---|---|
 | Core simulation | `VERILATOR=/opt/verilator-5.040/bin/verilator sim/run_sim.sh` | about 24 min (aeee6d2, 4 build jobs) | Verilator 5.040; GHDL for `POKEY=watson`; firmware for the BupChip end-to-end test (`BUPFW=FILE`); OpenBIOS for BIOS_BOOT (`BIOS=FILE`) | `sim/check/run_sim_check.py LOG`: exit 0, and a skipped section fails there, as does a `SIMULATOR EXIT N` line (a bench that exited non-zero in a case piped through `grep`). The script itself exits 0 whatever its verdicts say. With `FP=1` every case writes its `+fp` fingerprint (`frame,len_sys,riot,video,audio,cpu,t_sys,rst_n,rst_sys`: the last three place each frame and the console reset's releases in absolute `clk_sys`; a last line covers the frame still in progress when the run ends), compared between builds with `sim/check/frame_gate.py --strict`. |
-| Extra tests | `sim/extra_tests.sh` | about 1 h; 2 h 34 min with `AR_TAPE=1` (aeee6d2, on a machine with all four cores busy; the two tape runs simulate 34 s); step 7 adds about 16 min for its 2600 cartridge-RAM section, and with `AR_TAPE=1` the tape load with `+cartram` (artape) in that section, about 80 min more (measured on aeee6d2 with the other cores busy) | a finished `run_sim.sh`; network access to GitHub; git, a C compiler, libpng-dev, flex, Pillow | `sim/check/extra_tests_check.py LOG --ref REF_LOG` (the reference build's log, for the POKEY and DLI statistics; `--ar-tape` with `AR_TAPE=1`): exit 0. |
+| Extra tests | `sim/extra_tests.sh` | about 1 h; 2 h 34 min with `AR_TAPE=1` (aeee6d2, on a machine with all four cores busy; the two tape runs simulate 34 s); step 7 adds about 16 min for its 2600 cartridge-RAM section, and with `AR_TAPE=1` the tape load with `+cartram` (artape) in that section, about 80 min more (measured on aeee6d2 with the other cores busy); on 2.2.4's tree 5.1 h (DARIA build) and 3.7 h (plain) with `AR_TAPE=1`, and in pieces less (6.1) | a finished `run_sim.sh`; network access to GitHub; git, a C compiler, libpng-dev, flex, Pillow | `sim/check/extra_tests_check.py LOG --ref REF_LOG` (the reference build's log, for the POKEY and DLI statistics; `--ar-tape` with `AR_TAPE=1`): exit 0. |
 | 2600 cartridge RAM | `sim/cartram2600_test.py matrix --build` and `s19`; on a tree with Fix B also `reset`, `midswap` and `forcecoinc`, and each with `--mutant nohold` or `--mutant nocmp` | about 12 min for the matrix and 4 min for `s19` (aeee6d2), plus the `tb_cartram` build; `--arfw FILE` (the Supercharger BIOS) adds the tape load, about 80 min (22 simulated seconds with the monitor); on F, `reset` (14 runs, the console-reset sweep) about 8 min, `midswap` and `forcecoinc` under 1 min, a mutant's build about 1 min more (once per work directory) | a `WORK` with `run_sim.sh`'s `rtl/` links | `CARTRAM_MATRIX pass`, `CARTRAM_S19 pass`, `CARTRAM_RESET pass`, `CARTRAM_MIDSWAP pass`, `CARTRAM_FORCECOINC pass`, exit 0; with `--mutant`, `MUTANT ... CAUGHT`, exit 0 (header of the script). `--ref-logs DIR` holds the tape load's colours to another build's; `--fp` writes each run's fingerprint. |
 | Step 7 gates | `sim/step7_gates.sh` (`--list` shows what is available) | hours | as its header: `SIM_LOCK`, `BIOS`, `BUPFW`, `HYGIENE_NAMES`, `PP_EXPECT`, `PP_GUARD_FROM`, `EXTRA_REF`; optional `RUN_SIM_REF`, `FP_REF` (fingerprints in tb_load's current nine-column format), `PP_ORACLE_BASE`, `CARTRAM_ONLY`, `S4_GAME` and `REFDIR`, `S4_JOBS` (`s4_check`'s simulations at once, default 2), `GAMES`, `R1_DIR`, `FRAMES_LIST`, `FRAMES_GUARD`, `FRAMES_RULE` (`v1`, the default, or `shift`), `WIRE_ONLY` and `WIRE_MUT` (the `wire` gate on some scenarios or mutants only: a quick look) | `STEP7_GATES pass`, exit 0. Exit 1 when a gate failed. Exit 3 when none failed but a gate is not available yet or ran only in part, or when no gate ran at all (every one not selected or not available). PARTIAL: `s4_check` without the firmware and game jobs; `cartram` with `CARTRAM_ONLY`; `wire` without `GAMES` (the Turbo run), `BIOS` or `BUPFW` (the four Souper runs; by default the tree's gitignored `src/fpga/mister/rtl/bupchip.hex`), or with `WIRE_ONLY` or `WIRE_MUT`; `frames` with a `FRAMES_LIST` that leaves out any of plan 1.2 row 7's 16 images (it names them); `selftest` without one of its input logs or `EXTRA_REF` (it names each one missing); `fit_selftest` with less than 100 MB free on /. Exit 2 on a usage error, before any gate runs: an unknown argument, an unknown gate name in `--only` or `--skip`, or an `--only` that names no gate (header of the script). |
 | Whole-core frames | `sim/run_frames.sh IMAGE.bin` (`tb_frames`: the Pocket core on a 2600 image with `tb_daria`'s fingerprint, input script and call log; `NAME`, `FRAMES`, `WORK`; `INPUTS=tb_daria` presents the TIA's paddle inputs as `tb_daria` does, which a comparison with R1 needs) | non-DARIA build: 196 s of wall time per emulated second (Juno First, 1,500 frames, 25.0 s emulated in 82 min, beside two to three other simulations); DARIA build (`u_fe` wired): about 270 s on a 12-frame run (load included) | a `tb_frames` build (`run_sim.sh BUILD_TOP=tb_frames`, which the script makes) | `FRAMES result: PASS`, exit 0 (in a DARIA build also the call_tog, call_go and returned counts equal to the busy periods); against R1, `sim/check/frame_gate.py --auto` (the scheme the loader found picks `--strict` or the gate's rules: `--rule v1` by default, which gates `len_sys`, video, RIOT and each call's ARM instruction count and counts audio, or `--rule shift`, the strict rule; `--ref-prefix` for a run shorter than R1's; `--shift-cap` for the release_shift frames allowed per column, default the larger of 8 and 1% of the frames). |
@@ -405,6 +407,27 @@ How to read the table:
 | Modes | `sim/bupchip/daria/modes/run_modes.sh` | not recorded | arm-none-eabi-gcc | Not recorded. |
 | MMIO | `sim/bupchip/daria/mmio/run_mmio.sh` | not recorded | Verilator 5.040 (`VERILATOR` overrides) | Its header lists the conditions: each run ends with errors=0, an exact rate window and the expected TCR latencies (lines 1-12). |
 | Quartus | section 3.4; wrap with the lock (section 3.5) | 2-4 min per clock (`run_probe`); about 12 min for a full build | dockerd running; the image | CI greps the STA report for "Timing requirements not met" and only warns (`.github/workflows/build.yml:24-30`). |
+
+### 6.1 Extra tests: where the time goes, and running them in pieces
+
+The step-7 gates' `extra_tests` gate (`sim/step7_gates.sh`, with `AR_TAPE=1`) took 9.1 h on 2.2.2's merge (32,797 s) and 8.8 h on 2.2.4 (31,787 s), one build after the other in one simulation slot [measured: the gate logs; the per-section split from the times of each case's fingerprint file, so each figure includes the case's build of the cart]:
+
+| Section | DARIA build, merge / 2.2.4 (min) | Plain build, merge / 2.2.4 (min) |
+|---|---|---|
+| cartram (16 mapper runs, Supercharger loads, s19) | 136 / 133, of which artape (the tape load with `+cartram`) 117 / 115 | 95 / 95, artape 82 / 82 |
+| multisprite (with the tools check) | 1 / 1 | 1 / 1 |
+| pokey450, pokey4000, dli | 20 / 20 | 16 / 14 |
+| savekey, firmware | 8 / 8 | 6 / 6 |
+| supercharger, the stub's three loads | 12 / 12 | 9 / 9 |
+| supercharger, `AR_TAPE=1`'s tape pair (full load, multiload) | 135 / 133 | 106 / 98 |
+| whole run | 313 / 306 | 234 / 224 |
+
+The three tape loads are about 80 % of it. Ways to run it in less wall time, with the same checks and the same log format (the headers of `sim/extra_tests.sh` and `sim/step7_gates.sh`):
+
+- `EXTRA_ONLY=S[,S...] sim/extra_tests.sh` runs some sections (`cartram multisprite pokey450 pokey4000 dli savekey firmware supercharger`): a quick look; `extra_tests_check.py` fails the sections left out.
+- `EXTRA_JOBS=3 EXTRA_SLOT=<slot command> sim/extra_tests.sh` runs the sections as pieces, longest first, three at once, each under the slot command, and prints their logs in the serial order: `extra_tests_check.py` gives the same verdict. A build then takes about as long as its longest section, about 2.5 h on the DARIA build with `AR_TAPE=1` [estimated from the table]. Do not run it inside one slot: every piece is a simulation.
+  Checked on 2.2.4's tree with `AR_TAPE=0` and the VM's slot helper (2026-10-23): the log equals the step-7 gate's serial one but for the work paths, the `AR_TAPE` value and the tape lines, `extra_tests_check.py` passes it, and all 35 fingerprints are byte-equal to the serial run's; 40 min of wall time, with another lane holding one or two of the three slots [measured].
+- In `sim/step7_gates.sh`: `EXTRA_JOBS=N` passes that through for both builds (each piece under `EXTRA_SLOT`, by default `flock $SIM_LOCK` when `SIM_LOCK` is set), and `EXTRA_BOTH=1` runs the plain build's `extra_tests.sh` beside the DARIA one's. Launch the gate run itself outside a slot then. On the VM (11.6) the slot command is its slot helper; with its three slots, both builds in pieces would take about 3.5 h [estimated: the six pieces of the table on three slots, longest first].
 
 ## 7. Working conventions
 
@@ -559,7 +582,7 @@ This file adds:
 
 Corrections to DEVELOPING.md. None of these have been applied there yet:
 
-- DEVELOPING.md:59 lists numpy, but no tracked file imports it.
+- DEVELOPING.md:59 lists numpy without saying where: `tools/atarivox` needs it, in the venv (section 4).
 - The macro table (DEVELOPING.md:36-47) lacks `POCKET_SUPERCHARGER`, which `src/fpga/ap_core.qsf:744` sets and `sim/run_sim.sh:108` passes. `sim/run_sim.sh` also adds `KEEP_NOCART_ROM` (lines 91-92).
 - DEVELOPING.md:57 says 5.020 is too old, but `sim/run_sim.sh` still defaults to `verilator` from PATH.
 - The Layout row (DEVELOPING.md:30) describes `sim/` only as "Verilator/GHDL simulation and test carts", with no mention of the `sim/bupchip` suites.
@@ -602,7 +625,7 @@ All the tools of section 2.2 are present except those the project does not use: 
 | dasm | 2.20.14.1 | |
 | ccache | 4.12.3 | |
 | Python | 3.14.4 | refuses a system-wide `pip install` (PEP 668), so quick start step 3's `pip install pillow` fails: Pillow 12.1.1 comes from apt's `python3-pil` |
-| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259 | `sim/work/bupchip/venv`, as section 4 |
+| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259, numpy 2.5.4 (added 2026-10-23, for `tools/atarivox`; apt's python3 has no numpy and PEP 668 refuses a system-wide install) | `sim/work/bupchip/venv`, as section 4 |
 | Docker | 29.9.1 | 11.3 |
 | git, gh | 2.53.0; gh 2.102.0 in `~/.local/bin` | gh is logged in as the owner, and is git's credential helper |
 
@@ -661,6 +684,7 @@ The VM does not stop when a session goes idle, and has no 13-hour limit (section
 - **Detached runs:** start runs that must outlive the session with `setsid`/`nohup`, as section 7.5 says. Linger is off. With `sudo loginctl enable-linger miasmark`, `systemd-run --user` would also keep runs after a logout, with `systemctl --user` to inspect them.
 - **Resuming:** a workflow can be resumed only in the session that started it. Keep the habits of section 8.4: split runs into pieces that write their own results and skip finished pieces when run again, and commit `WIP snapshot: …` commits.
 - **Load:** on this VM, at most 4 simulations while no Quartus job runs, and 3 while one does; Quartus runs one job at a time, under the lock of 3.5 (the owner, 2026-10-19: "4 sims or 1 quartus run +3 sims"), as section 7.4 states. The earlier limits (3 and 2) were set for the container's 4 CPUs.
+- **Simulation slots:** agents run their simulations through a slot helper kept outside the repository: three slots, handed out first come, first served since 2026-10-23 ([AGENT_RUNS.md](AGENT_RUNS.md) 3). It is the slot command for `EXTRA_SLOT` (6.1).
 
 ### 11.7 Headroom measured on 2026-10-18
 

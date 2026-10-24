@@ -117,7 +117,11 @@ the input-dependent groups below that did not run for want of their input
                    the frames gate runs plan 1.2 row 7's 16 images by
                    default and is PARTIAL, naming the images not run, for a
                    list that leaves any out (FAIL when an image fails); the
-                   selftest gate is PARTIAL and names each missing input
+                   selftest gate is PARTIAL and names each missing input;
+                   and run_frames.sh with a stand-in binary: it refuses to
+                   run (exit 2) when WORK/rtl, or one palette or ROM table
+                   in it, is missing or a dangling link, and fails a run
+                   whose log says "$readmem file not found"
 SPDX-License-Identifier: MIT
 """
 import argparse
@@ -1010,6 +1014,78 @@ print("SELFTEST pass (1 of 1 cases as expected)")
 """
 
 
+# stand-in tb_frames binary for run_frames_cases: a passing bench, which also
+# prints Verilator's missing-table warning when FAKE_READMEM is set
+FRAMES_FAKE_VTB = r"""#!/bin/bash
+[ -n "$FAKE_READMEM" ] && echo '%Warning: rtl/palettes/NWARM.hex:0: $readmem file not found'
+echo "FRAMES 3 frames after 0 s; 0.050 s emulated"
+echo "FRAMES result: PASS"
+"""
+FRAMES_RTL = ("palettes/NWARM.hex", "palettes/NCOOL.hex", "palettes/NHOT.hex", "palettes/PWARM.hex",
+              "palettes/PCOOL.hex", "palettes/PHOT.hex", "Minnie/minnie_wave.hex", "ooo.hex", "ar_stub.hex",
+              "vox_irom.hex", "vox_drom.hex")
+
+
+def run_frames_cases(w):
+    """run_frames.sh, copied into a scratch tree, with NOBUILD=1 and a
+    stand-in binary (FRAMES_FAKE_VTB) whose mode is recorded: it passes with
+    WORK/rtl's tables all there; it refuses to run (exit 2, naming the file)
+    with no WORK/rtl, a dangling rtl link, or one table missing, as when a
+    WORK shares another's obj_frames without its rtl/ (2.2.4's black
+    pictures); and it fails (exit 1) a run whose log has Verilator's
+    "$readmem file not found", although the bench says PASS."""
+    import hashlib
+    print("run_frames.sh on a scratch tree with a stand-in tb_frames binary:")
+    d = os.path.join(w, "run_frames_sh")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(os.path.join(d, "sim"))
+    rf = os.path.join(d, "sim", "run_frames.sh")
+    shutil.copy2(os.path.join(SIM, "run_frames.sh"), rf)
+    img = os.path.join(d, "img.bin")
+    open(img, "wb").write(b"\0")
+    k = [0]
+
+    def work(rtl):
+        k[0] += 1
+        wk = os.path.join(d, "work%d" % k[0])
+        os.makedirs(os.path.join(wk, "obj_frames"))
+        vtb = os.path.join(wk, "obj_frames", "vtb")
+        open(vtb, "w").write(FRAMES_FAKE_VTB)
+        os.chmod(vtb, 0o755)
+        md5 = hashlib.md5(open(vtb, "rb").read()).hexdigest()
+        open(os.path.join(wk, "obj_frames.mode"), "w").write(f"FRAMES_DEBUG=0 md5 {md5}\n")
+        if rtl == "dangling":
+            os.symlink(os.path.join(d, "no_such_rtl"), os.path.join(wk, "rtl"))
+        elif rtl is not None:
+            for f in rtl:
+                p = os.path.join(wk, "rtl", f)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                open(p, "w").write("00\n")
+        return wk
+
+    def case(label, rtl, want_rc, want, env=None):
+        env1 = {k: v for k, v in os.environ.items() if k not in ("FAKE_READMEM", "NAME", "FRAMES", "INPUTS",
+                                                                  "ARM_DIV", "FRAMES_DEBUG", "RTL_TREE")}
+        env1.update(NOBUILD="1", VERILATOR="true", WORK=work(rtl), **(env or {}))
+        r =subprocess.run(["bash", rf, img], env=env1, capture_output=True, text=True)
+        got = r.stdout + r.stderr
+        ok = r.returncode == want_rc and want in got
+        results.append(ok)
+        last = (got.strip().splitlines() or ["(no output)"])[-1]
+        print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected exit {want_rc}, got {r.returncode} ({last[:150]})")
+        if not ok:
+            print(f"        missing: {want!r}")
+            print("\n".join("        " + l for l in got.splitlines()[-10:]))
+
+    case("every table in WORK/rtl: the bench's PASS stands", FRAMES_RTL, 0, "FRAMES result: PASS")
+    case("no WORK/rtl: refused before the run", None, 2, "rtl/palettes/NWARM.hex is missing")
+    case("WORK/rtl a dangling link: refused", "dangling", 2, "rtl/palettes/NWARM.hex is missing")
+    case("WORK/rtl without vox_drom.hex: refused", FRAMES_RTL[:-1], 2, "rtl/vox_drom.hex is missing")
+    case("a table not found by the bench, which says PASS: FAIL", FRAMES_RTL, 1, "could not load a table",
+         env={"FAKE_READMEM": "1"})
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def gates_sh_cases(w):
     """step7_gates.sh itself, copied into a scratch tree of its layout with
     stand-ins (GATES_FAKE_*) for run_frames.sh, frame_gate.py and
@@ -1448,6 +1524,7 @@ def main():
     gate_cases(w)
     wire_cases(w)
     gates_sh_cases(w)
+    run_frames_cases(w)
     skipped = [o for o, v in (("--run-sim", a.run_sim), ("--extra", a.extra), ("--fp", a.fp), ("--cartram", a.cartram),
                               ("--reset", a.reset), ("--artape", a.artape), ("--tools", a.tools)) if not v]
     print("groups not run (no input given): " + (", ".join(skipped) if skipped else "none"))
