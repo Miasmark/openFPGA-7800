@@ -11,6 +11,9 @@ Skills in `.claude/skills/`:
   notes and landing a release or a hardware-test build.
 - `debug-game-in-sim`: running a game in the whole-core simulation and
   finding why it fails.
+- `port-mister-core`: assessing, porting or refreshing a MiSTer core for the
+  Pocket (base point, MiSTer changes, licences, fit, bitstreams, PAL, save
+  states). The fit levers it relies on are in `release-build` section 8.
 
 Rules that always hold:
 
