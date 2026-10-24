@@ -225,7 +225,9 @@ the Pocket changes to all thirteen modified upstream files (`top.sv`,
    phase 2, halves the level and sets `READ_WHOLE_CYCLE`, and that
    `pokey_bus.sv` and `pokey.sv` still have that parameter (the read fix of
    2.2.2, POCKET_CHANGES.md): an upstream update to these files would drop
-   them.
+   them. `run_sim.sh`'s POKEY read section (`sim/pokey_read_test.py`'s
+   cartridge; `ONLY=pokey` runs it alone, checked with
+   `run_sim_check.py --only pokey`) fails when the reads return $FF.
 5. Check any new file's license header and update THIRD_PARTY_NOTICES.md.
 
 ### Add a menu setting

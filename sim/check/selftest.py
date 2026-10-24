@@ -15,7 +15,14 @@ the input-dependent groups below that did not run for want of their input
                    FAIL, a skipped section, a missing PLL_REGION line, a
                    truncated log, a geometry change, BUPCHIP_E2E FAIL, a
                    case cut short (an earlier FRAME line with the right
-                   geometry), a SIMULATOR EXIT line
+                   geometry), a SIMULATOR EXIT line; the POKEY read section
+                   (RANDOM all $FF as with the read fix undone, 3 $FF, too
+                   few distinct values, the bench's counts not the values',
+                   IRQST's timer bit not set, the program not done, the
+                   $4000 case or the section gone; 2 $FF still passes), and
+                   the section alone as an ONLY=pokey log (passes with
+                   --only pokey, fails planted, and the whole log fails
+                   with --only pokey)
   --extra LOG      a passing extra_tests.sh log, with its reference log
                    (--extra-ref) and, for a log from before step 7, its
                    extra/ directory (--extra-dir): an ARCHECK mismatch, a
@@ -219,6 +226,59 @@ def run_sim_cases(log, w):
     }
     for k, fn in cases.items():
         expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)
+    pokey_cases(log, w, chk)
+
+
+def pokey_cases(log, w, chk):
+    """The POKEY read section (2.2.2's read fix): planted on the first case's
+    (POKEY at $450) lines of a passing log."""
+    rx = r"^(    POKEYRD RANDOM 40 reads, )\d+ of them \$FF, \d+ distinct:((?: [0-9a-f]{2}){40})$"
+
+    def rnd(f, counts=None):
+        # f(values) -> the values to plant; the bench's counts follow them
+        # unless counts gives others
+        def g(t):
+            def r(m):
+                v = f([int(x, 16) for x in m.group(2).split()])
+                nff, nd = counts or (v.count(0xFF), len(set(v)))
+                return f"{m.group(1)}{nff} of them $FF, {nd} distinct:" + "".join(f" {x:02x}" for x in v)
+            return re.sub(rx, r, t, count=1, flags=re.M)
+        return g
+
+    def ffs(n):
+        # n values $FF, the rest as they were but none $FF
+        return lambda v: [0xFF] * n + [x if x != 0xFF else 0x00 for x in v[n:]]
+    pass_cases = {"pokey_two_ff": rnd(ffs(2))}
+    fail_cases = {
+        "pokey_all_ff": rnd(lambda v: [0xFF] * 40),
+        "pokey_three_ff": rnd(ffs(3)),
+        "pokey_few_distinct": rnd(lambda v: [0x10 + (i % 29) for i in range(40)]),
+        "pokey_counts_lie": rnd(lambda v: [0xFF] * 40, counts=(0, 40)),
+        "pokey_irqst_not_fired": sub1(r"^(    POKEYRD IRQST idle \$[0-9a-f]{2}, timer 1 fired \$)[0-9a-f]{2}", r"\g<1>ff"),
+        "pokey_not_done": sub1(r"^(    POKEYRD marker \$)a5", r"\g<1>00"),
+        "pokey_4000_missing": lambda t: re.sub(r"^  POKEY at \$4000:\n(?:    .*\n)*", "", t, count=1, flags=re.M),
+        "pokey_missing": lambda t: re.sub(r"^-- POKEY reads.*?(?=^-- )", "", t, count=1, flags=re.M | re.S),
+    }
+    for k, fn in pass_cases.items():
+        expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], True)
+    for k, fn in fail_cases.items():
+        expect(k, [chk, plant(log, os.path.join(w, f"run_sim_{k}.log"), fn)], False)
+    # the section alone, as run_sim.sh ONLY=pokey writes it
+    t = open(log, "rb").read().decode("utf-8", "replace")
+    head = re.search(r"^-- run_sim\.sh: .*\n", t, flags=re.M)
+    sec = re.search(r"^-- POKEY reads.*?(?=^-- )", t, flags=re.M | re.S)
+    if not head or not sec:
+        results.append(False)
+        print("  WRONG ONLY=pokey log: the log has no '-- run_sim.sh:' line or no POKEY read section to make it from")
+        return
+    only = os.path.join(w, "run_sim_only_pokey.log")
+    open(only, "w").write(head.group(0) + "-- run_sim.sh ONLY=pokey: tb_load and the POKEY read section alone, not a whole run\n"
+                          + sec.group(0) + "exit 0\n")
+    expect("ONLY=pokey log, --only pokey", [chk, only, "--only", "pokey"], True)
+    expect("ONLY=pokey log without --only", [chk, only], False)
+    expect("ONLY=pokey log, RANDOM all $FF", [chk, plant(only, os.path.join(w, "run_sim_only_pokey_ff.log"),
+                                                         rnd(lambda v: [0xFF] * 40)), "--only", "pokey"], False)
+    expect("the whole log with --only pokey", [chk, log, "--only", "pokey"], False)
 
 
 def extra_cases(log, ref, xdir, w):

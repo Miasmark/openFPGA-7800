@@ -2,7 +2,7 @@
 """Verdict of a run_sim.sh log, as one exit code (DARIA step 7, plan 1.2 row 3).
 
   run_sim_check.py LOG [--build plain|daria|auto] [--audf 0,7,14,31]
-                       [--ref REF_LOG] [--only daria]
+                       [--ref REF_LOG] [--only daria|pokey]
 
 run_sim.sh prints measurements and a few verdicts (BIOS_BOOT, BUPCHIP_E2E,
 PLL_REGION, DARIA) and exits 0 whatever they say. This checks every case
@@ -31,6 +31,13 @@ against its expected lines and fails on:
     the file as it was: load_test.a78 (not taken for FA2) and fa2_test.py's
     a78 image (taken for FA2, mapper 25, its save done with no write into
     the slot's RAM);
+  - the POKEY read section (2.2.2's read fix; sim/pokey_read_test.py's
+    cartridge, POKEY at $450 and at $4000) other than: the program done
+    (marker $a5); of the 40 RANDOM reads at most POKEY_MAX_FF $FF and at
+    least POKEY_MIN_DISTINCT distinct values, counted here from the bytes
+    the line lists (and the bench's own counts equal to them); IRQST's bit 0
+    1 idle, 0 once timer 1's interrupt fired and 1 once IRQEN cleared it.
+    With the fix undone every read is $FF;
   - tb_vaxis5 (sim/run_vaxis5.sh) other than its four seeds of 10^7 clocks
     with 0 mismatches each, the planted fault caught and "VAXIS5 pass";
   - tb_region (sim/run_region.sh) other than its lines for the DARIA and
@@ -58,6 +65,8 @@ a build without BUP_DEBUG.
 --only daria checks a run_sim.sh ONLY=daria log (tb_load and the DARIA
 section alone): the global rules and the DARIA section only. A log that
 says ONLY=daria fails without it, and one that does not fails with it.
+--only pokey does the same for a run_sim.sh ONLY=pokey log and the POKEY
+read section.
 --ref REF_LOG also compares every measurement and verdict line with another
 log (e.g. the same tree before a bench change): any difference fails.
 Exit status: 0 pass, 1 fail, 2 usage.
@@ -74,6 +83,16 @@ TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured 
 # a build without BUP_DEBUG compares as before)
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
                           r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
+# The POKEY read section: each mapping run_sim.sh tries, and the RANDOM rule.
+# A read that returns the precharged bus is $FF. For 40 uniform random bytes,
+# three or more $FF come about once in 1,800 and fewer than 30 distinct
+# values about once in 50,000 [estimated: Poisson for the $FF, a sampling of
+# 200,000 draws for the distinct values], so a timing change that keeps the
+# reads right does not trip these. POKEYRD lines are not in VERDICT_LINE, so
+# a --ref log from before the section still compares.
+POKEY_BASES = ("450", "4000")
+POKEY_MAX_FF = 2
+POKEY_MIN_DISTINCT = 30
 OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern", "frame_cdfj_retune")
 # What each run's overlay line must say it required and checked (run_sim.sh's
 # OVL table): a line that passes on a smaller requirement fails here.
@@ -257,6 +276,59 @@ def overlay_check(body, debug, bad, notes):
         notes.append("DARIA status overlay: " + agg[0])
 
 
+def pokey_check(L, bad, notes):
+    """The POKEY read section: one case per POKEY_BASES mapping."""
+    h, b = L.section("-- POKEY reads")
+    if b is None:
+        bad.append("POKEY reads: section missing")
+        return
+    cases, cur = {}, None
+    for x in b:
+        m = re.fullmatch(r"  POKEY at \$([0-9A-Fa-f]+):", x.rstrip())
+        if m:
+            cur = cases.setdefault(m.group(1), [])
+            cur.append(None)            # counts the case's title lines
+        elif cur is not None:
+            cur.append(x.strip())
+    for base in POKEY_BASES:
+        c = cases.get(base)
+        what = f"POKEY reads, POKEY at ${base}"
+        if c is None or c.count(None) != 1:
+            bad.append(f"{what}: {0 if c is None else c.count(None)} cases, expected 1")
+            continue
+        c = [x for x in c if x is not None]
+        mk = [x for x in c if x.startswith("POKEYRD marker")]
+        if len(mk) != 1 or not re.fullmatch(r"POKEYRD marker \$a5 after \d+ ms", mk[0]):
+            bad.append(f"{what}: the program did not finish (marker line {mk[:1] or 'missing'})")
+        rl = [x for x in c if x.startswith("POKEYRD RANDOM")]
+        m = re.fullmatch(r"POKEYRD RANDOM 40 reads, (\d+) of them \$FF, (\d+) distinct:((?: [0-9a-f]{2}){40})", rl[0]) \
+            if len(rl) == 1 else None
+        if not m:
+            bad.append(f"{what}: no RANDOM line with 40 values ({rl[:1] or 'missing'})")
+            nff = nd = None
+        else:
+            v = [int(x, 16) for x in m.group(3).split()]
+            nff, nd = v.count(0xFF), len(set(v))
+            if (nff, nd) != (int(m.group(1)), int(m.group(2))):
+                bad.append(f"{what}: the bench counts {m.group(1)} $FF and {m.group(2)} distinct, the values {nff} and {nd}")
+            if nff > POKEY_MAX_FF:
+                bad.append(f"{what}: {nff} of the 40 RANDOM reads are $FF (at most {POKEY_MAX_FF})")
+            if nd < POKEY_MIN_DISTINCT:
+                bad.append(f"{what}: {nd} distinct RANDOM values of 40 (at least {POKEY_MIN_DISTINCT})")
+        il = [x for x in c if x.startswith("POKEYRD IRQST")]
+        m = re.fullmatch(r"POKEYRD IRQST idle \$([0-9a-f]{2}), timer 1 fired \$([0-9a-f]{2}), IRQEN cleared \$([0-9a-f]{2})",
+                         il[0]) if len(il) == 1 else None
+        if not m:
+            bad.append(f"{what}: no IRQST line ({il[:1] or 'missing'})")
+        else:
+            idle, fired, clr = (int(x, 16) for x in m.groups())
+            if (idle & 1, fired & 1, clr & 1) != (1, 0, 1):
+                bad.append(f"{what}: IRQST ${idle:02x} ${fired:02x} ${clr:02x}: bit 0 must be 1, 0, 1 "
+                           "(idle, timer 1 fired, IRQEN cleared)")
+            elif nff is not None:
+                notes.append(f"{what}: RANDOM {nff} $FF and {nd} distinct of 40; IRQST ${idle:02x} ${fired:02x} ${clr:02x}")
+
+
 def check(log, build, audfs, only=None):
     L = Log(log)
     bad, notes = [], []
@@ -284,10 +356,13 @@ def check(log, build, audfs, only=None):
     if build == "auto":
         build = "daria" if any(re.match(r"^-- run_sim\.sh: .*POCKET_DARIA 1,", x) for x in L.lines) else "plain"
     debug = any(re.match(r"^-- run_sim\.sh: .*defines:.* -DBUP_DEBUG( |$)", x) for x in L.lines)
-    said_only = any(x.startswith("-- run_sim.sh ONLY=daria") for x in L.lines)
-    if said_only != (only == "daria"):
-        bad.append("the log is a run_sim.sh ONLY=daria run: check it with --only daria" if said_only
-                   else "--only daria, but the log is not a run_sim.sh ONLY=daria run")
+    said_only = next((m.group(1) for m in (re.match(r"^-- run_sim\.sh ONLY=(\w+)", x) for x in L.lines) if m), None)
+    if said_only != only:
+        bad.append(f"the log is a run_sim.sh ONLY={said_only} run: check it with --only {said_only}" if said_only
+                   else f"--only {only}, but the log is not a run_sim.sh ONLY={only} run")
+    if only == "pokey":
+        pokey_check(L, bad, notes)
+        return bad, notes, build
     if only == "daria":
         h, b = L.section("-- DARIA")
         if build != "daria" or h is None or "inactive" in h:
@@ -391,6 +466,9 @@ def check(log, build, audfs, only=None):
                             r".*arsc_bad=0 psram_viol=0$", x) for x in s):
             bad.append("BupChip end to end: the result line with the firmware is not clean")
 
+    # POKEY reads
+    pokey_check(L, bad, notes)
+
     # DARIA
     h, b = L.section("-- DARIA")
     if build == "daria":
@@ -467,7 +545,7 @@ def main():
     p.add_argument("--build", choices=("plain", "daria", "auto"), default="auto")
     p.add_argument("--audf", default="0,7,14,31")
     p.add_argument("--ref")
-    p.add_argument("--only", choices=("daria",))
+    p.add_argument("--only", choices=("daria", "pokey"))
     a = p.parse_args()
     bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")], a.only)
     if a.ref:

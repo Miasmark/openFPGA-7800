@@ -986,6 +986,34 @@ module tb_load;
 		end
 	end
 
+	// ---------------- POKEY reads (+pokeyrd=MS) ----------------
+	// sim/pokey_read_test.py's cartridge reads POKEY's RANDOM 40 times, then
+	// IRQST idle, with timer 1's interrupt fired and with it cleared again,
+	// and stores what the CPU got in RAM at $2210-$2237 and $2240-$2242;
+	// $2200 = $A5 once it is done. +pokeyrd=MS runs MS ms after the reset
+	// and prints that RAM; run_sim.sh's POKEY read section and
+	// sim/check/run_sim_check.py judge it (2.2.2's read fix, READ_WHOLE_CYCLE
+	// in Pokey/pokey_adapter.sv: without it every read is $FF).
+	int pr_ms = 0;
+	function automatic logic [7:0] pr_ram(int a);   // RAM0, $2000-$27FF
+		return dut.main.ram0.u_ram.mem_q[a - 'h2000];
+	endfunction
+	task automatic pokeyrd_report();
+		string s = "";
+		int nff = 0, nd = 0;
+		bit seen [256];
+		for (int i = 0; i < 40; i++) begin
+			automatic logic [7:0] v = pr_ram('h2210 + i);
+			s = {s, $sformatf(" %02x", v)};
+			if (v == 8'hFF) nff++;
+			if (!seen[v]) begin seen[v] = 1'b1; nd++; end
+		end
+		$display("POKEYRD marker $%02x after %0d ms", pr_ram('h2200), pr_ms);
+		$display("POKEYRD RANDOM 40 reads, %0d of them $FF, %0d distinct:%s", nff, nd, s);
+		$display("POKEYRD IRQST idle $%02x, timer 1 fired $%02x, IRQEN cleared $%02x",
+			pr_ram('h2240), pr_ram('h2241), pr_ram('h2242));
+	endtask
+
 	// ---------------- boot probe ----------------
 	// At each release of the core's reset (top.sv's effective_reset): the
 	// BIOS switch as the core got it (use_bios, and top.sv's bypass_bios,
@@ -1685,6 +1713,11 @@ module tb_load;
 		end
 		reset_in = 1'b0;
 		if (ext_end) wait (1'b0);
+		if ($value$plusargs("pokeyrd=%d", pr_ms)) begin
+			run_ms(pr_ms);
+			pokeyrd_report();
+			$finish;
+		end
 `ifdef POCKET_DARIA
 		if ($value$plusargs("daria=%d", daria_ms)) begin
 			for (int ms_i = 0; ms_i < daria_ms; ms_i++) repeat (14318) @(posedge clk_sys);
