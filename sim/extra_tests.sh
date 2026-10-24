@@ -45,7 +45,10 @@
 #        so the output is a serial run's and extra_tests_check.py gives the
 #        same verdict. Exit 1 when a piece exited non-zero (a serial run
 #        stops at that section instead). Every piece is a simulation: do not
-#        run EXTRA_JOBS>1 inside one slot. With AR_TAPE=1 and N=3 a build
+#        run EXTRA_JOBS>1 inside one slot, and EXTRA_JOBS>1 with no
+#        EXTRA_SLOT is refused (exit 2). On the owner's VM use
+#        EXTRA_SLOT=~/daria_work/bin/simslot; "flock FILE" with
+#        one FILE runs the pieces one at a time. With AR_TAPE=1 and N=3 a build
 #        takes about as long as its Supercharger section [estimated: 2.5 h
 #        on the DARIA build, 1.9 h on the plain one].
 set -e
@@ -60,6 +63,10 @@ EXTRA_ONLY="${EXTRA_ONLY:-}"; EXTRA_ONLY="${EXTRA_ONLY//,/ }"
 for s in $EXTRA_ONLY; do
 	case " $SECTIONS " in *" $s "*) ;; *) echo "extra_tests.sh: unknown section '$s' in EXTRA_ONLY (sections: $SECTIONS)" >&2; exit 2 ;; esac
 done
+if [ "${EXTRA_JOBS:-1}" -gt 1 ] && [ -z "${EXTRA_PIECE:-}" ] && [ -z "${EXTRA_SLOT:-}" ]; then
+	echo "extra_tests.sh: EXTRA_JOBS=$EXTRA_JOBS needs EXTRA_SLOT, a command prefix that holds one simulation slot (on the owner's VM, EXTRA_SLOT=~/daria_work/bin/simslot); without it every piece runs outside a slot" >&2
+	exit 2
+fi
 want() { [ -z "$EXTRA_ONLY" ] || case " $EXTRA_ONLY " in *" $1 "*) true ;; *) false ;; esac; }
 want_tools() { local s; for s in $TOOLSECS; do want "$s" && return 0; done; return 1; }
 fp() { [ "${FP:-0}" = 1 ] && printf '%s' "+fp=$WORK/fp/extra_$1.csv"; true; }
@@ -297,6 +304,7 @@ sim "$WORK/obj_load/vtb" +image=ar_multi.bin +arprobe +wav=1500 $(fp ar_multi) |
 echo "  Two loads numbered 0, reset after the first (expect blue \$84 / AUDF0 3, then after the reset yellow \$1e / AUDF0 20):"
 sim "$WORK/obj_load/vtb" +image=ar_tape.bin +arprobe +wav=1000 +resetat=500 $(fp ar_tape) | grep -E "^AR |RESET"
 if [ "${AR_TAPE:-0}" = 1 ]; then
+	fetch_ar
 	echo "  With the BIOS, from tape: full load (expect 0 RAM bytes differ) and multiload (expect red, then green):"
 	sim "$WORK/obj_load/vtb" +image=ar_full.bin +arfw="$X/fw/supercharger.bin" +arprobe +wav=22000 +ardump=ram_tape.bin $(fp ar_tape_full) | grep -E "^AR "
 	python3 "$HERE/ar_test.py" check ram_tape.bin ar_full.bin || echo "ARCHECK FAIL"
