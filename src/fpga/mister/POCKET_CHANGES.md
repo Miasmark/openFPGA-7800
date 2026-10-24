@@ -69,7 +69,8 @@ upstream b48eac0 (the last commit with it), with its top entity renamed
 name. `../core/pokey_adapter_watson.sv` provides the `pokey_adapter` module
 that `cart.sv` instantiates, wired the way b48eac0 wired Watson's POKEY.
 `cart.sv` itself is unchanged. (2.0.21 and later build `rtl/Pokey/` instead;
-both left the tree after 2.2.4 and remain in the history.)
+`rtl/PokeyWatson/` and `pokey_adapter_watson.sv` left the tree after 2.2.4
+and remain in the history.)
 
 At the time the exact fault in the new POKEY was not identified (it is below). Its pure tones match
 the documented behaviour at all 256 frequencies, and rewriting its registers
