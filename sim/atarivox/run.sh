@@ -18,7 +18,12 @@ if [ -z "$PYTHON" ]; then
 	[ -x "$VENV/bin/python" ] && PYTHON="$VENV/bin/python"
 fi
 "$PYTHON" -c 'import numpy' 2>/dev/null || {
-	echo "run.sh: $PYTHON has no numpy; install it: $VENV/bin/pip install numpy (docs/ENVIRONMENT.md 4)" >&2
+	if [ -x "$VENV/bin/python" ]; then
+		echo "run.sh: $PYTHON has no numpy; install it: $VENV/bin/pip install numpy (docs/ENVIRONMENT.md 4)" >&2
+	else
+		# a fresh worktree has no sim/work, so no venv
+		echo "run.sh: $PYTHON has no numpy, and there is no venv at $VENV. Either set PYTHON (or VENV) to another checkout's venv, e.g. PYTHON=<main checkout>/sim/work/bupchip/venv/bin/python, or create the venv as in docs/ENVIRONMENT.md's quick start and then run $VENV/bin/pip install numpy" >&2
+	fi
 	exit 2; }
 mkdir -p "$WORK"
 "$PYTHON" "$ROOT/tools/atarivox/sjhw.py" --build "$AV"

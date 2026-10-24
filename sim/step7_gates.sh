@@ -105,7 +105,14 @@
 #                build's extra_tests.sh beside the DARIA one's, each under
 #                EXTRA_SLOT, else under the slot (SIM_LOCK takes them in
 #                turn). Run step7_gates.sh outside a slot then: every
-#                piece takes its own.
+#                piece takes its own. EXTRA_JOBS>1 with neither EXTRA_SLOT
+#                nor SIM_LOCK is refused (exit 2) before any gate runs: it
+#                would start N simulations per build, 2N with EXTRA_BOTH=1.
+#                The SIM_LOCK default is one lock file, so it runs every
+#                piece of both builds one at a time: no faster than a whole
+#                run. On the owner's VM use
+#                EXTRA_SLOT=~/daria_work/bin/simslot (3 slots,
+#                first come, first served; docs/ENVIRONMENT.md 6.1).
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
 #                and fingerprints (so it runs after them), the guards'
@@ -298,6 +305,12 @@ selected() {
 	[[ "$SKIP" != *",$1,"* ]]
 }
 
+# EXTRA_JOBS>1 needs a slot per piece: without EXTRA_SLOT or SIM_LOCK every
+# piece would run at once, outside any slot
+if [ "$LIST" != 1 ] && selected extra_tests && [ "${EXTRA_JOBS:-1}" -gt 1 ] && [ -z "${EXTRA_SLOT:-}" ] && [ -z "${SIM_LOCK:-}" ]; then
+	echo "step7_gates.sh: EXTRA_JOBS=$EXTRA_JOBS needs EXTRA_SLOT (on the owner's VM, EXTRA_SLOT=~/daria_work/bin/simslot) or SIM_LOCK; without either every piece runs outside a slot" >&2
+	exit 2
+fi
 if [ "$LIST" = 1 ]; then
 	for g in "${GATES[@]}"; do
 		w="$(avail "$g")"
