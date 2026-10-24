@@ -460,7 +460,7 @@ The three tape loads are about 80 % of it. Ways to run it in less wall time, wit
 
 ### 7.4 Load
 
-- **At most 4 simulations at once while no Quartus job runs, and 3 while one does** (the owner's rule for the self-hosted VM, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Quartus itself runs one job at a time, under the lock of 3.5. The container's rule (2026-10-09) was 3 and 2; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used under it.
+- **At most 4 simulations at once while no Quartus job runs, and 3 while one does** (the owner's rule for the self-hosted VM, 2026-10-19: "4 sims or 1 quartus run +3 sims"). Quartus itself runs one job at a time, under the lock of 3.5. The container's rule (2026-10-09) was 3 and 2; [AGENT_RUNS.md](AGENT_RUNS.md) 3 describes the slot helper the step-7 runs used under it, and the VM's.
   - `run_rand.sh` defaults to `JOBS=1` and caps it at 3, the most that is allowed while Quartus runs.
   - `campaign.sh` runs two at a time, and `daria/run_all.sh` defaults to `JOBS=2`.
   - `s4/check.sh` defaults to `JOBS=3`, so pass `JOBS=2`.
