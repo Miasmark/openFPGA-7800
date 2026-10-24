@@ -120,8 +120,9 @@ the input-dependent groups below that did not run for want of their input
                    selftest gate is PARTIAL and names each missing input;
                    and run_frames.sh with a stand-in binary: it refuses to
                    run (exit 2) when WORK/rtl, or one palette or ROM table
-                   in it, is missing or a dangling link, and fails a run
-                   whose log says "$readmem file not found"
+                   in it, is missing or a dangling link, fails a run whose
+                   log says "$readmem file not found" for one of them, and
+                   passes one whose only such line is rtl/mem0.hex's
 SPDX-License-Identifier: MIT
 """
 import argparse
@@ -1015,9 +1016,9 @@ print("SELFTEST pass (1 of 1 cases as expected)")
 
 
 # stand-in tb_frames binary for run_frames_cases: a passing bench, which also
-# prints Verilator's missing-table warning when FAKE_READMEM is set
+# prints Verilator's missing-table warning for FAKE_READMEM (a path under rtl/)
 FRAMES_FAKE_VTB = r"""#!/bin/bash
-[ -n "$FAKE_READMEM" ] && echo '%Warning: rtl/palettes/NWARM.hex:0: $readmem file not found'
+[ -n "$FAKE_READMEM" ] && echo "%Warning: rtl/$FAKE_READMEM:0: \$readmem file not found"
 echo "FRAMES 3 frames after 0 s; 0.050 s emulated"
 echo "FRAMES result: PASS"
 """
@@ -1032,8 +1033,10 @@ def run_frames_cases(w):
     WORK/rtl's tables all there; it refuses to run (exit 2, naming the file)
     with no WORK/rtl, a dangling rtl link, or one table missing, as when a
     WORK shares another's obj_frames without its rtl/ (2.2.4's black
-    pictures); and it fails (exit 1) a run whose log has Verilator's
-    "$readmem file not found", although the bench says PASS."""
+    pictures); it fails (exit 1) a run whose log has Verilator's
+    "$readmem file not found" for one of those tables, although the bench
+    says PASS; and it passes one whose only such warning is rtl/mem0.hex's,
+    which every BUILD_TOP=tb_frames WORK prints."""
     import hashlib
     print("run_frames.sh on a scratch tree with a stand-in tb_frames binary:")
     d = os.path.join(w, "run_frames_sh")
@@ -1082,7 +1085,9 @@ def run_frames_cases(w):
     case("WORK/rtl a dangling link: refused", "dangling", 2, "rtl/palettes/NWARM.hex is missing")
     case("WORK/rtl without vox_drom.hex: refused", FRAMES_RTL[:-1], 2, "rtl/vox_drom.hex is missing")
     case("a table not found by the bench, which says PASS: FAIL", FRAMES_RTL, 1, "could not load a table",
-         env={"FAKE_READMEM": "1"})
+         env={"FAKE_READMEM": "palettes/NWARM.hex"})
+    case("only rtl/mem0.hex not found, the bench says PASS: PASS", FRAMES_RTL, 0, "FRAMES result: PASS",
+         env={"FAKE_READMEM": "mem0.hex"})
     shutil.rmtree(d, ignore_errors=True)
 
 
