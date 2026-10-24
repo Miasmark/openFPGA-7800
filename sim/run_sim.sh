@@ -31,6 +31,9 @@
 #                  a scratch tree (sim/bupchip/dstat/run_ovl.sh); its log is
 #                  checked with run_sim_check.py --only daria, as it is no
 #                  whole run
+#   ONLY=pokey     the same for the POKEY read section (below), e.g. on a
+#                  scratch tree with the read fix undone; run_sim_check.py
+#                  --only pokey
 # The checker sim/check/run_sim_check.py turns this script's output into one
 # exit code.
 set -e
@@ -192,7 +195,8 @@ case "${ONLY:-}" in
 	"") ;;
 	daria) [ "$DARIA_ON" = 1 ] || { echo "run_sim.sh: ONLY=daria needs the DARIA build (DARIA=1)" >&2; exit 1; }
 		echo "-- run_sim.sh ONLY=daria: tb_load and the DARIA section alone, not a whole run" ;;
-	*) echo "run_sim.sh: ONLY=$ONLY: daria is the one section that runs alone" >&2; exit 1 ;;
+	pokey) echo "-- run_sim.sh ONLY=pokey: tb_load and the POKEY read section alone, not a whole run" ;;
+	*) echo "run_sim.sh: ONLY=$ONLY: daria and pokey are the sections that run alone" >&2; exit 1 ;;
 esac
 if [ -n "${BUILD_TOP:-}" ]; then
 	case "$BUILD_TOP" in
@@ -438,6 +442,28 @@ runpy.run_path("armemu.py", run_name="__main__")' "$B/synth.arsc" --song 0 --sec
 fi
 fi   # ONLY
 
+# POKEY reads (2.2.2's read fix): sim/pokey_read_test.py's game-free
+# cartridge reads RANDOM 40 times and IRQST three times (idle, timer 1's
+# interrupt fired, cleared) through POKEY at $450 (A78 type 0x0040) and at
+# $4000 (type 0x0001), and stores what the CPU got in RAM; tb_load's
+# +pokeyrd prints that RAM 20 ms after the reset. With the read fix undone
+# (Pokey/pokey_adapter.sv's READ_WHOLE_CYCLE 0) every read is $FF.
+# sim/check/run_sim_check.py judges the lines: the program done, at most 2
+# of the 40 RANDOM reads $FF and at least 30 distinct values, IRQST's bit 0
+# 1, 0 and 1. ONLY=pokey runs this section alone.
+if [ -z "${ONLY:-}" ] || [ "$ONLY" = pokey ]; then
+	echo "-- POKEY reads: RANDOM and IRQST as the CPU gets them (pokey_read_test.py):"
+	PR="$WORK/pokey_read"
+	mkdir -p "$PR"; ln -sfn "$WORK/rtl" "$PR/rtl"
+	for base in 450 4000; do
+		python3 "$HERE/pokey_read_test.py" "$PR/pokey_$base.a78" --base "$base"
+		echo "  POKEY at \$$base:"
+		(cd "$PR" && sim ./../obj_load/vtb +image="pokey_$base.a78" +pokeyrd=20 $(fp "pokey_read_$base") < /dev/null > "pokey_$base.log")
+		l="$(grep -E "^POKEYRD" "$PR/pokey_$base.log" || true)"
+		if [ -n "$l" ]; then sed 's/^/    /' <<< "$l"; else echo "    no POKEYRD lines: see $PR/pokey_$base.log"; fi
+	done
+fi
+
 # DARIA in the whole core (docs/daria_step7/plan.md 3.6), game-free: tb_load
 # runs fe_dir's synthetic ARM images (sim/bupchip/daria/fe_dir/mkimg.py: a
 # DPC+, a CDFJ and the 64 KB "digital" CDFJ image, which also reads ROM above
@@ -476,7 +502,9 @@ fi   # ONLY
 # requirement OVL gives it.
 # Only in the DARIA build; without POCKET_DARIA the section is inactive,
 # which is not a pass (run_sim_check.py).
-if [ "$DARIA_ON" = 1 ]; then
+if [ "${ONLY:-}" = pokey ]; then
+	:   # ONLY=pokey: not the DARIA section
+elif [ "$DARIA_ON" = 1 ]; then
 	echo "-- DARIA: synthetic ARM images in the whole core (fe_dir/mkimg.py):"
 	DR="$WORK/daria"
 	mkdir -p "$DR"; ln -sfn "$WORK/rtl" "$DR/rtl"
