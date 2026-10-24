@@ -94,7 +94,18 @@
 #                that writes them); with POCKET_DARIA in the
 #                qsf also on run_sim's plain build, checked the same way,
 #                and every extra_ and cartram_ fingerprint equal between the
-#                builds but the ARM image's (plan 7.5 row 5, 1.2 row 4)
+#                builds but the ARM image's (plan 7.5 row 5, 1.2 row 4).
+#                About 9 h with AR_TAPE=1 run whole, one build after the
+#                other (5.2 h + 3.9 h on 2.2.4's tree, docs/ENVIRONMENT.md 6).
+#                In pieces, the same checks: EXTRA_JOBS=N runs each build's
+#                sections N at once (extra_tests.sh's header), each under
+#                EXTRA_SLOT (a command prefix holding one simulation slot;
+#                default flock SIM_LOCK when SIM_LOCK is set), and the
+#                run itself outside any slot; EXTRA_BOTH=1 runs the plain
+#                build's extra_tests.sh beside the DARIA one's, each under
+#                EXTRA_SLOT, else under the slot (SIM_LOCK takes them in
+#                turn). Run step7_gates.sh outside a slot then: every
+#                piece takes its own.
 #   selftest     sim/check/selftest.py: the checkers' planted faults, on this
 #                run's run_sim.sh, extra_tests.sh, cartram, reset and artape logs
 #                and fingerprints (so it runs after them), the guards'
@@ -203,7 +214,8 @@
 # they are never copied into the tree), R1_DIR=DIR (the reference runs),
 # S4_GAME=FILE and REFDIR (s4/check.sh's game jobs), S4_JOBS, RUN_SIM_REF=LOG,
 # FP_REF=DIR, PP_ORACLE_BASE=REV, CARTRAM_ONLY=LIST, FRAMES_LIST,
-# FRAMES_GUARD, FRAMES_RULE, WIRE_ONLY, WIRE_MUT (above).
+# FRAMES_GUARD, FRAMES_RULE, WIRE_ONLY, WIRE_MUT, EXTRA_JOBS, EXTRA_SLOT,
+# EXTRA_BOTH (above).
 # Every log starts with the tree's HEAD and status and the Verilator path
 # and version (plan P23); the run scripts add the md5 of each binary they
 # build. Output in --out DIR (default sim/work/step7/gates): <gate>.log and
@@ -438,8 +450,28 @@ g_selftest() {
 g_fit_selftest() { bash "$HERE/bupchip/quartus_probe/step7/selftest.sh"; }
 g_extra_tests() {
 	[ -x "$OUT/rs/obj_load/vtb" ] || { echo "no run_sim build in $OUT/rs: run the run_sim gate first"; return 1; }
-	local tape=() rc=0
-	FP=1 WORK="$OUT/rs" slot bash "$HERE/extra_tests.sh" > "$OUT/extra_tests.out" 2>&1; echo "exit $?" >> "$OUT/extra_tests.out"
+	local tape=() rc=0 bg=""
+	# xrun OUT VAR=VALUE...: one whole extra_tests.sh run with FP=1 (any
+	# EXTRA_ONLY cleared), in pieces with EXTRA_JOBS>1, its exit status
+	# appended to OUT
+	xrun() {
+		local o="$1"; shift
+		( export "$@" FP=1 EXTRA_ONLY=
+		if [ "${EXTRA_JOBS:-1}" -gt 1 ]; then
+			[ -n "${EXTRA_SLOT:-}" ] || { [ -n "${SIM_LOCK:-}" ] && export EXTRA_SLOT="flock $SIM_LOCK nice -n 10"; }
+			nice -n 10 bash "$HERE/extra_tests.sh"
+		elif [ -n "${EXTRA_SLOT:-}" ]; then
+			$EXTRA_SLOT bash "$HERE/extra_tests.sh"
+		else
+			slot bash "$HERE/extra_tests.sh"
+		fi ) > "$o" 2>&1
+		echo "exit $?" >> "$o"
+	}
+	if [ "$QSF_DARIA" = 1 ] && [ "${EXTRA_BOTH:-0}" = 1 ] && [ -x "$OUT/rs_plain/obj_load/vtb" ]; then
+		xrun "$OUT/extra_tests_plain.out" DARIA=0 WORK="$OUT/rs_plain" & bg=$!
+	fi
+	xrun "$OUT/extra_tests.out" WORK="$OUT/rs"
+	[ -z "$bg" ] || wait "$bg"
 	cat "$OUT/extra_tests.out"
 	[ "${AR_TAPE:-0}" = 1 ] && tape=(--ar-tape)
 	python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests.out" --ref "$EXTRA_REF" "${tape[@]}" || rc=1
@@ -447,8 +479,7 @@ g_extra_tests() {
 	if [ "$QSF_DARIA" = 1 ]; then
 		echo "== the plain build (DARIA=0): extra_tests.sh on run_sim's plain WORK, and the fingerprints equal (plan 7.5 row 5)"
 		[ -x "$OUT/rs_plain/obj_load/vtb" ] || { echo "  FAIL: no plain run_sim build in $OUT/rs_plain (the run_sim gate makes it)"; return 1; }
-		DARIA=0 FP=1 WORK="$OUT/rs_plain" slot bash "$HERE/extra_tests.sh" > "$OUT/extra_tests_plain.out" 2>&1
-		echo "exit $?" >> "$OUT/extra_tests_plain.out"
+		[ -n "$bg" ] || xrun "$OUT/extra_tests_plain.out" DARIA=0 WORK="$OUT/rs_plain"
 		python3 "$HERE/check/extra_tests_check.py" "$OUT/extra_tests_plain.out" --ref "$EXTRA_REF" "${tape[@]}" || rc=1
 		fp_cross "$OUT/rs_plain/fp" "$OUT/rs/fp" 'extra_*.csv' "the plain build" || rc=1
 		fp_cross "$OUT/rs_plain/fp" "$OUT/rs/fp" 'cartram_*.csv' "the plain build" || rc=1
