@@ -1066,13 +1066,20 @@ def run_frames_cases(w):
                 open(p, "w").write("00\n")
         return wk
 
-    def case(label, rtl, want_rc, want, env=None):
+    def case(label, rtl, want_rc, want, env=None, want_log=None):
         env1 = {k: v for k, v in os.environ.items() if k not in ("FAKE_READMEM", "NAME", "FRAMES", "INPUTS",
                                                                   "ARM_DIV", "FRAMES_DEBUG", "RTL_TREE")}
-        env1.update(NOBUILD="1", VERILATOR="true", WORK=work(rtl), **(env or {}))
+        wk = work(rtl)
+        env1.update(NOBUILD="1", VERILATOR="true", WORK=wk, **(env or {}))
         r =subprocess.run(["bash", rf, img], env=env1, capture_output=True, text=True)
         got = r.stdout + r.stderr
-        ok = r.returncode == want_rc and want in got
+        if want_log:
+            # the warning stays in run.log, not in the lines run_frames.sh prints
+            try:
+                got += open(os.path.join(wk, "runs", "img", "run.log"), errors="replace").read()
+            except OSError:
+                pass
+        ok = r.returncode == want_rc and want in got and (want_log is None or want_log in got)
         results.append(ok)
         last = (got.strip().splitlines() or ["(no output)"])[-1]
         print(f"  {'ok   ' if ok else 'WRONG'} {label}: expected exit {want_rc}, got {r.returncode} ({last[:150]})")
@@ -1087,7 +1094,7 @@ def run_frames_cases(w):
     case("a table not found by the bench, which says PASS: FAIL", FRAMES_RTL, 1, "could not load a table",
          env={"FAKE_READMEM": "palettes/NWARM.hex"})
     case("only rtl/mem0.hex not found, the bench says PASS: PASS", FRAMES_RTL, 0, "FRAMES result: PASS",
-         env={"FAKE_READMEM": "mem0.hex"})
+         env={"FAKE_READMEM": "mem0.hex"}, want_log="rtl/mem0.hex:0: $readmem file not found")
     shutil.rmtree(d, ignore_errors=True)
 
 
