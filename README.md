@@ -46,7 +46,10 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   exception is by design: at the start of Spiders' play, MiSTer is late on 16
   calls in frames 557-572 and stretches those frames, while DARIA is on time
   there, as the project's model of the real cartridge's chip is
-  ([docs/HARMONY_MODEL.md](docs/HARMONY_MODEL.md)). 2.2.1 and 2.2.2 were late
+  ([docs/HARMONY_MODEL.md](docs/HARMONY_MODEL.md)). A chart sets DARIA
+  beside that model, MiSTer's core and lroby74's MiSTer fork
+  ([docs/DARIA_CORE.md](docs/DARIA_CORE.md#comparisons-upstream-and-lroby74s-fork)).
+  2.2.1 and 2.2.2 were late
   on them, as MiSTer is. Sound effects and music are the
   same writes, landing slightly earlier or later in time (the verification
   table below). Limits: BUS and ELF cartridges are not supported (no
