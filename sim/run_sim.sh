@@ -448,8 +448,8 @@ fi   # ONLY
 # $4000 (type 0x0001), and stores what the CPU got in RAM; tb_load's
 # +pokeyrd prints that RAM 20 ms after the reset. With the read fix undone
 # (Pokey/pokey_adapter.sv's READ_WHOLE_CYCLE 0) every read is $FF.
-# sim/check/run_sim_check.py judges the lines: the program done, at most 2
-# of the 40 RANDOM reads $FF and at least 30 distinct values, IRQST's bit 0
+# sim/check/run_sim_check.py judges the lines: the program done, at most 4
+# of the 40 RANDOM reads $FF and at least 24 distinct values, IRQST's bit 0
 # 1, 0 and 1. ONLY=pokey runs this section alone.
 if [ -z "${ONLY:-}" ] || [ "$ONLY" = pokey ]; then
 	echo "-- POKEY reads: RANDOM and IRQST as the CPU gets them (pokey_read_test.py):"

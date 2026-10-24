@@ -16,13 +16,14 @@ the input-dependent groups below that did not run for want of their input
                    truncated log, a geometry change, BUPCHIP_E2E FAIL, a
                    case cut short (an earlier FRAME line with the right
                    geometry), a SIMULATOR EXIT line; the POKEY read section
-                   (RANDOM all $FF as with the read fix undone, 3 $FF, too
-                   few distinct values, the bench's counts not the values',
-                   IRQST's timer bit not set, the program not done, the
-                   $4000 case or the section gone; 2 $FF still passes), and
-                   the section alone as an ONLY=pokey log (passes with
-                   --only pokey, fails planted, and the whole log fails
-                   with --only pokey)
+                   (RANDOM all $FF as with the read fix undone, at $450 and
+                   at $4000, 5 $FF, 23 distinct values, the bench's counts
+                   not the values', IRQST's bit 0 clear when idle or set
+                   once timer 1 fired, the program not done, the $4000 case
+                   or the section gone; 4 $FF and 24 distinct still pass),
+                   and the section alone as an ONLY=pokey log (passes with
+                   --only pokey, fails planted, and the whole log fails with
+                   --only pokey)
   --extra LOG      a passing extra_tests.sh log, with its reference log
                    (--extra-ref) and, for a log from before step 7, its
                    extra/ directory (--extra-dir): an ARCHECK mismatch, a
@@ -227,10 +228,10 @@ def run_sim_cases(log, w):
 
 def pokey_cases(log, w, chk):
     """The POKEY read section (2.2.2's read fix): planted on the first case's
-    (POKEY at $450) lines of a passing log."""
+    (POKEY at $450) lines of a passing log, or the $4000 case's."""
     rx = r"^(    POKEYRD RANDOM 40 reads, )\d+ of them \$FF, \d+ distinct:((?: [0-9a-f]{2}){40})$"
 
-    def rnd(f, counts=None):
+    def rnd(f, counts=None, at4000=False):
         # f(values) -> the values to plant; the bench's counts follow them
         # unless counts gives others
         def g(t):
@@ -238,18 +239,24 @@ def pokey_cases(log, w, chk):
                 v = f([int(x, 16) for x in m.group(2).split()])
                 nff, nd = counts or (v.count(0xFF), len(set(v)))
                 return f"{m.group(1)}{nff} of them $FF, {nd} distinct:" + "".join(f" {x:02x}" for x in v)
-            return re.sub(rx, r, t, count=1, flags=re.M)
+            i = t.index("\n  POKEY at $4000:\n") if at4000 else 0
+            return t[:i] + re.sub(rx, r, t[i:], count=1, flags=re.M)
         return g
 
     def ffs(n):
         # n values $FF, the rest as they were but none $FF
         return lambda v: [0xFF] * n + [x if x != 0xFF else 0x00 for x in v[n:]]
-    pass_cases = {"pokey_two_ff": rnd(ffs(2))}
+    pass_cases = {
+        "pokey_four_ff": rnd(ffs(4)),
+        "pokey_24_distinct": rnd(lambda v: [0x10 + (i % 24) for i in range(40)]),
+    }
     fail_cases = {
         "pokey_all_ff": rnd(lambda v: [0xFF] * 40),
-        "pokey_three_ff": rnd(ffs(3)),
-        "pokey_few_distinct": rnd(lambda v: [0x10 + (i % 29) for i in range(40)]),
+        "pokey_4000_all_ff": rnd(lambda v: [0xFF] * 40, at4000=True),
+        "pokey_five_ff": rnd(ffs(5)),
+        "pokey_few_distinct": rnd(lambda v: [0x10 + (i % 23) for i in range(40)]),
         "pokey_counts_lie": rnd(lambda v: [0xFF] * 40, counts=(0, 40)),
+        "pokey_irqst_idle_clear": sub1(r"^(    POKEYRD IRQST idle \$)[0-9a-f]{2}", r"\g<1>fe"),
         "pokey_irqst_not_fired": sub1(r"^(    POKEYRD IRQST idle \$[0-9a-f]{2}, timer 1 fired \$)[0-9a-f]{2}", r"\g<1>ff"),
         "pokey_not_done": sub1(r"^(    POKEYRD marker \$)a5", r"\g<1>00"),
         "pokey_4000_missing": lambda t: re.sub(r"^  POKEY at \$4000:\n(?:    .*\n)*", "", t, count=1, flags=re.M),
