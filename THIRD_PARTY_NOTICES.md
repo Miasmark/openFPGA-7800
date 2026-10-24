@@ -26,11 +26,10 @@ https://github.com/Miasmark/openFPGA-7800
 | APF framework | `src/fpga/apf/` | Analogue | Analogue's APF Software License Agreement (file headers); `mf_*.v` also carry the Intel Program License | Built |
 | PLL and PLL reconfiguration IP (generated) | `src/fpga/core/pll/` | Intel | Intel Program License (file headers): for use with Intel devices | Built |
 | Core template glue (`core_top.v`, `core_bridge_cmd.v`) | `src/fpga/core/` | Analogue, modified for this port | Analogue's APF terms | Built |
-| Pocket wrapper, audio filter, POKEY adapter, PLL setup, the BupChip (ARIA, `src/fpga/core/bupchip/`), sim, tools | `src/fpga/core/`, `sim/`, `tools/` | this project | MIT (`LICENSE`) | Built (HDL) |
+| Pocket wrapper, audio filter, PLL setup, the BupChip (ARIA, `src/fpga/core/bupchip/`), sim, tools | `src/fpga/core/`, `sim/`, `tools/` | this project | MIT (`LICENSE`) | Built (HDL) |
 | Video mixer | `src/fpga/mister/rtl/video_mixer_plus.sv` | Alexey Melnikov (Sorgelig) | GPL | Repo only |
 | ARM7TDMI core | `src/fpga/mister/rtl/arm7tdmi/arm7tdmi_core.sv` | Robert Peip / Jamie Blanks | GPL-2.0-only | Repo only |
 | T65 | `src/fpga/mister/rtl/t65/` | Daniel Wallner, Mike Johnson, Wolfgang Scherr, Morten Leikvoll | BSD-style (file headers) | Repo only |
-| Watson POKEY | `src/fpga/mister/rtl/PokeyWatson/` | Mark Watson | Own terms: free for non-commercial use; commercial use needs his permission. See the file headers | Repo only (built up to 2.0.20; simulation) |
 
 The 6502 assembler test programs in `sim/` pull in 7800basic's
 `i2c7800.inc` at build time. It is not stored here; 7800basic's includes are
@@ -85,8 +84,8 @@ display-mode list). The simulation's test carts use 7800basic's includes
 ## POKEY
 
 Since 2.0.21 the bitstream builds upstream's MIT POKEY (`rtl/Pokey`).
-Mark Watson's POKEY, still in `rtl/PokeyWatson` for simulation and built
-into releases up to 2.0.20, keeps its own license: free for non-commercial
-use, and commercial use or sale, in source or binary form, needs his
-permission (scrameta at gmail). That applies to those releases and to any
-bitstream built with it.
+Releases 2.0.20 and earlier built Mark Watson's POKEY under his own terms
+(free for non-commercial use; commercial use or sale, in source or binary
+form, needs his permission, scrameta at gmail), and those terms still apply
+to those releases; the current tree no longer contains his POKEY, though the
+repository's history still does.

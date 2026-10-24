@@ -1487,7 +1487,7 @@ The busiest cycle, a CDF fast fetch, uses 6 of the 12 slots (study §3.2).
 
 Coding style matters under the project's `MUX_RESTRUCTURE OFF`: the same sketch written as state machines took 1,343 ALMs. Each register gets one load enable and at most a 4-way data mux.
 
-**How it will be proved:** as a cycle-by-cycle shadow of upstream's front ends inside `tb_daria.sv`, as POKEY was (`run_pokey_shadow.sh`): the same 6507 bus into both, data compared at every latch edge, state compared after every cycle, AMPLITUDE compared per tick. Then directed tests per scheme (BUS has no demo) and a random differential bench. Two differences are expected and will be counted, not hidden: AMPLITUDE can lag a tick at a different clock, and stall lengths differ.
+**How it will be proved:** as a cycle-by-cycle shadow of upstream's front ends inside `tb_daria.sv`, as POKEY was (`run_pokey_shadow.sh`, removed after 2.2.4 with Watson's POKEY; `git show 3c7041c:sim/run_pokey_shadow.sh`): the same 6507 bus into both, data compared at every latch edge, state compared after every cycle, AMPLITUDE compared per tick. Then directed tests per scheme (BUS has no demo) and a random differential bench. Two differences are expected and will be counted, not hidden: AMPLITUDE can lag a tick at a different clock, and stall lengths differ.
 
 ### Fix B: the 2600 cartridge-RAM request on its own registered path
 

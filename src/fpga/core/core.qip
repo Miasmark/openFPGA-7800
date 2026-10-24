@@ -31,8 +31,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../mister/rtl/sdram.sv]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/6502/mos6502.qip]
 # POKEY: upstream's rtl/Pokey (since 2.0.21), with the Pocket's adapter fix
-# and output level (see mister/POCKET_CHANGES.md). Mark Watson's VHDL POKEY,
-# used up to 2.0.20, stays in mister/rtl/PokeyWatson for simulation.
+# and output level (see mister/POCKET_CHANGES.md). Releases up to 2.0.20
+# built Mark Watson's VHDL POKEY instead.
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/Pokey/Pokey.qip]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/Minnie/Minnie.qip]
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../mister/rtl/SN76489/SN76489.qip]

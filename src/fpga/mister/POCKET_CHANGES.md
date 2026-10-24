@@ -24,8 +24,8 @@ Thirteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
 `Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`. The
 sections below describe each. Three firmware images are removed. The build
 uses upstream's POKEY (`rtl/Pokey/`, with a changed adapter and, from 2.2.2,
-the read fix); Watson's older one, which releases up to 2.0.20 used, stays in
-`rtl/PokeyWatson/` for simulation.
+the read fix). Watson's older one, which releases up to 2.0.20 used, is no
+longer in the tree; the repository's history keeps it.
 
 ### POKEY: upstream's rtl/Pokey, fixed (Watson's VHDL up to 2.0.20)
 
@@ -68,7 +68,8 @@ upstream b48eac0 (the last commit with it), with its top entity renamed
 `pokey` -> `pokey_watson` so it cannot collide with the new POKEY's module
 name. `../core/pokey_adapter_watson.sv` provides the `pokey_adapter` module
 that `cart.sv` instantiates, wired the way b48eac0 wired Watson's POKEY.
-`cart.sv` itself is unchanged. (2.0.21 and later build `rtl/Pokey/` instead.)
+`cart.sv` itself is unchanged. (2.0.21 and later build `rtl/Pokey/` instead;
+both left the tree after 2.2.4 and remain in the history.)
 
 At the time the exact fault in the new POKEY was not identified (it is below). Its pure tones match
 the documented behaviour at all 256 frequencies, and rewriting its registers
@@ -194,8 +195,9 @@ real bus holds it. In this core MARIA's DMA address can be on the bus in the
 very clk that ends a write's o2 half, when DMA starts right after the write,
 and the write then lands on the register MARIA's address names. Found with
 `sim/run_pokey_shadow.sh` (upstream's POKEY run as a shadow of Watson's in
-the whole core) on Ballblazer: its `$BBA8 STA $4007`, followed by DMA
-reading `$2772`, arrived as a write to register 2. 7 of the 2,404 writes in
+the whole core; removed after 2.2.4 with Watson's POKEY) on Ballblazer: its
+`$BBA8 STA $4007`, followed by DMA reading `$2772`, arrived as a write to
+register 2. 7 of the 2,404 writes in
 its first 10 s went to a wrong register (always 2), none after the fix. The
 wrong writes leave channels un-silenced or retuned, and over a match they
 add up to the near-silence heard on hardware. Confirmed on Pocket hardware (a
