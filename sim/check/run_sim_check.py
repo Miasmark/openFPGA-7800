@@ -90,9 +90,7 @@ VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BU
 # (131,071) at strides 12, 16 and 20: the worst case is 4 $FF and 24 distinct
 # values, so a timing change that keeps the reads right does not trip these.
 # With the fix undone every read is $FF (1 distinct value). The rules are
-# tuned to rtl/Pokey, the release POKEY. POKEY=watson passes them too
-# (ONLY=pokey, 2026-10-23): the same LFSR sequence offset by two reads, 0 $FF
-# and 34 distinct, IRQST $f7 $f6 $f7. POKEYRD lines are not in VERDICT_LINE,
+# tuned to rtl/Pokey, the release POKEY. POKEYRD lines are not in VERDICT_LINE,
 # so a --ref log from before the section still compares.
 POKEY_BASES = ("450", "4000")
 POKEY_MAX_FF = 4

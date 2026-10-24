@@ -47,7 +47,7 @@ Tags:
   - the ARM schemes leave the `clk_sdram` cone, because no SDRAM or SRAM is left in their 6507 path.
 
   Against the 2.1.1 figure the saving is −650 to −900. The plan's "reuse unmodified, about 1,750 ALMs" understates reuse: the live figure is about 2,200, plus the controller.
-- **Recommendation:** write the lean front end as this project's MIT code. Verify it as a cycle-by-cycle shadow of upstream's front ends inside `sim/bupchip/daria/tb_daria.sv`, the same way `sim/run_pokey_shadow.sh` verified POKEY.
+- **Recommendation:** write the lean front end as this project's MIT code. Verify it as a cycle-by-cycle shadow of upstream's front ends inside `sim/bupchip/daria/tb_daria.sv`, the same way `sim/run_pokey_shadow.sh` (removed after 2.2.4) verified POKEY.
 
 ## 1. Where the ALMs go
 
@@ -493,7 +493,7 @@ Tests:
      - at every commit: bank, `call_request` and `service_request` (same cycle), `stuff_valid`/`stuff_data` in s4–s5;
      - after each 6507 cycle: the DPC+ fetcher fields against `mapper_dpcplus`'s registers (hierarchical references), and the CDF/BUS pointer, increment and map words against `arm_mapper_tables`' copies (upstream's own cart RAM lags because of the writeback);
      - per tick: the amplitude sequence.
-   - This takes ARM timing out of the comparison entirely, as `run_pokey_shadow.sh` did for POKEY.
+   - This takes ARM timing out of the comparison entirely, as `run_pokey_shadow.sh` (removed after 2.2.4) did for POKEY.
 2. **Directed 6507 tests per scheme**, run on both implementations, comparing bus traces. BUS needs them most, since it has no demo. Cover:
    - 12-bit counter and 20-bit fraction wraps; window edges;
    - non-adjacent DPC+ fast fetches; `$A9` as data; `$4C` at a bank end;

@@ -7,7 +7,7 @@
 #   VERILATOR=BIN  the Verilator to use (5.040; PATH's otherwise)
 #   VL_JOBS=N      build parallelism (default 4)
 #   DARIA=0|1      POCKET_DARIA off or on; default: as ap_core.qsf sets it
-#   BUP_DEBUG=0|1, BUPCHIP=0, SRAM=0, POKEY=watson: as below
+#   BUP_DEBUG=0|1, BUPCHIP=0, SRAM=0: as below
 #   BIOS=FILE      the 7800 BIOS for the BIOS boot tests (below)
 #   BUPFW=FILE     the BupChip firmware (default src/fpga/mister/rtl/bupchip.hex)
 #   FP=1           every run also writes its per-frame fingerprint (tb_load's
@@ -76,30 +76,13 @@ done
 # which Quartus allows and Verilator does not.
 sed -E 's/^(\s*)output(\s+)charged,/\1output logic\2charged,/' "$RTL/paddles.sv" > "$PATCHED/paddles.sv"
 
-# The Pocket build uses upstream's POKEY (rtl/Pokey). POKEY=watson builds
-# Mark Watson's VHDL one (rtl/PokeyWatson, behind core/pokey_adapter_watson.sv)
-# instead, as releases up to 2.0.20 did. Verilator reads no VHDL, so GHDL
-# (4.x) converts it to Verilog first. run_pokey_shadow.sh needs that file.
-if [ "${POKEY:-new}" = watson ]; then
-	POKEY_SRCS=("$WORK/pokey_watson.v" "$FPGA/core/pokey_adapter_watson.sv")
-else
-	POKEY_SRCS=($(ls "$RTL"/Pokey/*.sv))
-fi
-if [ "${POKEY:-new}" = watson ] && { [ ! -f "$WORK/pokey_watson.v" ] || [ -n "$(find "$RTL/PokeyWatson" -newer "$WORK/pokey_watson.v")" ]; }; then
-	command -v ghdl >/dev/null || { echo "needs ghdl (apt install ghdl)"; exit 1; }
-	mkdir -p "$WORK/ghdl"
-	(cd "$WORK/ghdl" && rm -f ./*.cf && ghdl -a --std=08 -fsynopsys "$RTL"/PokeyWatson/*.vhd* 2>/dev/null \
-		&& ghdl --synth --std=08 -fsynopsys --out=verilog pokey_watson > "$WORK/pokey_watson.v" 2>/dev/null) \
-		|| { echo "ghdl conversion of PokeyWatson failed"; exit 1; }
-fi
-
 SRCS=(
 	"$HERE/sim_stubs.sv"
 	"$RTL/arm7tdmi/arm7tdmi_pkg.sv"
 	"$RTL/6502/mos6502_pkg.sv"
 	$(ls "$RTL"/6502/*.sv | grep -v pkg)
 	$(ls "$RTL"/Maria/*.sv | grep -v control.sv) "$PATCHED/Maria/control.sv"
-	"${POKEY_SRCS[@]}"
+	$(ls "$RTL"/Pokey/*.sv)
 	$(sed -n 's/.*qip_path) \(.*\.sv\) *\].*/\1/p' "$RTL/Minnie/Minnie.qip" | sed "s#^#$RTL/Minnie/#")
 	"$RTL/SN76489/sn76489.sv"
 	"$RTL"/jt51/*.v

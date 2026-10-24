@@ -20,9 +20,7 @@ cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY_NOTICES.md" "$ROOT/LICENSES/GPL-3.0.txt" "
 cp "$ROOT/src/fpga/mister/LICENSE" "$LIC/MiSTer-Atari7800-LICENSE.txt"
 cp "$ROOT/src/fpga/pocket_utils/LICENSE" "$LIC/analogue-pocket-utils-LICENSE.txt"
 # A notice that lives only in source headers, copied word for word:
-# Analogue's APF license. (Mark Watson's POKEY notice went with his POKEY
-# up to 2.0.20; the bitstream no longer contains it.)
-rm -f "$LIC/PokeyWatson-NOTICE.txt"
+# Analogue's APF license.
 awk '{ sub(/\r$/, "") } /^$/ { print; next } /^\/\/ *$/ || !/^\/\// { exit } { sub(/^\/\/ ?/, ""); print }' \
 	"$ROOT/src/fpga/apf/apf_top.v" > "$LIC/Analogue-APF-Software-License.txt"
 if command -v zip >/dev/null; then

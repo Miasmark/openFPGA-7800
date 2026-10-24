@@ -407,6 +407,8 @@ That is enough for step 5, because the 6507 only ever reads upstream's RAM. A fr
 
 The POKEY shadow is `sim/run_pokey_shadow.sh` (59 lines), `sim/tb_load.sv` under `POKEY_SHADOW`, and `sim/pokey_shadow_compare.py`.
 
+[2026-10-24] All three were removed after 2.2.4, with Watson's POKEY, which the shadow compared against. The line references below are to the tree before that; `git show 3c7041c:<path>` has each file.
+
 - **Build** (run_pokey_shadow.sh):
   - It makes renamed and patched copies in `$WORK/shadow`, never touching the repository: `pokey_adapter.sv` → `module pokey_adapter_new` (:19).
   - A Python splice inserts the shadow instance into a copy of `cart.sv`, just before the anchor `pokey_adapter return_of_pokey (`, and asserts that the anchor exists (:24-45).

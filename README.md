@@ -382,9 +382,7 @@ test cart locally (no ROMs are stored in this repository) and runs them
 through the core. `sim/tb_pokey.sv` sweeps a POKEY channel through all 256
 frequencies in any AUDC/AUDCTL mode, for comparison against `pokey_model.py`
 (the documented divider and polynomial behaviour) with `pokey_compare.py`.
-The simulation runs the same POKEY as the Pocket build. `POKEY=watson
-sim/run_sim.sh` converts Watson's VHDL POKEY with GHDL and uses it instead,
-and `sim/run_pokey_shadow.sh` runs the two side by side.
+The simulation runs the same POKEY as the Pocket build.
 
 ## Controls
 
@@ -569,7 +567,7 @@ tools/                 Packaging
 - **7800basic** by **Mike Saarna (RevEng)** and contributors: the SaveKey
   driver and samples the simulation test carts are built from (CC0).
 - **A7800**, whose `highscor.rom` file name this core accepts.
-- **Verilator**, **GHDL** and **Intel Quartus Prime Lite**, for simulation
+- **Verilator** and **Intel Quartus Prime Lite**, for simulation
   and builds.
 - MiSTer's **ARM7TDMI core** (**Robert Peip**, the GBA_MiSTer contributors
   and **Jamie Blanks**, GPL-2.0): the simulation reference ARIA is checked
@@ -589,9 +587,9 @@ bitstream.
 - The SDRAM controller, JT51 and the SaveKey EEPROM are GPL-3.0. The full
   text is in [LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt), and the complete
   source for the bitstream is in this repository.
-- Mark Watson's POKEY (`src/fpga/mister/rtl/PokeyWatson/`), built into
-  releases up to 2.0.20, is free for non-commercial use; commercial use needs
-  his permission. Releases from 2.0.21 use the MIT POKEY instead.
+- Releases up to 2.0.20 built Mark Watson's POKEY, which is free for
+  non-commercial use; commercial use needs his permission. Releases from
+  2.0.21 use the MIT POKEY, and this tree no longer contains Watson's.
 - `src/fpga/apf/`, `core_top.v` and `core_bridge_cmd.v` are Analogue's
   framework and template, under Analogue's terms.
 - No console or peripheral firmware is included: the 7800 BIOS, the high

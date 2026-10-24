@@ -37,11 +37,11 @@ Related documents:
 | `src/fpga/core/bupchip/` | The BupChip, ARIA: the Souper cartridge's music co-processor, its memories, asset cache and PSRAM path ([BUPCHIP_CORE.md](BUPCHIP_CORE.md)); with `POCKET_DARIA`, DARIA, the same CPU running the 2600 ARM cartridges: `daria_*.sv` (memories, call port, MMIO, sample requester, the front end `daria_fe*.sv`) and `bup_dbg_snap.sv` ([DARIA_CORE.md](DARIA_CORE.md)) | This project |
 | `src/fpga/core/pll/` | Generated PLL and PLL-reconfiguration IP | Quartus `ip-generate` (see below) |
 | `src/fpga/core/pll_region.v` | PAL/NTSC PLL retune sequence | This project |
-| `src/fpga/core/audio_filter.sv`, `pokey_adapter_watson.sv` | Audio conditioning; Watson POKEY wrapper (simulation only since 2.0.21) | This project |
+| `src/fpga/core/audio_filter.sv` | Audio conditioning | This project |
 | `src/fpga/mister/rtl/` | The MiSTer Atari7800 core, vendored | Upstream; change only as POCKET_CHANGES.md records |
 | `src/fpga/pocket_utils/` | agg23's data loader, I2S, FIFO, PSRAM controller | agg23 (MIT) |
 | `dist/` | SD card layout: `Cores/Miasmark.7800/*.json`, platform files | This project |
-| `sim/` | Verilator/GHDL simulation and test carts | This project |
+| `sim/` | Verilator simulation and test carts | This project |
 | `tools/` | Packaging and file utilities | This project |
 
 `src/fpga/ap_core.qsf` holds the device, the file list (through
@@ -71,7 +71,6 @@ Macros belong in the `.qsf`, never in a `.qip` (Quartus rejects them there).
 |---|---|---|
 | Quartus Prime Lite | 21.1 | Docker image `raetro/quartus:21.1`; CI uses it. |
 | Verilator | 5.040 | 5.020 is too old for the upstream sources. |
-| GHDL | 4.x | Converts Watson's VHDL POKEY to Verilog, for `POKEY=watson` and the shadow comparison. |
 | Python 3 | any recent | Packaging and sim helpers; numpy/Pillow for some sim scripts. |
 | dasm, 7800basic | built by `sim/extra_tests.sh` | Test carts. |
 
@@ -112,7 +111,6 @@ sim/run_sim.sh          # whole-core tests; a few minutes
 sim/extra_tests.sh      # game-style tests with 7800basic carts; needs run_sim.sh first
 sim/bupchip/run_bupchip.sh GAME.a78 SONG   # BupChip CPU load; see BUPCHIP.md
 SRAM=0 WORK=sim/work_bram sim/run_sim.sh   # the block RAM build, as up to 2.0.20
-POKEY=watson sim/run_sim.sh               # Watson's POKEY instead of upstream's
 BUP_DEBUG=0 sim/run_sim.sh                # the BupChip without its debug status (a release build)
 BUPCHIP=0 WORK=sim/work_nobup sim/run_sim.sh   # without the Pocket BupChip, as up to 2.0.21
 ```
@@ -139,7 +137,7 @@ benches are in `sim/bupchip/` (its `s4/check.sh` runs the wrapper's).
 (`tb_load.sv`'s `+joyscript`) and checking each command, the PCM and the
 screen.
 
-`run_sim.sh` converts the POKEY with GHDL, copies the few upstream files
+`run_sim.sh` copies the few upstream files
 Verilator can't parse into `sim/work/patched/` (initialised `wire` arrays
 become `logic`), builds two testbenches, and runs them:
 

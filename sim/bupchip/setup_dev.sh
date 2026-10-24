@@ -12,7 +12,7 @@ command -v verilator >/dev/null && command -v arm-none-eabi-objdump >/dev/null |
 	apt-get install -y -q verilator iverilog gcc-arm-none-eabi binutils-arm-none-eabi
 # Verilator 5.040 is required (5.020 compiles but is too old for the upstream sources).
 if [ ! -x /opt/verilator-5.040/bin/verilator ]; then
-	apt-get install -y -q autoconf flex bison help2man libfl-dev ccache make g++ perl ghdl
+	apt-get install -y -q autoconf flex bison help2man libfl-dev ccache make g++ perl
 	T="$(mktemp -d)"
 	git clone -q --depth 1 --branch v5.040 https://github.com/verilator/verilator "$T/v"
 	(cd "$T/v" && autoconf && ./configure --prefix=/opt/verilator-5.040 && make -j"$(nproc)" && make install)
