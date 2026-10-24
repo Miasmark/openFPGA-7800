@@ -84,15 +84,19 @@ TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured 
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
                           r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
 # The POKEY read section: each mapping run_sim.sh tries, and the RANDOM rule.
-# A read that returns the precharged bus is $FF. For 40 uniform random bytes,
-# three or more $FF come about once in 1,800 and fewer than 30 distinct
-# values about once in 50,000 [estimated: Poisson for the $FF, a sampling of
-# 200,000 draws for the distinct values], so a timing change that keeps the
-# reads right does not trip these. POKEYRD lines are not in VERDICT_LINE, so
-# a --ref log from before the section still compares.
+# A read that returns the precharged bus is $FF. The 40 RANDOM reads are not
+# independent: they are samples of one 17-bit LFSR (pokey_poly.sv), 16 of its
+# shifts apart in this bench. A model of it checked every phase of its period
+# (131,071) at strides 12, 16 and 20: the worst case is 4 $FF and 24 distinct
+# values, so a timing change that keeps the reads right does not trip these.
+# With the fix undone every read is $FF (1 distinct value). The rules are
+# tuned to rtl/Pokey, the release POKEY. POKEY=watson passes them too
+# (ONLY=pokey, 2026-10-23): the same LFSR sequence offset by two reads, 0 $FF
+# and 34 distinct, IRQST $f7 $f6 $f7. POKEYRD lines are not in VERDICT_LINE,
+# so a --ref log from before the section still compares.
 POKEY_BASES = ("450", "4000")
-POKEY_MAX_FF = 2
-POKEY_MIN_DISTINCT = 30
+POKEY_MAX_FF = 4
+POKEY_MIN_DISTINCT = 24
 OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern", "frame_cdfj_retune")
 # What each run's overlay line must say it required and checked (run_sim.sh's
 # OVL table): a line that passes on a smaller requirement fails here.
