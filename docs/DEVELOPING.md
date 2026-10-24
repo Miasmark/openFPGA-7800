@@ -73,6 +73,7 @@ Macros belong in the `.qsf`, never in a `.qip` (Quartus rejects them there).
 | Verilator | 5.040 | 5.020 is too old for the upstream sources. |
 | GHDL | 4.x | Converts Watson's VHDL POKEY to Verilog, for `POKEY=watson` and the shadow comparison. |
 | Python 3 | any recent | Packaging and sim helpers; numpy/Pillow for some sim scripts. |
+| py65 | 1.2 | `tools/d78.py`, the 6502 disassembler for reading a game's code (`tools/a78_info.py` decodes its A78 header). |
 | dasm, 7800basic | built by `sim/extra_tests.sh` | Test carts. |
 
 ## Build
@@ -192,6 +193,9 @@ Something that fails only on hardware is most likely in one of those.
 | `port1=N`, `port2=N` | Port Input setting: 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun, 5 dual stick, 6 Booster Grip |
 | `turbo=N` | Turbo (X/Y): 0 off, 1 fast, 2 medium, 3 slow |
 | `inputtest` | Scripted controller test for `input_test.py`'s image (below) |
+| `joyscript=FILE` | Drive joystick 1 from a script: lines `MS HEX` (joy0 bits: 0 right, 1 left, 2 down, 3 up, 9 A, 10 B) or `MS dump` (write the next frame) |
+| `cpuprobe` | Print MARIA register writes, bus addresses at 1, 3 and 5 s, and the first 40 POKEY RANDOM reads: where a game that shows nothing is stuck (`tools/d78.py` disassembles the addresses) |
+| `voxset=N`, `voxlog`, `voxpcm` | AtariVox voice setting (0 off .. 3 loud, default 2); log the bytes sent on port 2; write the voice as `vox.pcm` (16,384 Hz s16le). See ATARIVOX.md |
 
 `input_test.py` builds a 2600 image that reads the ports every frame the
 way paddle, driving and light-gun games do. With `+inputtest`, `tb_load`

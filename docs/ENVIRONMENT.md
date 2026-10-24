@@ -433,7 +433,7 @@ How to read the table:
 - **WIP snapshots:**
   - The session may require a clean working tree before it ends, so unfinished work is committed as `WIP snapshot: …` rather than left uncommitted.
   - Keep generated output in gitignored paths so the hook does not ask for it to be committed.
-- **`.claude/`:** this container excludes `/.claude/` through `.git/info/exclude:7`. A fresh clone does not carry that file. If a `.claude/` directory appears, add the same exclude line **[untested]**.
+- **`.claude/`:** this container excludes `/.claude/` through `.git/info/exclude:7`. A fresh clone does not carry that file. Since 2026-10-24 `.claude/skills/` is tracked (the repo's skills, listed in `CLAUDE.md`), so exclude only the local files, such as `/.claude/settings.local.json`, not the whole directory.
 
 ### 7.4 Load
 
