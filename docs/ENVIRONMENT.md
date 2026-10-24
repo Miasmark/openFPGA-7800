@@ -40,6 +40,7 @@ make install
 python3 -m venv sim/work/bupchip/venv
 sim/work/bupchip/venv/bin/pip install -q 'unicorn==2.1.1'
 sim/work/bupchip/venv/bin/pip install -q yowasp-yosys
+sim/work/bupchip/venv/bin/pip install -q numpy   # tools/atarivox (sim/atarivox/run.sh)
 pip install --quiet pillow
 
 # 4. Docker daemon, then the Quartus image (the pull took about 2 min 11 s)
@@ -261,12 +262,13 @@ flock /tmp/daria_quartus.lock sim/bupchip/quartus_probe/daria_fe_map.sh <block> 
 
 ## 4. Python and node dependencies
 
-Python is 3.11.15. The only third-party imports in tracked files are unicorn and PIL.
+Python is 3.11.15. The only third-party imports in tracked files are unicorn, PIL and numpy (`tools/atarivox/sjsynth.py`).
 
 | Package | Where | Version | Install command (recorded) | Used by |
 |---|---|---|---|---|
 | unicorn | venv | 2.1.1 | `pip install -q 'unicorn==2.1.1'` (`sim/bupchip/setup_dev.sh:20-24`) | `sim/bupchip/daria/thumb/thumb_iss.py`, `daria/thumb_expand.py`, `model/sweep.py`, `verif/isa/iss_run.py`, `verif/iss_fw_replay.py` |
 | yowasp-yosys | venv | 0.69.0.0.post1233 | `sim/work/bupchip/venv/bin/pip install -q yowasp-yosys` | the Yosys scripts (section 6) |
+| numpy | venv | 2.5.4 on the VM (11.2), installed 2026-10-23 | `sim/work/bupchip/venv/bin/pip install numpy` | `tools/atarivox/sjsynth.py`, so `sjhw.py --build` and `vox_check.py`: `sim/atarivox/run.sh` runs them with `PYTHON`, else the venv's python, and exits 2 naming this command when that python has no numpy |
 | Pillow | system | 12.3.0 | `pip install --quiet pillow` | `sim/extra_tests.sh:60` and its 7800basic build |
 | markdown | system | 3.11 | pip, 2026-10-09 [command not recorded] | report rendering only; the project does not need it |
 
@@ -277,7 +279,7 @@ Python is 3.11.15. The only third-party imports in tracked files are unicorn and
 - **Finding Yosys:**
   - The scripts honour a `YOSYS` override, then try `yosys` on PATH, then `$VENV/bin/yowasp-yosys`, and otherwise exit with status 2 (for example `sim/bupchip/daria/thumb/aria_equiv.sh:23`).
   - YoWASP caches compiled modules in `~/.cache/YoWASP` (205 MB).
-- **Not needed:** numpy (DEVELOPING.md:59 lists it, but no tracked file imports it) and capstone.
+- **Not needed:** capstone. (numpy was listed here as unused until `tools/atarivox` came in; it is in the venv now, see the table.)
 - **Node:**
   - node v22.22.0, npm 10.9.4 and a global Playwright 1.56.1 (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`) come with the base image.
   - No tracked file uses them. They were used once, ad hoc, for report screenshots, by a script that is not in the repo [R].
@@ -559,7 +561,7 @@ This file adds:
 
 Corrections to DEVELOPING.md. None of these have been applied there yet:
 
-- DEVELOPING.md:59 lists numpy, but no tracked file imports it.
+- DEVELOPING.md:59 lists numpy without saying where: `tools/atarivox` needs it, in the venv (section 4).
 - The macro table (DEVELOPING.md:36-47) lacks `POCKET_SUPERCHARGER`, which `src/fpga/ap_core.qsf:744` sets and `sim/run_sim.sh:108` passes. `sim/run_sim.sh` also adds `KEEP_NOCART_ROM` (lines 91-92).
 - DEVELOPING.md:57 says 5.020 is too old, but `sim/run_sim.sh` still defaults to `verilator` from PATH.
 - The Layout row (DEVELOPING.md:30) describes `sim/` only as "Verilator/GHDL simulation and test carts", with no mention of the `sim/bupchip` suites.
@@ -602,7 +604,7 @@ All the tools of section 2.2 are present except those the project does not use: 
 | dasm | 2.20.14.1 | |
 | ccache | 4.12.3 | |
 | Python | 3.14.4 | refuses a system-wide `pip install` (PEP 668), so quick start step 3's `pip install pillow` fails: Pillow 12.1.1 comes from apt's `python3-pil` |
-| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259 | `sim/work/bupchip/venv`, as section 4 |
+| venv | unicorn 2.1.1, yowasp-yosys 0.70.0.0.post1259, numpy 2.5.4 (added 2026-10-23, for `tools/atarivox`; apt's python3 has no numpy and PEP 668 refuses a system-wide install) | `sim/work/bupchip/venv`, as section 4 |
 | Docker | 29.9.1 | 11.3 |
 | git, gh | 2.53.0; gh 2.102.0 in `~/.local/bin` | gh is logged in as the owner, and is git's credential helper |
 
