@@ -108,7 +108,9 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   The tape keeps its place through a reset, so a compilation tape (Party
   Mix) loads its next game after one.
 - Settings (the Pocket shows at most 16, so related ones share an entry):
-  - *Difficulty*: both difficulty switches.
+  - *Difficulty*: both difficulty switches. The default is Left B, Right B,
+    as the core powers up; some 2600 games turn their music off with A, such
+    as Chaotic Grill and Elevator Agent.
   - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
   - *Region*, *Palette* (warm/cool/hot), *High Score Cart*, *SaveKey
     (port 2)*, *AtariVox Voice*, *Skip BIOS*.
