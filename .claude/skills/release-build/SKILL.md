@@ -28,7 +28,7 @@ enough. Fit all three on the exact tree that
 will ship, with the step-7 driver, under the Quartus lock, detached:
 
 ```sh
-export QUARTUS_LOCK=/tmp/daria_quartus.lock
+export QUARTUS_LOCK=<the lock file>   # docs/ENVIRONMENT.md 3.5
 setsid nohup flock "$QUARTUS_LOCK" bash -c 'for s in 1 2 3; do
   SEED=$s TAG=<name>_s$s sim/bupchip/quartus_probe/step7/run_step7.sh; rc=$?
   [ $rc = 0 ] || [ $rc = 3 ] || exit $rc; done' > sim/work/<name>_fits.log 2>&1 < /dev/null &
@@ -133,7 +133,8 @@ After a restart has killed a fit:
   The PR body follows the session's attribution rules. After it merges,
   restart the branch from the new `main` for the next piece of work.
 - Never commit ROMs, BIOS, firmware, or traces and recordings derived from
-  games (ENVIRONMENT 7.2). Game files stay in the scratchpad or `sim/work*`.
+  games (ENVIRONMENT 7.2). Game files stay in the session's scratch
+  directory or `sim/work*`.
 
 ## 8. When a change does not fit, or the margins shrink
 

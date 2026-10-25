@@ -18,8 +18,8 @@ Skills in `.claude/skills/`:
 Rules that always hold:
 
 - **No game data, BIOS or firmware in git.** That includes traces,
-  recordings and listings made from games. Keep them in `sim/work*`,
-  `release/` or the scratchpad, which are all gitignored.
+  recordings and listings made from games. Keep them in `sim/work*` or
+  `release/` (both gitignored), or in the session's scratch directory.
 - **Clean room** (ENVIRONMENT 7.1): `arm7tdmi_core.sv` is a simulation
   oracle only. Don't open `/home/user/lroby74`. Stella's sources are for
   behaviour notes only.
@@ -28,4 +28,4 @@ Rules that always hold:
 - **Processes:** stop them with `kill <PID>`, never `pkill -f`. Write `rm`
   with literal paths.
 - **Long jobs:** run them under `setsid nohup` with a log. Run Quartus
-  under `flock /tmp/daria_quartus.lock`, one job at a time.
+  under the Quartus lock (ENVIRONMENT 3.5), one job at a time.

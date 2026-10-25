@@ -126,8 +126,8 @@ read strobe that was live only in o2, after the CPU had latched the data.
 - **Stopping a run:** use `kill <PID>`, never `pkill -f`, which killed the
   session's own shell.
 - **Helper script names:** a helper named like a stdlib module
-  (`dis.py`, `json.py`) shadows it. Keep helpers in the scratchpad and run
-  them with `python3 -I`.
+  (`dis.py`, `json.py`) shadows it. Keep helpers in the session's scratch
+  directory and run them with `python3 -I`.
 - **No foreground sleep:** it is blocked. Long runs go under
   `setsid nohup` with a log, plus a `send_later` check-in if they outlast
   the session (see `release-build` step 4).
