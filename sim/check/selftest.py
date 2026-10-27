@@ -63,7 +63,11 @@ the input-dependent groups below that did not run for want of their input
                    slash and the rest, a listed name, also inside
                    an identifier, no list, an empty list and one of comment
                    lines only, a list inside the repository, a binary and
-                   an oversized file) and pp_equiv.py on a small
+                   an oversized file; a tool's own directory and
+                   instructions file let through as file names and as
+                   paths in a line, and a listed name anywhere else in such
+                   a path or line or in their lines) and
+                   pp_equiv.py on a small
                    Quartus tree (a comment, a layout and a dead-ifdef edit
                    keep the hash; a code edit, a live ifdef edit and a
                    removed macro change it; --expect and --max-token fail;
@@ -701,6 +705,34 @@ def hygiene_cases(w):
         ("listed name inside a camelCase identifier", lambda: write(d, "docs/x.md", "QuuxbotHelper wrote it\n"), False, ["--names", names]),
         ("listed name inside a snake_case identifier", lambda: write(d, "sim/x.py", "quuxbot_x = 1\n"), False, ["--names", names]),
         ("listed name in a file name", lambda: write(d, "docs/Quuxbot-notes.md", "x\n"), False, ["--names", names]),
+        # a tool's own file names (amended 2026-10-25): its directory .<name> and
+        # its instructions file <NAME>.md are let through, nothing else in the path
+        ("a tool's own directory and instructions file", lambda: (write(d, ".quuxbot/skills/build/SKILL.md", "x\n"),
+                                                                  write(d, "QUUXBOT.md", "x\n"),
+                                                                  write(d, "docs/QUUXBOT.md", "x\n")), True,
+         ["--names", names]),
+        ("listed name below a tool's own directory", lambda: write(d, ".quuxbot/skills/quuxbot-build/SKILL.md", "x\n"), False,
+         ["--names", names]),
+        ("listed name in a line of a tool's instructions file", lambda: write(d, "QUUXBOT.md", "ask quuxbot\n"), False,
+         ["--names", names]),
+        ("a tool's directory in another case", lambda: write(d, ".Quuxbot/x.md", "x\n"), False, ["--names", names]),
+        ("a tool's instructions file in lower case", lambda: write(d, "quuxbot.md", "x\n"), False, ["--names", names]),
+        ("a tool's instructions file name as a directory", lambda: write(d, "QUUXBOT.md/x.txt", "x\n"), False,
+         ["--names", names]),
+        ("a listed name glued to the tool's directory", lambda: write(d, ".quuxbotrc/x.txt", "x\n"), False, ["--names", names]),
+        ("a tool's own directory and instructions file named in a line",
+         lambda: write(d, "docs/x.md", "skills in `.quuxbot/skills/`, `/.quuxbot/`, `.quuxbot`, QUUXBOT.md and docs/QUUXBOT.md\n"),
+         True, ["--names", names]),
+        ("a listed name beside a tool's own path in a line", lambda: write(d, "docs/x.md", "`.quuxbot/` is for quuxbot\n"), False,
+         ["--names", names]),
+        ("a tool's directory with more after it in a line", lambda: write(d, "docs/x.md", "see ~/.quuxbotrc\n"), False,
+         ["--names", names]),
+        ("a tool's directory with more before it in a line", lambda: write(d, "docs/x.md", "see x.quuxbot/\n"), False,
+         ["--names", names]),
+        ("a tool's instructions file in another case in a line", lambda: write(d, "docs/x.md", "see Quuxbot.md\n"), False,
+         ["--names", names]),
+        ("a tool's instructions file with more after it in a line", lambda: write(d, "docs/x.md", "see QUUXBOT.md.bak\n"),
+         False, ["--names", names]),
     ]
     for name, fn, want, extra in cases:
         g("checkout", "-q", "-f", "base")

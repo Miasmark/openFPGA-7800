@@ -25,7 +25,14 @@
 #     identifier too: camelCase, snake_case), a shorter one as a word.
 #     Without the list, or with a list that holds no name (empty, or only
 #     comment lines, which start with #), the run fails: the check did not
-#     happen.
+#     happen. The two names a coding tool fixes are let through (amended
+#     2026-10-25): a directory named "." and the listed name in lower case
+#     (the tool's settings and skills), and a file named by the listed name
+#     in upper case with ".md" (its instructions file). In a file name they
+#     are let through as those parts of the path; in an added line, as a
+#     path written out (the directory alone or with a slash after it, the
+#     file alone or after a directory). The rest of the path or the line is
+#     checked, and so is every line added to those files.
 # Commit messages are not files and are not checked here.
 #   sim/check/hygiene.sh [--base REV] [--names FILE] [--allow PATH]... [--limit BYTES]
 #                        [--repo DIR]
@@ -144,18 +151,34 @@ else:
             bad.append(f"the name list {names} holds no names (empty, or comment lines only): not checked")
         pats = [re.compile(re.escape(w), re.I) if len(w) >= 5 else
                 re.compile(r"(?<![A-Za-z0-9])" + re.escape(w) + r"(?![A-Za-z0-9])", re.I) for w in words]
-        hits = 0
+        # a tool's own directory and instructions file written as a path (header)
+        owns = [re.compile(r"(?<![\w.-])(?:" + re.escape("." + w.lower()) + r"(?![\w.-])|" +
+                           re.escape(w.upper() + ".md") + r"(?![\w./-]))") for w in words]
+        hits, own_lines = 0, 0
         for f, t in added:
-            for w, p in zip(words, pats):
-                if p.search(t):
+            for w, p, o in zip(words, pats, owns):
+                if p.search(o.sub(" ", t)):
                     hits += 1
                     bad.append(f"listed name in an added line: {f}: '{w}'")
-        # file names too
+                elif p.search(t):
+                    own_lines += 1
+        # file names too, but for the parts a tool fixes: its directory
+        # .<name> and its instructions file <NAME>.md (header)
+        own = set()
         for f in files:
+            parts = f.split("/")
             for w, p in zip(words, pats):
-                if p.search(f):
+                rest = [c for c in parts[:-1] if c != "." + w.lower()]
+                if parts[-1] != w.upper() + ".md":
+                    rest.append(parts[-1])
+                if p.search("/".join(rest)):
                     bad.append(f"listed name in a file name: {f}: '{w}'")
+                elif p.search(f):
+                    own.add(f)
         print(f"  names: {len(words)} checked over {len(added)} added lines")
+        if own or own_lines:
+            print(f"  names: {len(own)} file name(s) and {own_lines} added line(s) let through: a tool's own"
+                  " directory or instructions file")
 
 print(f"hygiene {base}..{head}: {len(files)} files changed, {len(added)} lines added")
 for b in bad:
