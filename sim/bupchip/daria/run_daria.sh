@@ -163,7 +163,7 @@ BIN="$OBJ/vtb"
 if [ ! -x "$BIN" ] || { [ "${NOBUILD:-0}" = 0 ] && \
 		[ -n "$(find "${SRCS[@]}" "${INCS[@]}" -newer "$BIN" 2>/dev/null | head -1)" ]; }; then
 	echo "building $BIN ..." >&2
-	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial fast \
+	nice -n 10 "$VERILATOR" --binary --timing --verilate-jobs 1 --build-jobs 2 -O3 --x-assign fast --x-initial fast \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD \
 		-DNO_BUPCHIP -DEXTERNAL_FIRMWARE -DEEPROM_NACK_ENDS_READ "${DEFS[@]}" \
 		--top-module tb_daria -Mdir "$OBJ" -o vtb "${SRCS[@]}" > "$OBJ.log" 2>&1 \

@@ -113,7 +113,7 @@ PY
 		# shellcheck disable=SC2206
 		top=tb_fe_guard; plus=("+edges=${EDGES:-200000}" $GPLUS)
 	fi
-	if ! nice -n 10 "$VERILATOR" --binary --timing -j 2 -O1 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
+	if ! nice -n 10 "$VERILATOR" --binary --timing --verilate-jobs 1 --build-jobs 2 -O1 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
 			-Wno-MULTIDRIVEN "-I$HERE" --top-module "$top" "${DEFS[@]}" -Mdir "$d/obj" -o vtb "${srcs[@]}" \
 			> "$d/build.log" 2>&1; then
 		echo "ERROR    $id: the mutant does not build (see $d/build.log)"; rm -rf "$d/obj"; continue

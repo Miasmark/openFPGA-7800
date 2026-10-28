@@ -46,7 +46,7 @@ sed -E 's/^(\s*)wire(\s+\[[^]]+\]\s+\w+\s*\[[0-9]+\]\s*=)/\1logic\2/' "$RTL/RIOT
 build() {	# OBJ DUT_SOURCE
 	local obj="$1" src="$2"
 	rm -rf "$obj"
-	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
+	nice -n 10 "$VERILATOR" --binary --timing --verilate-jobs 1 --build-jobs 2 -O2 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
 		-DBUP_DEBUG -DPOCKET_DARIA --top-module tb_dstat -Mdir "$obj" -o vtb \
 		"$RTL/cache_ram.v" "$WORK/M6532.sv" "$src" "$TB" > "$obj.log" 2>&1 || return 1
 	find "$obj" -type f ! -name vtb -delete

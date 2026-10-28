@@ -74,7 +74,7 @@ for f in "${SRCS[@]}"; do [ -f "$f" ] || { echo "run_rand.sh: missing $f" >&2; e
 OBJ="$WORK/obj_$BUILD"
 # the options without paths (they and the sources' names and contents make the stamp)
 # shellcheck disable=SC2206
-OPTS=(--binary --timing -j 2 -O3 -MAKEFLAGS "OPT_FAST=-O2 OPT_GLOBAL=-O2" -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN
+OPTS=(--binary --timing --verilate-jobs 1 --build-jobs 2 -O3 -MAKEFLAGS "OPT_FAST=-O2 OPT_GLOBAL=-O2" -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN
 	--top-module tb_fe_rand "${DEFS[@]}" $VFLAGS -o vtb)
 ARGS=("${OPTS[@]}" "-I$HERE" "-I$HERE/../fe_unit" -Mdir "$OBJ" "${SRCS[@]}")
 SIG="$("$VERILATOR" --version) ${ARGS[*]}"          # the rebuild test (paths included)

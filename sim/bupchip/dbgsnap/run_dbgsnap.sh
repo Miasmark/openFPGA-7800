@@ -52,7 +52,7 @@ build() {	# OBJ DUT_SOURCE XINIT [-G...]
 	local obj="$1" src="$2" xi="$3"
 	shift 3
 	rm -rf "$obj"
-	nice -n 10 "$VERILATOR" --binary --timing -j 2 -O3 --x-assign fast --x-initial "$xi" \
+	nice -n 10 "$VERILATOR" --binary --timing --verilate-jobs 1 --build-jobs 2 -O3 --x-assign fast --x-initial "$xi" \
 		-Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD "$@" \
 		--top-module tb_dbg_snap -Mdir "$obj" -o vtb "$src" "$TB" > "$obj.log" 2>&1 || return 1
 	find "$obj" \( -name '*.gch' -o -name '*.o' \) -delete
