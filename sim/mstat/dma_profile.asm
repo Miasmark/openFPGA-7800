@@ -86,6 +86,9 @@ copy
 
 	lda #1
 	sta ilo
+	ifconst QUICK          ; -DQUICK: the screen alone, for checking it
+	jmp show
+	endif
 measure
 	jsr wait_vb_start
 	lda #255
@@ -200,20 +203,20 @@ show_line_right
 	ldx #0
 	jmp show_right
 
-; A low byte, X high byte, at x 40 (show_left, which starts the list) or
-; 72 (show_right, which ends it); 5 digits, 5 pixels apart
+; A low byte, X high byte, at x 20 (show_left, which starts the list) or
+; 80 (show_right, which ends it); 5 digits, 10 pixels apart
 show_left
 	sta num
 	stx num+1
 	lda #0
 	sta dly
-	lda #40
+	lda #20
 	sta xpos
 	jmp putnum
 show_right
 	sta num
 	stx num+1
-	lda #72
+	lda #80
 	sta xpos
 	jsr putnum
 	ldy dly
@@ -243,9 +246,10 @@ pn_sub
 pn_emit
 	ldy dly
 	lda digit
+	asl                     ; 2 bytes a glyph
 	sta (dl),y
 	iny
-	lda #$1F
+	lda #$1E                ; palette 0, width 2
 	sta (dl),y
 	iny
 	lda #$E0
@@ -257,7 +261,7 @@ pn_emit
 	sty dly
 	clc
 	lda xpos
-	adc #5
+	adc #10
 	sta xpos
 	inx
 	cpx #5
@@ -309,7 +313,7 @@ ddll                            ; the results
 	dc.b $0F, >empty, <empty
 	REPEND
 
-	include "font.inc"
+	include "font_wide.inc"
 
 	org $FFF8
 	dc.b $FF, $C7
