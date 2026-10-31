@@ -148,7 +148,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 
 ### New in 2.2.5
 
-2.2.5 is 2.2.4 with one MARIA timing change:
+2.2.5 is 2.2.4 with one MARIA timing change and a new menu default:
 
 - **DMA that runs over the line** (a zone with more objects than a line
   has time for) gives the CPU back the bus 2 MARIA clocks sooner, as a
@@ -157,6 +157,9 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   loop passes a frame, against a console's 426-427 (2.2.4: 418-419); the
   14 other cases of the series are unchanged. What the overloaded lines
   draw does not change. See *Changes to the MiSTer sources*.
+- **The difficulty switches default to B, B** (A, A before). Games with a
+  music switch (Chaotic Grill, Elevator Action) turn their music off in A
+  and started silent. A setting already saved is kept.
 
 ### New in 2.2.4
 
