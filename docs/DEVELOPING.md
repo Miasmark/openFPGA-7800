@@ -192,6 +192,7 @@ Something that fails only on hardware is most likely in one of those.
 | `port1=N`, `port2=N` | Port Input setting: 0 auto, 1 joystick, 2 paddles, 3 driving, 4 light gun, 5 dual stick, 6 Booster Grip |
 | `turbo=N` | Turbo (X/Y): 0 off, 1 fast, 2 medium, 3 slow |
 | `inputtest` | Scripted controller test for `input_test.py`'s image (below) |
+| `dmaprobe` | What MARIA's DMA costs the CPU, as the DMA timing test carts measure it: per frame (MSTAT's vblank end to start) the CPU cycles and the cycles SALLY spent halted, the count the test carts store at `$90`/`$91`, and for frame 3 every halted line with the columns where SALLY let go of the bus and took it back |
 
 `input_test.py` builds a 2600 image that reads the ports every frame the
 way paddle, driving and light-gun games do. With `+inputtest`, `tb_load`

@@ -986,6 +986,46 @@ module tb_load;
 		end
 	end
 
+	// ---------------- DMA probe (+dmaprobe) ----------------
+	// What MARIA's DMA costs the CPU, as the DMA timing test carts measure
+	// it: per frame, from the end of MSTAT's vblank to its start, the CPU
+	// cycles and the cycles SALLY spent halted. For frame 3, every line
+	// with a halt: MARIA's row, the column where SALLY let go of the bus and
+	// took it back, and the cycles lost.
+	`define DP_SYNC dut.main.maria_inst.sync_inst
+	logic dp_on = 1'b0, dp_vb_d = 1'b1, dp_h_d = 1'b0;
+	int   dp_frame = 0, dp_cyc = 0, dp_halt = 0, dp_line = 0, dp_col0 = 0;
+	initial dp_on = $test$plusargs("dmaprobe");
+	always @(posedge clk_sys) if (dp_on && !reset_in && dut.main.cpu_inst.phi1_en) begin
+		dp_vb_d <= `DP_SYNC.vblank;
+		dp_h_d  <= dut.main.cpu_inst.is_halted;
+		if (dp_vb_d && !`DP_SYNC.vblank) begin
+			dp_cyc <= 0;
+			dp_halt <= 0;
+		end else if (!`DP_SYNC.vblank) begin
+			dp_cyc <= dp_cyc + 1;
+			if (dut.main.cpu_inst.is_halted) dp_halt <= dp_halt + 1;
+		end
+		if (!dp_vb_d && `DP_SYNC.vblank) begin
+			$display("DMA frame %0d: %0d CPU cycles, %0d halted", dp_frame, dp_cyc, dp_halt);
+			dp_frame <= dp_frame + 1;
+		end
+		if (dp_frame == 3) begin
+			if (!dp_h_d && dut.main.cpu_inst.is_halted) begin
+				dp_line <= 1;
+				dp_col0 <= int'(`DP_SYNC.col);
+				$write("DMA row %0d: col %0d", `DP_SYNC.row, `DP_SYNC.col);
+			end else if (dut.main.cpu_inst.is_halted)
+				dp_line <= dp_line + 1;
+			if (dp_h_d && !dut.main.cpu_inst.is_halted)
+				$display(" to %0d, %0d cycles", `DP_SYNC.col, dp_line);
+		end
+	end
+	// The test carts' loop count, stored at $90/$91 once a frame
+	always @(posedge clk_sys) if (dp_on && !reset_in && dut.main.cpu_inst.phi2_en
+			&& !dut.RW && (dut.bios_addr == 16'h0090 || dut.bios_addr == 16'h0091))
+		$display("DMA count $%04x = $%02x (frame %0d)", dut.bios_addr, dut.main.write_DB, dp_frame);
+
 	// ---------------- boot probe ----------------
 	// At each release of the core's reset (top.sv's effective_reset): the
 	// BIOS switch as the core got it (use_bios, and top.sv's bypass_bios,
