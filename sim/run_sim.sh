@@ -35,10 +35,12 @@
 # exit code.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-FPGA="${RTL_TREE:-$HERE/..}/src/fpga"
+# Absolute, since the rtl/ links below point at it
+FPGA="$(cd "${RTL_TREE:-$HERE/..}" && pwd)/src/fpga"
 RTL="$FPGA/mister/rtl"
 WORK="${WORK:-$HERE/work}"
 mkdir -p "$WORK/rtl"
+WORK="$(cd "$WORK" && pwd)"   # absolute: the runs below cd into it
 
 # Quartus 21.1 ignores an initializer on an output port declaration
 # (`output logic x = 1'b0`, `output reg x = 0`) and, with Power-Up Don't

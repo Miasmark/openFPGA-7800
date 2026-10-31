@@ -97,6 +97,7 @@ module video_sync (
 	output logic       hblank, vblank, vblank_ex,
 	output logic       border,
 	output logic       lrc,
+	output logic       dma_abort, // Pocket: where DMA that runs over the line is cut off
 	output logic       prst,  // no clue, but it's there
 	output logic       vbe,   // vblank_end
 	output logic       hbs    // hblank start
@@ -117,6 +118,15 @@ localparam HBLANK_END = 68;
 localparam HSYNC_START = 0;
 localparam HSYNC_END = 34; // Typo in schematic
 localparam LINE_RESET_COUNT = 412;
+// Pocket: DMA that runs over the line is cut off 2 clocks before the line
+// reset, not on it; the line reset itself (line RAM swap, WSYNC release)
+// stays at 412. With 412 a console gave SALLY half a CPU cycle more per
+// overloaded line than this core did: the DMA timing test carts' over-the-
+// limit case (8 objects x 16 bytes on 192 lines) counted 426-427 on a
+// console and 418-419 here. 410 gives 425-426, the same one count below
+// the console as the 14 cases that never reach the limit, which 410 leaves
+// cycle for cycle as they were. See POCKET_CHANGES.md.
+localparam DMA_ABORT_COUNT = 410;
 localparam RCPRST = 418; // RC PLA Reset
 localparam HCBURSTS = 38;
 
@@ -141,6 +151,7 @@ assign HSync      = col < HSYNC_END;
 assign hblank     = hide_border ? border : ((col >= HBLANK_START) || (col < HBLANK_END));
 assign border     = (col >= BORDER_START) || (col < BORDER_END);
 assign lrc        = (col == LINE_RESET_COUNT) || reset;
+assign dma_abort  = (col == DMA_ABORT_COUNT) || reset;
 assign vbe        = (row == VBLANK_END) && (col == 1);
 assign hbs        = col == HBLANK_START;
 assign prst       = col == RCPRST;

@@ -112,6 +112,7 @@ module maria(
 	logic             vbe;
 	logic             hbs;
 	logic             lrc;
+	logic             dma_abort;
 	logic             wm;
 	logic             latch_hpos;
 	logic             halt_en;
@@ -296,7 +297,7 @@ module maria(
 		.vblank          (vblank),
 		.vbe             (vbe),
 		.hbs             (hbs),
-		.lrc             (lrc),
+		.lrc             (dma_abort),      // Pocket: see video_sync.sv
 		.pclk1           (pclk1),
 		.pclk0           (pclk0),
 		.DM              (ctrl[6:5]),
@@ -333,6 +334,7 @@ module maria(
 		.border          (border),
 		.hide_border     (hide_border),
 		.lrc             (lrc),
+		.dma_abort       (dma_abort),
 		.prst            (prst),
 		.vbe             (vbe),
 		.hbs             (hbs)

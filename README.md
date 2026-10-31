@@ -146,6 +146,21 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.
 
+### New in 2.2.5
+
+2.2.5 is 2.2.4 with one MARIA timing change and a new menu default:
+
+- **DMA that runs over the line** (a zone with more objects than a line
+  has time for) gives the CPU back the bus 2 MARIA clocks sooner, as a
+  console does: half a CPU cycle more per overloaded line. On a DMA
+  timing test cart that overloads 192 lines, the core now counts 425-426
+  loop passes a frame, against a console's 426-427 (2.2.4: 418-419); the
+  14 other cases of the series are unchanged. What the overloaded lines
+  draw does not change. See *Changes to the MiSTer sources*.
+- **The difficulty switches default to B, B** (A, A before). Games with a
+  music switch (Chaotic Grill, Elevator Action) turn their music off in A
+  and started silent. A setting already saved is kept.
+
 ### New in 2.2.4
 
 2.2.4 is 2.2.2 with these additions:
@@ -238,6 +253,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | 2600 video | 59.92 Hz, 160x240 (MiSTer's "smart" stabiliser window) |
 | Audio filter | centred on zero, settles to 0 in silence |
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
+| MARIA DMA timing | 15 DMA timing test carts (empty zones, direct, character and 5-byte headers, 8-line zones, holey DMA, DLIs, the line's limit) each count a loop through the visible frame (`tb_load +dmaprobe`). All 15 count exactly one below the owner's console (2026-10-31), e.g. 1836 / 1837 for empty zones and 425-426 / 426-427 for 192 overloaded lines; before the DMA cut-off moved (see *Changes to the MiSTer sources*), the overloaded case counted 418-419. The Pocket gives the same 15 counts (hardware table). Eagle's indirect holey carts (SWTEST, DWtest) cost what the 7800 Software Guide gives: 6 and 9 cycles per object in a hole |
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
@@ -262,8 +278,17 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of 2.2.4 (fitter seed 2, DARIA's CPU clock at 38.18 MHz)
+The Quartus build of 2.2.5 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
 meets timing on all four corners. Worst setup slack at the worse slow
+corner: +2.705 ns on clk_sdram (gate +1.5 ns), +1.334 ns on DARIA's CPU
+clock (gate +0.5 ns), and +3.200 ns on DARIA's phase detector (bounded at
+8.0 / 0.5 ns; hold +0.441 ns). Worst hold slack +0.096 ns. Seeds 1 and 2
+pass every check too, with +2.474 and +2.491 ns on clk_sdram; seed 3 has
+the most, which decides (seeds 1 and 2 have more on DARIA's clock, +2.215
+and +2.542 ns). It uses 14,680 of 18,480 ALMs (79%), 216 of 308 M10K
+blocks and 13 DSP blocks. Its bitstream is the hardware test build's.
+The Quartus build of 2.2.4 (fitter seed 2, DARIA's CPU clock at 38.18 MHz)
+met timing on all four corners. Worst setup slack at the worse slow
 corner: +3.020 ns on clk_sdram (against a release gate of +1.5 ns),
 +1.482 ns on DARIA's CPU clock (gate +0.5 ns), and +3.128 ns on the one
 path of DARIA's front end that is timed on its own (its phase detector,
@@ -309,7 +334,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to the 2.2.4 candidate, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.5, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -339,6 +364,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Crystal Castles (2600) | Works (2.0.21-test) |
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
+| MARIA DMA timing (2.2.5's test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 | DARIA's test build (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay was not built at the time; it has landed since ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
@@ -357,6 +383,16 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
   and the fix both reproduce in simulation with 7800basic's multisprite
   sample. After the fix every sprite matches its source graphic row for row.
   This bug is in the MiSTer nightly too, not only here. See
+  [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
+
+- **DMA that runs over the line.** When a display list needs more DMA than
+  a line has, MARIA cuts it off. A console gives the CPU half a cycle more
+  per overloaded line than upstream's MARIA does: on a DMA timing test cart
+  that overloads 192 lines (8 objects x 16 bytes), the console counts 426-427
+  loop passes a frame and upstream 418-419. This port cuts such DMA off 2
+  MARIA clocks sooner, which gives 425-426, one below the console as on the
+  14 other cases of the series, which it leaves unchanged. MiSTer's core has
+  the same MARIA, so the same difference. See
   [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
 
 - **POKEY.** Upstream replaced Mark Watson's long-standing VHDL POKEY with
