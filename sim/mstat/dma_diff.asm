@@ -8,7 +8,8 @@
 ; 257 + i, wrapping at 263 (1 is the first line of vblank, 21 holds the
 ; frame's first DMA, 22 the first visible line, 263 the last); a line's
 ; value is 55 plus the CPU cycles its DMA took (see dma_profile.asm).
-; -DROMDL builds it with the 1-line zones' display list in ROM instead,
+; -DNODMA measures with MARIA's DMA off (every line should read 55), to
+; tell the measurement apart from DMA. -DROMDL builds it with the 1-line zones' display list in ROM instead,
 ; which reads the same on the core.
 ; Build: dasm dma_diff.asm -f3 -odma_diff.bin, then
 ; sim/make_a78.py --bin dma_diff.bin, and sign it for an NTSC console.
@@ -76,12 +77,20 @@ copy
 	lda #<mdll
 	sta DPPL
 	jsr wait_vb_start
-	lda #$40                ; DMA on, 160A
+	ifnconst NODMA         ; -DNODMA: measure with DMA off; every line
+	lda #$40                ; DMA on, 160A ; should then read 55
 	sta CTRL
+	endif
 	jsr wait_vb_start       ; a whole frame of DMA before the first one
 
 	lda #1
 	sta ilo
+	ifconst FIRST          ; -DFIRST=n: start at line n (a short simulation)
+	lda #<FIRST
+	sta ilo
+	lda #>FIRST
+	sta ihi
+	endif
 	ifconst QUICK          ; -DQUICK: the screen alone, for checking it
 	jmp show
 	endif
@@ -273,6 +282,10 @@ empty_row
 	sta DPPH
 	lda #<ddll
 	sta DPPL
+	ifconst NODMA
+	lda #$40                ; DMA on for the results
+	sta CTRL
+	endif
 forever
 	jmp forever
 
@@ -384,7 +397,11 @@ ddll                            ; the results: 10 rows of 16 lines
 	REPEND
 
 	org $D200
+	ifconst NODMA
+expected	ds 264, 55       ; no DMA: 55 on every line
+	else
 	include "expected.inc"
+	endif
 
 	include "font_bold.inc"
 
