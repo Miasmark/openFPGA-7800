@@ -238,6 +238,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | 2600 video | 59.92 Hz, 160x240 (MiSTer's "smart" stabiliser window) |
 | Audio filter | centred on zero, settles to 0 in silence |
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
+| MARIA DMA timing | 15 DMA timing test carts (empty zones, direct, character and 5-byte headers, 8-line zones, holey DMA, DLIs, the line's limit) each count a loop through the visible frame (`tb_load +dmaprobe`). All 15 count exactly one below the owner's console (2026-10-31), e.g. 1836 / 1837 for empty zones and 425-426 / 426-427 for 192 overloaded lines; before the DMA cut-off moved (see *Changes to the MiSTer sources*), the overloaded case counted 418-419 |
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |
@@ -357,6 +358,16 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
   and the fix both reproduce in simulation with 7800basic's multisprite
   sample. After the fix every sprite matches its source graphic row for row.
   This bug is in the MiSTer nightly too, not only here. See
+  [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
+
+- **DMA that runs over the line.** When a display list needs more DMA than
+  a line has, MARIA cuts it off. A console gives the CPU half a cycle more
+  per overloaded line than upstream's MARIA does: on a DMA timing test cart
+  that overloads 192 lines (8 objects x 16 bytes), the console counts 426-427
+  loop passes a frame and upstream 418-419. This port cuts such DMA off 2
+  MARIA clocks sooner, which gives 425-426, one below the console as on the
+  14 other cases of the series, which it leaves unchanged. MiSTer's core has
+  the same MARIA, so the same difference. See
   [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
 
 - **POKEY.** Upstream replaced Mark Watson's long-standing VHDL POKEY with

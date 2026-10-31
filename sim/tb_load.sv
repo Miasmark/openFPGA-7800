@@ -1021,6 +1021,19 @@ module tb_load;
 				$display(" to %0d, %0d cycles", `DP_SYNC.col, dp_line);
 		end
 	end
+	// Frame 3's line RAM: the bytes MARIA wrote between two swaps, and the
+	// column of the last one
+	`define DP_LRAM dut.main.maria_inst.line_ram_inst
+	int dp_bytes = 0, dp_last = 0;
+	always @(posedge clk_sys) if (dp_on && !reset_in && dp_frame == 3) begin
+		if (`DP_LRAM.swap_now) begin
+			$display("LRAM row %0d: %0d bytes, last at col %0d", `DP_SYNC.row, dp_bytes, dp_last);
+			dp_bytes <= 0;
+		end else if (`DP_LRAM.byte_now) begin
+			dp_bytes <= dp_bytes + 1;
+			dp_last <= int'(`DP_SYNC.col);
+		end
+	end
 	// The test carts' loop count, stored at $90/$91 once a frame
 	always @(posedge clk_sys) if (dp_on && !reset_in && dut.main.cpu_inst.phi2_en
 			&& !dut.RW && (dut.bios_addr == 16'h0090 || dut.bios_addr == 16'h0091))

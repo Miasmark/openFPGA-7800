@@ -213,9 +213,9 @@ from GitHub at test time.
 ### Update the MiSTer core
 
 Follow "Updating" in `src/fpga/mister/POCKET_CHANGES.md`: it re-applies
-the Pocket changes to all thirteen modified upstream files (`top.sv`,
+the Pocket changes to all fourteen modified upstream files (`top.sv`,
 `cart.sv`, `cart2600.sv`, `banks2600.sv`, `EEPROM_24LC256.sv`,
-`Maria/DMA.sv`, `Maria/video_sync.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`,
+`Maria/DMA.sv`, `Maria/video_sync.sv`, `Maria/maria.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`,
 `Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`). Then:
 
 1. Add any new upstream source files to `core/core.qip` **and** `sim/run_sim.sh`.

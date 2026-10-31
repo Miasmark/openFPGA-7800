@@ -18,9 +18,9 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Thirteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
+Fourteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
 `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv`,
-`video_mux.sv`, `TIA.sv`, `bram.v`, and three of the POKEY's,
+`Maria/maria.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`, and three of the POKEY's,
 `Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`. The
 sections below describe each. Three firmware images are removed. The build
 uses upstream's POKEY (`rtl/Pokey/`, with a changed adapter and, from 2.2.2,
@@ -98,6 +98,28 @@ puts them at MARIA lines 24-247 (of 16-257). Games draw 3 lines lower:
 window showed 3 lines of the game's overscan at the top (Commando's
 background above the score bar) and cut 3 picture lines at the bottom.
 The Pocket copy uses lines 27-250. PAL keeps 24-297 (274 lines).
+
+### `rtl/Maria/video_sync.sv`, `rtl/Maria/maria.sv`: DMA over the line cut off 2 clocks sooner
+
+When a line's display list needs more DMA than the line has, MARIA cuts it
+off. Upstream cuts it off with the line reset (`lrc`, column 412 of 454),
+and SALLY gets the bus back at column 424 or 426, as the CPU's phase falls
+(a line is 113.5 CPU cycles). A console gives SALLY half a CPU cycle more
+per overloaded line. A series of 15 DMA timing test carts, each counting a
+14-cycle loop through the visible frame, measured it (the owner's console,
+2026-10-31): the over-the-limit case, 8 objects x 16 bytes on 192 lines,
+counts 426-427 on the console and 418-419 on upstream's MARIA, while the
+other 14 cases count exactly one below the console.
+
+The Pocket copy gives the DMA its own cut-off, `dma_abort`, at column 410
+(`DMA_ABORT_COUNT`); `lrc` stays at 412 for the line RAM swap and the WSYNC
+release. The over-the-limit case then counts 425-426, one below the console
+as the rest are, and the other 14 cases are unchanged to the cycle
+(`tb_load +dmaprobe`: the CPU cycles and halted cycles per frame). The
+overloaded lines draw the same picture. The fit is to one measured effect,
+not to the die: whether the console cuts DMA off sooner or shuts it down
+faster is not known. The one count below the console on every case is a
+separate, constant difference of about 14 CPU cycles a frame, still open.
 
 ### `rtl/EEPROM_24LC256.sv`: a NACK ends a read (`EEPROM_NACK_ENDS_READ`)
 
@@ -307,13 +329,16 @@ the files are unchanged from upstream.
 ## Updating
 
 Copy a newer upstream `rtl/` over this one and re-apply the changes to all
-thirteen modified files:
+fourteen modified files:
 
 - the `ifdef` blocks in `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`
   and `EEPROM_24LC256.sv`;
 - the holey DMA fix in `Maria/DMA.sv` (unless upstream has fixed it; check
   with `sim/extra_tests.sh`);
 - the 224 line window in `Maria/video_sync.sv`;
+- the DMA cut-off at column 410 (`dma_abort`) in `Maria/video_sync.sv` and
+  `Maria/maria.sv` (check with the DMA timing test carts and `tb_load
+  +dmaprobe`);
 - the SRAM frame port in `video_mux.sv` and the memory editor's removal in
   `bram.v`;
 - the stabilised window's end in `TIA.sv`;
