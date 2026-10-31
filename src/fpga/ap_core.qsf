@@ -761,8 +761,8 @@ set_global_assignment -name VERILOG_MACRO "POCKET_ATARIVOX=1"
 # status word, shadow FIFO counters, load probe and its status cells on
 # screen (core/bupchip/bup_status_osd.sv). Releases leave it out
 # (docs/DEVELOPING.md, "Before a release"); sim/run_sim.sh follows this file.
-# Fitter seed. The DMA cut-off tree (2.2.4 with MARIA's DMA cut off at
-# column 410; its hardware test build) ships seed 3: of seeds 1-3, fitted
+# Fitter seed. 2.2.5 (2.2.4 with MARIA's DMA cut off at column 410)
+# ships seed 3, its hardware test build's bitstream: of seeds 1-3, fitted
 # on 3164a7e, every gate and every check of docs/daria_step7/plan.md 5.4
 # passed on all three, and seed 3 has the most clk_sdram margin (P12).
 # Worst setup on clk_arm and clk_sdram, worst hold, (h), and ALMs:
@@ -771,7 +771,7 @@ set_global_assignment -name VERILOG_MACRO "POCKET_ATARIVOX=1"
 #   seed 3: clk_arm +1.334, clk_sdram +2.705, hold +0.096, (h) +6.712 / +0.274, 14,680
 # DARIA's guard pair passes on all three.
 # 2.2.4 itself (DARIA's clk_arm at VCO/18, 38.18 MHz, with 2.2.2's
-# POKEY read fix and AtariVox escape fix merged in) ships seed 2: of seeds
+# POKEY read fix and AtariVox escape fix merged in) shipped seed 2: of seeds
 # 1-3, fitted on 7701ee9 (the merged tree's Q2), every gate and every check
 # of docs/daria_step7/plan.md 5.4 passed on all three, and seed 2 has the
 # most clk_sdram margin (P12, the owner's ruling of 2026-10-21).

@@ -146,6 +146,18 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.
 
+### New in 2.2.5
+
+2.2.5 is 2.2.4 with one MARIA timing change:
+
+- **DMA that runs over the line** (a zone with more objects than a line
+  has time for) gives the CPU back the bus 2 MARIA clocks sooner, as a
+  console does: half a CPU cycle more per overloaded line. On a DMA
+  timing test cart that overloads 192 lines, the core now counts 425-426
+  loop passes a frame, against a console's 426-427 (2.2.4: 418-419); the
+  14 other cases of the series are unchanged. What the overloaded lines
+  draw does not change. See *Changes to the MiSTer sources*.
+
 ### New in 2.2.4
 
 2.2.4 is 2.2.2 with these additions:
@@ -263,8 +275,17 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of 2.2.4 (fitter seed 2, DARIA's CPU clock at 38.18 MHz)
+The Quartus build of 2.2.5 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
 meets timing on all four corners. Worst setup slack at the worse slow
+corner: +2.705 ns on clk_sdram (gate +1.5 ns), +1.334 ns on DARIA's CPU
+clock (gate +0.5 ns), and +3.200 ns on DARIA's phase detector (bounded at
+8.0 / 0.5 ns; hold +0.441 ns). Worst hold slack +0.096 ns. Seeds 1 and 2
+pass every check too, with +2.474 and +2.491 ns on clk_sdram; seed 3 has
+the most, which decides (seeds 1 and 2 have more on DARIA's clock, +2.215
+and +2.542 ns). It uses 14,680 of 18,480 ALMs (79%), 216 of 308 M10K
+blocks and 13 DSP blocks. Its bitstream is the hardware test build's.
+The Quartus build of 2.2.4 (fitter seed 2, DARIA's CPU clock at 38.18 MHz)
+met timing on all four corners. Worst setup slack at the worse slow
 corner: +3.020 ns on clk_sdram (against a release gate of +1.5 ns),
 +1.482 ns on DARIA's CPU clock (gate +0.5 ns), and +3.128 ns on the one
 path of DARIA's front end that is timed on its own (its phase detector,
@@ -310,7 +331,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to the 2.2.4 candidate, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.5, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -340,7 +361,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Crystal Castles (2600) | Works (2.0.21-test) |
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
-| MARIA DMA timing (DMA cut-off test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
+| MARIA DMA timing (2.2.5's test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
 | DARIA's test build (daria-test1, 2026-10-17) | Tested on a Pocket: "everything looks good, tested the library and played the games". The owner checked the sound against YouTube captures of the games, to make sure it was not too noisy. Not completed: a PAL 2600 ARM game on Region Auto, and a PAL A78 after it, because the PAL versions at hand all seem to be PAL60 builds. A PAL60 build draws 262-line frames, which Auto treats as NTSC; Stay Frosty 2's PAL build is one. Simulation covers both. The DARIA status overlay was not built at the time; it has landed since ([docs/daria_step7/progress.md](docs/daria_step7/progress.md), "Step 8: hardware tests of daria-test1 (2026-10-17)") |
