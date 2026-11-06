@@ -41,7 +41,11 @@ module line_ram(
 	input  logic               lrc,
 	input  logic               mclk0,
 	input  logic               mclk1,
-	input  logic               cram_write
+	input  logic               cram_write,
+	// Pocket: a CPU access to a colour register shows at the beam (maria.sv)
+	input  logic               cram_flash,   // a read: show COLOR_MAP[cram_index]
+	input  logic [4:0]         cram_index,
+	input  logic               cram_hold     // a write: the previous pixel repeats
 );
 
 // Two things argue for keeping the whole line RAM in flops: MARIA writes up to
@@ -116,8 +120,16 @@ always @(posedge clk_sys) begin
 	// The color ram will be delayed by one if there's a cram write
 	// Uncomment to enable this bug (it's ugly)
 	if (mclk0 /*&& ~cram_write*/) begin
-		if (playback_color == 2'b0 || border) begin
-			PLAYBACK <= (border & ~BORDER_CONTROL) ? 8'd0 : COLOR_MAP[0];
+		if (cram_hold) begin
+			// Pocket: a CPU write's colour RAM clock, which reads nothing:
+			// the previous pixel repeats
+		end else if (border & ~BORDER_CONTROL) begin
+			PLAYBACK <= 8'd0;
+		end else if (cram_flash) begin
+			// Pocket: a CPU read's colour RAM address replaces the pixel's
+			PLAYBACK <= COLOR_MAP[cram_index];
+		end else if (playback_color == 2'b0 || border) begin
+			PLAYBACK <= COLOR_MAP[0];
 		end else begin
 			PLAYBACK <= COLOR_MAP[pb_map_index[playback_palette] + playback_color];
 		end

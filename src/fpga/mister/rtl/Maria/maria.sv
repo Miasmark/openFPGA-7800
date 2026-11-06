@@ -229,6 +229,28 @@ module maria(
 		end
 	end
 
+	// Pocket: CPU accesses to the colour registers show on the picture, as
+	// on a console. MARIA's colour RAM has one port: while the CPU reads one
+	// of the 25 colour registers ($20-$3F less $24, $28, ... $3C, and their
+	// mirrors), its address replaces the pixel's for phase 2, 2 MARIA clocks,
+	// and that register's colour goes out at the beam. A write's last
+	// phase-2 clock reads nothing, and the previous pixel repeats; the
+	// written colour itself never shows. Dummy reads count as reads. From
+	// the schematics (7800tools.com's MARIA summary) and a console's photo
+	// of sim/mstat/cram_test.asm (2026-11-06): the reads' dots at the
+	// beam, LDA zp,X's two, nothing from writes on black.
+	localparam bit CRAM_ACCESS_SHOWS = 1'b1;
+	wire       cram_access = CRAM_ACCESS_SHOWS && cs_maria && pclk &&
+		(|AB_in[1:0] || AB_in[4:0] == 5'h00);
+	logic      cram_ph2_late = 1'b0;   // phase 2's second MARIA clock
+	always_ff @(posedge clk_sys) if (mclk0) cram_ph2_late <= pclk;
+	wire       cram_flash = cram_access && RW;
+	wire       cram_hold  = cram_access && ~RW && cram_ph2_late;
+	// COLOR_MAP's entry, as control.sv's color_ram_index: palette p's colour c
+	// ($20 + 4p + c, c = 1-3) is 3p + c; the background ($20) is 0
+	wire [4:0] cram_index = (AB_in[1:0] == 2'd0) ? 5'd0 :
+		{2'd0, AB_in[4:2]} * 5'd3 + {3'd0, AB_in[1:0]};
+
 	line_ram line_ram_inst (
 		.mclk0           (mclk0),
 		.mclk1           (mclk1),
@@ -247,7 +269,10 @@ module maria(
 		.BORDER_CONTROL  (ctrl[3]),
 		.COLOR_KILL      (ctrl[7]),
 		.lrc             (lrc),
-		.cram_write      (cram_sel)
+		.cram_write      (cram_sel),
+		.cram_flash      (cram_flash),
+		.cram_index      (cram_index),
+		.cram_hold       (cram_hold)
 	);
 
 	control control_inst (

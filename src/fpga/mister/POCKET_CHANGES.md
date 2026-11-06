@@ -18,9 +18,9 @@ used. Its Pocket counterpart is `../core/atari7800_pocket.sv`.
 
 ## Changes from upstream
 
-Fourteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
+Fifteen upstream files are modified: `top.sv`, `cart.sv`, `cart2600.sv`,
 `banks2600.sv`, `EEPROM_24LC256.sv`, `Maria/DMA.sv`, `Maria/video_sync.sv`,
-`Maria/maria.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`, and three of the POKEY's,
+`Maria/maria.sv`, `Maria/line_ram.sv`, `video_mux.sv`, `TIA.sv`, `bram.v`, and three of the POKEY's,
 `Pokey/pokey_adapter.sv`, `Pokey/pokey.sv` and `Pokey/pokey_bus.sv`. The
 sections below describe each. Three firmware images are removed. The build
 uses upstream's POKEY (`rtl/Pokey/`, with a changed adapter and, from 2.2.2,
@@ -98,6 +98,31 @@ puts them at MARIA lines 24-247 (of 16-257). Games draw 3 lines lower:
 window showed 3 lines of the game's overscan at the top (Commando's
 background above the score bar) and cut 3 picture lines at the bottom.
 The Pocket copy uses lines 27-250. PAL keeps 24-297 (274 lines).
+
+### `rtl/Maria/maria.sv`, `rtl/Maria/line_ram.sv`: colour register accesses show at the beam
+
+MARIA's colour RAM has one port, shared by the pixel output and the CPU.
+On a console, while the CPU reads one of the 25 colour registers during a
+visible line, the register's address replaces the pixel's for phase 2 (2
+MARIA clocks), so that register's colour goes out at the beam: a stray dot,
+a trail of them from a loop. A write's last phase-2 clock reads nothing and
+the previous pixel repeats; the written colour never shows. Dummy reads
+(`LDA zp,X`, `STA abs,X`, read-modify-write) count as reads. Nothing shows
+in blanking or in a black border; with the border colour on (`BCNTL`), a read
+shows there too. Upstream's colour registers are a plain register array, and
+the picture never shows the accesses (a commented-out "cram write" delay in
+`line_ram.sv` is the only trace).
+
+The Pocket copy shows them: `maria.sv` decodes the CPU's colour register
+accesses in phase 2 (`cram_flash` for a read, with the entry it selects;
+`cram_hold` for a write's second phase-2 clock), and `line_ram.sv` puts
+that entry, or the previous pixel, on the output for those clocks.
+`CRAM_ACCESS_SHOWS` in `maria.sv` turns it off. The mechanism is from the
+schematics (Eagle's MARIA summary at 7800tools.com, AtariAge, 2026-11); a
+console's photo of `sim/mstat/cram_test.asm` (2026-11-06) agrees: the reads'
+dots where the beam is at the access, to the photo's 3 pixels, `LDA zp,X`'s
+two dots, and nothing from writes on black. MARIA's own DMA reads of its
+registers smear the same way on a console (TailChao); that is not modelled.
 
 ### `rtl/Maria/video_sync.sv`, `rtl/Maria/maria.sv`: DMA over the line cut off 2 clocks sooner
 
@@ -329,7 +354,7 @@ the files are unchanged from upstream.
 ## Updating
 
 Copy a newer upstream `rtl/` over this one and re-apply the changes to all
-fourteen modified files:
+fifteen modified files:
 
 - the `ifdef` blocks in `top.sv`, `cart.sv`, `cart2600.sv`, `banks2600.sv`
   and `EEPROM_24LC256.sv`;
@@ -339,6 +364,9 @@ fourteen modified files:
 - the DMA cut-off at column 410 (`dma_abort`) in `Maria/video_sync.sv` and
   `Maria/maria.sv` (check with the DMA timing test carts and `tb_load
   +dmaprobe`);
+- the colour register accesses shown at the beam (`cram_flash`, `cram_hold`)
+  in `Maria/maria.sv` and `Maria/line_ram.sv` (check with
+  `sim/mstat/cram_test.asm`);
 - the SRAM frame port in `video_mux.sv` and the memory editor's removal in
   `bram.v`;
 - the stabilised window's end in `TIA.sv`;

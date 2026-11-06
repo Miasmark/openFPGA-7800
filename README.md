@@ -385,6 +385,13 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
   This bug is in the MiSTer nightly too, not only here. See
   [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
 
+- **Colour register accesses.** On a console, a CPU read of a colour
+  register while a line is drawn puts that register's colour on the pixel
+  at the beam, as a stray dot (the colour RAM has one port); writes show
+  nothing. Upstream's MARIA never shows them. This port does, matching a
+  console's photo of a test cart (`sim/mstat/cram_test.asm`). See
+  [POCKET_CHANGES.md](src/fpga/mister/POCKET_CHANGES.md).
+
 - **DMA that runs over the line.** When a display list needs more DMA than
   a line has, MARIA cuts it off. A console gives the CPU half a cycle more
   per overloaded line than upstream's MARIA does: on a DMA timing test cart
