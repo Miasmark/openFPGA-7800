@@ -188,7 +188,7 @@
         "writeonly": true,
         "address": "0x10000270",
         "defaultval": 0,
-        "mask": "0xFFFFFFFC",
+        "mask": "0xFFFFFFF8",
         "options": [
           {
             "value": 0,
@@ -201,6 +201,18 @@
           {
             "value": 2,
             "name": "Hot"
+          },
+          {
+            "value": 4,
+            "name": "Warm, Composite"
+          },
+          {
+            "value": 5,
+            "name": "Cool, Composite"
+          },
+          {
+            "value": 6,
+            "name": "Hot, Composite"
           }
         ]
       },

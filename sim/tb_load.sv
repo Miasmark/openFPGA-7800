@@ -96,8 +96,10 @@ module tb_load;
 	logic pokey_irq_on = 1'b0;
 	logic overscan_on = 1'b0;
 	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
+	logic composite_on = 1'b0;                           // +composite: the decoded picture
 	initial begin
 		clear_rnd = $test$plusargs("clearrnd");
+		composite_on = $test$plusargs("composite");
 		void'($value$plusargs("bs=%d", bs_ovr));
 	end
 	initial overscan_on = $test$plusargs("overscan");
@@ -186,7 +188,7 @@ module tb_load;
 		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
-		.clear_random(clear_rnd), .decomb(1'b0), .bs_override(bs_ovr),
+		.clear_random(clear_rnd), .decomb(1'b0), .composite(composite_on), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
 		.port1_input(port1_in), .port2_input(port2_in),
@@ -815,6 +817,19 @@ module tb_load;
 `endif
 	endtask
 `endif
+
+	// +composite: how many clk_sys the decoded picture's HBlank trails the RGB
+	// one (atari7800_pocket.sv's COMP_GUN_DELAY), once, after 600 visible lines
+	longint cg_cyc = 0, cg_rgb = 0; int cg_lines = 0; bit cg_done = 0, cg_rhb = 1, cg_chb = 1;
+	always @(posedge clk_sys) if (composite_on && !cg_done) begin
+		cg_cyc++;
+		cg_rhb <= dut.rgb_hb; cg_chb <= dut.comp_hbo;
+		if (cg_rhb && !dut.rgb_hb && !dut.rgb_vb) begin cg_rgb = cg_cyc; cg_lines++; end
+		if (cg_chb && !dut.comp_hbo && cg_lines > 600 && cg_rgb != 0) begin
+			$display("COMPOSITE HBlank trails RGB by %0d clk_sys", cg_cyc - cg_rgb);
+			cg_done = 1;
+		end
+	end
 
 	// ---------------- frame capture (+dump=N: write N frames as PPM) --------
 	int dump_frames = 0, dumped = 0, fx = 0, fy = 0, line_px = 0, dump_at = 0, fire_at = 0, fire_at2 = 0, reset_at = 0;

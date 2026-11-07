@@ -567,6 +567,11 @@ module Atari7800 #(
 	wire        c_vs    = c_maria ? maria_vsync  : tia_vsync;
 	wire        c_hb    = c_maria ? maria_hblank : tia_hblank;
 	wire        c_vb    = c_maria ? maria_vblank : tia_vblank;
+	// POCKET: the flag that leaves with the signal marks the window the RGB path
+	// shows (video_mux's vblank below), so the Pocket can send the decoded
+	// picture to the same scaler slot. The signal itself is still blanked on
+	// MARIA's whole vblank, as before.
+	wire        c_vb_win = c_maria ? (show_overscan ? maria_vblank : maria_vblank_ex) : tia_vblank;
 
 	composite_out comp_out
 	(
@@ -584,7 +589,7 @@ module Atari7800 #(
 		.hsync        (c_hs),
 		.pix_tick     (c_maria ? mclk0 : tia_pix_ce),
 		.hblank       (c_hb),
-		.vblank       (c_vb),
+		.vblank       (c_vb_win),
 		.vsync        (c_vs),
 		.temp         (pal_temp),
 		.comp         (comp),

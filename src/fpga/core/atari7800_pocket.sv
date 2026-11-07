@@ -62,6 +62,7 @@ module atari7800_pocket
 	input  wire        pokey_irq,
 	input  wire        clear_random,    // fill RAM with random values at reset (MiSTer "Clear Memory")
 	input  wire        decomb,          // 2600 de-comb
+	input  wire        composite,       // composite video (artifact colour), NTSC
 	input  wire  [4:0] bs_override,     // 2600 bankswitching: 0 auto, else MiSTer's mapper number       // let POKEY timer IRQs reach the CPU (MiSTer "Pokey IRQ Enabled")
 	input  wire        pause_core,      // Pocket menu open
 
@@ -698,6 +699,17 @@ save_ram_dp #(.WORD_ADDR_BITS(6), .BLANK(8'hFF)) fa2_ram
 
 //////////////////////////////  INPUT  ////////////////////////////////////
 
+// The RGB picture and its timing as top.sv sends them. The module's video
+// outputs are these, or the composite decoder's picture (end of the module);
+// everything inside that needs the timing (turbo, the light gun, the BupChip
+// status) keeps to these.
+wire [7:0] rgb_r, rgb_g, rgb_b;
+wire       rgb_hs, rgb_vs, rgb_hb, rgb_vb, rgb_ce;
+// top.sv's composite signal (composite_out), for the Composite setting
+wire signed [23:0] comp;
+wire        comp_tog, comp_hs, comp_vs, comp_hb, comp_vb;
+wire  [9:0] comp_burst_start, comp_burst_len;
+
 // Turbo: X repeats fire 1 (as A does) and Y fire 2 (as B does), the
 // button next to each on the Pocket's diamond; A and B stay plain. Switching
 // every 2, 3 or 4 frames: 15, 10 or 7.5 presses a second at 60 Hz. Counted
@@ -707,8 +719,8 @@ reg  [1:0] turbo_cnt = 2'd0;
 reg        turbo_on = 1'b1;
 reg        turbo_vs = 1'b0;
 always @(posedge clk_sys) begin
-	turbo_vs <= VSync;
-	if (VSync && !turbo_vs) begin
+	turbo_vs <= rgb_vs;
+	if (rgb_vs && !turbo_vs) begin
 		if (turbo_cnt >= turbo) begin
 			turbo_cnt <= 2'd0;
 			turbo_on  <= ~turbo_on;
@@ -958,9 +970,9 @@ lightgun lightgun (
 	.JOY_X        ({~gun_x[7], gun_x[6:0]}),
 	.JOY_Y        ({~gun_yl[7], gun_yl[6:0]}),
 	.JOY_TRIG     (gun_port ? vbutton[1] : vbutton[0]),
-	.HDE          (~HBlank),
+	.HDE          (~rgb_hb),
 	.VDE          (~VBlank_orig),
-	.CE_PIX       (ce_pix),
+	.CE_PIX       (rgb_ce),
 	.BTN_MODE     (1'b0),
 	.SIZE         (2'd1),
 	.SENSOR_DELAY (tia_en ? 8'd20 : 8'd48),
@@ -1255,20 +1267,20 @@ Atari7800 main
 	.RED          (core_r),
 	.GREEN        (core_g),
 	.BLUE         (core_b),
-	.HSync        (HSync),
-	.VSync        (VSync),
-	.HBlank       (HBlank),
-	.VBlank       (VBlank),
+	.HSync        (rgb_hs),
+	.VSync        (rgb_vs),
+	.HBlank       (rgb_hb),
+	.VBlank       (rgb_vb),
 	.VBlank_orig  (VBlank_orig),
-	.ce_pix       (ce_pix),
-	.comp         (),
-	.comp_tog     (),
-	.comp_hs      (),
-	.comp_vs      (),
-	.comp_hb      (),
-	.comp_vb      (),
-	.comp_burst_start(),
-	.comp_burst_len  (),
+	.ce_pix       (rgb_ce),
+	.comp         (comp),
+	.comp_tog     (comp_tog),
+	.comp_hs      (comp_hs),
+	.comp_vs      (comp_vs),
+	.comp_hb      (comp_hb),
+	.comp_vb      (comp_vb),
+	.comp_burst_start(comp_burst_start),
+	.comp_burst_len  (comp_burst_len),
 	.show_border  (~hide_border),
 	// PAL ignores Show Overscan: its 274 line window already holds the whole
 	// picture, and the Pocket has no scaler slot left for 292 lines (the APF
@@ -1769,26 +1781,120 @@ bup_status_osd bup_osd
 	.daria   (1'b0),
 	.dstat   (49'd0),
 `endif
-	.ce_pix  (ce_pix),
-	.hblank  (HBlank),
-	.vblank  (VBlank),
+	.ce_pix  (rgb_ce),
+	.hblank  (rgb_hb),
+	.vblank  (rgb_vb),
 	.r_in    (pic_r),
 	.g_in    (pic_g),
 	.b_in    (pic_b),
-	.r_out   (R),
-	.g_out   (G),
-	.b_out   (B)
+	.r_out   (rgb_r),
+	.g_out   (rgb_g),
+	.b_out   (rgb_b)
 );
 `else
-assign R = pic_r;
-assign G = pic_g;
-assign B = pic_b;
+assign rgb_r = pic_r;
+assign rgb_g = pic_g;
+assign rgb_b = pic_b;
 `endif
 `else
-assign R = pic_r;
-assign G = pic_g;
-assign B = pic_b;
+assign rgb_r = pic_r;
+assign rgb_g = pic_g;
+assign rgb_b = pic_b;
 `endif
+
+// Composite video (the Composite setting): top.sv's composite_out, the 7800's
+// output stage, which upstream builds the composite signal with, through
+// upstream's TV decoder, composite_decoder, as MiSTer's video_mixer_plus runs
+// it with its default options (Smear 1, AGC on, Comb off). This is what gives artifact
+// colour: one pixel stripes and dithers that the RGB picture shows as they
+// are come out of a TV's decoder as colour (Tower Toppler's tower).
+//
+// One sample per clk_sys (4 x the colour subcarrier), so the decoder's picture
+// is two samples per MARIA pixel and four per TIA pixel. The scaler slots are
+// 372 / 320 / 160 wide, so each pixel sent is the mean of its samples, counted
+// from the end of HBlank. NTSC only: composite_out and the decoder are built
+// for the NTSC subcarrier (PAL keeps RGB, as Show Overscan keeps to NTSC).
+reg         comp_tog_d = 1'b0;
+always @(posedge clk_sys) comp_tog_d <= comp_tog;
+
+wire  [7:0] cd_r, cd_g, cd_b;
+wire        cd_ce, cd_hs, cd_vs, cd_hb, cd_vb;
+composite_decoder #(.SPC(4)) comp_dec
+(
+	.clk         (clk_sys),
+	.ce          (comp_tog ^ comp_tog_d),
+	.comp        (comp),
+	.hs_in       (comp_hs),
+	.vs_in       (comp_vs),
+	.hb_in       (comp_hb),
+	.vb_in       (comp_vb),
+	.burst_start (comp_burst_start),
+	.burst_len   (comp_burst_len),
+	.sat         (8'd128),
+	.hue         (8'd0),
+	.smear       (4'd1),
+	.luma_delay  (4'd2),
+	.setup       (16'sd0),
+	.luma_gain   (16'd2857),
+	.agc_en      (1'b1),
+	.comb_en     (1'b0),
+	.ce_out      (cd_ce),
+	.hs_out      (cd_hs),
+	.vs_out      (cd_vs),
+	.hb_out      (cd_hb),
+	.vb_out      (cd_vb),
+	.r_out       (cd_r),
+	.g_out       (cd_g),
+	.b_out       (cd_b)
+);
+
+// The light gun's crosshair, moved to where the decoded picture is: the
+// decoder's picture comes out COMP_GUN_DELAY clk_sys later than the RGB one.
+localparam integer COMP_GUN_DELAY = 16;
+reg [COMP_GUN_DELAY-1:0] gun_dly = '0;
+always @(posedge clk_sys) gun_dly <= {gun_dly[COMP_GUN_DELAY-2:0], gun_en & gun_target};
+
+wire       use_comp = composite && ~video_pal_o;
+wire [1:0] comp_last = tia_en ? 2'd3 : 2'd1;   // samples per pixel, less one
+reg  [1:0] comp_ph = 2'd0;
+reg  [9:0] comp_sr = 10'd0, comp_sg = 10'd0, comp_sb = 10'd0;
+reg  [7:0] comp_r = 8'd0, comp_g = 8'd0, comp_b = 8'd0;
+reg        comp_hso = 1'b0, comp_vso = 1'b0, comp_hbo = 1'b1, comp_vbo = 1'b1, comp_ce = 1'b0;
+wire [9:0] comp_nr = (comp_ph == 2'd0 ? 10'd0 : comp_sr) + {2'd0, cd_r};
+wire [9:0] comp_ng = (comp_ph == 2'd0 ? 10'd0 : comp_sg) + {2'd0, cd_g};
+wire [9:0] comp_nb = (comp_ph == 2'd0 ? 10'd0 : comp_sb) + {2'd0, cd_b};
+always @(posedge clk_sys) begin
+	comp_ce <= 1'b0;
+	if (cd_ce) begin
+		comp_hso <= cd_hs;
+		comp_vso <= cd_vs;
+		comp_hbo <= cd_hb;
+		comp_vbo <= cd_vb;
+		comp_sr  <= comp_nr;
+		comp_sg  <= comp_ng;
+		comp_sb  <= comp_nb;
+		comp_ph  <= (cd_hb || comp_ph == comp_last) ? 2'd0 : comp_ph + 2'd1;
+		if (!cd_hb && comp_ph == comp_last) begin
+			comp_ce <= 1'b1;
+			if (gun_dly[COMP_GUN_DELAY-1]) begin
+				comp_r <= 8'd255; comp_g <= 8'd0; comp_b <= 8'd0;
+			end else if (tia_en) begin
+				comp_r <= comp_nr[9:2]; comp_g <= comp_ng[9:2]; comp_b <= comp_nb[9:2];
+			end else begin
+				comp_r <= comp_nr[8:1]; comp_g <= comp_ng[8:1]; comp_b <= comp_nb[8:1];
+			end
+		end
+	end
+end
+
+assign R      = use_comp ? comp_r   : rgb_r;
+assign G      = use_comp ? comp_g   : rgb_g;
+assign B      = use_comp ? comp_b   : rgb_b;
+assign HSync  = use_comp ? comp_hso : rgb_hs;
+assign VSync  = use_comp ? comp_vso : rgb_vs;
+assign HBlank = use_comp ? comp_hbo : rgb_hb;
+assign VBlank = use_comp ? comp_vbo : rgb_vb;
+assign ce_pix = use_comp ? comp_ce  : rgb_ce;
 
 assign tia_mode_o = tia_en;
 assign is_pal_o = region_pll;

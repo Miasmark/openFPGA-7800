@@ -132,7 +132,7 @@ module tb_system;
 		.region_setting(region), .palette_temp(2'd0), .hsc_setting(2'd2), .show_overscan(overscan),
 		.hide_border(hide_border), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(1'b1), .flicker_blend(1'b0), .pokey_irq(1'b0), .pause_core(1'b0),
-		.clear_random(1'b0), .decomb(1'b0), .bs_override(5'd0),
+		.clear_random(1'b0), .decomb(1'b0), .composite(1'b0), .bs_override(5'd0),
 		.joy0(16'd0), .joy1(16'd0), .joy2(16'd0), .joy3(16'd0),
 		.analog0(16'h8080), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
 		.port1_input(3'd0), .port2_input(3'd0),
