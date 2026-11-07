@@ -1038,8 +1038,9 @@ module tb_load;
 	// not $24, $28, $2C, $30, $34, $38 or $3C; mirrors in A8-A9): the row
 	// and column of the access's phase 2, whether it reads or writes, and
 	// the register (+dmaprobe, at most 400 lines)
-	int dp_cram = 0;
-	always @(posedge clk_sys) if (dp_on && !reset_in && dp_frame == 3 && dp_cram < 400
+	int dp_cram = 0, cram_frame = 3;
+	initial void'($value$plusargs("cramframe=%d", cram_frame));   // +cramframe=N: which frame
+	always @(posedge clk_sys) if (dp_on && !reset_in && dp_frame == cram_frame && dp_cram < 400
 			&& dut.main.cpu_inst.phi2_en && !dut.main.cpu_inst.is_halted
 			&& dut.bios_addr[15:10] == 6'd0 && dut.bios_addr[7:5] == 3'b001
 			&& (dut.bios_addr[1:0] != 2'b00 || dut.bios_addr[4:2] == 3'd0)) begin
