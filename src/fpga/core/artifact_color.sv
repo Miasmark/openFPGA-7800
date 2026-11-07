@@ -34,7 +34,10 @@ module artifact_color #(
 	parameter signed [8:0] VR = 9'sd21,       // V in 256ths
 	parameter signed [8:0] VG = 9'sd13,
 	parameter signed [8:0] VB = -9'sd124,
-	parameter bit EVEN_POS = 1'b1,            // s = +1 on the column parity that hs leaves at 0
+	parameter bit EVEN_POS = 1'b0,            // s = +1 on the column parity that hs leaves at 1:
+	                                          // settled in simulation against the Python model
+	                                          // of these rules (2026-11-07: Tower Toppler's title,
+	                                          // TOPPLER blue as on Composite)
 	parameter integer DELAY = 5               // clk_sys: 2 pixels and the output register
 )(
 	input  logic       clk,
