@@ -146,6 +146,20 @@ not to the die: whether the console cuts DMA off sooner or shuts it down
 faster is not known. The one count below the console on every case is a
 separate, constant difference of about 14 CPU cycles a frame, still open.
 
+### `rtl/top.sv`: the composite signal's vblank flag
+
+Upstream builds a composite signal beside the RGB picture (`composite_out`,
+the 7800's output stage) and decodes it in MiSTer's `video_mixer_plus`
+(`composite_decoder`). The Pocket decodes it in `../core/atari7800_pocket.sv`
+for the *Composite* palettes and sends the result to the RGB picture's
+scaler slot, so the `vblank` that `composite_out` passes along with the
+signal (`vb_out`) is now the RGB path's window, `c_vb_win` (MARIA's
+`vblank_ex`, or `vblank` with Show Overscan; the TIA's unchanged), instead
+of MARIA's whole vblank. The signal itself is still blanked on the whole
+vblank (`blank`, `c_vb`), and the decoder only passes the flag through, so
+the decoded picture is the same. `composite_decoder.sv` and
+`composite_out.sv` are otherwise upstream's, unchanged.
+
 ### `rtl/EEPROM_24LC256.sv`: a NACK ends a read (`EEPROM_NACK_ENDS_READ`)
 
 In a sequential read the model fetches the next byte whatever the master

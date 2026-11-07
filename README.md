@@ -109,7 +109,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
     music switch (Chaotic Grill, Elevator Action) turn their music off in A,
     so a default of A looked like broken sound.
   - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
-  - *Region*, *Palette* (warm/cool/hot), *High Score Cart*, *SaveKey
+  - *Region*, *Palette* (warm/cool/hot, each also with *Composite*,
+    below), *High Score Cart*, *SaveKey
     (port 2)*, *AtariVox Voice*, *Skip BIOS*.
   - *Picture*: the border on or off, and *Overscan* (below).
   - *Audio*: Stereo TIA, and a blend of the left and right channels (25%,
@@ -145,6 +146,14 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   screens sit). Games that draw into the overscan, like
   Triple Punch's bonus timer at the bottom, need it. PAL games ignore it:
   their 274-line picture is already complete.
+- *Composite* (the *Warm, Composite*, *Cool, Composite* and *Hot,
+  Composite* palettes) shows the picture as a TV decodes the 7800's
+  composite output, with artifact colour: one-pixel stripes and dithers
+  come out as colour, as games drew them for (Tower Toppler's tower turns
+  solid blue). It uses upstream MiSTer's own composite model and TV
+  decoder (`composite_out.sv`, `composite_decoder.sv`), with MiSTer's
+  default options (Smear 1, AGC on, Comb off). NTSC only: PAL games stay
+  RGB.
 
 ### New in 2.2.5
 
@@ -192,7 +201,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 |---|---|
 | 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
-| Composite video filter | Only the RGB output is used. |
+| Composite options | MiSTer's Composite Smear, AGC and Comb settings: the Pocket's menu is full, so *Composite* uses their defaults. PAL composite: upstream's model and decoder are NTSC only. |
 
 #### Why MiSTer's BupChip doesn't fit, and ARIA
 
@@ -254,6 +263,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Audio filter | centred on zero, settles to 0 in silence |
 | SaveKey | a test cart writes 8 bytes over I2C with 7800basic's AtariVox/SaveKey driver and reads them back: pass (Auto with a SaveKey header, and On); absent when the header has none |
 | MARIA DMA timing | 15 DMA timing test carts (empty zones, direct, character and 5-byte headers, 8-line zones, holey DMA, DLIs, the line's limit) each count a loop through the visible frame (`tb_load +dmaprobe`). All 15 count exactly one below the owner's console (2026-10-31), e.g. 1836 / 1837 for empty zones and 425-426 / 426-427 for 192 overloaded lines; before the DMA cut-off moved (see *Changes to the MiSTer sources*), the overloaded case counted 418-419. The Pocket gives the same 15 counts (hardware table). Eagle's indirect holey carts (SWTEST, DWtest) cost what the 7800 Software Guide gives: 6 and 9 cycles per object in a hole |
+| Composite video | Tower Toppler with *Composite* (`tb_load +composite`): the tower's one-pixel brick stripes decode to a solid blue (mean 46, 71, 188) where the owner's MAME build's composite view, at the phase that matches, gives 40, 65, 184; the RGB picture stays as it is with the setting off. The decoded picture trails the RGB one by 14 clk_sys; the light gun's crosshair is delayed to match |
 | SaveKey reads ending in NACK | A read whose last byte is $00, answered with NACK then STOP, leaves SDA released and the STOP seen (`+i2ctrace`). Triple Punch's slot scan decodes cleanly with a zeroed and a blank file |
 | SaveKey save slot | 32 KiB written in and read back under the APF read protocol: only the 8 bytes the cart wrote differ |
 | HSC save slot | a hardware-written save round-trips with 0 of 2048 bytes different |

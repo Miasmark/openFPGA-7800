@@ -1848,9 +1848,11 @@ composite_decoder #(.SPC(4)) comp_dec
 	.b_out       (cd_b)
 );
 
-// The light gun's crosshair, moved to where the decoded picture is: the
-// decoder's picture comes out COMP_GUN_DELAY clk_sys later than the RGB one.
-localparam integer COMP_GUN_DELAY = 16;
+// The light gun's crosshair, moved to where the decoded picture is. The
+// decoded picture's HBlank trails the RGB one by 14 clk_sys (tb_load
+// +composite measures it); the crosshair is taken one clk_sys before the
+// pixel it lands on is registered, so 13 here.
+localparam integer COMP_GUN_DELAY = 13;
 reg [COMP_GUN_DELAY-1:0] gun_dly = '0;
 always @(posedge clk_sys) gun_dly <= {gun_dly[COMP_GUN_DELAY-2:0], gun_en & gun_target};
 
