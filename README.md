@@ -109,8 +109,8 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
     music switch (Chaotic Grill, Elevator Action) turn their music off in A,
     so a default of A looked like broken sound.
   - *Swap Controllers*, *Port 1 Input*, *Port 2 Input*, *Turbo (X/Y)*.
-  - *Region*, *Palette* (warm/cool/hot, each also with *Composite*,
-    below), *High Score Cart*, *SaveKey
+  - *Region*, *Palette* (warm/cool/hot, each also with *Composite* or
+    *Artifact*, below), *High Score Cart*, *SaveKey
     (port 2)*, *AtariVox Voice*, *Skip BIOS*.
   - *Picture*: the border on or off, and *Overscan* (below).
   - *Audio*: Stereo TIA, and a blend of the left and right channels (25%,
@@ -154,6 +154,18 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   decoder (`composite_out.sv`, `composite_decoder.sv`), with MiSTer's
   default options (Smear 1, AGC on, Comb off). NTSC only: PAL games stay
   RGB.
+- *Artifact* (the *Warm, Artifact*, *Cool, Artifact* and *Hot, Artifact*
+  palettes) gives the artifact colour without the TV's blur, the way Apple
+  II emulators offer an idealised colour mode beside their NTSC filter. The
+  core finds one-pixel light/dark alternations in the RGB picture and
+  colours only them, by the rules of AppleWin's RGB monitor (as the
+  trackstar-clone project's colour table uses them), generalised to the
+  7800's colours: a lone lit pixel takes the hue of its column parity, the
+  dark pixel between two such takes their hue, so stripes fill solid; runs,
+  edges, flat areas and text stay exactly as in RGB
+  (`src/fpga/core/artifact_color.sv`). The hue and strength are fitted to
+  *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
+  PAL games stay RGB.
 
 ### New in 2.2.5
 

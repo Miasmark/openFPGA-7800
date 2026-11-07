@@ -63,6 +63,7 @@ module atari7800_pocket
 	input  wire        clear_random,    // fill RAM with random values at reset (MiSTer "Clear Memory")
 	input  wire        decomb,          // 2600 de-comb
 	input  wire        composite,       // composite video (artifact colour), NTSC
+	input  wire        artifact,        // artifact colour on the sharp RGB picture, NTSC
 	input  wire  [4:0] bs_override,     // 2600 bankswitching: 0 auto, else MiSTer's mapper number       // let POKEY timer IRQs reach the CPU (MiSTer "Pokey IRQ Enabled")
 	input  wire        pause_core,      // Pocket menu open
 
@@ -1889,14 +1890,44 @@ always @(posedge clk_sys) begin
 	end
 end
 
-assign R      = use_comp ? comp_r   : rgb_r;
-assign G      = use_comp ? comp_g   : rgb_g;
-assign B      = use_comp ? comp_b   : rgb_b;
-assign HSync  = use_comp ? comp_hso : rgb_hs;
-assign VSync  = use_comp ? comp_vso : rgb_vs;
-assign HBlank = use_comp ? comp_hbo : rgb_hb;
-assign VBlank = use_comp ? comp_vbo : rgb_vb;
-assign ce_pix = use_comp ? comp_ce  : rgb_ce;
+// Artifact (the Palette setting's Artifact choices): the RGB picture with
+// one-pixel alternations coloured as a TV would, everything else left sharp
+// (artifact_color.sv). MARIA only (a TIA pixel is a whole carrier cycle) and
+// NTSC only. Two pixels late, with its timing delayed to match; the
+// crosshair's pixels pass unchanged.
+wire [7:0] art_r, art_g, art_b;
+wire       art_hs, art_vs, art_hb, art_vb, art_ce;
+artifact_color art
+(
+	.clk     (clk_sys),
+	.ce      (rgb_ce),
+	.r_in    (rgb_r),
+	.g_in    (rgb_g),
+	.b_in    (rgb_b),
+	.keep_in (gun_en & gun_target),
+	.hs_in   (rgb_hs),
+	.vs_in   (rgb_vs),
+	.hb_in   (rgb_hb),
+	.vb_in   (rgb_vb),
+	.r_out   (art_r),
+	.g_out   (art_g),
+	.b_out   (art_b),
+	.hs_out  (art_hs),
+	.vs_out  (art_vs),
+	.hb_out  (art_hb),
+	.vb_out  (art_vb),
+	.ce_out  (art_ce)
+);
+wire use_art = artifact && !use_comp && !video_pal_o && !tia_en;
+
+assign R      = use_comp ? comp_r   : use_art ? art_r  : rgb_r;
+assign G      = use_comp ? comp_g   : use_art ? art_g  : rgb_g;
+assign B      = use_comp ? comp_b   : use_art ? art_b  : rgb_b;
+assign HSync  = use_comp ? comp_hso : use_art ? art_hs : rgb_hs;
+assign VSync  = use_comp ? comp_vso : use_art ? art_vs : rgb_vs;
+assign HBlank = use_comp ? comp_hbo : use_art ? art_hb : rgb_hb;
+assign VBlank = use_comp ? comp_vbo : use_art ? art_vb : rgb_vb;
+assign ce_pix = use_comp ? comp_ce  : use_art ? art_ce : rgb_ce;
 
 assign tia_mode_o = tia_en;
 assign is_pal_o = region_pll;

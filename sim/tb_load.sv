@@ -97,9 +97,11 @@ module tb_load;
 	logic overscan_on = 1'b0;
 	logic clear_rnd = 1'b0; logic [4:0] bs_ovr = 5'd0;   // +clearrnd, +bs=N
 	logic composite_on = 1'b0;                           // +composite: the decoded picture
+	logic artifact_on = 1'b0;                            // +artifact: artifact_color.sv's picture
 	initial begin
 		clear_rnd = $test$plusargs("clearrnd");
 		composite_on = $test$plusargs("composite");
+		artifact_on = $test$plusargs("artifact");
 		void'($value$plusargs("bs=%d", bs_ovr));
 	end
 	initial overscan_on = $test$plusargs("overscan");
@@ -188,7 +190,7 @@ module tb_load;
 		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
-		.clear_random(clear_rnd), .decomb(1'b0), .composite(composite_on), .bs_override(bs_ovr),
+		.clear_random(clear_rnd), .decomb(1'b0), .composite(composite_on), .artifact(artifact_on), .bs_override(bs_ovr),
 		.joy0(joy0), .joy1(joy1), .joy2(joy2), .joy3(joy3),
 		.analog0(ana0), .analog1(16'h8080), .analog2(16'h8080), .analog3(16'h8080),
 		.port1_input(port1_in), .port2_input(port2_in),

@@ -387,6 +387,7 @@ localparam [15:0] SLOT_BUPFW = 16'h0109;
     reg     [1:0]   set_turbo     = 2'd0;   // X / Y turbo: off, fast, medium, slow
     reg     [1:0]   set_atarivox  = 2'd2;   // AtariVox voice: off, quiet, normal, loud
     reg             set_composite = 1'b0;   // composite video (artifact colour)
+    reg             set_artifact  = 1'b0;   // artifact colour on the sharp picture
     reg     [7:0]   menu_reset_cnt = 8'd0;
 
 always @(posedge clk_74a) begin
@@ -400,7 +401,7 @@ always @(posedge clk_74a) begin
             12'h264: set_ldiff_b   <= bridge_wr_data[0];
             12'h268: set_rdiff_b   <= bridge_wr_data[0];
             12'h26C: set_region    <= bridge_wr_data[1:0];
-            12'h270: {set_composite, set_palette} <= bridge_wr_data[2:0];   // Palette: bit 2 Composite
+            12'h270: {set_artifact, set_composite, set_palette} <= bridge_wr_data[3:0];   // Palette: bit 2 Composite, bit 3 Artifact
             12'h274: set_hsc       <= bridge_wr_data[1:0];
             12'h278: set_overscan  <= bridge_wr_data[0];
             12'h27C: set_border    <= bridge_wr_data[0];
@@ -769,9 +770,9 @@ end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
 // a two stage synchroniser per bit is enough.
-    reg     [37:0]  set_s1, set_s2;
+    reg     [38:0]  set_s1, set_s2;
 always @(posedge clk_sys) begin
-    set_s1 <= {set_composite, set_atarivox, set_turbo, set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
+    set_s1 <= {set_artifact, set_composite, set_atarivox, set_turbo, set_port2, set_port1, set_bs, set_decomb, set_clear_rnd, set_stmix,
                set_swap, set_ldiff_b, set_rdiff_b, set_region, set_palette,
                set_hsc, set_overscan, set_border, set_stereo, set_skip_bios,
                set_blend, set_pokey_irq, set_savekey, 1'b0};
@@ -899,6 +900,7 @@ atari7800_pocket atari (
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),
     .composite      ( set_s2[37] ),
+    .artifact       ( set_s2[38] ),
     .bs_override    ( set_s2[26:22] ),
     .port1_input    ( set_s2[29:27] ),
     .port2_input    ( set_s2[32:30] ),
