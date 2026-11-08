@@ -167,6 +167,23 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
   PAL games stay RGB.
 
+### New in 2.2.6
+
+2.2.6 is 2.2.5 with artifact colour and one MARIA change:
+
+- **Composite and Artifact palettes.** Games that draw one-pixel stripes
+  and dithers to get colours from a TV (Tower Toppler's tower is the best
+  known) now show them. *Composite* (Warm, Cool or Hot, Composite) is
+  upstream MiSTer's own model of the 7800's composite output and TV
+  decoder, blur included. *Artifact* (Warm, Cool or Hot, Artifact) colours
+  only the stripes and keeps the rest of the picture as sharp as RGB, the
+  idealised mode Apple II emulators offer. Both are NTSC only; Artifact is
+  for 7800 games (a 2600 pixel is a whole colour cycle). See *Features*.
+- **Colour register accesses show at the beam.** A CPU read of a colour
+  register while a line is drawn puts that register's colour on the pixel
+  at the beam, as a stray dot, as on a console; writes show nothing. See
+  *Changes to the MiSTer sources*.
+
 ### New in 2.2.5
 
 2.2.5 is 2.2.4 with one MARIA timing change and a new menu default:
@@ -301,8 +318,17 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of 2.2.5 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+The Quartus build of 2.2.6 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
 meets timing on all four corners. Worst setup slack at the worse slow
+corner: +2.764 ns on clk_sdram (gate +1.5 ns), +2.059 ns on DARIA's CPU
+clock (gate +0.5 ns), and +3.308 ns on DARIA's phase detector (bounded at
+8.0 / 0.5 ns; hold +0.365 ns). Worst hold slack +0.104 ns. Seeds 1 and 2
+pass every check too, with +2.277 and +2.571 ns on clk_sdram; seed 3 has
+the most, which decides. It uses 15,549 of 18,480 ALMs (84%), 219 of 308
+M10K blocks and 43 DSP blocks (the composite decoder and the Artifact
+palettes' arithmetic). Its bitstream is the hardware test build's.
+The Quartus build of 2.2.5 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+met timing on all four corners. Worst setup slack at the worse slow
 corner: +2.705 ns on clk_sdram (gate +1.5 ns), +1.334 ns on DARIA's CPU
 clock (gate +0.5 ns), and +3.200 ns on DARIA's phase detector (bounded at
 8.0 / 0.5 ns; hold +0.441 ns). Worst hold slack +0.096 ns. Seeds 1 and 2
@@ -357,7 +383,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.2.5, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.6, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -387,6 +413,8 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | Crystal Castles (2600) | Works (2.0.21-test) |
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
+| Composite and Artifact palettes (2.2.6's test builds, 2026-11-07 and 2026-11-08) | Tower Toppler's tower shows its artifact colour on both; light gun games aim as before with Composite on; the owner's verdict on the Artifact build: "it works good" |
+| Colour register accesses (2.2.6, 2026-11) | `sim/mstat/cram_test.asm` on the Pocket shows the reads' dots where the console's photo has them, and nothing from writes |
 | MARIA DMA timing (2.2.5's test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
 | 2600 bottom line | Before 2.0.19 the last line kept whatever an earlier game drew there (after Kaboom!, in every 2600 game); 2.0.19 fills all 240 / 288 lines |
