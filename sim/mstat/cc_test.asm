@@ -26,6 +26,10 @@
 ; the 7800's identical 263-line frames), so the default sends each pair
 ; twice. A decoder that reads every frame would then double the letters:
 ; PAUSE for 1. Control codes are sent twice anyway, as broadcasters do.
+; With that, the same TV showed the whole caption, "ATARI 7800 CAPTION n"
+; (2026-11-08), but at offset 1 (row 19); the first run had read offset 0
+; (row 18). Which line the decoder takes as line 21 changes between runs:
+; likely which of the alternating frames it locks to as field 1.
 ; In simulation (tb_load +dmaprobe +ccprobe, 2026-11-08): the caption line
 ; is MARIA row 18 at offset 0 (row 19 at 1, ...); the picture's first pixel
 ; is column 93; the run-in pulses start at columns 93, 107, ... 164, the
