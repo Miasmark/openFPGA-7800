@@ -14,12 +14,18 @@
 ; writes BACKGRND there, bit 6's level and then parity's, then black again.
 ; See cc_tables.py for the bit positions.
 ;
-; Controls (shown at the top left: offset, level, channel):
+; Controls (shown at the top left: offset, level, channel, repeat):
 ;   up / down     the caption line's offset, 0-7 lines below the first
 ;                 line MARIA draws (the TV's line 21 is one of them)
 ;   left / right  the high level: hue 0, luminance 2-15 (default 7)
 ;   SELECT        CC1 or CC3 (CC3 sends the misc control codes as $15:
 ;                 for a TV that takes the 7800's frames as field 2)
+;   PAUSE         each byte pair in 2 frames (2, the default) or 1 (1)
+; On the owner's Samsung CRT (2026-11-08) one pair a frame showed
+; "AR78 CTI n": the decoder reads every other frame (its field 1 out of
+; the 7800's identical 263-line frames), so the default sends each pair
+; twice. A decoder that reads every frame would then double the letters:
+; PAUSE for 1. Control codes are sent twice anyway, as broadcasters do.
 ; In simulation (tb_load +dmaprobe +ccprobe, 2026-11-08): the caption line
 ; is MARIA row 18 at offset 0 (row 19 at 1, ...); the picture's first pixel
 ; is column 93; the run-in pulses start at columns 93, 107, ... 164, the
@@ -97,6 +103,8 @@ prevA    = $8A          ; last frame's SWCHA
 prevB    = $8B          ; last frame's SWCHB
 wsn      = $8C          ; WSYNCs to the caption line
 dlp      = $8D          ; DLL write pointer (2 bytes)
+rep1     = $8F          ; 0: each pair in 2 frames, 1: in 1
+half     = $92          ; which of its 2 frames this is
 
 BM       = $1800        ; the caption line's 40 bytes
 CCDL     = $1840        ; its display list
@@ -218,11 +226,18 @@ in_sel	lda SWCHB
 	eor #$FF
 	and prevB
 	stx prevB
+	sta tmp
 	and #$02                ; SELECT
-	beq in_done
+	beq in_pau
 	lda chan
 	eor #1
 	sta chan
+in_pau	lda tmp
+	and #$08                ; PAUSE
+	beq in_done
+	lda rep1
+	eor #1
+	sta rep1
 in_done
 	lda lvl
 	sta P0C3
@@ -315,6 +330,11 @@ st_one	pha
 	ora #1                  ; 1 or 3
 	ldx #104
 	jsr st_digit
+	lda #2                  ; 2 frames a pair, or 1
+	sec
+	sbc rep1
+	ldx #136
+	jsr st_digit
 	lda #0
 	sta STDL,y
 	sta STDL+1,y
@@ -358,7 +378,13 @@ np_a	sta pa
 	ldy cnt
 	lda par_dig,y
 np_b	sta pb
-np_adv	inx
+np_adv	lda rep1                ; 2 frames a pair: advance on the second
+	bne np_inx
+	lda half
+	eor #1
+	sta half
+	bne np_done
+np_inx	inx
 	cpx #SEQ_LEN + SEQ_NULL
 	bne np_done
 	ldx #0
