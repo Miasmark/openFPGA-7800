@@ -4,8 +4,9 @@
 ; "ATARI 7800 CAPTION n" should appear at the bottom, n counting 0-9, a
 ; new caption every 2 seconds or so.
 ;
-; The caption line: from the first line MARIA can draw (+ the offset
-; below), 320D graphics with kangaroo mode on, so every pixel is a palette
+; The caption lines: the first two lines MARIA can draw (+ the offset
+; below), the same on both (a TV takes one of them for line 21; which one
+; changed between runs on the owner's Samsung), 320D graphics with kangaroo mode on, so every pixel is a palette
 ; colour (P0C1 black, P0C3 the high level) and none is background. It holds
 ; the clock run-in (about 5.7 of its 7 cycles: MARIA's picture starts 18
 ; clocks after the run-in should), the start bits 0 0 1 and the two bytes
@@ -15,8 +16,8 @@
 ; See cc_tables.py for the bit positions.
 ;
 ; Controls (shown at the top left: offset, level, channel, repeat):
-;   up / down     the caption line's offset, 0-7 lines below the first
-;                 line MARIA draws (the TV's line 21 is one of them)
+;   up / down     the caption lines' offset, 0-7 lines below the first
+;                 line MARIA draws
 ;   left / right  the high level: hue 0, luminance 2-15 (default 7)
 ;   SELECT        CC1 or CC3 (CC3 sends the misc control codes as $15:
 ;                 for a TV that takes the 7800's frames as field 2)
@@ -30,8 +31,11 @@
 ; (2026-11-08), but at offset 1 (row 19); the first run had read offset 0
 ; (row 18). Which line the decoder takes as line 21 changes between runs:
 ; likely which of the alternating frames it locks to as field 1.
-; In simulation (tb_load +dmaprobe +ccprobe, 2026-11-08): the caption line
-; is MARIA row 18 at offset 0 (row 19 at 1, ...); the picture's first pixel
+; In simulation (tb_load +dmaprobe +ccprobe, 2026-11-08): the caption lines
+; are MARIA rows 18 and 19 at offset 0 (19 and 20 at 1, ...), each decoding
+; to the bytes sent (ENM $94 $AE, "AT" $C1 $54); parity's border write
+; lands at columns 426-428 on the first and 428-430 on the second. Before
+; the second line (one caption line, 2026-11-08): the picture's first pixel
 ; is column 93; the run-in pulses start at columns 93, 107, ... 164, the
 ; start bits' 1 at 203-217, and the bytes read back as sent (ENM $94 $AE,
 ; PAC $94 $E0); the bit 6 / parity border write lands at column 426 or 428
@@ -62,19 +66,26 @@ SWCHB    = $282
 CTRL_NORM = $40         ; DMA on, 160A, black border, kangaroo off
 CTRL_CC   = $4E         ; DMA on, border control, kangaroo, 320B/D
 
+; The caption goes out on two lines in a row, the same data on both: which
+; one a TV takes for line 21 changed between runs on the owner's Samsung.
 ; Rows: MARIA fetches a line during the two before it (its DMA starts at
 ; column 440 two lines ahead), so the first line it draws is the frame's
 ; first DMA line + 2. FIRST_WS WSYNCs from that DMA line release the CPU at
-; column 412 of the line before the caption line; the next line's (empty)
-; DMA then halts it until about column 12 of the caption line. W1_DELAY and
-; W2_DELAY, in CPU cycles, then put the first border write inside the
-; picture (after the left border, before column 413) and the second at
-; column 429. All three from the simulation (tb_load +dmaprobe +ccprobe).
+; column 412 of the line before the first caption line; the second caption
+; line's DMA then halts it until about column 160 of the first. There it
+; writes bit 6's level at once and, W2A_DELAY cycles on, parity's at column
+; 429. The next line's (empty) DMA halts it until about column 12 of the
+; second caption line: black for its left border, then W1_DELAY and
+; W2_DELAY put bit 6's level inside the picture and parity's at column
+; 429 again. All from the simulation (tb_load +dmaprobe +ccprobe).
 	ifnconst FIRST_WS
 FIRST_WS = 2
 	endif
+	ifnconst W2A_DELAY
+W2A_DELAY = 58
+	endif
 	ifnconst W1_DELAY
-W1_DELAY = 41
+W1_DELAY = 38
 	endif
 	ifnconst W2_DELAY
 W2_DELAY = 54
@@ -168,11 +179,19 @@ frame
 ws	sta WSYNC               ; caption line's DMA, two lines ahead
 	dex
 	bne ws                  ; released at column 412 of the line before
-	nop                     ; halted from column 440 for the next line's
-	nop                     ; (empty) DMA; resumes in the caption line
-	DELAY W1_DELAY
+	nop                     ; halted from column 440 for the second
+	nop                     ; caption line's DMA; resumes in the first
 	lda lvl17
 	sta BACKGRND            ; bit 6's level, for the right border
+	DELAY W2A_DELAY
+	lda #0
+	sty BACKGRND            ; parity's level, at column 429
+	nop                     ; halted from column 440 for the next line's
+	nop                     ; (empty) DMA; resumes in the second
+	sta BACKGRND            ; black, before its left border (column 68)
+	DELAY W1_DELAY
+	lda lvl17
+	sta BACKGRND            ; bit 6's level, inside the picture
 	DELAY W2_DELAY
 	lda #0
 	sty BACKGRND            ; parity's level, at column 429
@@ -264,7 +283,8 @@ build_dll
 	sec
 	sbc #1                  ; an empty zone of off lines
 	jsr dll_empty
-bd_cc	lda #$00                ; the caption line: 1 line
+bd_cc	ldx #2                  ; the caption lines: two 1-line zones
+bd_cc2	lda #$00
 	sta (dlp),y
 	iny
 	lda #>CCDL
@@ -273,13 +293,15 @@ bd_cc	lda #$00                ; the caption line: 1 line
 	lda #<CCDL
 	sta (dlp),y
 	iny
+	dex
+	bne bd_cc2
 	lda #15
 	jsr dll_empty
 	lda #15
 	jsr dll_empty
 	lda #15
 	jsr dll_empty
-	lda #14                 ; 15 - off lines
+	lda #13                 ; 14 - off lines
 	sec
 	sbc off
 	jsr dll_empty
