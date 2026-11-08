@@ -1065,6 +1065,17 @@ module tb_load;
 			dut.RW ? "r" : "w", dut.bios_addr[7:0]);
 		dp_cram <= dp_cram + 1;
 	end
+	// +ccprobe (with +dmaprobe): frame cram_frame's MARIA colour output (YC)
+	// on rows 14-30, as runs: each change with its row and column, for the
+	// closed caption test cart (sim/mstat/cc_test.asm)
+	bit cc_on = 0;
+	logic [7:0] cc_yc = 8'd0;
+	initial cc_on = $test$plusargs("ccprobe");
+	always @(posedge clk_sys) if (cc_on && dp_on && !reset_in && dp_frame == cram_frame
+			&& `DP_SYNC.row >= 14 && `DP_SYNC.row <= 30 && dut.main.maria_inst.YC != cc_yc) begin
+		cc_yc <= dut.main.maria_inst.YC;
+		$display("PIX row %0d col %0d YC $%02x", `DP_SYNC.row, `DP_SYNC.col, dut.main.maria_inst.YC);
+	end
 	// The test carts' loop count, stored at $90/$91 once a frame
 	always @(posedge clk_sys) if (dp_on && !reset_in && dut.main.cpu_inst.phi2_en
 			&& !dut.RW && (dut.bios_addr == 16'h0090 || dut.bios_addr == 16'h0091))
