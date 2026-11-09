@@ -22,12 +22,15 @@
 ;   SELECT        CC1 or CC3 (CC3 sends the misc control codes as $15:
 ;                 for a TV that takes the 7800's frames as field 2)
 ;   PAUSE         each byte pair in 2 frames (2, the default) or 1 (1)
-;   RESET         bit width: 1 the standard's (14.19 MARIA clocks), or 8:
-;                 an experiment, 8-clock bits (895 kbit/s, not 503), the
-;                 data where the standard starts it, so the whole 7-cycle
-;                 run-in and every bit fit inside the picture (nothing in
-;                 the border). A decoder that samples at its fixed bit
-;                 rate should not read it.
+;   RESET         1: the standard waveform, or 4: the playfield grid
+;                 experiment, every edge rounded to 8 MARIA clocks (4 TIA
+;                 colour clocks, a 2600 playfield pixel) from the
+;                 picture's first pixel, the run-in as 8-clock pulses every
+;                 16 (it cannot keep its rate on that grid): could a 2600
+;                 send captions with its playfield? (cc_tables.py)
+; An earlier experiment in RESET's place, 8-clock bits (895 kbit/s instead
+; of 503), did not decode on the Samsung (2026-11-09): its decoder samples
+; at a fixed rate. Every level from 4 to 15 decodes, at offset 0 or 1.
 ; On the owner's Samsung CRT (2026-11-08) one pair a frame showed
 ; "AR78 CTI n": the decoder reads every other frame (its field 1 out of
 ; the 7800's identical 263-line frames), so the default sends each pair
@@ -126,7 +129,7 @@ wsn      = $8C          ; WSYNCs to the caption line
 dlp      = $8D          ; DLL write pointer (2 bytes)
 rep1     = $8F          ; 0: each pair in 2 frames, 1: in 1
 half     = $92          ; which of its 2 frames this is
-mode8    = $93          ; 1: 8-clock bits
+mode4    = $93          ; 1: the playfield grid
 
 BM       = $1800        ; the caption line's 40 bytes
 CCDL     = $1840        ; its display list
@@ -271,9 +274,9 @@ in_pau	lda tmp
 in_rst	lda tmp
 	and #$01                ; RESET
 	beq in_done
-	lda mode8
+	lda mode4
 	eor #1
-	sta mode8
+	sta mode4
 in_done
 	lda lvl
 	sta P0C3
@@ -374,10 +377,10 @@ st_one	pha
 	sbc rep1
 	ldx #96
 	jsr st_digit
-	lda #1                  ; bit width: 1 standard, 8
-	ldx mode8
+	lda #1                  ; 1 standard, 4 the playfield grid
+	ldx mode4
 	beq st_w
-	lda #8
+	lda #4
 st_w	ldx #120
 	jsr st_digit
 	lda #0
@@ -444,9 +447,9 @@ np_done	stx seqi
 
 ; The caption line's 40 bytes, and the border writes' values
 build_line
-	lda mode8
+	lda mode4
 	beq bl_std
-	jmp build_line8
+	jmp build_line4
 bl_std	ldx #39
 bl_cp	lda cc_base,x
 	sta BM,x
@@ -478,6 +481,7 @@ bl_sh	lsr tmp
 bl_next	iny
 	cpy #14
 	bne bl_bit
+bl_border
 	ldx #0                  ; bit 17: the second byte's bit 6
 	lda pb
 	and #$40
@@ -491,44 +495,41 @@ bl_17	stx lvl17
 bl_18	stx lvl18
 	rts
 
-; The same with 8-clock bits: all 16 data bits in the picture, the border
-; black
-build_line8
+; The same on the playfield grid: the same 14 bits in the picture and the
+; same two in the border (columns 413 and 429 are on the grid)
+build_line4
 	ldx #39
-b8_cp	lda cc8_base,x
+b4_cp	lda cc4_base,x
 	sta BM,x
 	dex
-	bpl b8_cp
+	bpl b4_cp
 	lda pa
 	sta tmp
-	ldy #0                  ; data bits 3-18
-b8_bit	cpy #8
-	bne b8_sh
+	ldy #0                  ; data bits 3-16
+b4_bit	cpy #8
+	bne b4_sh
 	lda pb
 	sta tmp
-b8_sh	lsr tmp
-	bcc b8_next
-	ldx cc8_mi0,y
+b4_sh	lsr tmp
+	bcc b4_next
+	ldx cc4_mi0,y
 	lda BM,x
-	ora cc8_mm0,y
+	ora cc4_mm0,y
 	sta BM,x
-	ldx cc8_mi1,y
-	bmi b8_next
+	ldx cc4_mi1,y
+	bmi b4_next
 	lda BM,x
-	ora cc8_mm1,y
+	ora cc4_mm1,y
 	sta BM,x
-	ldx cc8_mi2,y
-	bmi b8_next
+	ldx cc4_mi2,y
+	bmi b4_next
 	lda BM,x
-	ora cc8_mm2,y
+	ora cc4_mm2,y
 	sta BM,x
-b8_next	iny
-	cpy #16
-	bne b8_bit
-	lda #0
-	sta lvl17
-	sta lvl18
-	rts
+b4_next	iny
+	cpy #14
+	bne b4_bit
+	jmp bl_border
 
 wait_vb_start
 	lda MSTAT
