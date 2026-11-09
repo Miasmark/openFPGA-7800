@@ -3,31 +3,63 @@ PIX0_COL = 93
 SEQ_LEN  = 18
 SEQ_CNT  = 15          ; the entry whose second byte is the counter
 SEQ_NULL = 120
-cc_base
+; mode 1
+cc0_base
 	dc.b $FE, $03, $F8, $0F, $E0, $3F, $80, $FF
 	dc.b $01, $FC, $00, $00, $00, $03, $FF, $F0
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
-cc_mi0	dc.b $0F, $11, $13, $14, $16, $18, $1A, $1B, $1D, $1F, $21, $23, $24, $26
-cc_mm0	dc.b $0F, $3F, $FF, $03, $07, $1F, $7F, $01, $07, $0F, $3F, $FF, $03, $0F
-cc_mi1	dc.b $10, $12, $14, $15, $17, $19, $1B, $1C, $1E, $20, $22, $24, $25, $27
-cc_mm1	dc.b $FF, $FF, $FC, $FF, $FF, $FF, $FE, $FF, $FF, $FF, $FF, $FC, $FF, $FF
-cc_mi2	dc.b $11, $FF, $FF, $16, $18, $1A, $FF, $1D, $1F, $21, $FF, $FF, $26, $FF
-cc_mm2	dc.b $C0, $00, $00, $F8, $E0, $80, $00, $F8, $F0, $C0, $00, $00, $F0, $00
-; the playfield grid mode
-cc4_base
+cc0_mi0	dc.b $0F, $11, $13, $14, $16, $18, $1A, $1B, $1D, $1F, $21, $23, $24, $26
+cc0_mm0	dc.b $0F, $3F, $FF, $03, $07, $1F, $7F, $01, $07, $0F, $3F, $FF, $03, $0F
+cc0_mi1	dc.b $10, $12, $14, $15, $17, $19, $1B, $1C, $1E, $20, $22, $24, $25, $27
+cc0_mm1	dc.b $FF, $FF, $FC, $FF, $FF, $FF, $FE, $FF, $FF, $FF, $FF, $FC, $FF, $FF
+cc0_mi2	dc.b $11, $FF, $FF, $16, $18, $1A, $FF, $1D, $1F, $21, $FF, $FF, $26, $FF
+cc0_mm2	dc.b $C0, $00, $00, $F8, $E0, $80, $00, $F8, $F0, $C0, $00, $00, $F0, $00
+; mode 2
+cc1_base
+	dc.b $FE, $03, $F8, $0F, $E0, $3F, $80, $FF
+	dc.b $01, $FC, $00, $00, $00, $00, $FF, $00
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+cc1_mi0	dc.b $0F, $11, $13, $15, $17, $18, $1A, $1C, $1E, $1F, $21, $23, $25, $27
+cc1_mm0	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+cc1_mi1	dc.b $10, $12, $14, $16, $FF, $19, $1B, $1D, $FF, $20, $22, $24, $26, $FF
+cc1_mm1	dc.b $FF, $FF, $FF, $FF, $00, $FF, $FF, $FF, $00, $FF, $FF, $FF, $FF, $00
+cc1_mi2	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+cc1_mm2	dc.b $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+; mode 3
+cc2_base
+	dc.b $FF, $00, $FF, $00, $FF, $00, $FF, $00
+	dc.b $FF, $00, $00, $00, $00, $03, $FF, $F0
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+	dc.b $00, $00, $00, $00, $00, $00, $00, $00
+cc2_mi0	dc.b $0F, $11, $13, $14, $16, $18, $1A, $1B, $1D, $1F, $21, $23, $24, $26
+cc2_mm0	dc.b $0F, $3F, $FF, $03, $07, $1F, $7F, $01, $07, $0F, $3F, $FF, $03, $0F
+cc2_mi1	dc.b $10, $12, $14, $15, $17, $19, $1B, $1C, $1E, $20, $22, $24, $25, $27
+cc2_mm1	dc.b $FF, $FF, $FC, $FF, $FF, $FF, $FE, $FF, $FF, $FF, $FF, $FC, $FF, $FF
+cc2_mi2	dc.b $11, $FF, $FF, $16, $18, $1A, $FF, $1D, $1F, $21, $FF, $FF, $26, $FF
+cc2_mm2	dc.b $C0, $00, $00, $F8, $E0, $80, $00, $F8, $F0, $C0, $00, $00, $F0, $00
+; mode 4
+cc3_base
 	dc.b $FF, $00, $FF, $00, $FF, $00, $FF, $00
 	dc.b $FF, $00, $00, $00, $00, $00, $FF, $00
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
 	dc.b $00, $00, $00, $00, $00, $00, $00, $00
-cc4_mi0	dc.b $0F, $11, $13, $15, $17, $18, $1A, $1C, $1E, $1F, $21, $23, $25, $27
-cc4_mm0	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-cc4_mi1	dc.b $10, $12, $14, $16, $FF, $19, $1B, $1D, $FF, $20, $22, $24, $26, $FF
-cc4_mm1	dc.b $FF, $FF, $FF, $FF, $00, $FF, $FF, $FF, $00, $FF, $FF, $FF, $FF, $00
-cc4_mi2	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-cc4_mm2	dc.b $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+cc3_mi0	dc.b $0F, $11, $13, $15, $17, $18, $1A, $1C, $1E, $1F, $21, $23, $25, $27
+cc3_mm0	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+cc3_mi1	dc.b $10, $12, $14, $16, $FF, $19, $1B, $1D, $FF, $20, $22, $24, $26, $FF
+cc3_mm1	dc.b $FF, $FF, $FF, $FF, $00, $FF, $FF, $FF, $00, $FF, $FF, $FF, $FF, $00
+cc3_mi2	dc.b $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+cc3_mm2	dc.b $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+mode_tab
+	dc.w cc0_base, cc0_mi0, cc0_mm0, cc0_mi1, cc0_mm1, cc0_mi2, cc0_mm2
+	dc.w cc1_base, cc1_mi0, cc1_mm0, cc1_mi1, cc1_mm1, cc1_mi2, cc1_mm2
+	dc.w cc2_base, cc2_mi0, cc2_mm0, cc2_mi1, cc2_mm1, cc2_mi2, cc2_mm2
+	dc.w cc3_base, cc3_mi0, cc3_mm0, cc3_mi1, cc3_mm1, cc3_mi2, cc3_mm2
 ; first byte (bit 0 of seq_misc: a misc code, $15 for CC3), second byte
 seq_a	dc.b $94, $94, $94, $94, $94, $94, $C1, $C1, $49, $37, $B0, $20, $C1, $54, $4F, $20, $94, $94
 seq_b	dc.b $20, $20, $AE, $AE, $E0, $E0, $54, $52, $20, $38, $B0, $43, $D0, $49, $CE, $23, $2F, $2F

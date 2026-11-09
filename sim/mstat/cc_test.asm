@@ -22,12 +22,14 @@
 ;   SELECT        CC1 or CC3 (CC3 sends the misc control codes as $15:
 ;                 for a TV that takes the 7800's frames as field 2)
 ;   PAUSE         each byte pair in 2 frames (2, the default) or 1 (1)
-;   RESET         1: the standard waveform, or 4: the playfield grid
-;                 experiment, every edge rounded to 8 MARIA clocks (4 TIA
-;                 colour clocks, a 2600 playfield pixel) from the
-;                 picture's first pixel, the run-in as 8-clock pulses every
-;                 16 (it cannot keep its rate on that grid): could a 2600
-;                 send captions with its playfield? (cc_tables.py)
+;   RESET         the mode, 1-4: 1 the standard waveform; 2-4 the
+;                 playfield grid experiment (could a 2600 send captions
+;                 with its playfield?): edges rounded to 8 MARIA clocks (4
+;                 TIA colour clocks, a 2600 playfield pixel) from the
+;                 picture's first pixel, for 2 the start and data bits, for
+;                 3 the run-in (8-clock pulses every 16: it cannot keep its
+;                 rate on that grid), for 4 both (cc_tables.py). 4 did not
+;                 decode on the Samsung (2026-11-09).
 ; An earlier experiment in RESET's place, 8-clock bits (895 kbit/s instead
 ; of 503), did not decode on the Samsung (2026-11-09): its decoder samples
 ; at a fixed rate. Every level from 4 to 15 decodes, at offset 0 or 1.
@@ -129,7 +131,15 @@ wsn      = $8C          ; WSYNCs to the caption line
 dlp      = $8D          ; DLL write pointer (2 bytes)
 rep1     = $8F          ; 0: each pair in 2 frames, 1: in 1
 half     = $92          ; which of its 2 frames this is
-mode4    = $93          ; 1: the playfield grid
+mode     = $93          ; 0-3: modes 1-4
+tp       = $A0          ; this mode's 7 table addresses (14 bytes)
+TP_BASE  = tp
+TP_MI0   = tp + 2
+TP_MM0   = tp + 4
+TP_MI1   = tp + 6
+TP_MM1   = tp + 8
+TP_MI2   = tp + 10
+TP_MM2   = tp + 12
 
 BM       = $1800        ; the caption line's 40 bytes
 CCDL     = $1840        ; its display list
@@ -274,9 +284,11 @@ in_pau	lda tmp
 in_rst	lda tmp
 	and #$01                ; RESET
 	beq in_done
-	lda mode4
-	eor #1
-	sta mode4
+	lda mode
+	clc
+	adc #1
+	and #3
+	sta mode
 in_done
 	lda lvl
 	sta P0C3
@@ -377,11 +389,10 @@ st_one	pha
 	sbc rep1
 	ldx #96
 	jsr st_digit
-	lda #1                  ; 1 standard, 4 the playfield grid
-	ldx mode4
-	beq st_w
-	lda #4
-st_w	ldx #120
+	lda mode                ; 1-4
+	clc
+	adc #1
+	ldx #120
 	jsr st_digit
 	lda #0
 	sta STDL,y
@@ -447,13 +458,26 @@ np_done	stx seqi
 
 ; The caption line's 40 bytes, and the border writes' values
 build_line
-	lda mode4
-	beq bl_std
-	jmp build_line4
-bl_std	ldx #39
-bl_cp	lda cc_base,x
-	sta BM,x
-	dex
+	lda mode                ; this mode's tables: mode_tab + 14 mode
+	asl
+	sta tmp
+	asl
+	asl
+	asl
+	sec
+	sbc tmp
+	tax
+	ldy #0
+bl_tp	lda mode_tab,x
+	sta tp,y
+	inx
+	iny
+	cpy #14
+	bne bl_tp
+	ldy #39
+bl_cp	lda (TP_BASE),y
+	sta BM,y
+	dey
 	bpl bl_cp
 	lda pa
 	sta tmp
@@ -464,19 +488,22 @@ bl_bit	cpy #8
 	sta tmp
 bl_sh	lsr tmp
 	bcc bl_next
-	ldx cc_mi0,y
+	lda (TP_MI0),y
+	tax
 	lda BM,x
-	ora cc_mm0,y
+	ora (TP_MM0),y
 	sta BM,x
-	ldx cc_mi1,y
+	lda (TP_MI1),y
 	bmi bl_next
+	tax
 	lda BM,x
-	ora cc_mm1,y
+	ora (TP_MM1),y
 	sta BM,x
-	ldx cc_mi2,y
+	lda (TP_MI2),y
 	bmi bl_next
+	tax
 	lda BM,x
-	ora cc_mm2,y
+	ora (TP_MM2),y
 	sta BM,x
 bl_next	iny
 	cpy #14
@@ -494,42 +521,6 @@ bl_17	stx lvl17
 	ldx lvl
 bl_18	stx lvl18
 	rts
-
-; The same on the playfield grid: the same 14 bits in the picture and the
-; same two in the border (columns 413 and 429 are on the grid)
-build_line4
-	ldx #39
-b4_cp	lda cc4_base,x
-	sta BM,x
-	dex
-	bpl b4_cp
-	lda pa
-	sta tmp
-	ldy #0                  ; data bits 3-16
-b4_bit	cpy #8
-	bne b4_sh
-	lda pb
-	sta tmp
-b4_sh	lsr tmp
-	bcc b4_next
-	ldx cc4_mi0,y
-	lda BM,x
-	ora cc4_mm0,y
-	sta BM,x
-	ldx cc4_mi1,y
-	bmi b4_next
-	lda BM,x
-	ora cc4_mm1,y
-	sta BM,x
-	ldx cc4_mi2,y
-	bmi b4_next
-	lda BM,x
-	ora cc4_mm2,y
-	sta BM,x
-b4_next	iny
-	cpy #14
-	bne b4_bit
-	jmp bl_border
 
 wait_vb_start
 	lda MSTAT
