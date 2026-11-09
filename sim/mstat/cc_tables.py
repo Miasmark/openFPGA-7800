@@ -10,6 +10,12 @@ starts 18 clocks late (about 5.7 of its 7 cycles show), and the last two
 bits (the second byte's bit 6 and parity, columns 415-444) fall in the
 right border, where the cart puts them with two BACKGRND writes.
 
+A second set (cc8_*) is for the cart's experimental mode with 8-clock
+bits (895 kbit/s, not the standard's 503): the data starts where the
+standard puts it, column 174, so the whole 7-cycle run-in (columns
+118-174) and the last bit (to column 326) are inside the picture, and
+nothing goes in the border.
+
 Usage: cc_tables.py PIX0_COL > cc_tables.inc
 """
 import sys
@@ -22,31 +28,36 @@ D0 = RUNIN + 7 * T            # the first start bit
 def cell(k):                  # data cell k (0-18): its start column
     return D0 + k * T
 
-px = [0] * 320
-def high(a, b):               # columns [a, b) high, rounded
-    for c in range(round(a), round(b)):
-        p = c - PIX0_COL
-        if 0 <= p < 320:
-            px[p] = 1
+def waveform(T, D0, nbits):
+    """base bitmap (run-in, start bits) and masks for data bits 3..nbits+2"""
+    px = [0] * 320
+    def high(a, b):
+        for c in range(round(a), round(b)):
+            p = c - PIX0_COL
+            if 0 <= p < 320:
+                px[p] = 1
+    def cell(k):
+        return D0 + k * T
+    r0 = D0 - 7 * T
+    for j in range(7):                      # run-in: a cycle a bit, high
+        s0 = r0 + j * T                     # in its middle half
+        high(s0 + T / 4, s0 + 3 * T / 4)
+    high(cell(2), cell(3))                  # start bits 0 0 1
+    base = [sum(px[8 * i + b] << (7 - b) for b in range(8)) for i in range(40)]
+    masks = []
+    for k in range(3, 3 + nbits):
+        m = {}
+        for c in range(round(cell(k)), round(cell(k + 1))):
+            p = c - PIX0_COL
+            if 0 <= p < 320:
+                m[p // 8] = m.get(p // 8, 0) | (0x80 >> (p % 8))
+        items = sorted(m.items()) + [(0xFF, 0)] * 3
+        assert len(m) <= 3
+        masks.append(items[:3])
+    return base, masks
 
-# run-in: each cycle high in its middle half (a sine's top half, squared)
-for j in range(7):
-    s = RUNIN + j * T
-    high(s + T / 4, s + 3 * T / 4)
-# start bits 0 0 1
-high(cell(2), cell(3))
-base = [sum(px[8 * i + b] << (7 - b) for b in range(8)) for i in range(40)]
-
-# data bits 3-16 (byte 1's 8, byte 2's bits 0-5): up to 3 (byte, mask) each
-masks = []
-for k in range(3, 17):
-    m = {}
-    for c in range(round(cell(k)), round(cell(k + 1))):
-        p = c - PIX0_COL
-        if 0 <= p < 320:
-            m[p // 8] = m.get(p // 8, 0) | (0x80 >> (p % 8))
-    items = sorted(m.items()) + [(0xFF, 0)] * 3
-    masks.append(items[:3])
+base, masks = waveform(T, D0, 14)          # bits 17-18 go in the border
+base8, masks8 = waveform(8, D0, 16)        # all 16 inside the picture
 
 def par(c):                   # odd parity in bit 7
     return c | (0x80 if bin(c).count("1") % 2 == 0 else 0)
@@ -81,6 +92,13 @@ for i in range(0, 40, 8):
 for n in range(3):
     print("cc_mi%d\tdc.b " % n + ", ".join("$%02X" % m[n][0] for m in masks))
     print("cc_mm%d\tdc.b " % n + ", ".join("$%02X" % m[n][1] for m in masks))
+print("; 8-clock bits (the experimental mode)")
+print("cc8_base")
+for i in range(0, 40, 8):
+    print("\tdc.b " + ", ".join("$%02X" % v for v in base8[i:i + 8]))
+for n in range(3):
+    print("cc8_mi%d\tdc.b " % n + ", ".join("$%02X" % m[n][0] for m in masks8))
+    print("cc8_mm%d\tdc.b " % n + ", ".join("$%02X" % m[n][1] for m in masks8))
 print("; first byte (bit 0 of seq_misc: a misc code, $15 for CC3), second byte")
 print("seq_a\tdc.b " + ", ".join("$%02X" % par(a & 0xFF) for a, _ in seq))
 print("seq_b\tdc.b " + ", ".join("$%02X" % par(b) for _, b in seq))

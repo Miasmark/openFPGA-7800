@@ -15,13 +15,19 @@
 ; writes BACKGRND there, bit 6's level and then parity's, then black again.
 ; See cc_tables.py for the bit positions.
 ;
-; Controls (shown at the top left: offset, level, channel, repeat):
+; Controls (shown at the top left: offset, level, channel, repeat, bits):
 ;   up / down     the caption lines' offset, 0-7 lines below the first
 ;                 line MARIA draws
 ;   left / right  the high level: hue 0, luminance 2-15 (default 7)
 ;   SELECT        CC1 or CC3 (CC3 sends the misc control codes as $15:
 ;                 for a TV that takes the 7800's frames as field 2)
 ;   PAUSE         each byte pair in 2 frames (2, the default) or 1 (1)
+;   RESET         bit width: 1 the standard's (14.19 MARIA clocks), or 8:
+;                 an experiment, 8-clock bits (895 kbit/s, not 503), the
+;                 data where the standard starts it, so the whole 7-cycle
+;                 run-in and every bit fit inside the picture (nothing in
+;                 the border). A decoder that samples at its fixed bit
+;                 rate should not read it.
 ; On the owner's Samsung CRT (2026-11-08) one pair a frame showed
 ; "AR78 CTI n": the decoder reads every other frame (its field 1 out of
 ; the 7800's identical 263-line frames), so the default sends each pair
@@ -120,6 +126,7 @@ wsn      = $8C          ; WSYNCs to the caption line
 dlp      = $8D          ; DLL write pointer (2 bytes)
 rep1     = $8F          ; 0: each pair in 2 frames, 1: in 1
 half     = $92          ; which of its 2 frames this is
+mode8    = $93          ; 1: 8-clock bits
 
 BM       = $1800        ; the caption line's 40 bytes
 CCDL     = $1840        ; its display list
@@ -257,10 +264,16 @@ in_sel	lda SWCHB
 	sta chan
 in_pau	lda tmp
 	and #$08                ; PAUSE
-	beq in_done
+	beq in_rst
 	lda rep1
 	eor #1
 	sta rep1
+in_rst	lda tmp
+	and #$01                ; RESET
+	beq in_done
+	lda mode8
+	eor #1
+	sta mode8
 in_done
 	lda lvl
 	sta P0C3
@@ -335,7 +348,7 @@ dll_empty                       ; A = lines - 1
 build_status
 	ldy #0
 	lda off
-	ldx #24
+	ldx #8
 	jsr st_digit
 	lda lvl
 	ldx #0
@@ -346,20 +359,26 @@ st_ten	cmp #10
 	bne st_ten
 st_one	pha
 	txa
-	ldx #56
+	ldx #32
 	jsr st_digit
 	pla
-	ldx #72
+	ldx #48
 	jsr st_digit
 	lda chan
 	asl
 	ora #1                  ; 1 or 3
-	ldx #104
+	ldx #72
 	jsr st_digit
 	lda #2                  ; 2 frames a pair, or 1
 	sec
 	sbc rep1
-	ldx #136
+	ldx #96
+	jsr st_digit
+	lda #1                  ; bit width: 1 standard, 8
+	ldx mode8
+	beq st_w
+	lda #8
+st_w	ldx #120
 	jsr st_digit
 	lda #0
 	sta STDL,y
@@ -425,7 +444,10 @@ np_done	stx seqi
 
 ; The caption line's 40 bytes, and the border writes' values
 build_line
-	ldx #39
+	lda mode8
+	beq bl_std
+	jmp build_line8
+bl_std	ldx #39
 bl_cp	lda cc_base,x
 	sta BM,x
 	dex
@@ -467,6 +489,45 @@ bl_17	stx lvl17
 	bpl bl_18
 	ldx lvl
 bl_18	stx lvl18
+	rts
+
+; The same with 8-clock bits: all 16 data bits in the picture, the border
+; black
+build_line8
+	ldx #39
+b8_cp	lda cc8_base,x
+	sta BM,x
+	dex
+	bpl b8_cp
+	lda pa
+	sta tmp
+	ldy #0                  ; data bits 3-18
+b8_bit	cpy #8
+	bne b8_sh
+	lda pb
+	sta tmp
+b8_sh	lsr tmp
+	bcc b8_next
+	ldx cc8_mi0,y
+	lda BM,x
+	ora cc8_mm0,y
+	sta BM,x
+	ldx cc8_mi1,y
+	bmi b8_next
+	lda BM,x
+	ora cc8_mm1,y
+	sta BM,x
+	ldx cc8_mi2,y
+	bmi b8_next
+	lda BM,x
+	ora cc8_mm2,y
+	sta BM,x
+b8_next	iny
+	cpy #16
+	bne b8_bit
+	lda #0
+	sta lvl17
+	sta lvl18
 	rts
 
 wait_vb_start
