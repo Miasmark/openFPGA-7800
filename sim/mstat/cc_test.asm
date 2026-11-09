@@ -28,8 +28,10 @@
 ;                 TIA colour clocks, a 2600 playfield pixel) from the
 ;                 picture's first pixel, for 2 the start and data bits, for
 ;                 3 the run-in (8-clock pulses every 16: it cannot keep its
-;                 rate on that grid), for 4 both (cc_tables.py). 4 did not
-;                 decode on the Samsung (2026-11-09).
+;                 rate on that grid), for 4 both (cc_tables.py). None of
+;                 2, 3 or 4 decoded on the Samsung (2026-11-09): neither
+;                 the grid's data edges (up to 3.9 clocks off, 0.55 us)
+;                 nor its run-in alone.
 ; An earlier experiment in RESET's place, 8-clock bits (895 kbit/s instead
 ; of 503), did not decode on the Samsung (2026-11-09): its decoder samples
 ; at a fixed rate. Every level from 4 to 15 decodes, at offset 0 or 1.
