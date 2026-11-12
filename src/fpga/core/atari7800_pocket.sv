@@ -1850,12 +1850,14 @@ composite_decoder #(.SPC(4)) comp_dec
 );
 
 // The light gun's crosshair, moved to where the decoded picture is. The
-// decoded picture's HBlank trails the RGB one by 14 clk_sys (tb_load
-// +composite measures it); the crosshair is taken one clk_sys before the
-// pixel it lands on is registered, so 13 here.
-localparam integer COMP_GUN_DELAY = 13;
+// decoded picture's HBlank trails the RGB one by 14 clk_sys on MARIA and 12
+// on the TIA (tb_load +composite measures it); the crosshair is taken one
+// clk_sys before the pixel it lands on is registered, so 13 and 11 here.
+localparam integer COMP_GUN_DELAY     = 13;
+localparam integer COMP_GUN_DELAY_TIA = 11;
 reg [COMP_GUN_DELAY-1:0] gun_dly = '0;
 always @(posedge clk_sys) gun_dly <= {gun_dly[COMP_GUN_DELAY-2:0], gun_en & gun_target};
+wire gun_comp = tia_en ? gun_dly[COMP_GUN_DELAY_TIA-1] : gun_dly[COMP_GUN_DELAY-1];
 
 wire       use_comp = composite && ~video_pal_o;
 wire [1:0] comp_last = tia_en ? 2'd3 : 2'd1;   // samples per pixel, less one
@@ -1879,7 +1881,7 @@ always @(posedge clk_sys) begin
 		comp_ph  <= (cd_hb || comp_ph == comp_last) ? 2'd0 : comp_ph + 2'd1;
 		if (!cd_hb && comp_ph == comp_last) begin
 			comp_ce <= 1'b1;
-			if (gun_dly[COMP_GUN_DELAY-1]) begin
+			if (gun_comp) begin
 				comp_r <= 8'd255; comp_g <= 8'd0; comp_b <= 8'd0;
 			end else if (tia_en) begin
 				comp_r <= comp_nr[9:2]; comp_g <= comp_ng[9:2]; comp_b <= comp_nb[9:2];

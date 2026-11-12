@@ -230,7 +230,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 |---|---|
 | 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
-| Composite options | MiSTer's Composite Smear, AGC and Comb settings: the Pocket's menu is full, so *Composite* uses their defaults. PAL composite: upstream's model and decoder are NTSC only. |
+| Composite options | MiSTer's Composite Smear, AGC and Comb settings: the Pocket's menu is full, so *Composite* uses their defaults. PAL composite: upstream's model and decoder are NTSC only. In 2600 mode *Composite* is built from the TIA's colour codes, so *Flicker Blend* and *De-comb*, which work on the RGB picture, do not reach it. |
 
 #### Why MiSTer's BupChip doesn't fit, and ARIA
 
