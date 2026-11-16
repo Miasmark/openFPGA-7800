@@ -306,6 +306,8 @@ wire net_cmd  = (mb_device >= 8'h71 && mb_device <= 8'h78) &&
                 (mb_cmd == 8'h4F || mb_cmd == 8'h43 || mb_cmd == 8'h53 || mb_cmd == 8'h52);
 
 assign busy = st != E_IDLE;
+wire rx_act = st == E_SEND || st == E_FETCH || st == E_WAIT;
+wire frame_end = u_rx_valid && u_rx_data == SLIP_END && !hunting && pos != 12'd0;
 
 always_comb begin
 	emit = 1'b0;
@@ -419,6 +421,10 @@ always_ff @(posedge clk) begin
 				sum <= cks(sum, plen[15:8]);
 				step <= 5'd0;
 				st <= E_SEND;
+				hunting <= 1'b1;
+				esc <= 1'b0;
+				raw_cnt <= 12'd0;
+				rx_any <= 1'b0;
 			end
 			default: ;
 		endcase
@@ -451,10 +457,7 @@ always_ff @(posedge clk) begin
 			end
 			5'd9: begin
 				// sent: wait for the reply
-				hunting <= 1'b1;
-				esc <= 1'b0;
-				raw_cnt <= 12'd0;
-				if (!bare) rx_any <= 1'b0;
+				if (bare) raw_cnt <= 12'd0;
 				ms_pre <= 14'd0;
 				ms <= 17'd0;
 				if (!bare)
@@ -502,53 +505,70 @@ always_ff @(posedge clk) begin
 			st <= E_DONE;
 		end
 
+		if (u_rx_valid && raw_cnt >= 12'd2061) begin
+			err <= ERR_TOOBIG;
+			st <= E_DONE;
+		end
+		if (frame_end) begin
+			// a whole frame
+			if (pos < 12'd6 || r_len != {4'd0, pos} || r_ck != rsum || rbad || dstate != 2'd3) begin
+				err <= ERR_BADFRAME;
+				st <= E_DONE;
+			end else if (r_dev == 8'hFF && (r_cmd == 8'h4F || r_cmd == 8'h57 || r_cmd == 8'h43)) begin
+				// the FujiNet pushing an image (MOUNT_IMAGE): refused at its
+				// OPEN, as a cart with no room for it; the others are ACKed.
+				// The wait starts again, as fujibus_usb.c's.
+				if (r_cmd == 8'h4F) begin
+					boot_state <= 8'h80;   // FN_BOOT_FAILED
+					boot_err <= 8'd3;      // FN_BOOT_ERR_NOMAP
+				end
+				if (r_cmd == 8'h43 && dptr != 11'd0 && r_d0 == 8'h01) begin
+					boot_state <= 8'h80;
+					boot_err <= 8'd2;      // FN_BOOT_ERR_TRUNCATED
+				end
+				link_seen <= 1'b1;
+				link_ever <= 1'b1;
+				bare <= 1'b1;
+				s_dev <= 8'hFF;
+				s_cmd <= (r_cmd == 8'h4F) ? 8'h15 : 8'h06;
+				plen <= 16'd6;
+				sum <= cks(cks(8'hFF, (r_cmd == 8'h4F) ? 8'h15 : 8'h06), 8'h06);
+				step <= 5'd0;
+				st <= E_SEND;
+			end else begin
+				reply_cmd <= r_cmd;
+				rxlen <= dptr > 11'd1024 ? 11'd1024 : dptr;
+				err <= ERR_OK;
+				link_seen <= 1'b1;
+				link_ever <= 1'b1;
+				st <= E_DONE;
+			end
+		end
+	end
+
+	E_DONE: begin
+		if (err != ERR_OK) begin
+			reply_cmd <= 8'd0;
+			rxlen <= 11'd0;
+		end
+		// last: the interlock (the client sees the echo only once all is in place)
+		ackseq <= seq;
+		st <= E_IDLE;
+	end
+
+	default: st <= E_IDLE;
+	endcase
+
+	// The receiver runs from the start of a request's frame, so a reply that
+	// starts early is not lost, and a wire from SO to SI (loopback) brings the
+	// cart's own frame back as a good frame. Only E_WAIT acts on a frame.
+	if (rx_act) begin
 		if (u_rx_valid) begin
 			rx_any <= 1'b1;
 			raw_cnt <= raw_cnt + 12'd1;
-			if (raw_cnt >= 12'd2061) begin
-				err <= ERR_TOOBIG;
-				st <= E_DONE;
-			end
 			if (u_rx_data == SLIP_END) begin
-				if (hunting) begin
-					hunting <= 1'b0;
-					pos <= 12'd0;
-				end else if (pos != 12'd0) begin
-					// a whole frame
-					pos <= 12'd0;
-					if (pos < 12'd6 || r_len != {4'd0, pos} || r_ck != rsum || rbad || dstate != 2'd3) begin
-						err <= ERR_BADFRAME;
-						st <= E_DONE;
-					end else if (r_dev == 8'hFF && (r_cmd == 8'h4F || r_cmd == 8'h57 || r_cmd == 8'h43)) begin
-						// the FujiNet pushing an image (MOUNT_IMAGE): refused at
-						// its OPEN, as a cart with no room for it; the others
-						// are ACKed. The wait starts again, as fujibus_usb.c's.
-						if (r_cmd == 8'h4F) begin
-							boot_state <= 8'h80;   // FN_BOOT_FAILED
-							boot_err <= 8'd3;      // FN_BOOT_ERR_NOMAP
-						end
-						if (r_cmd == 8'h43 && dptr != 11'd0 && r_d0 == 8'h01) begin
-							boot_state <= 8'h80;
-							boot_err <= 8'd2;      // FN_BOOT_ERR_TRUNCATED
-						end
-						link_seen <= 1'b1;
-						link_ever <= 1'b1;
-						bare <= 1'b1;
-						s_dev <= 8'hFF;
-						s_cmd <= (r_cmd == 8'h4F) ? 8'h15 : 8'h06;
-						plen <= 16'd6;
-						sum <= cks(cks(8'hFF, (r_cmd == 8'h4F) ? 8'h15 : 8'h06), 8'h06);
-						step <= 5'd0;
-						st <= E_SEND;
-					end else begin
-						reply_cmd <= r_cmd;
-						rxlen <= dptr > 11'd1024 ? 11'd1024 : dptr;
-						err <= ERR_OK;
-						link_seen <= 1'b1;
-						link_ever <= 1'b1;
-						st <= E_DONE;
-					end
-				end
+				hunting <= 1'b0;       // a frame's start; at its end E_WAIT above takes it
+				pos <= 12'd0;
 				esc <= 1'b0;
 				rsum <= 8'd0;
 				dstate <= 2'd0;
@@ -601,26 +621,13 @@ always_ff @(posedge clk) begin
 			end
 		end
 	end
-
-	E_DONE: begin
-		if (err != ERR_OK) begin
-			reply_cmd <= 8'd0;
-			rxlen <= 11'd0;
-		end
-		// last: the interlock (the client sees the echo only once all is in place)
-		ackseq <= seq;
-		st <= E_IDLE;
-	end
-
-	default: st <= E_IDLE;
-	endcase
 end
 
 // The decoded byte stream, ahead of the parser above
 always_comb begin
 	rx_byte = 1'b0;
 	rb = u_rx_data;
-	if (st == E_WAIT && u_rx_valid && !hunting && u_rx_data != SLIP_END) begin
+	if (rx_act && u_rx_valid && !hunting && u_rx_data != SLIP_END) begin
 		if (esc) begin
 			// a malformed escape is dropped, as the ESP32 does
 			rx_byte = u_rx_data == SLIP_ESC_END || u_rx_data == SLIP_ESC_ESC;

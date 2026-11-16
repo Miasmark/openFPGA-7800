@@ -45,6 +45,7 @@ expect = [
     frame(0x70, 0xC4),
     frame(0x70, 0xC4),
     frame(0x71, 0x4F, params=[(4, 0x04030201)]),
+    frame(0x70, 0xC4, params=[(1, 7)], payload=b"AB"),
 ]
 
 src = [os.path.join(FPGA, "fujinet_uart.sv"), os.path.join(FPGA, "fujinet_mailbox.sv"),

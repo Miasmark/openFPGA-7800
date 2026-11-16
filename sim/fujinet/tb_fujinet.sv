@@ -25,13 +25,14 @@ logic        rw = 1'b1, phi2 = 1'b0, cs = 1'b0;
 logic        bus_oe, txd, tx_en, busy;
 logic  [7:0] bus_do;
 logic        rxd = 1'b1;
+bit          loop = 0;          // SO wired to SI
 
 fujinet_mailbox #(.MS_DIV(MS)) dut (
 	.clk (clk), .reset (reset), .app (1'b1), .pal (1'b0), .tv_pal (1'b0),
 	.claim_kind (8'd0), .hsc_rom (1'b0), .hsc_on (1'b0), .bios_skipped (1'b0),
 	.addr (addr), .wdata (wdata), .rw (rw), .phi2 (phi2), .cs (cs),
 	.bus_oe (bus_oe), .bus_do (bus_do),
-	.txd (txd), .tx_en (tx_en), .rxd (rxd), .busy (busy)
+	.txd (txd), .tx_en (tx_en), .rxd (loop ? txd : rxd), .busy (busy)
 );
 
 int fails = 0;
@@ -313,6 +314,22 @@ initial begin
 	rd(st(8'h02), v); check("11 err", v, 0);
 	rd(st(8'h03), v); check("11 nak", v, 8'h15);
 	rd(st(8'h04), v); check("11 rxlen", v, 0);
+
+	// 12: SO wired to SI: the cart hears its own request, a good frame
+	// (one param, skipped as a field, and a payload "AB" that is the reply)
+	loop = 1;
+	begin_txn(8'h70, 8'hC4, 8'd1);
+	tx(8'd1); tx(8'h07);
+	tx("A"); tx("B");
+	go(s);
+	expect_frame(200000);
+	wait_ack(s, 400000);
+	rd(st(8'h02), v); check("12 loopback err", v, 0);
+	rd(st(8'h03), v); check("12 loopback reply cmd", v, 8'hC4);
+	rd(st(8'h04), v); check("12 loopback rxlen", v, 2);
+	rd(16'h0800, v); check("12 loopback data 0", v, "A");
+	rd(16'h0801, v); check("12 loopback data 1", v, "B");
+	loop = 0;
 
 	$display("TB_FUJINET frames %0d fails %0d", ntx, fails);
 	$finish;

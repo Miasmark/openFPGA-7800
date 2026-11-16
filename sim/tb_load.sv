@@ -183,11 +183,23 @@ module tb_load;
 	initial fn_loop = $test$plusargs("fnloop");
 `ifdef POCKET_SRAM
 	logic [7:0] fn_ack_seen = 8'd0;
-	int fn_txbytes = 0;
+	int fn_txbytes = 0, fn_rd_n = 0, fn_wr_n = 0;
+	initial begin
+		#40ms;
+		if (dut.fn_app) $display("FN claim found: blk_end %0d, cart_size %0d, RAM %0d", dut.fn_blk_end, dut.cart_size, dut.fn_ram);
+	end
 	logic fn_txd_d = 1'b1;
 	always @(posedge clk_sys) begin
 		fn_txd_d <= fn_txd;
 		if (fn_txd_d && !fn_txd) fn_txbytes++;    // start bits, roughly
+		if (dut.fn_oe && dut.bus_phi2 && fn_rd_n < 12) begin
+			fn_rd_n++;
+			$display("FN read $%04x = $%02x", dut.bios_addr, dut.fn_do);
+		end
+		if (dut.fujinet.reg_wr && fn_wr_n < 12) begin
+			fn_wr_n++;
+			$display("FN reg %02x = $%02x", dut.fujinet.reg_n, dut.din);
+		end
 		if (dut.fujinet.ackseq != fn_ack_seen) begin
 			fn_ack_seen <= dut.fujinet.ackseq;
 			$display("FN %0d ms: ackseq %0d err %0d reply_cmd %02x rxlen %0d link %0d, ~%0d bytes sent, app %0d",
