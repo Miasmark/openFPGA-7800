@@ -254,8 +254,13 @@ assign cart_tran_pin31_dir = 1'b0;  // input
 
 // link port is unused, set to input only to be safe
 // each bit may be bidirectional in some applications
-assign port_tran_so = 1'bz;
-assign port_tran_so_dir = 1'b0;     // SO is output only
+// FujiNet (atari7800_pocket.sv, fujinet_mailbox.sv): a FujiNet program
+// talks to a FujiNet device over a 115,200 baud serial line on the link
+// port, TX on SO, RX on SI. SO is driven only while such a program is
+// loaded; otherwise both stay as the template leaves them.
+wire fn_txd, fn_tx_en;
+assign port_tran_so = fn_tx_en ? fn_txd : 1'bz;
+assign port_tran_so_dir = fn_tx_en;
 assign port_tran_si = 1'bz;
 assign port_tran_si_dir = 1'b0;     // SI is input only
 assign port_tran_sck = 1'bz;
@@ -896,6 +901,9 @@ atari7800_pocket atari (
     .flicker_blend  ( set_s2[4] ),
     .pokey_irq      ( set_s2[3] ),
     .savekey_setting( set_s2[2:1] ),
+    .fn_txd( fn_txd ),
+    .fn_tx_en( fn_tx_en ),
+    .fn_rxd( port_tran_si ),
     .atarivox_setting( set_s2[36:35] ),
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),

@@ -175,6 +175,28 @@ module tb_load;
 		.cram_we_n(cram0_we_n), .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n));
 `endif
 
+	// FujiNet (fujinet_mailbox.sv): the link port's serial line. +fnloop
+	// joins SO to SI, as a wire between link pins 2 and 3 does; otherwise
+	// SI idles high, nothing attached. Each transaction's end is logged.
+	logic fn_txd, fn_tx_en;
+	bit   fn_loop = 0;
+	initial fn_loop = $test$plusargs("fnloop");
+`ifdef POCKET_SRAM
+	logic [7:0] fn_ack_seen = 8'd0;
+	int fn_txbytes = 0;
+	logic fn_txd_d = 1'b1;
+	always @(posedge clk_sys) begin
+		fn_txd_d <= fn_txd;
+		if (fn_txd_d && !fn_txd) fn_txbytes++;    // start bits, roughly
+		if (dut.fujinet.ackseq != fn_ack_seen) begin
+			fn_ack_seen <= dut.fujinet.ackseq;
+			$display("FN %0d ms: ackseq %0d err %0d reply_cmd %02x rxlen %0d link %0d, ~%0d bytes sent, app %0d",
+				$time / 1000000, dut.fujinet.ackseq, dut.fujinet.err, dut.fujinet.reply_cmd,
+				dut.fujinet.rxlen, dut.fujinet.link_seen, fn_txbytes, dut.fn_app);
+		end
+	end
+`endif
+
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
 		.clk_arm(clk_arm), .bupfw_download(bupfw_download), .ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
@@ -200,6 +222,7 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
+		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd(fn_loop ? fn_txd : 1'b1),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),

@@ -167,6 +167,39 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
   PAL games stay RGB.
 
+### FujiNet over the link port (in development, not in a release yet)
+
+FujiNet programs for the 7800 talk to a FujiNet device through a mailbox
+their cartridge serves below $1000 (the FujiNet 7800 programmer's handbook,
+section 19). The core can now be that cartridge, with the FujiNet on the
+Pocket's link port instead of a cartridge's USB link:
+
+- **When:** only for an image that claims the mailbox ("FUJI" at $FF70, as
+  FujiNet's own tools put it; the core finds it while the image loads).
+  Every other image runs exactly as before, and the link port's pins stay
+  undriven.
+- **What it does** (`src/fpga/core/fujinet_mailbox.sv`): the mailbox as
+  FujiNet's RP2354B cartridge serves it (reply window at $0800, status page
+  at $0C00, registers at $0D00, the request stream at $0F00, the
+  SEQ / ACKSEQ handshake, per-command time limits), plus POKEY at $0450 and,
+  if the claim asks, 16K of RAM at $4000. Each request goes out as a
+  FujiBus packet in a SLIP frame at 115,200 baud 8N1, the format every
+  FujiNet uses (`lib/bus/rs232`): link pin 2 (SO) is the core's TX, pin 3
+  (SI) its RX, pin 6 ground.
+- **Not done:** loading a game from the FujiNet (MOUNT_IMAGE's image push
+  is refused, so the program sees the load fail) and the High Score Cart's
+  saves to the FujiNet's SD card. Images come from the Pocket's SD card as
+  always.
+- **No link:** a serial adapter gives no sign it is there, so the core
+  counts the link as up once a good frame arrives. Until then a request
+  that hears nothing ends after 1.5 s with "no link" (error 1).
+- **Testing it:** `sim/fujinet/fn_test.asm` (built as
+  `sim/fujinet/fn_test.a78`) shows the mailbox and runs one request.
+  With nothing on the link port it reports NO LINK; with a wire between
+  link pins 2 and 3 it hears its own request and reports LOOPBACK.
+  `sim/fujinet/run_fujinet.py` checks the mailbox and every frame it sends
+  against a model of the FujiBus format.
+
 ### New in 2.2.6
 
 2.2.6 is 2.2.5 with artifact colour and one MARIA change:

@@ -111,6 +111,10 @@ module atari7800_pocket
 
 	// SaveKey EEPROM (24LC256) RAM, second port for its save slot (clk_74a)
 	input  wire  [1:0] savekey_setting, // 0 auto (A78 header), 1 on, 2 off
+	// FujiNet (fujinet_mailbox.sv): its serial line on the link port
+	output wire        fn_txd,
+	output wire        fn_tx_en,        // drive link SO
+	input  wire        fn_rxd,
 	input  wire  [1:0] atarivox_setting, // AtariVox voice: 0 off, 1 quiet, 2 normal, 3 loud
 	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
 	input  wire        sk_bridge_wr,
@@ -454,6 +458,46 @@ wire  [7:0] din;
 
 wire [24:0] cart_write_addr = (ioctl_addr >= 25'd128) && cart_is_7800 ?
 	(ioctl_addr - 25'd128) : ioctl_addr;
+
+// FujiNet claim: "FUJI" and 6 flag bytes at CPU $FF70 make an image a
+// FujiNet program (APP mode; fujinet_mailbox.sv). The bytes are found as
+// the image loads: $FF70 is 0x90 bytes from the end of the ROM, so in the
+// last 4K block at block offset $F70, for any ROM a whole number of 4K
+// blocks long (every 7800 ROM). Each block's bytes at $F70-$F76 are kept;
+// at the end the last block's count only if it ends where the cartridge
+// does. Flag byte 2, bit 0: 16K of cartridge RAM at $4000.
+reg  [7:0] fn_sig [0:5];
+reg        fn_blk_ok = 1'b0, fn_blk_ram = 1'b0;
+reg  [7:0] fn_blk_kind = 8'd0;
+reg [12:0] fn_blk_end = 13'd0;
+reg        fn_app = 1'b0, fn_ram = 1'b0;
+reg  [7:0] fn_kind = 8'd0;
+always @(posedge clk_sys) begin
+	if (cart_download && ~old_cart_download) begin
+		fn_blk_ok <= 1'b0;
+		fn_app <= 1'b0;
+		fn_ram <= 1'b0;
+	end
+	if (cart_download && ioctl_wr && cart_is_7800 && ioctl_addr >= 25'd128) begin
+		if (cart_write_addr[11:0] >= 12'hF70 && cart_write_addr[11:0] <= 12'hF75)
+			fn_sig[cart_write_addr[2:0]] <= ioctl_dout;
+		if (cart_write_addr[11:0] == 12'hF76) begin
+			fn_blk_ok <= {fn_sig[0], fn_sig[1], fn_sig[2], fn_sig[3]} == "FUJI";
+			fn_blk_kind <= fn_sig[5];
+			fn_blk_ram <= ioctl_dout[0];
+			fn_blk_end <= cart_write_addr[24:12] + 13'd1;
+		end
+	end
+	if (old_cart_download && ~cart_download) begin
+		fn_app <= cart_is_7800 && fn_blk_ok && cart_size == {7'd0, fn_blk_end, 12'h000};
+		fn_ram <= fn_blk_ram;
+		fn_kind <= fn_blk_kind;
+	end
+end
+// A claimed image gets the POKEY at $0450 (header bit 6) and, if it asks,
+// the RAM at $4000 (bit 2), as the FujiNet cartridge gives it.
+wire [15:0] fn_flags = fn_app ? {9'd0, 1'b1, 3'd0, fn_ram, 2'd0} : 16'd0;
+
 
 // The "no cartridge" image MiSTer boots into when nothing is loaded. The
 // Pocket's cartridge slot is required, so the core never runs without a
@@ -1245,6 +1289,40 @@ wire  [7:0] bup_cmd_data;
 wire [15:0] bup_audio_l, bup_audio_r;
 `endif
 
+// FujiNet: the mailbox, on the bus the cartridge sees (POCKET_SRAM builds)
+wire        bus_phi2, bus_cs_cart, fn_oe;
+wire  [7:0] fn_do;
+`ifdef POCKET_SRAM
+fujinet_mailbox fujinet
+(
+	.clk          (clk_sys),
+	.reset        (cart_download),
+	.app          (fn_app && ~tia_mode),
+	.pal          (region_pll),
+	.tv_pal       (region_select),
+	.claim_kind   (fn_kind),
+	.hsc_rom      (hscfw_loaded),
+	.hsc_on       (hsc_en),
+	.bios_skipped (~use_bios),
+	.addr         (bios_addr),
+	.wdata        (din),
+	.rw           (RW),
+	.phi2         (bus_phi2),
+	.cs           (bus_cs_cart),
+	.bus_oe       (fn_oe),
+	.bus_do       (fn_do),
+	.txd          (fn_txd),
+	.tx_en        (fn_tx_en),
+	.rxd          (fn_rxd),
+	.busy         ()
+);
+`else
+assign fn_oe = 1'b0;
+assign fn_do = 8'hFF;
+assign fn_txd = 1'b1;
+assign fn_tx_en = 1'b0;
+`endif
+
 Atari7800 main
 (
 	// HSC firmware and Supercharger BIOS: built without them
@@ -1318,7 +1396,7 @@ Atari7800 main
 	.cart_read    (cart_read),
 	.cart_size    (cart_size),
 	.cart_addr_out(cart_addr),
-	.cart_flags   (cart_is_7800 ? cart_flags : 16'd0),
+	.cart_flags   (cart_is_7800 ? (cart_flags | fn_flags) : 16'd0),
 	.cart_mapper  (cart_mapper),
 	.cart_save    (cart_save),
 	.cart_din     (cart_din),
@@ -1339,6 +1417,10 @@ Atari7800 main
 	.cartram_wrdata26_out (cartram_wrdata26),
 	.mclk1_out      (mclk1),
 	.bios_sel_out   (bios_sel),
+	.phi2_out       (bus_phi2),
+	.cs_cart_out    (bus_cs_cart),
+	.fn_oe          (fn_oe),
+	.fn_do          (fn_do),
 	.fb_addr        (fb_addr),
 	.fb_we          (fb_we),
 	.fb_wdata       (fb_wdata),

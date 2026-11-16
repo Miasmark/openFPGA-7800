@@ -39,6 +39,13 @@ module Atari7800 #(
 	output logic        cartram_wr26_out,
 	output logic        cartram_rd26_out,
 	output logic  [7:0] cartram_wrdata26_out,
+	// Pocket: the FujiNet mailbox (core/fujinet_mailbox.sv) watches the bus
+	// as a cartridge does and answers reads in cartridge space through
+	// fn_oe / fn_do, ahead of cart.sv.
+	output logic        phi2_out,
+	output logic        cs_cart_out,
+	input  logic        fn_oe,
+	input  logic  [7:0] fn_do,
 `endif
 `ifdef POCKET_BUPCHIP
 	// Pocket: the BupChip runs outside this module (core/bupchip/, with
@@ -379,6 +386,8 @@ module Atari7800 #(
 `ifdef POCKET_SRAM
 	assign bios_sel_out = bios_sel;
 	assign mclk1_out = mclk1;
+	assign phi2_out = pclk0;
+	assign cs_cart_out = cs_cart;
 `endif
 
 	// A selected chip drives only the lines its own oe mask marks - the TIA has
@@ -1097,6 +1106,13 @@ module Atari7800 #(
 `endif
 `endif
 
+`ifdef POCKET_SRAM
+	// The FujiNet mailbox's reads come first (Pocket; see the ports)
+	logic [7:0] cart_7800_DB_c, cart_7800_DB_oe_c;
+	assign cart_7800_DB_out = fn_oe ? fn_do : cart_7800_DB_c;
+	assign cart_7800_DB_oe  = fn_oe ? 8'hFF : cart_7800_DB_oe_c;
+`endif
+
 	cart cart
 	(
 		.aud_cmd_valid  (bup_cmd_valid),
@@ -1132,8 +1148,13 @@ module Atari7800 #(
 		.hsc_ram_cs     (hsc_ram_cs),
 		.hsc_ram_din    (hsc_ram_dout),
 		.rw             (RW),
+`ifdef POCKET_SRAM
+		.dout           (cart_7800_DB_c),
+		.dout_oe        (cart_7800_DB_oe_c),
+`else
 		.dout           (cart_7800_DB_out),
 		.dout_oe        (cart_7800_DB_oe),
+`endif
 		.pokey_audio_r  (pokey_audio_r),
 		.pokey_audio_l  (pokey_audio_l),
 		.minnie_audio   (minnie_audio),
