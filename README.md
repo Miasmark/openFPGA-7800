@@ -222,6 +222,9 @@ link:
   reports LOOPBACK and the port.
   `sim/fujinet/run_fujinet.py` checks the mailbox and every frame it sends
   against a model of the FujiBus format.
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md) has the wiring and the
+  steps, up to a FujiNet running on a PC (fujinet-pc's RS232 build) through
+  a USB serial adapter.
 
 ### New in 2.2.6
 

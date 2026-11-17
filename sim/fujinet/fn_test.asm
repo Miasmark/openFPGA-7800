@@ -185,7 +185,7 @@ wt1
 	lda frames+1
 	cmp #4                  ; 1024 frames: give up
 	bcc wait
-	PRINT 7, 1, t_noans
+	PRINT 8, 1, t_noans
 	jmp again
 
 done
@@ -209,7 +209,7 @@ errok
 	ldy errtab+1,x
 	jsr puts
 
-	PRINT 9, 1, t_reply
+	PRINT 10, 1, t_reply
 	lda FN_RCMD
 	jsr puthex
 	lda #" "
@@ -232,19 +232,19 @@ errok
 rc
 	txa
 	jsr puts
-	PRINT 9, 20, t_rxlen
+	PRINT 10, 20, t_rxlen
 	lda FN_RXHI
 	jsr puthex
 	lda FN_RXLO
 	jsr puthex
 
-	PRINT 10, 1, t_stat
+	PRINT 12, 1, t_stat
 	lda FN_STATUS
 	jsr puthex
-	PRINT 10, 12, t_link
+	PRINT 12, 12, t_link
 	lda FN_LINK
 	jsr puthex
-	PRINT 10, 20, t_port
+	PRINT 12, 20, t_port
 	lda FN_PORT
 	ldx #<t_none
 	ldy #>t_none
@@ -266,21 +266,21 @@ pt2
 	lda FN_RCMD
 	cmp #$06
 	bne again
-	PRINT 12, 1, t_ssid
+	PRINT 14, 1, t_ssid
 	ldx #0                  ; ssid: char[33] at 0
 	lda #26
 	jsr rstr
-	PRINT 13, 1, t_ip
+	PRINT 16, 1, t_ip
 	ldx #140                ; the IP as text: char[16] at 140
 	lda #16
 	jsr rstr
-	PRINT 14, 1, t_fw
+	PRINT 18, 1, t_fw
 	ldx #125                ; firmware version: char[15] at 125
 	lda #15
 	jsr rstr
 
 again
-	PRINT 20, 1, t_again
+	PRINT 22, 1, t_again
 rel
 	jsr frame
 	jsr button
