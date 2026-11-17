@@ -318,10 +318,14 @@ speed factor x FAST/SLOW, from the same tables as the model.
   frame correlation 0.93-0.97.
 - **The RTL against the program** (`sim/atarivox/run.sh`): bytes sent over
   the serial line as a game sends them; every output sample equal, at the
-  same clock, to the emulator's. Juno First's title, the allophones, the
-  effects, the speed and bend steps and a serial-control sequence (clear
-  before each phrase, a phrase cut off, "Ready"): about 357,000 samples,
-  no difference, no tick missed.
+  same clock, to the emulator's. The allophones, the effects, the speed
+  and bend steps and a serial-control sequence (clear before each phrase, a
+  phrase cut off, "Ready"): about 357,000 samples, no difference, no tick
+  missed. A game's title phrase was among the inputs until 2026-11-16; it
+  is replaced by our own synthetic phrase, `sim/atarivox/make_phrase.py`
+  (`python3 sim/atarivox/make_phrase.py > phrase.txt`, then
+  `sim/atarivox/run.sh phrase.txt +ms=2000`), which drives the engine the
+  same ways (pitch staircases, speed, bend and volume changes, pauses).
 - **On its own in Quartus** (5CEBA4F23C8): 420 ALMs, 17 M10K, 1 DSP, +55 ns
   of setup slack at clk_sys.
 - **In the whole core** (`tb_load +voxlog +voxpcm +sk_on`, DARIA in):
