@@ -111,10 +111,12 @@ module atari7800_pocket
 
 	// SaveKey EEPROM (24LC256) RAM, second port for its save slot (clk_74a)
 	input  wire  [1:0] savekey_setting, // 0 auto (A78 header), 1 on, 2 off
-	// FujiNet (fujinet_mailbox.sv): its serial line on the link port
+	// FujiNet (fujinet_mailbox.sv): its serial line, on the link port or the
+	// cartridge slot (core_top.v sends TX to both)
 	output wire        fn_txd,
-	output wire        fn_tx_en,        // drive link SO
-	input  wire        fn_rxd,
+	output wire        fn_tx_en,        // drive TX
+	input  wire        fn_rxd_link,     // link SI
+	input  wire        fn_rxd_cart,     // cartridge pin 31
 	input  wire  [1:0] atarivox_setting, // AtariVox voice: 0 off, 1 quiet, 2 normal, 3 loud
 	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
 	input  wire        sk_bridge_wr,
@@ -1313,7 +1315,8 @@ fujinet_mailbox fujinet
 	.bus_do       (fn_do),
 	.txd          (fn_txd),
 	.tx_en        (fn_tx_en),
-	.rxd          (fn_rxd),
+	.rxd_link     (fn_rxd_link),
+	.rxd_cart     (fn_rxd_cart),
 	.busy         ()
 );
 `else

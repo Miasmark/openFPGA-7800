@@ -1,5 +1,5 @@
 // FujiNet cartridge mailbox for the 7800, with its FujiBus link on the
-// Pocket's link port.
+// Pocket's link port or cartridge slot.
 //
 // A FujiNet program talks to its cartridge through a mailbox below $1000
 // (fujinet-firmware pico/atari-7800/firmware/include/fuji_mailbox.h; the
@@ -7,8 +7,9 @@
 // request to a FujiNet device as one FujiBus packet, a SLIP frame at 115,200
 // baud (lib/bus/rs232 on the ESP32; pico/common/src/fujibus.c is the
 // reference this follows byte for byte), and shows the reply in the mailbox.
-// Here the core is the cartridge, and the link port is the serial line:
-// link SO (pin 2) carries the core's TX, link SI (pin 3) its RX.
+// Here the core is the cartridge, and the serial line is on the link port
+// (TX on SO, pin 2; RX on SI, pin 3) or in the cartridge slot (TX on pin 5,
+// GBA /CS; RX on pin 31, GBA /REQ), whichever answers ("Two ports", below).
 //
 // The mailbox is live only for an image that claims it ("FUJI" at $FF70,
 // APP mode); fujinet_claim in atari7800_pocket.sv finds the claim while the
@@ -18,6 +19,7 @@
 //   $0C00-$0CFF  status page (FN_R_*)
 //   $0D00-$0D7F  write V to $0D00+n: register n = V (FN_REG_*)
 //   $0F00-$0FFF  write: append the byte to the TX stream (320 bytes at most)
+//   $0C30        (this core's own) the port in use: 0 none yet, 1 link, 2 cartridge
 //
 // A transaction: DEVICE, CMD, NPARAM, DATA_RST, the TX stream (NPARAM x
 // {size 1|2|4, value little endian}, then payload), then SEQ = ACKSEQ + 1.
@@ -56,9 +58,10 @@ module fujinet_mailbox #(
 	output logic  [7:0] bus_do,
 
 	// The link port
-	output logic        txd,
-	output logic        tx_en,        // drive SO (APP mode only)
-	input  logic        rxd,
+	output logic        txd,          // sent on both ports (see "Two ports")
+	output logic        tx_en,        // drive TX (APP mode only)
+	input  logic        rxd_link,     // link port SI
+	input  logic        rxd_cart,     // cartridge pin 31
 	output logic        busy
 );
 
@@ -132,6 +135,7 @@ always_comb begin
 		8'h1E: status_b = {7'd0, tv_set ? tv_reg : tv_pal};
 		8'h25: status_b = bios_skipped ? 8'd2 : 8'd1;
 		8'h26: status_b = {6'd0, hsc_on, hsc_rom};
+		8'h30: status_b = {6'd0, lock_cart, lock_link};   // Pocket: the port in use (1 link, 2 cartridge)
 		default: ;
 	endcase
 end
@@ -173,6 +177,37 @@ end
 
 //////////////////////////////  the link  //////////////////////////////////
 
+// Two ports: the FujiNet can be on the link port (TX on SO, RX on SI) or in
+// the cartridge slot (TX on pin 5, RX on pin 31). The core sends on both and
+// listens to the ones that are alive: a line is alive once it has idled
+// high for 1 ms (something drives it, as a UART's TX idles high) and dead
+// again after 2 ms low (unplugged), so an undriven pin is never heard. The
+// alive lines are ANDed. A good frame locks the port its last byte came in
+// on (the one with the latest falling edge); a request that hears nothing
+// at all (the link dropped) unlocks it.
+logic [1:0]  rs_l = 2'b11, rs_c = 2'b11;
+wire         r_l = rs_l[1], r_c = rs_c[1];
+logic [15:0] run_l = 16'd0, run_c = 16'd0;   // clocks at the current level
+logic        alive_l = 1'b0, alive_c = 1'b0;
+logic        lock_link = 1'b0, lock_cart = 1'b0;
+logic        last_cart = 1'b0;      // the latest falling edge was the cartridge's
+localparam [15:0] T_ALIVE = 16'(MS_DIV), T_DEAD = 16'(2 * MS_DIV < 65535 ? 2 * MS_DIV : 65535);
+wire         rxd_m = lock_link ? r_l : lock_cart ? r_c :
+                     ((r_l | !alive_l) & (r_c | !alive_c));
+always_ff @(posedge clk) begin
+	rs_l <= {rs_l[0], rxd_link};
+	rs_c <= {rs_c[0], rxd_cart};
+	run_l <= (rs_l[0] != r_l) ? 16'd0 : (run_l == 16'hFFFF ? run_l : run_l + 16'd1);
+	run_c <= (rs_c[0] != r_c) ? 16'd0 : (run_c == 16'hFFFF ? run_c : run_c + 16'd1);
+	if (r_l && run_l >= T_ALIVE) alive_l <= 1'b1;
+	if (!r_l && run_l >= T_DEAD) alive_l <= 1'b0;
+	if (r_c && run_c >= T_ALIVE) alive_c <= 1'b1;
+	if (!r_c && run_c >= T_DEAD) alive_c <= 1'b0;
+	if (rs_l[1] && !rs_l[0]) last_cart <= 1'b0;
+	if (rs_c[1] && !rs_c[0]) last_cart <= 1'b1;
+end
+
+
 logic [7:0] u_tx_data;
 logic       u_tx_valid, u_tx_ready;
 logic [7:0] u_rx_data;
@@ -186,7 +221,7 @@ fujinet_uart uart (
 	.tx_valid   (u_tx_valid),
 	.tx_ready   (u_tx_ready),
 	.txd        (txd),
-	.rxd        (rxd),
+	.rxd        (rxd_m),
 	.rx_data    (u_rx_data),
 	.rx_valid   (u_rx_valid)
 );
@@ -343,6 +378,8 @@ always_ff @(posedge clk) begin
 		if (reset) begin
 			link_seen <= 1'b0;
 			link_ever <= 1'b0;
+			lock_link <= 1'b0;
+			lock_cart <= 1'b0;
 		end
 	end else case (st)
 	E_IDLE: if (start) begin
@@ -501,7 +538,11 @@ always_ff @(posedge clk) begin
 			ms_pre <= ms_pre + 14'd1;
 		if (ms >= ms_lim) begin
 			err <= (rx_any || link_seen) ? ERR_TIMEOUT : ERR_NOLINK;
-			if (!rx_any) link_seen <= 1'b0;
+			if (!rx_any) begin
+				link_seen <= 1'b0;
+				lock_link <= 1'b0;
+				lock_cart <= 1'b0;
+			end
 			st <= E_DONE;
 		end
 
@@ -528,6 +569,10 @@ always_ff @(posedge clk) begin
 				end
 				link_seen <= 1'b1;
 				link_ever <= 1'b1;
+				if (!lock_link && !lock_cart) begin
+					lock_link <= !last_cart;
+					lock_cart <= last_cart;
+				end
 				bare <= 1'b1;
 				s_dev <= 8'hFF;
 				s_cmd <= (r_cmd == 8'h4F) ? 8'h15 : 8'h06;
@@ -541,6 +586,10 @@ always_ff @(posedge clk) begin
 				err <= ERR_OK;
 				link_seen <= 1'b1;
 				link_ever <= 1'b1;
+				if (!lock_link && !lock_cart) begin
+					lock_link <= !last_cart;
+					lock_cart <= last_cart;
+				end
 				st <= E_DONE;
 			end
 		end

@@ -244,7 +244,11 @@ assign cart_tran_bank2 = 8'hzz;
 assign cart_tran_bank2_dir = 1'b0;
 assign cart_tran_bank1 = 8'hzz;
 assign cart_tran_bank1_dir = 1'b0;
-assign cart_tran_bank0 = 4'hf;
+wire fn_txd, fn_tx_en;  // the FujiNet's serial TX (below)
+// Bank 0 is an output, held high, as the template leaves it. Bit 4
+// (cartridge pin 5, GBA /CS) is also the FujiNet's TX while a FujiNet
+// program runs (below); idle, a UART line is high too.
+assign cart_tran_bank0 = {3'b111, fn_tx_en ? fn_txd : 1'b1};
 assign cart_tran_bank0_dir = 1'b1;
 assign cart_tran_pin30 = 1'b0;      // reset or cs2, we let the hw control it by itself
 assign cart_tran_pin30_dir = 1'bz;
@@ -252,13 +256,13 @@ assign cart_pin30_pwroff_reset = 1'b0;  // hardware can control this
 assign cart_tran_pin31 = 1'bz;      // input
 assign cart_tran_pin31_dir = 1'b0;  // input
 
-// link port is unused, set to input only to be safe
-// each bit may be bidirectional in some applications
 // FujiNet (atari7800_pocket.sv, fujinet_mailbox.sv): a FujiNet program
-// talks to a FujiNet device over a 115,200 baud serial line on the link
-// port, TX on SO, RX on SI. SO is driven only while such a program is
-// loaded; otherwise both stay as the template leaves them.
-wire fn_txd, fn_tx_en;
+// talks to a FujiNet device over a 115,200 baud serial line, on the link
+// port (TX on SO, RX on SI) or in the cartridge slot (TX on pin 5, RX on
+// pin 31). TX goes out on both; the mailbox listens to the one that
+// answers. SO is driven only while such a program is loaded; otherwise the
+// link port stays as the template leaves it (cartridge pin 5 is the
+// template's output, held high, either way).
 assign port_tran_so = fn_tx_en ? fn_txd : 1'bz;
 assign port_tran_so_dir = fn_tx_en;
 assign port_tran_si = 1'bz;
@@ -903,7 +907,8 @@ atari7800_pocket atari (
     .savekey_setting( set_s2[2:1] ),
     .fn_txd( fn_txd ),
     .fn_tx_en( fn_tx_en ),
-    .fn_rxd( port_tran_si ),
+    .fn_rxd_link( port_tran_si ),
+    .fn_rxd_cart( cart_tran_pin31 ),
     .atarivox_setting( set_s2[36:35] ),
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),

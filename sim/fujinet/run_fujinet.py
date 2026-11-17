@@ -29,6 +29,7 @@ replies = [
     frame(0x70, 0x15),
     frame(0x70, 0x06, payload=bytes((i * 11) & 255 for i in range(1100))),
     frame(0x71, 0x15),
+    frame(0x70, 0x06, payload=b"\x01\xDB\x02\xC0"),
 ]
 with open(os.path.join(WORK, "replies.txt"), "w") as f:
     for r in replies:
@@ -46,6 +47,8 @@ expect = [
     frame(0x70, 0xC4),
     frame(0x71, 0x4F, params=[(4, 0x04030201)]),
     frame(0x70, 0xC4, params=[(1, 7)], payload=b"AB"),
+    frame(0x70, 0xC4),
+    frame(0x70, 0xC4),
 ]
 
 src = [os.path.join(FPGA, "fujinet_uart.sv"), os.path.join(FPGA, "fujinet_mailbox.sv"),

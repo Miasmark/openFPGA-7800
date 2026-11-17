@@ -167,12 +167,13 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
   PAL games stay RGB.
 
-### FujiNet over the link port (in development, not in a release yet)
+### FujiNet over the link port or cartridge slot (in development, not in a release yet)
 
 FujiNet programs for the 7800 talk to a FujiNet device through a mailbox
 their cartridge serves below $1000 (the FujiNet 7800 programmer's handbook,
 section 19). The core can now be that cartridge, with the FujiNet on the
-Pocket's link port instead of a cartridge's USB link:
+Pocket's link port or in its cartridge slot instead of on a cartridge's USB
+link:
 
 - **When:** only for an image that claims the mailbox ("FUJI" at $FF70, as
   FujiNet's own tools put it; the core finds it while the image loads).
@@ -184,8 +185,29 @@ Pocket's link port instead of a cartridge's USB link:
   SEQ / ACKSEQ handshake, per-command time limits), plus POKEY at $0450 and,
   if the claim asks, 16K of RAM at $4000. Each request goes out as a
   FujiBus packet in a SLIP frame at 115,200 baud 8N1, the format every
-  FujiNet uses (`lib/bus/rs232`): link pin 2 (SO) is the core's TX, pin 3
-  (SI) its RX, pin 6 ground.
+  FujiNet uses (`lib/bus/rs232`).
+- **Where:** the core sends on both ports and listens to the one that
+  answers, so it needs no setting:
+  - **Link port:** pin 2 (SO) is the core's TX, pin 3 (SI) its RX, pin 6
+    ground. Easiest for testing, with a link cable and a 3.3 V USB serial
+    adapter.
+  - **Cartridge slot:** pin 5 (GBA /CS) is TX, pin 31 (GBA /REQ) RX, pin 32
+    ground. A device here should have a GBA-shaped lower edge, so the slot
+    stays at 3.3 V; pin 5 is already an output held high in Analogue's
+    template, so nothing changes direction.
+  - A line counts once it has idled high for 1 ms (an undriven pin is never
+    heard); the first good reply locks the core to that port, and a request
+    that hears nothing unlocks it. Status byte $0C30 (this core's own) says
+    which: 1 link, 2 cartridge.
+- **Cartridge power:** `core.json` now asks for it (`cartridge_adapter` 0,
+  as Analogizer cores do), since the cartridge slot's level translators, and
+  probably the link port's, run on that rail. With the template's pin
+  settings this is safe with any cartridge left in the slot.
+- **Power for the FujiNet itself:** it should bring its own (a USB supply
+  or a LiPo). The Pocket's cartridge rail has only been seen to supply
+  about 0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which
+  already has trouble when the Pocket is low on charge); an ESP32 on Wi-Fi
+  averages more than that and peaks several times higher.
 - **Not done:** loading a game from the FujiNet (MOUNT_IMAGE's image push
   is refused, so the program sees the load fail) and the High Score Cart's
   saves to the FujiNet's SD card. Images come from the Pocket's SD card as
@@ -195,8 +217,9 @@ Pocket's link port instead of a cartridge's USB link:
   that hears nothing ends after 1.5 s with "no link" (error 1).
 - **Testing it:** `sim/fujinet/fn_test.asm` (built as
   `sim/fujinet/fn_test.a78`) shows the mailbox and runs one request.
-  With nothing on the link port it reports NO LINK; with a wire between
-  link pins 2 and 3 it hears its own request and reports LOOPBACK.
+  With nothing attached it reports NO LINK; with a wire between link pins
+  2 and 3 (or cartridge pins 5 and 31) it hears its own request and
+  reports LOOPBACK and the port.
   `sim/fujinet/run_fujinet.py` checks the mailbox and every frame it sends
   against a model of the FujiBus format.
 

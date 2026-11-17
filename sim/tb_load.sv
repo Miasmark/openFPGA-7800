@@ -180,7 +180,11 @@ module tb_load;
 	// SI idles high, nothing attached. Each transaction's end is logged.
 	logic fn_txd, fn_tx_en;
 	bit   fn_loop = 0;
+	bit   fn_cartloop = 0;
 	initial fn_loop = $test$plusargs("fnloop");
+	// +fncartloop joins cartridge pin 5 to pin 31 instead; otherwise pin 31
+	// reads low, as an undriven pin might (the mailbox must leave it out)
+	initial fn_cartloop = $test$plusargs("fncartloop");
 `ifdef POCKET_SRAM
 	logic [7:0] fn_ack_seen = 8'd0;
 	int fn_txbytes = 0, fn_rd_n = 0, fn_wr_n = 0;
@@ -202,9 +206,10 @@ module tb_load;
 		end
 		if (dut.fujinet.ackseq != fn_ack_seen) begin
 			fn_ack_seen <= dut.fujinet.ackseq;
-			$display("FN %0d ms: ackseq %0d err %0d reply_cmd %02x rxlen %0d link %0d, ~%0d bytes sent, app %0d",
+			$display("FN %0d ms: ackseq %0d err %0d reply_cmd %02x rxlen %0d link %0d port %s, ~%0d bytes sent, app %0d",
 				$time / 1000000, dut.fujinet.ackseq, dut.fujinet.err, dut.fujinet.reply_cmd,
-				dut.fujinet.rxlen, dut.fujinet.link_seen, fn_txbytes, dut.fn_app);
+				dut.fujinet.rxlen, dut.fujinet.link_seen,
+				dut.fujinet.lock_link ? "link" : dut.fujinet.lock_cart ? "cart" : "none", fn_txbytes, dut.fn_app);
 		end
 	end
 `endif
@@ -234,7 +239,8 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
-		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd(fn_loop ? fn_txd : 1'b1),
+		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd_link(fn_loop ? fn_txd : 1'b1),
+		.fn_rxd_cart(fn_cartloop ? fn_txd : 1'b0),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),

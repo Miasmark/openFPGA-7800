@@ -6,7 +6,9 @@
 ; firmware's own test ROM does (testrom/fujitest.s), and shows the result:
 ;   - nothing on the link port: ERR 01 NO LINK after about 1.5 s;
 ;   - link pins 2 (SO) and 3 (SI) joined: the cart hears its own request,
-;     a good frame with command $C4: REPLY C4, LOOPBACK, ERR 00;
+;     a good frame with command $C4: REPLY C4, LOOPBACK, ERR 00, PORT LINK;
+;   - cartridge pins 5 and 31 joined (a cartridge breakout board): the same,
+;     PORT CART;
 ;   - a FujiNet on a serial adapter: ERR 00, REPLY 06 (ACK), and its SSID,
 ;     IP address and firmware version.
 ; Fire or Reset runs the transaction again.
@@ -42,6 +44,7 @@ FN_PROTO   = $0C0B
 FN_MODE    = $0C12
 FN_LINK    = $0C15
 FN_TV      = $0C1E
+FN_PORT    = $0C30          ; this core's: 1 link port, 2 cartridge slot
 FN_REGSEL  = $0D00
 REG_DEVICE = $00
 REG_CMD    = $01
@@ -241,6 +244,22 @@ rc
 	PRINT 10, 12, t_link
 	lda FN_LINK
 	jsr puthex
+	PRINT 10, 20, t_port
+	lda FN_PORT
+	ldx #<t_none
+	ldy #>t_none
+	cmp #1
+	bne pt1
+	ldx #<t_plink
+	ldy #>t_plink
+pt1
+	cmp #2
+	bne pt2
+	ldx #<t_pcart
+	ldy #>t_pcart
+pt2
+	txa
+	jsr puts
 
 	lda FN_ERR              ; the adapter config, from a FujiNet's ACK
 	bne again
@@ -415,6 +434,10 @@ t_reply	dc.b "REPLY ", 0
 t_rxlen	dc.b "RXLEN ", 0
 t_stat	dc.b "STATUS ", 0
 t_link	dc.b "LINK ", 0
+t_port	dc.b "PORT ", 0
+t_none	dc.b "-   ", 0
+t_plink	dc.b "LINK", 0
+t_pcart	dc.b "CART", 0
 t_ssid	dc.b "SSID ", 0
 t_ip	dc.b "IP   ", 0
 t_fw	dc.b "FW   ", 0

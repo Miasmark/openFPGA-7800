@@ -24,7 +24,9 @@ logic  [7:0] wdata = 8'h00;
 logic        rw = 1'b1, phi2 = 1'b0, cs = 1'b0;
 logic        bus_oe, txd, tx_en, busy;
 logic  [7:0] bus_do;
-logic        rxd = 1'b1;
+logic        rxd = 1'b1;          // the FujiNet model's TX, to the link port
+logic        rxd_c = 1'b0;        // cartridge pin 31: undriven (low) until case 13
+bit          on_cart = 0;         // case 13: the FujiNet model is in the cartridge slot
 bit          loop = 0;          // SO wired to SI
 
 fujinet_mailbox #(.MS_DIV(MS)) dut (
@@ -32,7 +34,7 @@ fujinet_mailbox #(.MS_DIV(MS)) dut (
 	.claim_kind (8'd0), .hsc_rom (1'b0), .hsc_on (1'b0), .bios_skipped (1'b0),
 	.addr (addr), .wdata (wdata), .rw (rw), .phi2 (phi2), .cs (cs),
 	.bus_oe (bus_oe), .bus_do (bus_do),
-	.txd (txd), .tx_en (tx_en), .rxd (loop ? txd : rxd), .busy (busy)
+	.txd (txd), .tx_en (tx_en), .rxd_link (loop ? txd : (on_cart ? 1'b0 : rxd)), .rxd_cart (on_cart ? rxd : rxd_c), .busy (busy)
 );
 
 int fails = 0;
@@ -330,6 +332,30 @@ initial begin
 	rd(16'h0800, v); check("12 loopback data 0", v, "A");
 	rd(16'h0801, v); check("12 loopback data 1", v, "B");
 	loop = 0;
+
+	rd(st(8'h30), v); check("12 port link", v, 1);
+
+	// 13: the FujiNet moves to the cartridge slot. The link line goes low
+	// (unplugged); the lock is on the link port, so the first request hears
+	// nothing, times out and drops the link; the next one finds the
+	// cartridge port and locks to it.
+	on_cart = 1;
+	begin_txn(8'h70, 8'hC4, 8'd0);
+	go(s);
+	expect_frame(200000);
+	wait_ack(s, 8000000);
+	rd(st(8'h02), v); check("13 the link port is silent", v, 2);
+	rd(st(8'h30), v); check("13 unlocked", v, 0);
+	begin_txn(8'h70, 8'hC4, 8'd0);
+	go(s);
+	expect_frame(200000);
+	send(6);
+	wait_ack(s, 4000000);
+	rd(st(8'h02), v); check("13 cartridge err", v, 0);
+	rd(st(8'h03), v); check("13 cartridge reply cmd", v, 6);
+	rd(st(8'h04), v); check("13 cartridge rxlen", v, 4);
+	rd(16'h0803, v); check("13 cartridge data 3", v, 8'hC0);
+	rd(st(8'h30), v); check("13 port cartridge", v, 2);
 
 	$display("TB_FUJINET frames %0d fails %0d", ntx, fails);
 	$finish;
