@@ -202,7 +202,10 @@ link:
 - **Cartridge power:** `core.json` now asks for it (`cartridge_adapter` 0,
   as Analogizer cores do), since the cartridge slot's level translators, and
   probably the link port's, run on that rail. With the template's pin
-  settings this is safe with any cartridge left in the slot.
+  settings this is safe with any cartridge left in the slot. A GB or GBC
+  cartridge in the slot puts that rail, and the link port, at 5 V: keep
+  3.3 V-only devices off the link port then (see
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md)).
 - **Power for the FujiNet itself:** it should bring its own (a USB supply
   or a LiPo). The Pocket's cartridge rail has only been seen to supply
   about 0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which

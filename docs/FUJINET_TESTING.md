@@ -81,6 +81,25 @@ These instructions come from reading fujinet-firmware's source
 `lib/device/rs232/rs232Fuji.cpp`, which answers $C4); they have not been
 tried with this core yet.
 
+## Another cartridge in the slot
+
+- **Ordinary games:** the cartridge pins stay as Analogue's template sets
+  them (bank 0 an output held high, the rest inputs), so an inserted
+  cartridge sees no access. Cart power is on (`cartridge_adapter` 0), so it
+  is powered while the core runs.
+- **A FujiNet program:** TX toggles cartridge pin 5. On a GBA cart that is
+  ROM /CS, on a GB/GBC cart the save RAM's select; /WR and /CS2 never move,
+  so nothing is written. Analogue's own adapters (Game Gear, Lynx, ...) use
+  the pins their own way: take them out first. A cartridge that drives pin
+  31 (GBA /REQ, GB audio in) can garble replies until the core locks to the
+  link port.
+- **Voltage:** a GB or GBC cartridge presses the Pocket's voltage switch, and
+  the whole rail goes to 5 V, the link port included. An FT232H's inputs
+  take that; an ESP32 or any other 3.3 V-only device does not. With such a
+  device on the link port, leave the slot empty or use a GBA cartridge. A
+  device in the cartridge slot with a GBA-shaped edge keeps the rail at
+  3.3 V.
+
 ## Power for a real FujiNet
 
 A FujiNet device should bring its own power (USB or a LiPo) and share only
