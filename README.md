@@ -230,6 +230,9 @@ link:
   [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md) has the wiring and the
   steps, up to a FujiNet running on a PC (fujinet-pc's RS232 build) through
   a USB serial adapter.
+- **Tested on a Pocket (2026-11-19):** NO LINK with nothing attached, the
+  link-port loopback, and a full request to fujinet-pc through an FT232H
+  on the link port (its SSID and firmware version came back).
 
 ### New in 2.2.6
 

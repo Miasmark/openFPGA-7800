@@ -81,10 +81,12 @@ Expected: `ERR 00 OK`, `REPLY 06 ACK`, `RXLEN 00F0` (the 240-byte adapter
 configuration), and the SSID, IP address and firmware version fujinet-pc
 reports.
 
-These instructions come from reading fujinet-firmware's source
+Seen on a Pocket (2026-11-19): an FT232H on a cut GBC link cable, fujinet-pc
+firmware `v1.6-33a532da1`; the test cart showed SSID `dummy cafe`
+(fujinet-pc's stand-in, a PC having no Wi-Fi radio of its own) and that
+firmware version. The settings above come from fujinet-firmware's source
 (`fujinet_pc.cmake`, `lib/bus/rs232/rs232.cpp`, `lib/config/fnc_serial.cpp`,
-`lib/device/rs232/rs232Fuji.cpp`, which answers $C4); they have not been
-tried with this core yet.
+`lib/device/rs232/rs232Fuji.cpp`, which answers $C4).
 
 ## Another cartridge in the slot
 
