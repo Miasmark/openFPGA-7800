@@ -134,9 +134,9 @@ circuit, a WS2812-2020 status LED, RESET / BOOT buttons.
 - **Not served:** the cartridge's loader at $0600 and its hot operations, and
   the High Score Cart's saves to the device's SD card (the Pocket's own HSC
   saves still work).
-- **CONFIG**, FujiNet's own 7800 menu, lives in their cartridge's flash and
-  starts from its loader; whether it runs as an `.a78` from the Pocket's SD
-  card is not yet known.
+- **CONFIG**, FujiNet's own 7800 menu, runs as an `.a78` from the Pocket's SD
+  card (in simulation, 2026-11-19), all but booting games
+  ([FUJINET_TESTING.md](FUJINET_TESTING.md), section 5).
 
 ## 8. Bring-up
 

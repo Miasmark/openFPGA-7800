@@ -104,6 +104,33 @@ start of the page's HTML, `CLOSE ERR 00 REPLY 06`. Seen on a Pocket
 hears its own OPEN (`REPLY 4F`, not an ACK) and goes straight to CLOSE
 (`REPLY 43`), which is what simulation shows.
 
+## 5. FujiNet's own CONFIG
+
+FujiNet's 7800 menu (fujinet-config `atari7800/`: Wi-Fi setup, host slots,
+file browsing, the game lobby) is a 32K program at $8000 with the FUJI claim
+and 16K of RAM at $4000, both of which the core gives a claimed image. Its
+public source needs fujinet-lib-experimental's `atari7800` target, which is
+not published yet (2026-11), but fujinet-firmware carries a built copy:
+
+```
+sim/fujinet/mk_config_a78.py FUJINET_FIRMWARE_DIR fujinet_config.a78 \
+    --sign ../miasmark/a7800-toolkit/tools/sign7800.py
+```
+
+reads it out of `pico/atari-7800/firmware/baked/fujiconfigrom.h`, wraps it
+as an A78 and signs it (the claim sits below the signature). CONFIG is
+FujiNet's, under the GPL-3.0; this repository does not carry the image.
+
+In simulation with nothing attached (2026-11-19) it shows its banner, asks
+for the Wi-Fi state (NO LINK after 1.5 s) and goes on to its HOST SLOTS
+screen. On the core:
+
+- **Runs:** Wi-Fi setup, host slots, browsing, renaming, copying, INFO.
+- **Booting a game fails cleanly:** MOUNT_IMAGE's image push is refused, and
+  CONFIG shows `?LOAD ERROR 03` and goes back.
+- **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
+  Pocket's HSC; switching it there does nothing.
+
 ## Another cartridge in the slot
 
 - **Ordinary games:** the cartridge pins stay as Analogue's template sets
