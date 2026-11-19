@@ -177,7 +177,8 @@ module tb_load;
 
 	// FujiNet (fujinet_mailbox.sv): the link port's serial line. +fnloop
 	// joins SO to SI, as a wire between link pins 2 and 3 does; otherwise
-	// SI idles high, nothing attached. Each transaction's end is logged.
+	// SI idles high, nothing attached (or, with +fnpush=FILE, the FujiNet
+	// model below answers on SI). Each transaction's end is logged.
 	logic fn_txd, fn_tx_en;
 	bit   fn_loop = 0;
 	bit   fn_cartloop = 0;
@@ -213,6 +214,53 @@ module tb_load;
 		end
 	end
 `endif
+
+	// ---------------- FujiNet game loading, end to end (+fnpush=FILE) ----------------
+	// sim/fujinet/fn_model.sv on the link port answers a MOUNT_IMAGE by
+	// pushing FILE; sim/fujinet/fn_boot.a78 asks for it, arms the swap and
+	// jumps to $0600; the pushed game (fn_game.asm) writes $5A to $2201.
+	// One line at the end: the boot cart's markers ($2200 $11 started, $22
+	// READY and jumping, $EE not; then ERR, BOOT_STATE, BOOT_ERR), the swap's
+	// loads (fn_ld_dl rises) and bytes, the restarts, the game's marker and
+	// loop count, whether the claim was dropped, and the model's counts.
+	wire  fnm_tx;
+	fn_model fnm (.clk(clk_sys), .rx(fn_txd), .tx(fnm_tx));
+	logic [7:0] fnb_mark = 8'd0, fnb_err = 8'd0, fnb_state = 8'd0, fnb_berr = 8'd0, fng_mark = 8'd0;
+	int   fng_loops = 0, fn_swaps = 0, fn_swap_bytes = 0, fn_restarts = 0;
+	logic fn_ld_q = 1'b0, fn_rs_q = 1'b0;
+	always @(posedge clk_sys) begin
+		fn_ld_q <= fn_ld_dl;
+		fn_rs_q <= fn_restart;
+		if (fn_ld_dl && !fn_ld_q) begin
+			fn_swaps++;
+			$display("FNBOOT %0d ms: swap load starts (%0d bytes staged, header %0d)", $time / 1000000,
+				dut.fn_stg_size, dut.fn_stg_hdr);
+		end
+		if (!fn_ld_dl && fn_ld_q)
+			$display("FNBOOT %0d ms: swap load ends, %0d bytes, cart_size %0d, cart_is_7800 %0d",
+				$time / 1000000, fn_swap_bytes, dut.cart_size, dut.cart_is_7800);
+		if (fn_ld_dl && fn_ld_wr) fn_swap_bytes++;
+		if (fn_restart && !fn_rs_q) fn_restarts++;
+		if (dut.bus_phi2 && !dut.RW) case (dut.bios_addr)
+			16'h2200: begin
+				if (dut.din != fnb_mark) $display("FNBOOT %0d ms: boot cart mark $%02x", $time / 1000000, dut.din);
+				fnb_mark <= dut.din;
+			end
+			16'h2201: begin
+				if (dut.din != fng_mark) $display("FNBOOT %0d ms: game mark $%02x", $time / 1000000, dut.din);
+				fng_mark <= dut.din;
+			end
+			16'h2202: fnb_err <= dut.din;
+			16'h2203: fnb_state <= dut.din;
+			16'h2204: fnb_berr <= dut.din;
+			16'h2205: fng_loops++;
+			default: ;
+		endcase
+	end
+	final if (fnm.on)
+		$display("FNBOOT result: boot mark %02x err %0d state %02x berr %0d, swaps %0d bytes %0d, restarts %0d, game mark %02x loops %0d, claim %0d, cart_size %0d, model pushes %0d bytes %0d frames %0d refused %0d",
+			fnb_mark, fnb_err, fnb_state, fnb_berr, fn_swaps, fn_swap_bytes, fn_restarts, fng_mark, fng_loops,
+			dut.fn_app, dut.cart_size, fnm.pushes, fnm.push_bytes, fnm.push_frames, fnm.push_bad);
 
 	// A FujiNet swap's load and restart (fujinet_loader.sv), muxed in as
 	// core_top.v does: all low unless a swap runs
@@ -251,7 +299,7 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
-		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd_link(fn_loop ? fn_txd : 1'b1),
+		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd_link(fn_loop ? fn_txd : fnm.on ? fnm_tx : 1'b1),
 		.fn_rxd_cart(fn_cartloop ? fn_txd : 1'b0),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
