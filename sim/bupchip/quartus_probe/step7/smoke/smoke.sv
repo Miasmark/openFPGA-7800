@@ -11,7 +11,9 @@
 // (o from clk_sys, oa from clk_arm), so that no other path crosses.
 //
 // The guard (daria_fe_guard.sv) and the snapshot (bup_dbg_snap.sv) are the
-// real files.
+// real files. FujiNet's two channels (fujinet_stage -> bup_asset_wr's
+// staging, fujinet_loader -> fujinet_rd) are stand-ins under their RTL
+// names, as the rest.
 //
 // Variants (macros):
 //   SMOKE_Q5     BUP_DEBUG's chains (the snapshot's rq_s0/ak_s0): a Q5
@@ -55,11 +57,23 @@ module bup_asset_wr (
 	input  wire        msg_tog,
 	input  wire  [3:0] msg_type,
 	input  wire  [7:0] msg_pl,
+	// FujiNet staging (fujinet_stage, clk_sys): a toggle, the payload held
+	input  wire        s_tog,
+	input  wire        s_sync,
+	input  wire  [1:0] s_lanes,
+	input  wire  [7:0] s_haddr,
+	input  wire  [7:0] s_data,
+	output logic       s_ack = 1'b0,
 	output wire  [7:0] q
 );
 	logic t1 = 1'b0, t2 = 1'b0, seen = 1'b0;
 	logic [3:0] m_type = 4'd0;
 	logic [7:0] m_pl = 8'd0;
+	(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED" *)
+	logic st1 = 1'b0;
+	logic st2 = 1'b0, s_seen = 1'b0, s_t = 1'b0;
+	logic [1:0] s_l = 2'd0;
+	logic [7:0] s_a = 8'd0, s_d = 8'd0;
 	always_ff @(posedge clk) begin
 		t1 <= msg_tog;
 		t2 <= t1;
@@ -68,8 +82,100 @@ module bup_asset_wr (
 			m_type <= msg_type;
 			m_pl <= msg_pl;
 		end
+		st1 <= s_tog;
+		st2 <= st1;
+		if (st2 != s_seen) begin
+			s_seen <= st2;
+			s_t <= s_sync;
+			s_l <= s_lanes;
+			s_a <= s_haddr;
+			s_d <= s_data;
+			s_ack <= ~s_ack;
+		end
 	end
-	assign q = m_pl ^ {4'd0, m_type};
+	assign q = m_pl ^ {4'd0, m_type} ^ s_a ^ s_d ^ {5'd0, s_t, s_l};
+endmodule
+
+// FujiNet: the swap's reader (core/fujinet_rd.sv, clk_arm): a request
+// toggle, the address held; the answer held and a toggle back
+module fujinet_rd (
+	input  wire        clk,                // clk_arm
+	input  wire        l_req,
+	input  wire  [7:0] l_haddr,
+	output logic       ack = 1'b0,
+	output logic [7:0] data = 8'd0
+);
+	(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED" *)
+	logic req_s0 = 1'b0;
+	logic req_s1 = 1'b0;
+	logic [7:0] addr = 8'd0;
+	always_ff @(posedge clk) begin
+		req_s0 <= l_req;
+		req_s1 <= req_s0;
+		if (req_s1 != ack) begin
+			addr <= l_haddr;
+			ack <= req_s1;
+		end
+		data <= addr + 8'd5;
+	end
+endmodule
+
+// FujiNet staging, the clk_sys side (core/fujinet_stage.sv)
+module fujinet_stage (
+	input  wire        clk,                // clk_sys
+	input  wire  [7:0] a,
+	input  wire        s_ack,
+	output logic       s_tog = 1'b0,
+	output logic       s_sync = 1'b0,
+	output logic [1:0] s_lanes = 2'd0,
+	output logic [7:0] s_haddr = 8'd0,
+	output logic [7:0] s_data = 8'd0,
+	output wire        q
+);
+	(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED" *)
+	logic a1 = 1'b0;
+	logic a2 = 1'b0;
+	always_ff @(posedge clk) begin
+		a1 <= s_ack;
+		a2 <= a1;
+		if (a2 == s_tog && a[4]) begin
+			s_haddr <= a;
+			s_data <= ~a;
+			s_lanes <= a[1:0];
+			s_sync <= a[2];
+			s_tog <= ~s_tog;
+		end
+	end
+	assign q = a2;
+endmodule
+
+// FujiNet swap, the clk_sys side (core/fujinet_loader.sv)
+module fujinet_loader (
+	input  wire        clk,                // clk_sys
+	input  wire  [7:0] a,
+	input  wire        l_ack,
+	input  wire  [7:0] l_data,
+	output logic       l_req = 1'b0,
+	output logic [7:0] l_haddr = 8'd0,
+	output wire  [7:0] q
+);
+	(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED" *)
+	logic ack_s0 = 1'b0;
+	logic ack_s1 = 1'b0;
+	logic [7:0] hb = 8'd0, nb = 8'd0;
+	always_ff @(posedge clk) begin
+		ack_s0 <= l_ack;
+		ack_s1 <= ack_s0;
+		if (ack_s1 == l_req) begin
+			hb <= l_data;
+			nb <= l_data ^ 8'h3C;
+			if (a[3]) begin
+				l_haddr <= a;
+				l_req <= ~l_req;
+			end
+		end
+	end
+	assign q = hb ^ nb;
 endmodule
 
 module daria_call (
@@ -248,9 +354,19 @@ module bupchip_pocket (
 	input  wire        call_tog,
 	input  wire        smp_req,
 	input  wire  [7:0] smp_addr,
+	input  wire        fn_s_tog,           // FujiNet staging and swap (clk_sys)
+	input  wire        fn_s_sync,
+	input  wire  [1:0] fn_s_lanes,
+	input  wire  [7:0] fn_s_haddr,
+	input  wire  [7:0] fn_s_data,
+	input  wire        fn_l_req,
+	input  wire  [7:0] fn_l_haddr,
 	output wire        ret_tog,
 	output wire        smp_ack,
 	output wire  [7:0] smp_data,
+	output wire        fn_s_ack,
+	output wire        fn_l_ack,
+	output wire  [7:0] fn_l_data,
 	output wire  [7:0] q_sys,
 	output wire  [7:0] q_arm
 );
@@ -358,7 +474,10 @@ module bupchip_pocket (
 	wire [3:0] msg_type;
 	wire [7:0] msg_pl;
 	bup_capture capture (.clk(clk_sys), .a, .msg_tog, .msg_type, .msg_pl);
-	bup_asset_wr writer (.clk(clk_arm), .msg_tog, .msg_type, .msg_pl, .q(w_q));
+	bup_asset_wr writer (.clk(clk_arm), .msg_tog, .msg_type, .msg_pl,
+		.s_tog(fn_s_tog), .s_sync(fn_s_sync), .s_lanes(fn_s_lanes), .s_haddr(fn_s_haddr), .s_data(fn_s_data),
+		.s_ack(fn_s_ack), .q(w_q));
+	fujinet_rd fn_rd (.clk(clk_arm), .l_req(fn_l_req), .l_haddr(fn_l_haddr), .ack(fn_l_ack), .data(fn_l_data));
 	daria_call call (.clk(clk_arm), .call_tog, .ret_q(ret_tog), .q(c_q));
 	daria_mmio mmio (.clk_arm, .rst_arm(~cpu_run), .a, .clk_sys, .rst_sys(~run_s[1]), .q_sys(m_q_sys), .q_arm(m_q_arm));
 	daria_smp smp (.clk(clk_arm), .smp_req, .smp_addr, .ack(smp_ack), .data(smp_data));
@@ -384,10 +503,20 @@ module atari7800_pocket (
 	end
 	wire       call_tog, smp_req, ret_tog, smp_ack;
 	wire [7:0] smp_addr, smp_data, b_q, f_q;
+	// FujiNet game loading (docs/FUJINET_GAME_LOADING.md 3.2, 3.4)
+	wire       fn_s_tog, fn_s_sync, fn_s_ack, fn_l_req, fn_l_ack, st_q;
+	wire [1:0] fn_s_lanes;
+	wire [7:0] fn_s_haddr, fn_s_data, fn_l_haddr, fn_l_data, ld_q;
+	fujinet_stage fn_stage (.clk(clk_sys), .a, .s_ack(fn_s_ack), .s_tog(fn_s_tog), .s_sync(fn_s_sync),
+		.s_lanes(fn_s_lanes), .s_haddr(fn_s_haddr), .s_data(fn_s_data), .q(st_q));
+	fujinet_loader fn_loader (.clk(clk_sys), .a, .l_ack(fn_l_ack), .l_data(fn_l_data), .l_req(fn_l_req),
+		.l_haddr(fn_l_haddr), .q(ld_q));
 	bupchip_pocket bupchip (.clk_sys, .clk_arm, .a, .daria_profile, .daria_ram32_n, .daria_mreset(daria_mres_r),
-		.daria_gate, .call_tog, .smp_req, .smp_addr, .ret_tog, .smp_ack, .smp_data, .q_sys(b_q), .q_arm);
+		.daria_gate, .call_tog, .smp_req, .smp_addr,
+		.fn_s_tog, .fn_s_sync, .fn_s_lanes, .fn_s_haddr, .fn_s_data, .fn_l_req, .fn_l_haddr,
+		.ret_tog, .smp_ack, .smp_data, .fn_s_ack, .fn_l_ack, .fn_l_data, .q_sys(b_q), .q_arm);
 	daria_fe daria (.clk_sys, .clk_arm, .a, .ret_tog, .smp_ack, .smp_data, .call_tog, .smp_req, .smp_addr, .q(f_q));
-	assign q_sys = b_q ^ f_q;
+	assign q_sys = b_q ^ f_q ^ ld_q ^ {7'd0, st_q};
 endmodule
 
 module core_top (
