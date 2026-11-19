@@ -97,8 +97,10 @@ tried with this core yet.
   the whole rail goes to 5 V, the link port included. An FT232H's inputs
   take that; an ESP32 or any other 3.3 V-only device does not. With such a
   device on the link port, leave the slot empty or use a GBA cartridge. A
-  device in the cartridge slot with a GBA-shaped edge keeps the rail at
-  3.3 V.
+  device in the cartridge slot keeps the rail at 3.3 V as long as it leaves
+  the voltage switch (at one end of the connector) unpressed: a relief cut
+  over the switch is enough, deep enough that the switch is never half
+  pressed. Check the fit with a printed blank first.
 
 ## Power for a real FujiNet
 
