@@ -28,7 +28,8 @@
 # Names are as the RTL declares them (bupchip_pocket.sv, daria_call.sv,
 # daria_mmio.sv, bup_asset_wr.sv, daria_fe_call.sv, daria_fe_audio.sv,
 # daria_fe_guard.sv; daria_smp.sv and the atari7800_pocket.sv registers of P21
-# as lane I1 names them; bup_dbg_snap.sv).
+# as lane I1 names them; bup_dbg_snap.sv; and, at the end, FujiNet's
+# fujinet_stage.sv, fujinet_rd.sv and fujinet_loader.sv).
 
 # ---- clk_sys -> clk_arm: first flops --------------------------------------------------------------------
 s2a daria,q5 first *|bupchip_pocket:bupchip|hold_a[0]              *|bupchip_pocket:bupchip|hold_sys
@@ -86,3 +87,20 @@ a2s daria,q5 held  *|daria_mmio:mmio|tc[*]                         -
 a2s daria,q5 held  *|daria_fe_audio:u_audio|rdat[*]                -
 # the debug snapshot word (hold)
 a2s q5       held  *|bup_dbg_snap:*|q_sys[*]                       -
+
+# ---- FujiNet game loading (docs/FUJINET_GAME_LOADING.md 3.2, 3.4; not plan 2.7) ---------------------------
+# The staging channel: fujinet_stage.sv (clk_sys) -> bup_asset_wr.sv (clk_arm), a toggle and its payload
+# held until the answer, which comes back through two clk_sys flops
+s2a daria,q5 first *|bup_asset_wr:writer|st1                       *|fujinet_stage:fn_stage|s_tog
+s2a daria,q5 held  *|bup_asset_wr:writer|s_t                       -
+s2a daria,q5 held  *|bup_asset_wr:writer|s_l[*]                    -
+s2a daria,q5 held  *|bup_asset_wr:writer|s_a[*]                    -
+s2a daria,q5 held  *|bup_asset_wr:writer|s_d[*]                    -
+a2s daria,q5 first *|fujinet_stage:fn_stage|a1                     *|bup_asset_wr:writer|s_ack
+# The swap's reads: fujinet_loader.sv (clk_sys) -> fujinet_rd.sv (clk_arm), a request toggle and the
+# halfword address held; the halfword held and an answer toggle back
+s2a daria,q5 first *|fujinet_rd:fn_rd|req_s0                       *|fujinet_loader:fn_loader|l_req
+s2a daria,q5 held  *|fujinet_rd:fn_rd|addr[*]                      -
+a2s daria,q5 first *|fujinet_loader:fn_loader|ack_s0               *|fujinet_rd:fn_rd|ack
+a2s daria,q5 held  *|fujinet_loader:fn_loader|hb[*]                -
+a2s daria,q5 held  *|fujinet_loader:fn_loader|nb[*]                -

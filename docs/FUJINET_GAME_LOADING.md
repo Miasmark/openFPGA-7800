@@ -126,11 +126,18 @@ The staged file is fed through the core's own load path:
   address and data held between strobes as the bridge's are. Before the
   first byte its address is all ones, which no header parser takes for a
   header byte.
-- **The mux** is in `core_top.v`, at `atari7800_pocket`'s inputs:
-  `cart_download | fn_ld_dl`, and `ioctl_wr`, `ioctl_addr`, `ioctl_dout`,
-  `ioctl_wr_any` and `ioctl_hi` (0, the cartridge slot) from the loader while
-  its flag is up. With the flag low, which it always is unless a swap runs,
-  the bridge's signals pass unchanged.
+- **The mux** is in `core_top.v`, at the inputs of the registers that
+  already carry the bridge's loader into the core (`ioctl_wr_r`,
+  `ioctl_addr_r`, `ioctl_dout_r`, `ioctl_hi_r`, and `cart_download`, which
+  takes the swap's flag as one more OR term): while a swap runs they take the
+  loader's values, and `ioctl_hi` reads 0, the cartridge slot. So
+  `atari7800_pocket`'s load inputs stay registers, as they were. The first
+  version muxed after the registers; that added a logic level in front of
+  the SRAM controller's cartridge channel, and in all three fits the
+  retiming the fit's check (g) trips on (section 4) appeared. With the
+  swap's flag low, which it always is unless a swap runs, every register
+  takes the bridge's value as before; a swap's bytes reach the core a clock
+  after the loader sends them, its flag with them.
 - **The region PLL:** `pll_region` starts a retune only while no load is in
   progress; the loader's flag joins the bridge's `is_downloading` there
   (through two clk_74a flops), since an A78's region follows its header's
@@ -147,12 +154,14 @@ The staged file is fed through the core's own load path:
   its size, the SuperGame flag above 48 KiB, two joysticks, NTSC; the file
   follows from byte 128. Anything the header cannot say (a CRC-picked
   board, a PAL game) is a documented limit.
-- **The restart:** an unarmed hot swap holds `reset_in` for 64 clk_sys, as
-  a menu reset does, so the running program starts again.
+- **The restart:** an unarmed hot swap holds the console's reset for 64
+  clk_sys (one more OR term in `core_top.v`'s `core_reset` register, as a
+  menu reset), so the running program starts again.
 - A Pocket load from the SD card during a swap wins: the bridge's load
-  sequence (`is_downloading`, two flops in) ends the replay two clk_sys
-  before its own `cart_download` rises, so every consumer sees the replay
-  end and the new load begin; a replay never starts during one.
+  sequence (`is_downloading`, two flops in) deselects the replay a clock
+  before it can raise `cart_download` itself, which then falls for a clock,
+  so every consumer sees the replay end and the new load begin; the loader
+  stops, and never starts during one.
 
 ## 4. Risks
 

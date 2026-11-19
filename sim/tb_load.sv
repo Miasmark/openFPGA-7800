@@ -144,12 +144,24 @@ module tb_load;
 		.write_en(ioctl_wr), .write_addr(ioctl_addr), .write_data(ioctl_dout)
 	);
 
-	// core_top registers the loader's output on clk_sys
+	// core_top registers the loader's output on clk_sys, and a FujiNet
+	// swap's load (fujinet_loader.sv) is selected at those registers' inputs
+	// (fn_sel), its download flag and the restart registered with them
+	wire        fn_ld_dl, fn_ld_wr, fn_restart;
+	wire [24:0] fn_ld_addr;
+	wire  [7:0] fn_ld_dout;
+	logic [2:0] tb_dl_s = 3'd0;     // core_top's dl_s: the bridge's load sequence, on clk_sys
+	wire        fn_sel = fn_ld_dl & ~tb_dl_s[1];
+	logic       fn_sel_q = 1'b0, fn_restart_q = 1'b0;
 	logic ioctl_wr_r = 0; logic [24:0] ioctl_addr_r = 0; logic [7:0] ioctl_dout_r = 0;
 	logic [2:0] ioctl_hi_r = 0;	// POCKET_BUPCHIP: bits 27:25, which slot's address
 	always @(posedge clk_sys) begin
-		ioctl_wr_r <= ioctl_wr; ioctl_addr_r <= ioctl_addr[24:0]; ioctl_dout_r <= ioctl_dout;
-		ioctl_hi_r <= ioctl_addr[27:25];
+		ioctl_wr_r <= fn_sel ? fn_ld_wr : ioctl_wr;
+		ioctl_addr_r <= fn_sel ? fn_ld_addr : ioctl_addr[24:0];
+		ioctl_dout_r <= fn_sel ? fn_ld_dout : ioctl_dout;
+		ioctl_hi_r <= fn_sel ? 3'd0 : ioctl_addr[27:25];
+		fn_sel_q <= fn_sel;
+		fn_restart_q <= fn_restart;
 	end
 
 	// ---------------- system ----------------
@@ -262,28 +274,22 @@ module tb_load;
 			fnb_mark, fnb_err, fnb_state, fnb_berr, fn_swaps, fn_swap_bytes, fn_restarts, fng_mark, fng_loops,
 			dut.fn_app, dut.cart_size, fnm.pushes, fnm.push_bytes, fnm.push_frames, fnm.push_bad);
 
-	// A FujiNet swap's load and restart (fujinet_loader.sv), muxed in as
-	// core_top.v does: all low unless a swap runs
-	wire        fn_ld_dl, fn_ld_wr, fn_restart;
-	wire [24:0] fn_ld_addr;
-	wire  [7:0] fn_ld_dout;
-	logic [2:0] tb_dl_s = 3'd0;     // core_top's dl_s: the bridge's load sequence, on clk_sys
 	always @(posedge clk_sys) tb_dl_s <= {tb_dl_s[1:0], cart_download | bios_download | hscfw_download | arfw_download | bupfw_download};
 
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
 		.clk_arm(clk_arm), .bupfw_download(bupfw_download),
-		.ioctl_wr_any(fn_ld_dl ? fn_ld_wr : ioctl_wr_r), .ioctl_hi(fn_ld_dl ? 3'd0 : ioctl_hi_r),
+		.ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
 		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
 		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
 		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
 `endif
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in | fn_restart),
-		.cart_download(cart_download | fn_ld_dl), .bios_download(bios_download),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in | fn_restart_q),
+		.cart_download(cart_download | fn_sel_q), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(fn_ld_dl ? fn_ld_wr : ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)),
-		.ioctl_addr(fn_ld_dl ? fn_ld_addr : ioctl_addr_r), .ioctl_dout(fn_ld_dl ? fn_ld_dout : ioctl_dout_r),
+		.ioctl_wr(ioctl_wr_r & (cart_download | fn_sel_q | bios_download | hscfw_download | arfw_download | bupfw_download)),
+		.ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
 		.fn_ld_dl(fn_ld_dl), .fn_ld_wr(fn_ld_wr), .fn_ld_addr(fn_ld_addr), .fn_ld_dout(fn_ld_dout),
 		.fn_restart(fn_restart), .fn_host_dl(tb_dl_s[1]),
 		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),

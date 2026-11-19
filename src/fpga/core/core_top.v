@@ -248,6 +248,7 @@ wire fn_txd, fn_tx_en;  // the FujiNet's serial TX (below)
 // A FujiNet swap's cartridge load and console restart (atari7800_pocket.sv,
 // fujinet_loader.sv), clk_sys registers
 wire        fn_ld_dl, fn_ld_wr, fn_restart;
+wire        fn_sel;     // the swap's load selected (below, with the loader's registers)
 wire [24:0] fn_ld_addr;
 wire  [7:0] fn_ld_dout;
 // Bank 0 is an output, held high, as the template leaves it. Bit 4
@@ -734,14 +735,11 @@ data_loader #(
 // parser, 2600 mapper detection) had to settle within one clk_sdram period
 // (17.5 ns) instead of one clk_sys period (69.8 ns): those crossings were
 // all of the build's tightest setup paths.
+// (The registers themselves are below, after the slot flags: a FujiNet
+// swap's load is selected at their inputs.)
     reg             ioctl_wr_r = 1'b0;
     reg     [24:0]  ioctl_addr_r = 25'd0;
     reg     [7:0]   ioctl_dout_r = 8'd0;
-always @(posedge clk_sys) begin
-    ioctl_wr_r   <= ioctl_wr;
-    ioctl_addr_r <= ioctl_addr[24:0];
-    ioctl_dout_r <= ioctl_dout;
-end
 `ifdef POCKET_BUPCHIP
 // The BupChip takes its bytes by their own bridge address, not by the slot
 // flags below: bits 27:25 tell the slots apart (data.json's addresses), and
@@ -749,8 +747,6 @@ end
 // requestwrite or allcomplete moves the flags (bup_capture.sv, "Which bytes
 // are the BupChip's").
     reg     [2:0]   ioctl_hi_r = 3'd0;
-always @(posedge clk_sys)
-    ioctl_hi_r   <= ioctl_addr[27:25];
 `endif
 
 // Into clk_sys
@@ -772,14 +768,33 @@ always @(posedge clk_sys) begin
     rst_s  <= {rst_s[1:0],  reset_n};
     mrst_s <= {mrst_s[1:0], menu_reset_cnt != 0};
 
-    cart_download <= dl_s[2] & cart_s[2];
+    cart_download <= (dl_s[2] & cart_s[2]) | fn_sel;   // fn_sel: a FujiNet swap's load (below)
     bios_download <= dl_s[2] & bios_s[2];
     hscfw_download <= dl_s[2] & hscfw_s[2];
     arfw_download <= dl_s[2] & arfw_s[2];
 `ifdef POCKET_BUPCHIP
     bupfw_download <= dl_s[2] & bupfw_s[2];
 `endif
-    core_reset    <= ~rst_s[2] | mrst_s[2];
+    core_reset    <= ~rst_s[2] | mrst_s[2] | fn_restart;
+end
+
+// The loader's registers (above), and a FujiNet swap's load
+// (fujinet_loader.sv, docs/FUJINET_GAME_LOADING.md 3.4) selected at their
+// inputs, so that atari7800_pocket's load inputs stay registers, as
+// cart_download (above) takes it too: fn_sel while a swap runs, until the
+// bridge's next load sequence starts (dl_s[1], a clock before dl_s[2]:
+// cart_download then falls for a clock between the two loads). With fn_sel
+// low, which it is unless a swap runs, every one of these registers takes
+// the bridge's value as before. A swap's bytes reach the core a clock after
+// the loader sends them, its download flag with them.
+assign fn_sel = fn_ld_dl & ~dl_s[1];
+always @(posedge clk_sys) begin
+    ioctl_wr_r   <= fn_sel ? fn_ld_wr   : ioctl_wr;
+    ioctl_addr_r <= fn_sel ? fn_ld_addr : ioctl_addr[24:0];
+    ioctl_dout_r <= fn_sel ? fn_ld_dout : ioctl_dout;
+`ifdef POCKET_BUPCHIP
+    ioctl_hi_r   <= fn_sel ? 3'd0       : ioctl_addr[27:25];
+`endif
 end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
@@ -882,22 +897,22 @@ atari7800_pocket atari (
 `endif
     .pll_locked     ( pll_core_locked ),
     .pll_busy       ( pll_busy ),
-    .reset_in       ( core_reset | fn_restart ),
+    .reset_in       ( core_reset ),
 
-    // fn_ld_*: a FujiNet swap's load (fujinet_loader.sv), ahead of the
-    // bridge's; all low unless one runs, so the bridge's pass unchanged
-    .cart_download  ( cart_download | fn_ld_dl ),
+    // cart_download and ioctl_*_r carry a FujiNet swap's load as well as
+    // the bridge's (above)
+    .cart_download  ( cart_download ),
     .bios_download  ( bios_download ),
     .hscfw_download ( hscfw_download ),
     .arfw_download  ( arfw_download ),
 `ifdef POCKET_BUPCHIP
     .bupfw_download ( bupfw_download ),
-    .ioctl_wr_any   ( fn_ld_dl ? fn_ld_wr : ioctl_wr_r ),
-    .ioctl_hi       ( fn_ld_dl ? 3'd0 : ioctl_hi_r ),
+    .ioctl_wr_any   ( ioctl_wr_r ),
+    .ioctl_hi       ( ioctl_hi_r ),
 `endif
-    .ioctl_wr       ( fn_ld_dl ? fn_ld_wr : ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
-    .ioctl_addr     ( fn_ld_dl ? fn_ld_addr : ioctl_addr_r ),
-    .ioctl_dout     ( fn_ld_dl ? fn_ld_dout : ioctl_dout_r ),
+    .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
+    .ioctl_addr     ( ioctl_addr_r ),
+    .ioctl_dout     ( ioctl_dout_r ),
 
     .swap_joysticks ( set_s2[17] ),
     .diff_left_b    ( set_s2[16] ),

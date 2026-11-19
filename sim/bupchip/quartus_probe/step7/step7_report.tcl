@@ -120,7 +120,9 @@ proc regs {label pattern {nodup 0}} {
 # pattern, present in Build B (daria), present in Q5 (DARIA + BUP_DEBUG).
 # f3_crossings.txt holds the same presence per kind (selftest.sh compares
 # the two). cap_err_a is absent from Q5 too: it feeds only the status
-# word's bit 11, which bup_status_osd.sv does not show (plan 2.7).
+# word's bit 11, which bup_status_osd.sv does not show (plan 2.7). The last
+# four rows are FujiNet's (docs/FUJINET_GAME_LOADING.md 3.2, 3.4), after
+# plan 2.7: the staging channel's st1 and a1, the swap's req_s0 and ack_s0.
 set ff_table {
 	{*|bupchip_pocket:bupchip|hold_a[0]} 1 1
 	{*|bupchip_pocket:bupchip|pause_a[0]} 0 0
@@ -144,6 +146,10 @@ set ff_table {
 	{*|daria_fe_audio:u_audio|ack_s1} 1 1
 	{*|bup_dbg_snap:*|ak_s0} 0 1
 	{*|daria_fe_guard:u_guard|pd_rx} 1 1
+	{*|bup_asset_wr:writer|st1} 1 1
+	{*|fujinet_stage:fn_stage|a1} 1 1
+	{*|fujinet_rd:fn_rd|req_s0} 1 1
+	{*|fujinet_loader:fn_loader|ack_s0} 1 1
 }
 
 # The known bounds of the guard pair pd_tog -> pd_rx (docs/daria_fe/design.md
