@@ -11,6 +11,9 @@
 ;     PORT CART;
 ;   - a FujiNet on a serial adapter: ERR 00, REPLY 06 (ACK), and its SSID,
 ;     IP address and firmware version.
+; PAUSE runs the CONFIG probe: the commands FujiNet's CONFIG sends first
+; ($EA, $FA, $FE, $FD, $F4), one row each with ERR, REPLY, the reply's
+; length and its first byte.
 ; Fire or Reset runs the transaction again. SELECT runs the network test:
 ; an HTTP GET of URL (below) on N1 ($71) -- OPEN (mode 4, no translation),
 ; STATUS until two readings agree and are not zero, READ up to 180 bytes,
@@ -308,11 +311,62 @@ press
 	jsr frame
 	jsr buttons
 	beq press
+	cmp #$04
+	bcs probego
 	and #$02
 	bne netgo
 	jmp txn
 netgo
 	jmp nettest
+probego
+	jmp probe
+
+; ------------------------------------------------------------ the CONFIG probe
+; PAUSE: CONFIG's first commands to the FujiNet ($70), each on a row of its
+; own with ERR, REPLY and the reply's length and first byte
+probe
+	ldx #6
+	jsr clrrows
+	PRINT 6, 1, t_probe
+	lda #0
+	sta ntry
+pr1
+	ldx ntry
+	lda pcmds,x
+	beq prdone
+	sta tcmd
+	lda #$70
+	ldx tcmd
+	ldy #0
+	jsr fnbeg
+	jsr fngo
+	sta nerr
+	lda ntry
+	asl
+	clc
+	adc #8                  ; rows 8, 10, ... 16
+	ldx #1
+	jsr at
+	lda tcmd
+	jsr puthex
+	lda #" "
+	jsr putc
+	jsr showres
+	lda #<t_len
+	ldy #>t_len
+	jsr puts
+	lda FN_RXHI
+	jsr puthex
+	lda FN_RXLO
+	jsr puthex
+	lda #" "
+	jsr putc
+	lda FN_DATA
+	jsr puthex
+	inc ntry
+	jmp pr1
+prdone
+	jmp again
 
 ; ------------------------------------------------------------ the network test
 nettest
@@ -600,7 +654,7 @@ fg3
 	rts
 
 ; ------------------------------------------------------------ routines
-; A: bit 0 fire or Reset held, bit 1 SELECT held (Z set: none)
+; A: bit 0 fire or Reset held, bit 1 SELECT held, bit 2 PAUSE (Z set: none)
 buttons
 	lda #0
 	sta tb
@@ -623,6 +677,13 @@ bb2
 	ora #$02
 	sta tb
 bb3
+	lda SWCHB
+	and #$08
+	bne bb4
+	lda tb
+	ora #$04
+	sta tb
+bb4
 	lda tb
 	rts
 
@@ -762,7 +823,10 @@ t_pcart	dc.b "CART", 0
 t_ssid	dc.b "SSID ", 0
 t_ip	dc.b "IP   ", 0
 t_fw	dc.b "FW   ", 0
-t_again	dc.b "FIRE: CONFIG   SELECT: HTTP", 0
+t_again	dc.b "FIRE:CFG SEL:HTTP PAUSE:PROBE", 0
+t_probe	dc.b "CONFIG'S FIRST COMMANDS (70)", 0
+; GET_WIFI_ENABLED, GET_WIFI_STATUS, GET_SSID, SCAN_NETWORKS, READ_HOST_SLOTS
+pcmds	dc.b $EA, $FA, $FE, $FD, $F4, 0
 t_http	dc.b "HTTP GET EXAMPLE.COM ON N1", 0
 t_open	dc.b "OPEN   ", 0
 t_nstat	dc.b "STATUS ", 0
