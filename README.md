@@ -236,7 +236,9 @@ link:
   body with a GBA corner, its own LiPo.
 - **Tested on a Pocket (2026-11-19):** NO LINK with nothing attached, the
   link-port loopback, and a full request to fujinet-pc through an FT232H
-  on the link port (its SSID and firmware version came back).
+  on the link port (its SSID and firmware version came back), then an HTTP
+  GET of example.com on N1: OPEN, STATUS, READ and CLOSE, with the page's
+  first 180 bytes on screen.
 
 ### New in 2.2.6
 

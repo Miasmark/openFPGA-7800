@@ -97,7 +97,10 @@ step shows its ERR and REPLY.
 
 Expected with fujinet-pc (or any FujiNet) online: `OPEN ERR 00 REPLY 06`, a
 STATUS line with the bytes waiting, `READ ERR 00 REPLY 06 LEN 00B4`, the
-start of the page's HTML, `CLOSE ERR 00 REPLY 06`. In loopback the cart
+start of the page's HTML, `CLOSE ERR 00 REPLY 06`. Seen on a Pocket
+(2026-11-19) through the FT232H to fujinet-pc: `STATUS 0241 CONN 00 ST 01`
+(577 bytes waiting, the server done with the connection), `READ ... LEN
+00B4` and example.com's HTML from `<!doctype html>`. In loopback the cart
 hears its own OPEN (`REPLY 4F`, not an ACK) and goes straight to CLOSE
 (`REPLY 43`), which is what simulation shows.
 
