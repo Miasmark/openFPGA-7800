@@ -33,6 +33,15 @@ Expected: `ERR 00 OK`, `REPLY C4 LOOPBACK`, `RXLEN 0000`, `LINK 01`, and
 `PORT LINK` or `PORT CART`. The core heard its own request come back as a
 good frame, so its TX and RX both work on that port.
 
+Seen on a Pocket (2026-11-19) on the link port, with a GBC link cable cut
+open and 1 k across its SIN and SOUT. A first cable that did not seat
+fully in the Pocket's port gave NO LINK: check the contact before anything
+else, and solder or crimp a cut cable's wires rather than holding them.
+
+The test cart's row 20 (after a request) shows the lines as the core reads
+them, and SELECT holds TX low: with the loopback in place, SI should follow
+TX, which separates a wiring fault from a timing one.
+
 If the loopback still reports NO LINK, note which port fails: the link
 port's translators may need power the core does not ask for, or a
 direction bit may be wrong.
