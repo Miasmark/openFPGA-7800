@@ -169,9 +169,16 @@ The staged file is fed through the core's own load path:
   DARIA, with their own benches and fit gates (`sim/bupchip/`, step 7's
   checks). The changes must leave their streams bit for bit as they are when
   no FujiNet program runs.
-- The fit's check (g) tripped twice on a retimed register named after
-  `read_DB` (2026-11-19, the reverted line test). New logic on the bus side
-  should stay small for the same reason.
+- The fit's check (g) tripped on a retimed register named after `read_DB`:
+  on the reverted line test (2026-11-19), and on every seed of the
+  game-loading build, whatever its bus-side logic (the load mux before or
+  after core_top's registers, the mailbox's outputs combinational or
+  registered). The 150 paths were the 7800 cart RAM's own request, from the
+  CPU's retimed address registers; 0 crossed `cart2600`. (g)'s `read_DB`
+  leg now leaves out such registers (the owner's decision, 2026-11-20;
+  `docs/daria_step7/plan.md` 5.4 (g), with the negative control refitted).
+  The core keeps the two changes made on the way: the swap selected at
+  core_top's load registers, and the mailbox's bus outputs registered.
 - The BupChip end-to-end test needs `bupchip.hex`, which the development
   machine does not have; the DARIA section and the capture benches do run.
 
