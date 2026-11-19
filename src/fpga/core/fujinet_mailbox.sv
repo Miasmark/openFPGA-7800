@@ -191,11 +191,26 @@ always_comb begin
 	endcase
 end
 
+// The bus side is registers, a clock behind the address, as the reply
+// buffer's rx_q always was (and as the BIOS's block RAM is): the CPU, and
+// MARIA, take a cartridge byte at the bus cycle's closing enable, several
+// clk_sys later. Decoding the address combinationally into bus_oe and
+// bus_do put the mailbox's whole decode in front of top.sv's read_DB, and
+// the fitter then retimed the CPU's address registers through read_DB's
+// mux onto the cart RAM's request into the SRAM, which step 7's check (g)
+// forbids (docs/FUJINET_GAME_LOADING.md, 4).
 wire rd_reply  = addr[15:10] == 6'b0000_10;                // $0800-$0BFF
 wire rd_status = addr[15:8] == 8'h0C;
 wire rd_loader = addr[15:4] == 12'h060 && addr[3:0] < 4'hC;
-assign bus_oe = app && rw && cs && (rd_reply || rd_status || rd_loader);
-assign bus_do = rd_status ? status_b : rd_loader ? loader_b : (rd_in_len ? rx_q : 8'd0);
+logic       oe_q = 1'b0, rx_sel = 1'b0;
+logic [7:0] do_q = 8'd0;
+always_ff @(posedge clk) begin
+	oe_q   <= app && rw && cs && (rd_reply || rd_status || rd_loader);
+	rx_sel <= !rd_status && !rd_loader;
+	do_q   <= rd_status ? status_b : rd_loader ? loader_b : 8'd0;
+end
+assign bus_oe = oe_q;
+assign bus_do = rx_sel ? (rd_in_len ? rx_q : 8'd0) : do_q;
 
 always_ff @(posedge clk) begin
 	start <= 1'b0;
