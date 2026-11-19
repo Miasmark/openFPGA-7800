@@ -2,13 +2,14 @@
 
 How the core would load a game a FujiNet pushes (MOUNT_IMAGE), so that
 FujiNet's CONFIG, and any FujiNet program, can start games over the network.
-Status (2026-11-20): steps 1 to 4 are built and pass in simulation. The
-receiver passes `sim/fujinet/run_fujinet.py`. Staging and the replay pass
-`sim/fujinet/run_fnstage.sh`: the PSRAM model with capture writes and cache
-reads alongside, then the file read back through the loader with and
-without its header. End to end, `sim/run_sim.sh`'s FujiNet section
-(`ONLY=fujinet` alone) boots a game a FujiNet model pushes over the link
-port, as an A78 and as a bare ROM. Not yet fitted (step 5) or tried on a
+Status (2026-11-20): steps 1 to 5's fits are done. The receiver passes
+`sim/fujinet/run_fujinet.py`; staging and the replay pass
+`sim/fujinet/run_fnstage.sh`; end to end, `sim/run_sim.sh`'s FujiNet
+section (`ONLY=fujinet` alone) boots a game a FujiNet model pushes over the
+link port, as an A78 and as a bare ROM. The fits pass every gate and every
+step-7 check on seeds 1-3 (clk_sdram +2.424 / +2.680 / +3.151 ns, clk_arm
++1.807 / +2.192 / +2.436 ns, worst hold +0.074 / +0.045 / +0.074 ns,
+16,639-16,666 ALMs; section 4 has what it took). Not yet tried on a
 Pocket.
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
@@ -177,8 +178,13 @@ The staged file is fed through the core's own load path:
   CPU's retimed address registers; 0 crossed `cart2600`. (g)'s `read_DB`
   leg now leaves out such registers (the owner's decision, 2026-11-20;
   `docs/daria_step7/plan.md` 5.4 (g), with the negative control refitted).
-  The core keeps the two changes made on the way: the swap selected at
-  core_top's load registers, and the mailbox's bus outputs registered.
+  With that, seed 3 still failed (g) by the same mechanism on cart2600's
+  legs (a retimed register named after `mapper_P2`'s comparator), and the
+  rule was extended to them, the negative control refitted again. The core
+  keeps the changes made on the way: the swap selected at core_top's load
+  registers, the mailbox's bus outputs registered, and the YM2151's phase
+  shift register in flip-flops (`ap_core.qsf`), which seed 1 needed for
+  clk_sys hold (-0.005 ns before, +0.074 after).
 - The BupChip end-to-end test needs `bupchip.hex`, which the development
   machine does not have; the DARIA section and the capture benches do run.
 
@@ -200,5 +206,5 @@ The staged file is fed through the core's own load path:
    and as a bare 16K ROM. The first run found the loader's data moving
    ahead of its address (the header parser reads by address), now fixed and
    checked in `run_fnstage.sh` too.
-5. **Fits and the full regression**, then a test build for CONFIG and
-   fujinet-pc on a Pocket.
+5. **Fits and the full regression** (fits done, 2026-11-20: seeds 1-3 pass),
+   then a test build for CONFIG and fujinet-pc on a Pocket.
