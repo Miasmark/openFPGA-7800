@@ -20,6 +20,8 @@
 //   $0D00-$0D7F  write V to $0D00+n: register n = V (FN_REG_*)
 //   $0F00-$0FFF  write: append the byte to the TX stream (320 bytes at most)
 //   $0C30        (this core's own) the port in use: 0 none yet, 1 link, 2 cartridge
+//   $0C31        (this core's own) the lines: bit 0 SI, 1 SI alive, 2 pin 31, 3 pin 31
+//                alive, 4 TX held low; register $17 bit 0 holds TX low (a line test)
 //
 // A transaction: DEVICE, CMD, NPARAM, DATA_RST, the TX stream (NPARAM x
 // {size 1|2|4, value little endian}, then payload), then SEQ = ACKSEQ + 1.
@@ -86,6 +88,7 @@ logic [7:0] reply_cmd = 8'd0;
 logic [10:0] rxlen = 11'd0;
 logic [7:0] boot_state = 8'd0, boot_err = 8'd0;
 logic       tv_set = 1'b0, tv_reg = 1'b0;
+logic       tx_hold = 1'b0;      // FN_REG 0x17 bit 0: hold TX low (a line test)
 logic       link_seen = 1'b0, link_ever = 1'b0;
 logic       start = 1'b0;
 
@@ -136,6 +139,7 @@ always_comb begin
 		8'h25: status_b = bios_skipped ? 8'd2 : 8'd1;
 		8'h26: status_b = {6'd0, hsc_on, hsc_rom};
 		8'h30: status_b = {6'd0, lock_cart, lock_link};   // Pocket: the port in use (1 link, 2 cartridge)
+		8'h31: status_b = {3'd0, tx_hold, alive_c, r_c, alive_l, r_l};   // Pocket: the lines as they are (line test)
 		default: ;
 	endcase
 end
@@ -154,6 +158,7 @@ always_ff @(posedge clk) begin
 		txptr <= 9'd0;
 		lastseq <= 8'd0;
 		tv_set <= 1'b0;
+		tx_hold <= 1'b0;
 	end else begin
 		if (tx_wr && txptr < 9'd320 && !busy)
 			txptr <= txptr + 9'd1;
@@ -170,6 +175,7 @@ always_ff @(posedge clk) begin
 				start <= 1'b1;
 			end
 			7'h15: begin tv_set <= 1'b1; tv_reg <= wdata[0]; end
+			7'h17: tx_hold <= wdata[0];
 			default: ;
 		endcase
 	end
@@ -220,12 +226,14 @@ fujinet_uart uart (
 	.tx_data    (u_tx_data),
 	.tx_valid   (u_tx_valid),
 	.tx_ready   (u_tx_ready),
-	.txd        (txd),
+	.txd        (u_txd),
 	.rxd        (rxd_m),
 	.rx_data    (u_rx_data),
 	.rx_valid   (u_rx_valid)
 );
 assign tx_en = app;
+logic u_txd;
+assign txd = u_txd & ~tx_hold;
 
 // SLIP encoder: the engine offers one byte (raw: an END delimiter) when
 // enc_free; an END or ESC in the data goes out as two bytes.

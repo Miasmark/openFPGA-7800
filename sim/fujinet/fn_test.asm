@@ -11,7 +11,10 @@
 ;     PORT CART;
 ;   - a FujiNet on a serial adapter: ERR 00, REPLY 06 (ACK), and its SSID,
 ;     IP address and firmware version.
-; Fire or Reset runs the transaction again.
+; Fire or Reset runs the transaction again. Row 20 shows the lines live:
+; SI and cartridge pin 31 as read (1/0, + once alive), and TX; SELECT
+; holds TX low or lets it go, a line test needing no serial timing (with
+; a loopback, SI follows it).
 ; Build: python3 fn_font.py > fn_font.inc; dasm fn_test.asm -f3 -ofn_test.bin;
 ; sim/make_a78.py --bin fn_test.bin > fn_test.a78; sign it for a console.
 ; SPDX-License-Identifier: MIT
@@ -45,6 +48,8 @@ FN_MODE    = $0C12
 FN_LINK    = $0C15
 FN_TV      = $0C1E
 FN_PORT    = $0C30          ; this core's: 1 link port, 2 cartridge slot
+FN_LINES   = $0C31          ; this core's: 0 SI, 1 SI alive, 2 pin 31, 3 alive, 4 TX held
+REG_TXHOLD = $17            ; this core's: bit 0 holds TX low
 FN_REGSEL  = $0D00
 REG_DEVICE = $00
 REG_CMD    = $01
@@ -61,6 +66,8 @@ seq      = $84
 frames   = $85          ; 2 bytes
 col      = $87
 len      = $88
+hold     = $89          ; TX held low (SELECT)
+selp     = $8A          ; SELECT was down last frame
 
 	MAC PRINT               ; row, column, string
 	lda #{1}
@@ -283,13 +290,76 @@ again
 	PRINT 22, 1, t_again
 rel
 	jsr frame
+	jsr lines
 	jsr button
 	bne rel
 press
 	jsr frame
+	jsr lines
 	jsr button
 	beq press
 	jmp txn
+
+; The line test: show the lines' levels; SELECT holds TX low (or lets it go)
+; so a meter, or SI through a loopback, can see the level change
+lines
+	lda SWCHB
+	and #$02
+	bne sl_up
+	lda selp
+	bne sl_show
+	inc selp
+	lda hold
+	eor #1
+	sta hold
+	ldx #REG_TXHOLD
+	sta FN_REGSEL,x
+	jmp sl_show
+sl_up
+	lda #0
+	sta selp
+sl_show
+	PRINT 20, 1, t_si
+	lda FN_LINES
+	and #$01
+	jsr bit01
+	lda FN_LINES
+	and #$02
+	jsr bitpm
+	PRINT 20, 10, t_p31
+	lda FN_LINES
+	and #$04
+	jsr bit01
+	lda FN_LINES
+	and #$08
+	jsr bitpm
+	PRINT 20, 20, t_tx
+	lda FN_LINES
+	and #$10
+	beq tx_u
+	lda #<t_low
+	ldy #>t_low
+	jmp puts
+tx_u
+	lda #<t_uart
+	ldy #>t_uart
+	jmp puts
+
+bit01				; Z clear: "1", else "0"
+	beq b01z
+	lda #"1"
+	jmp putc
+b01z
+	lda #"0"
+	jmp putc
+
+bitpm				; Z clear: "+" (alive), else "-"
+	beq bpmz
+	lda #"+"
+	jmp putc
+bpmz
+	lda #"-"
+	jmp putc
 
 ; ------------------------------------------------------------ routines
 ; A = 1 (Z clear) while fire or Reset is held
@@ -441,7 +511,12 @@ t_pcart	dc.b "CART", 0
 t_ssid	dc.b "SSID ", 0
 t_ip	dc.b "IP   ", 0
 t_fw	dc.b "FW   ", 0
-t_again	dc.b "FIRE OR RESET: AGAIN", 0
+t_again	dc.b "FIRE: AGAIN  SELECT: TX LOW", 0
+t_si	dc.b "SI ", 0
+t_p31	dc.b "P31 ", 0
+t_tx	dc.b "TX ", 0
+t_low	dc.b "LOW ", 0
+t_uart	dc.b "HIGH", 0
 t_ackw	dc.b "ACK", 0
 t_nak	dc.b "NAK", 0
 t_loop	dc.b "LOOPBACK", 0
