@@ -125,13 +125,12 @@ circuit, a WS2812-2020 status LED, RESET / BOOT buttons.
   FujiNet device ($70) and the network devices N1-N8 ($71-$78): adapter
   configuration, Wi-Fi setup commands, HTTP, TCP, the rest of the network
   device's protocols, app keys, everything that is a request and its reply.
-- **Refused:** MOUNT_IMAGE's image push. On FujiNet's own cartridge the
-  device sends the game to device $FF and the cartridge's loader starts it;
-  the core refuses the push (BOOT_STATE FAILED, BOOT_ERR 3), so the program
-  sees the load fail. Loading games from the network would need the core to
-  take the pushed image into its cartridge memory and restart into it: a
-  substantial, well-defined addition, not started.
-- **Not served:** the cartridge's loader at $0600 and its hot operations, and
+- **In progress:** MOUNT_IMAGE's image push. On FujiNet's own cartridge the
+  device sends the game to device $FF and the cartridge's loader starts it.
+  The core now takes the push into the PSRAM and reports READY, but does
+  not yet start the staged game; that is step 3 of
+  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md).
+- **Not served:** the cartridge's hot operations other than the swap, and
   the High Score Cart's saves to the device's SD card (the Pocket's own HSC
   saves still work).
 - **CONFIG**, FujiNet's own 7800 menu, runs as an `.a78` from the Pocket's SD

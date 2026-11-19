@@ -13,6 +13,10 @@
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect
 //   hold, pause      clk_sys -> clk_arm   two flops
 //   capture messages clk_sys -> clk_arm   bup_capture / bup_asset_wr
+//   FujiNet staging  clk_sys -> clk_arm   fujinet_stage (core/) / bup_asset_wr:
+//                                         a toggle and a payload held until
+//                                         the answer, fn_s_ack, back through
+//                                         two clk_sys flops in fujinet_stage
 //   48 kHz tick      clk_74a -> clk_arm   bup_tick48k
 //   audio frame      clk_arm -> clk_sys   frame held, toggle, captured on the
 //                                         change between the second and third
@@ -185,7 +189,16 @@ module bupchip_pocket #(
 	output wire        psram_read_en,
 	input  wire        psram_read_avail,
 	input  wire [15:0] psram_data_out,
-	input  wire        psram_busy
+	input  wire        psram_busy,
+
+	// FujiNet staging (docs/FUJINET_GAME_LOADING.md, 3.2): fujinet_stage's
+	// messages, from clk_sys, to bup_asset_wr; fn_s_ack answers (clk_arm)
+	input  wire        fn_s_tog,
+	input  wire        fn_s_sync,
+	input  wire  [1:0] fn_s_lanes,
+	input  wire [18:0] fn_s_haddr,
+	input  wire [15:0] fn_s_data,
+	output wire        fn_s_ack
 `ifdef POCKET_DARIA
 	,
 	// DARIA, clk_sys: the profile, and the front ends' side of the CPU.
@@ -311,7 +324,9 @@ module bupchip_pocket #(
 		.rd_req, .rd_addr, .rd_ack,
 		.psram_bank_sel, .psram_addr, .psram_write_en, .psram_data_in,
 		.psram_write_high_byte, .psram_write_low_byte, .psram_read_en, .psram_busy,
-		.overrun(wr_overrun), .fw_start(wr_fw_start));
+		.overrun(wr_overrun), .fw_start(wr_fw_start),
+		.s_tog(fn_s_tog), .s_sync(fn_s_sync), .s_lanes(fn_s_lanes), .s_haddr(fn_s_haddr),
+		.s_data(fn_s_data), .s_ack(fn_s_ack));
 
 	// ---- the CPU and its memories -------------------------------------------------------
 `ifdef POCKET_DARIA

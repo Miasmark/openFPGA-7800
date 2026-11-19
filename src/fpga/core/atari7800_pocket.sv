@@ -1292,6 +1292,9 @@ wire [15:0] bup_audio_l, bup_audio_r;
 `endif
 
 // FujiNet: the mailbox, on the bus the cartridge sees (POCKET_SRAM builds)
+wire        fn_stg_start, fn_stg_we, fn_stg_sync, fn_stg_synced, fn_stg_busy;
+wire [19:0] fn_stg_addr;
+wire  [7:0] fn_stg_data;
 wire        bus_phi2, bus_cs_cart, fn_oe;
 wire  [7:0] fn_do;
 `ifdef POCKET_SRAM
@@ -1318,25 +1321,62 @@ fujinet_mailbox fujinet
 	.rxd_link     (fn_rxd_link),
 	.rxd_cart     (fn_rxd_cart),
 	.busy         (),
-	// game loading (docs/FUJINET_GAME_LOADING.md): the PSRAM stager and the
-	// swap are not built yet, so a push ends FAILED (BOOT_ERR 4) when its
-	// SYNC goes unanswered, and the swap requests go nowhere
+	// game loading (docs/FUJINET_GAME_LOADING.md): a push is staged in the
+	// BupChip's PSRAM (fujinet_stage, below; without POCKET_BUPCHIP its SYNC
+	// goes unanswered and the push ends FAILED, BOOT_ERR 4). The swap is not
+	// built yet: its requests go nowhere, and $0600 leaves the console in
+	// the loader's loop
+	.stg_start    (fn_stg_start),
+	.stg_we       (fn_stg_we),
+	.stg_addr     (fn_stg_addr),
+	.stg_data     (fn_stg_data),
+	.stg_sync     (fn_stg_sync),
+	.stg_synced   (fn_stg_synced),
+	.stg_busy     (fn_stg_busy),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.stg_start    (),
-	.stg_we       (),
-	.stg_addr     (),
-	.stg_data     (),
-	.stg_sync     (),
-	.stg_synced   (1'b0),
 	.stg_size     (),
 	.stg_ready    (),
 	.swap_go      (),
 	.swap_restart ()
 	/* verilator lint_on PINCONNECTEMPTY */
 );
+
+// The staging's clk_sys side: the pushed image's bytes as halfword WRITEs to
+// the BupChip's PSRAM writer (POCKET_BUPCHIP), staged from 4 MiB on die 0
+wire        fn_s_tog, fn_s_sync, fn_s_ack;
+wire  [1:0] fn_s_lanes;
+wire [18:0] fn_s_haddr;
+wire [15:0] fn_s_data;
+`ifdef POCKET_BUPCHIP
+fujinet_stage fn_stage
+(
+	.clk     (clk_sys),
+	.start   (fn_stg_start),
+	.we      (fn_stg_we),
+	.addr    (fn_stg_addr),
+	.data    (fn_stg_data),
+	.sync    (fn_stg_sync),
+	.busy    (fn_stg_busy),
+	.synced  (fn_stg_synced),
+	.s_tog   (fn_s_tog),
+	.s_sync  (fn_s_sync),
+	.s_lanes (fn_s_lanes),
+	.s_haddr (fn_s_haddr),
+	.s_data  (fn_s_data),
+	.s_ack   (fn_s_ack)
+);
+`else
+assign fn_stg_busy = 1'b0;
+assign fn_stg_synced = 1'b0;
+`endif
 `else
 assign fn_oe = 1'b0;
 assign fn_do = 8'hFF;
+assign fn_stg_start = 1'b0;
+assign fn_stg_we = 1'b0;
+assign fn_stg_addr = 20'd0;
+assign fn_stg_data = 8'd0;
+assign fn_stg_sync = 1'b0;
 assign fn_txd = 1'b1;
 assign fn_tx_en = 1'b0;
 `endif
@@ -1680,7 +1720,13 @@ bupchip_pocket bupchip
 	.psram_read_en         (psr_re),
 	.psram_read_avail      (psr_avail),
 	.psram_data_out        (psr_dout),
-	.psram_busy            (psr_busy)
+	.psram_busy            (psr_busy),
+	.fn_s_tog              (fn_s_tog),
+	.fn_s_sync             (fn_s_sync),
+	.fn_s_lanes            (fn_s_lanes),
+	.fn_s_haddr            (fn_s_haddr),
+	.fn_s_data             (fn_s_data),
+	.fn_s_ack              (fn_s_ack)
 `ifdef POCKET_DARIA
 	,
 	.daria_profile  (daria_profile),

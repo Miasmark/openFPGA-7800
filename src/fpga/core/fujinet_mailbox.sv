@@ -73,6 +73,7 @@ module fujinet_mailbox #(
 	output logic  [7:0] stg_data,
 	output logic        stg_sync,
 	input  logic        stg_synced,
+	input  logic        stg_busy,     // hold the next byte
 	output logic [19:0] stg_size,     // the staged file's bytes, once READY
 	output logic        stg_ready,
 
@@ -736,9 +737,10 @@ always_ff @(posedge clk) begin
 
 	// The frame's data to the stager, a byte every 4 clocks
 	E_COPY: begin
-		// sb_q follows sb_ra a clock later: byte ci is there from cw 1
-		cw <= cw + 2'd1;
-		if (cw == 2'd3) begin
+		// sb_q follows sb_ra a clock later: byte ci is there from cw 1; a
+		// busy stager holds it at cw 3
+		if (!(cw == 2'd3 && stg_busy)) cw <= cw + 2'd1;
+		if (cw == 2'd3 && !stg_busy) begin
 			sb_ra <= ci[8:0] + 9'd1;
 			if (got < tot) begin
 				stg_we <= 1'b1;

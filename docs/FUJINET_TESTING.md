@@ -126,8 +126,11 @@ for the Wi-Fi state (NO LINK after 1.5 s) and goes on to its HOST SLOTS
 screen. On the core:
 
 - **Runs:** Wi-Fi setup, host slots, browsing, renaming, copying, INFO.
-- **Booting a game fails cleanly:** MOUNT_IMAGE's image push is refused, and
-  CONFIG shows `?LOAD ERROR 03` and goes back.
+- **Booting a game does not work yet:** in builds up to step 1 of
+  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md) the image push is
+  refused and CONFIG shows `?LOAD ERROR 03`; from step 2 the push is
+  staged and reaches READY, but the console then waits in the loader at
+  `$0609` until step 3 (the swap) is built.
 - **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
   Pocket's HSC; switching it there does nothing.
 

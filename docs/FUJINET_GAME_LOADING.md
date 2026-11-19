@@ -2,10 +2,12 @@
 
 How the core would load a game a FujiNet pushes (MOUNT_IMAGE), so that
 FujiNet's CONFIG, and any FujiNet program, can start games over the network.
-Status (2026-11-20): step 1, the push receiver, is built and passes
-`sim/fujinet/run_fujinet.py`; the stager is not, so in the core a push ends
-FAILED with BOOT_ERR 4 (`?LOAD ERROR 04` in CONFIG) when its SYNC goes
-unanswered.
+Status (2026-11-20): steps 1 and 2 are built. The push receiver passes
+`sim/fujinet/run_fujinet.py`, and the staging channel passes
+`sim/fujinet/run_fnstage.sh` (against the PSRAM model, with capture writes
+and cache reads alongside). A push now lands in the PSRAM and ends READY,
+but nothing yet starts the staged game: `$0600` restarts the running
+program until step 3 (the swap) is built.
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
 PSRAM (cram0): a writer on clk_arm fed by messages from clk_sys
@@ -77,11 +79,14 @@ FujiNet's CONFIG (fujinet-config `atari7800/st_boot.c`) and fujinet-lib's
   from 0 and is under 4 MiB (the cartridge slot holds 4 MiB); a DARIA image
   takes the first 512 KiB; the BupChip CPU reads only within its asset size.
 - **A second message channel** into `bup_asset_wr`, beside `bup_capture`'s:
-  START, WRITE (a halfword, its byte lanes and address in the staging area)
-  and SYNC (answered with a toggle once every earlier write has reached the
-  PSRAM). Its own toggle and buffer, so neither source waits on the other's
-  timing; a WRITE waits for the controller as the capture's do. A push
-  arrives at most at 115,200 baud, a halfword every 170 us or so.
+  WRITE (a halfword, its byte lanes and address in the staging area) and
+  SYNC (answered once every earlier write has reached the PSRAM: the
+  controller idle two clocks). `fujinet_stage.sv` on clk_sys packs the
+  mailbox's bytes into halfwords and sends each with a toggle, holding the
+  payload until the answering toggle comes back; the mailbox waits on its
+  `busy`. The capture's WRITEs go first, the staging WRITE next, cache reads
+  last. A push arrives at most at 115,200 baud, a halfword every 170 us or
+  so; a crossing takes well under 1 us.
 - **No conflict with the CPU:** a FujiNet program is never a Souper cartridge
   or a 2600 image, so the BupChip CPU is held and its cache does not fill
   while the program runs.
@@ -139,11 +144,12 @@ The staged file is fed through the core's own load path:
 
 ## 5. Plan
 
-1. **Push receiver:** the mailbox's side (3.1) with a stager interface
+1. **Push receiver** (built): the mailbox's side (3.1) with a stager interface
    (START, a byte stream, SYNC back), and `tb_fujinet` cases for every frame
    and error.
-2. **Staging:** the second channel in `bup_asset_wr`, a bench against
-   `sim/bupchip/s4/psram_model.sv`, and the BupChip / DARIA benches unchanged.
+2. **Staging** (built): the second channel in `bup_asset_wr`, a bench against
+   `sim/bupchip/s4/psram_model.sv` (`sim/fujinet/run_fnstage.sh`), and the
+   BupChip / DARIA benches unchanged.
 3. **Loader and swap:** `$0600`, the hot swap, `fujinet_loader.sv`, the
    requester in `daria_smp`, and the input mux.
 4. **End to end in `tb_load`:** a FujiNet model on the link that answers

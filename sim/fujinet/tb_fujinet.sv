@@ -36,13 +36,17 @@ fujinet_mailbox #(.MS_DIV(MS)) dut (
 	.bus_oe (bus_oe), .bus_do (bus_do),
 	.txd (txd), .tx_en (tx_en), .rxd_link (loop ? txd : (on_cart ? 1'b0 : rxd)), .rxd_cart (on_cart ? rxd : rxd_c), .busy (busy),
 	.stg_start (stg_start), .stg_we (stg_we), .stg_addr (stg_addr), .stg_data (stg_data),
-	.stg_sync (stg_sync), .stg_synced (stg_synced), .stg_size (stg_size), .stg_ready (stg_ready),
+	.stg_sync (stg_sync), .stg_synced (stg_synced), .stg_busy (stg_busy), .stg_size (stg_size), .stg_ready (stg_ready),
 	.swap_go (swap_go), .swap_restart (swap_restart)
 );
 
-// The stager: a memory, and SYNC answered 20 clocks later
+// The stager: a memory, busy for 0-12 clocks after each byte (as
+// fujinet_stage.sv while a halfword crosses), and SYNC answered 20 clocks later
 logic        stg_start, stg_we, stg_sync, stg_ready, swap_go, swap_restart;
 logic        stg_synced = 1'b0;
+int          stg_hold = 0;
+wire         stg_busy = stg_hold != 0;
+int          stg_busy_we = 0;
 logic [19:0] stg_addr, stg_size;
 logic  [7:0] stg_data;
 logic  [7:0] stage_mem [0:8191];
@@ -50,7 +54,10 @@ int stg_starts = 0, stg_wes = 0, stg_bad = 0, swaps = 0, restarts = 0;
 logic [19:0] stg_next = 20'd0;
 always @(posedge clk) begin
 	if (stg_start) begin stg_starts++; stg_next = 20'd0; end
+	if (stg_hold != 0) stg_hold--;
 	if (stg_we) begin
+		if (stg_busy) stg_busy_we++;             // a byte while busy would be lost
+		stg_hold = $urandom_range(0, 12);
 		if (stg_addr != stg_next) stg_bad++;     // in order, from 0
 		stg_next = stg_addr + 20'd1;
 		stage_mem[stg_addr[12:0]] <= stg_data;
@@ -415,6 +422,7 @@ initial begin
 	check("14 stager starts", stg_starts - starts0, 1);
 	check("14 stager bytes", stg_wes, 4224);
 	check("14 stager out of order", stg_bad, 0);
+	check("14 stager bytes while busy", stg_busy_we, 0);
 	bad = 0;
 	for (int i = 0; i < 4224; i++) if (stage_mem[i] !== image[i]) bad++;
 	check("14 staged bytes wrong", bad, 0);
