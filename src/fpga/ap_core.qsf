@@ -861,3 +861,12 @@ set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pock
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|atari7800_pocket:atari|atarivox:atarivox"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|audio_filter:afilt"
 set_instance_assignment -name MUX_RESTRUCTURE ON -to "core_top:ic|core_bridge_cmd:icb"
+
+# The YM2151's phase shift register (jt51_pg's u_phsh, 20 bits x 29 stages)
+# in flip-flops, not block RAM. Inferred as altshift_taps, its input was one
+# hop from ph_X into an M10K's input register, whose clock arrives about
+# 0.43 ns after the source's: on the FujiNet game-loading build (2026-11-20)
+# seed 1 missed clk_sys hold there by 5 ps at the fast 0 C corner (seeds 2
+# and 3 passed with +0.019 / +0.090 ns). As flip-flops, the same function
+# costs about 290 ALMs and one M10K fewer.
+set_instance_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF -to "core_top:ic|atari7800_pocket:atari|Atari7800:main|cart:cart|jt51:ym2151|jt51_pg:u_pg|jt51_sh:u_phsh"
