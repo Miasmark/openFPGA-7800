@@ -2,8 +2,10 @@
 
 How the core would load a game a FujiNet pushes (MOUNT_IMAGE), so that
 FujiNet's CONFIG, and any FujiNet program, can start games over the network.
-Today the core refuses the push (`?LOAD ERROR 03` in CONFIG). Status: design,
-2026-11-19; nothing below is built yet.
+Status (2026-11-20): step 1, the push receiver, is built and passes
+`sim/fujinet/run_fujinet.py`; the stager is not, so in the core a push ends
+FAILED with BOOT_ERR 4 (`?LOAD ERROR 04` in CONFIG) when its SYNC goes
+unanswered.
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
 PSRAM (cram0): a writer on clk_arm fed by messages from clk_sys

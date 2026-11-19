@@ -1317,7 +1317,22 @@ fujinet_mailbox fujinet
 	.tx_en        (fn_tx_en),
 	.rxd_link     (fn_rxd_link),
 	.rxd_cart     (fn_rxd_cart),
-	.busy         ()
+	.busy         (),
+	// game loading (docs/FUJINET_GAME_LOADING.md): the PSRAM stager and the
+	// swap are not built yet, so a push ends FAILED (BOOT_ERR 4) when its
+	// SYNC goes unanswered, and the swap requests go nowhere
+	/* verilator lint_off PINCONNECTEMPTY */
+	.stg_start    (),
+	.stg_we       (),
+	.stg_addr     (),
+	.stg_data     (),
+	.stg_sync     (),
+	.stg_synced   (1'b0),
+	.stg_size     (),
+	.stg_ready    (),
+	.swap_go      (),
+	.swap_restart ()
+	/* verilator lint_on PINCONNECTEMPTY */
 );
 `else
 assign fn_oe = 1'b0;

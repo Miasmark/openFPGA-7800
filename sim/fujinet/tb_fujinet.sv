@@ -34,8 +34,42 @@ fujinet_mailbox #(.MS_DIV(MS)) dut (
 	.claim_kind (8'd0), .hsc_rom (1'b0), .hsc_on (1'b0), .bios_skipped (1'b0),
 	.addr (addr), .wdata (wdata), .rw (rw), .phi2 (phi2), .cs (cs),
 	.bus_oe (bus_oe), .bus_do (bus_do),
-	.txd (txd), .tx_en (tx_en), .rxd_link (loop ? txd : (on_cart ? 1'b0 : rxd)), .rxd_cart (on_cart ? rxd : rxd_c), .busy (busy)
+	.txd (txd), .tx_en (tx_en), .rxd_link (loop ? txd : (on_cart ? 1'b0 : rxd)), .rxd_cart (on_cart ? rxd : rxd_c), .busy (busy),
+	.stg_start (stg_start), .stg_we (stg_we), .stg_addr (stg_addr), .stg_data (stg_data),
+	.stg_sync (stg_sync), .stg_synced (stg_synced), .stg_size (stg_size), .stg_ready (stg_ready),
+	.swap_go (swap_go), .swap_restart (swap_restart)
 );
+
+// The stager: a memory, and SYNC answered 20 clocks later
+logic        stg_start, stg_we, stg_sync, stg_ready, swap_go, swap_restart;
+logic        stg_synced = 1'b0;
+logic [19:0] stg_addr, stg_size;
+logic  [7:0] stg_data;
+logic  [7:0] stage_mem [0:8191];
+int stg_starts = 0, stg_wes = 0, stg_bad = 0, swaps = 0, restarts = 0;
+logic [19:0] stg_next = 20'd0;
+always @(posedge clk) begin
+	if (stg_start) begin stg_starts++; stg_next = 20'd0; end
+	if (stg_we) begin
+		if (stg_addr != stg_next) stg_bad++;     // in order, from 0
+		stg_next = stg_addr + 20'd1;
+		stage_mem[stg_addr[12:0]] <= stg_data;
+		stg_wes++;
+	end
+	if (swap_go) swaps++;
+	if (swap_restart) restarts++;
+end
+initial forever begin
+	@(posedge clk);
+	if (stg_sync) begin
+		repeat (20) @(posedge clk);
+		stg_synced <= 1'b1;
+		@(posedge clk);
+		stg_synced <= 1'b0;
+	end
+end
+logic [7:0] image [0:4223];
+initial $readmemh("image.hex", image);
 
 int fails = 0;
 
@@ -188,7 +222,7 @@ endtask
 
 initial begin
 	logic [7:0] s, d;
-	int v, len, bad;
+	int v, len, bad, starts0;
 	repeat (10) @(posedge clk);
 	reset <= 1'b0;
 	repeat (10) @(posedge clk);
@@ -251,8 +285,9 @@ initial begin
 	rd(st(8'h04), v); check("4 rxlen", v, 0);
 	rd(16'h0800, v); check("4 reply hidden", v, 0);
 
-	// 5: MOUNT_IMAGE: the FujiNet pushes an image to device $FF; the cart
-	// NAKs the OPEN, and the mount's own reply (a NAK) ends it
+	// 5: MOUNT_IMAGE: the FujiNet opens a push to device $FF (the cart
+	// ACKs the OPEN), then refuses the mount itself (a NAK): the push never
+	// finished, so the state stays transferring
 	begin_txn(8'h70, 8'hF8, 8'd2);
 	tx(8'd1); tx(8'd0);
 	tx(8'd1); tx(8'd1);
@@ -264,8 +299,8 @@ initial begin
 	wait_ack(s, 4000000);
 	rd(st(8'h02), v); check("5 err", v, 0);
 	rd(st(8'h03), v); check("5 reply cmd NAK", v, 8'h15);
-	rd(st(8'h06), v); check("5 boot state failed", v, 8'h80);
-	rd(st(8'h08), v); check("5 boot err", v, 3);
+	rd(st(8'h06), v); check("5 boot state transferring (the mount refused mid-push)", v, 1);
+	rd(st(8'h08), v); check("5 boot err", v, 0);
 
 	// 6: a reply longer than the 1K window
 	begin_txn(8'h70, 8'hC4, 8'd0);
@@ -356,6 +391,79 @@ initial begin
 	rd(st(8'h04), v); check("13 cartridge rxlen", v, 4);
 	rd(16'h0803, v); check("13 cartridge data 3", v, 8'hC0);
 	rd(st(8'h30), v); check("13 port cartridge", v, 2);
+
+	starts0 = stg_starts;
+	// 14: MOUNT_IMAGE, and the FujiNet pushes a 4,224-byte A78 (a FUJI claim
+	// in its last 4K block) to device $FF: OPEN, nine WRITEs, CLOSE, each
+	// ACKed; then the mount's own ACK. READY, the counts, every byte staged.
+	begin_txn(8'h70, 8'hF8, 8'd2);
+	tx(8'd1); tx(8'd0);
+	tx(8'd1); tx(8'd1);
+	go(s);
+	expect_frame(200000);
+	for (int k = 7; k <= 17; k++) begin
+		send(k);
+		expect_frame(2000000);       // the cart's ACK
+	end
+	rd(st(8'h06), v); check("14 boot state READY", v, 2);
+	rd(st(8'h07), v); check("14 boot pct", v, 100);
+	rd(st(8'h16), v); len = v; rd(st(8'h17), v); len += v * 256;
+	check("14 got", len, 4224);
+	rd(st(8'h19), v); len = v; rd(st(8'h1A), v); len += v * 256;
+	check("14 tot", len, 4224);
+	rd(st(8'h1F), v); check("14 staged: ready, claim, bios ok", v, 7);
+	check("14 stager starts", stg_starts - starts0, 1);
+	check("14 stager bytes", stg_wes, 4224);
+	check("14 stager out of order", stg_bad, 0);
+	bad = 0;
+	for (int i = 0; i < 4224; i++) if (stage_mem[i] !== image[i]) bad++;
+	check("14 staged bytes wrong", bad, 0);
+	check("14 stg_size", int'(stg_size), 4224);
+	send(18);
+	wait_ack(s, 4000000);
+	rd(st(8'h02), v); check("14 mount err", v, 0);
+	rd(st(8'h03), v); check("14 mount ACK", v, 6);
+	rd(st(8'h06), v); check("14 still READY", v, 2);
+	// the loader, and the swap: without BOOTLOCK a restart, with it the image
+	rd(16'h0600, v); check("14 loader $0600 JMP", v, 8'h4C);
+	rd(16'h0604, v); check("14 loader $0604", v, 8'hFC);
+	cpu_write(16'h0DFE, 8'h00);
+	repeat (10) @(posedge clk);
+	check("14 hot swap unarmed: restart", restarts, 1);
+	check("14 hot swap unarmed: no swap", swaps, 0);
+	reg_w(7'h11, 8'hB5);
+	cpu_write(16'h0DFE, 8'h00);
+	repeat (10) @(posedge clk);
+	check("14 hot swap armed: swap", swaps, 1);
+
+	// 15: an image too big: the OPEN is NAKed, FAILED, error 1
+	begin_txn(8'h70, 8'hF8, 8'd2);
+	tx(8'd1); tx(8'd0);
+	tx(8'd1); tx(8'd1);
+	go(s);
+	expect_frame(200000);
+	send(19);
+	expect_frame(2000000);           // the cart's NAK
+	send(20);
+	wait_ack(s, 4000000);
+	rd(st(8'h06), v); check("15 boot state FAILED", v, 8'h80);
+	rd(st(8'h08), v); check("15 boot err too big", v, 1);
+	rd(st(8'h1F), v); check("15 nothing staged", v, 0);
+
+	// 16: fewer bytes than declared: FAILED, error 2 (truncated)
+	begin_txn(8'h70, 8'hF8, 8'd2);
+	tx(8'd1); tx(8'd0);
+	tx(8'd1); tx(8'd1);
+	go(s);
+	expect_frame(200000);
+	for (int k = 21; k <= 23; k++) begin
+		send(k);
+		expect_frame(2000000);
+	end
+	send(24);
+	wait_ack(s, 4000000);
+	rd(st(8'h06), v); check("16 boot state FAILED", v, 8'h80);
+	rd(st(8'h08), v); check("16 boot err truncated", v, 2);
 
 	$display("TB_FUJINET frames %0d fails %0d", ntx, fails);
 	$finish;

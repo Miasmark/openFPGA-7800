@@ -31,6 +31,25 @@ replies = [
     frame(0x71, 0x15),
     frame(0x70, 0x06, payload=b"\x01\xDB\x02\xC0"),
 ]
+# 14: the push of a 4,224-byte A78: a header, 4K of ROM with a FUJI claim at
+# $F70 (CPU $FF70), the bytes otherwise a pattern with END and ESC in it
+img = bytearray(128 + 4096)
+img[1:10] = b"ATARI7800"
+img[49:53] = (4096).to_bytes(4, "big")
+for i in range(4096):
+    img[128 + i] = (i * 13 + 0xC0) & 255
+img[128 + 0xF70:128 + 0xF7A] = b"FUJI" + bytes([1, 0, 1, 0, 0, 0])
+with open(os.path.join(WORK, "image.hex"), "w") as f:
+    f.write("\n".join("%02x" % b for b in img) + "\n")
+def push_open(size, stream=0):
+    return frame(0xFF, 0x4F, params=[(2, 0)], payload=bytes([stream]) + size.to_bytes(4, "little"))
+replies += [push_open(len(img))]
+replies += [frame(0xFF, 0x57, payload=bytes(img[o:o + 512])) for o in range(0, len(img), 512)]
+replies += [frame(0xFF, 0x43), frame(0x70, 0x06)]
+assert len(replies) == 19
+# 15: too big; 16: 500 of 1000 bytes, then CLOSE
+replies += [push_open(600000), frame(0x70, 0x15)]
+replies += [push_open(1000), frame(0xFF, 0x57, payload=bytes(500)), frame(0xFF, 0x43), frame(0x70, 0x15)]
 with open(os.path.join(WORK, "replies.txt"), "w") as f:
     for r in replies:
         f.write("%d %s\n" % (len(r), " ".join("%02x" % b for b in r)))
@@ -42,7 +61,7 @@ expect = [
           payload=bytes((i * 37 + 0xC0) & 255 for i in range(40))),
     frame(0x70, 0xC4),
     frame(0x70, 0xF8, params=[(1, 0), (1, 1)]),
-    frame(0xFF, 0x15),
+    frame(0xFF, 0x06),
     frame(0x70, 0xC4),
     frame(0x70, 0xC4),
     frame(0x71, 0x4F, params=[(4, 0x04030201)]),
@@ -50,6 +69,11 @@ expect = [
     frame(0x70, 0xC4),
     frame(0x70, 0xC4),
 ]
+mount = frame(0x70, 0xF8, params=[(1, 0), (1, 1)])
+ACK, NAK = frame(0xFF, 0x06), frame(0xFF, 0x15)
+expect += [mount] + [ACK] * 11          # 14: OPEN, nine WRITEs, CLOSE
+expect += [mount, NAK]                  # 15
+expect += [mount, ACK, ACK, ACK]        # 16
 
 src = [os.path.join(FPGA, "fujinet_uart.sv"), os.path.join(FPGA, "fujinet_mailbox.sv"),
        os.path.join(HERE, "tb_fujinet.sv")]

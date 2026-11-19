@@ -62,7 +62,24 @@ module fujinet_mailbox #(
 	output logic        tx_en,        // drive TX (APP mode only)
 	input  logic        rxd_link,     // link port SI
 	input  logic        rxd_cart,     // cartridge pin 31
-	output logic        busy
+	output logic        busy,
+
+	// The stager (docs/FUJINET_GAME_LOADING.md, 3.2): a MOUNT_IMAGE's pushed
+	// image, a byte at a time at its file offset; stg_sync asks for every
+	// byte so far to be stored, stg_synced (a pulse) says they are
+	output logic        stg_start,
+	output logic        stg_we,
+	output logic [19:0] stg_addr,
+	output logic  [7:0] stg_data,
+	output logic        stg_sync,
+	input  logic        stg_synced,
+	output logic [19:0] stg_size,     // the staged file's bytes, once READY
+	output logic        stg_ready,
+
+	// The loader at $0600 wrote the hot swap ($0DFE): start the staged image
+	// (armed: READY and BOOTLOCK), or else restart this one
+	output logic        swap_go,
+	output logic        swap_restart
 );
 
 localparam [7:0] SLIP_END = 8'hC0, SLIP_ESC = 8'hDB, SLIP_ESC_END = 8'hDC, SLIP_ESC_ESC = 8'hDD;
@@ -76,6 +93,7 @@ localparam [2:0] ERR_OK = 3'd0, ERR_NOLINK = 3'd1, ERR_TIMEOUT = 3'd2, ERR_BADFR
 wire wr_cyc = app && phi2 && !rw && cs;
 wire reg_wr = wr_cyc && addr[15:7] == 9'b0000_1101_0;      // $0D00-$0D7F
 wire tx_wr  = wr_cyc && addr[15:8] == 8'h0F;               // $0F00-$0FFF
+wire hot_wr = wr_cyc && addr[15:7] == 9'b0000_1101_1;      // $0D80-$0DFF, one-shot operations
 wire [6:0] reg_n = addr[6:0];
 
 logic [7:0] mb_device = 8'd0, mb_cmd = 8'd0, mb_nparam = 8'd0;
@@ -88,6 +106,11 @@ logic [7:0] boot_state = 8'd0, boot_err = 8'd0;
 logic       tv_set = 1'b0, tv_reg = 1'b0;
 logic       link_seen = 1'b0, link_ever = 1'b0;
 logic       start = 1'b0;
+logic       bootlock_w = 1'b0, hotswap_w = 1'b0;     // pulses to the engine
+// The push (3.1)
+logic  [7:0] boot_pct = 8'd0;
+logic [19:0] got = 20'd0, tot = 20'd0;
+logic  [7:0] staged = 8'd0;
 
 // TX stream: written by the bus, read by the engine
 logic [7:0] txbuf [0:511];
@@ -125,6 +148,7 @@ always_comb begin
 		8'h04: status_b = rxlen[7:0];
 		8'h05: status_b = {5'd0, rxlen[10:8]};
 		8'h06: status_b = boot_state;
+		8'h07: status_b = boot_pct;
 		8'h08: status_b = boot_err;
 		8'h09: status_b = "F";
 		8'h0A: status_b = "N";
@@ -132,6 +156,13 @@ always_comb begin
 		8'h12: status_b = 8'd3;                       // FN_MODE_APP
 		8'h14: status_b = |claim_kind ? claim_kind - 8'd1 : 8'd0;
 		8'h15: status_b = {7'd0, link_ever};
+		8'h16: status_b = got[7:0];                   // FN_R_BOOT_GOT0, 24-bit LE
+		8'h17: status_b = got[15:8];
+		8'h18: status_b = {4'd0, got[19:16]};
+		8'h19: status_b = tot[7:0];                   // FN_R_BOOT_TOT0
+		8'h1A: status_b = tot[15:8];
+		8'h1B: status_b = {4'd0, tot[19:16]};
+		8'h1F: status_b = staged;                     // FN_R_STAGED
 		8'h1E: status_b = {7'd0, tv_set ? tv_reg : tv_pal};
 		8'h25: status_b = bios_skipped ? 8'd2 : 8'd1;
 		8'h26: status_b = {6'd0, hsc_on, hsc_rom};
@@ -140,13 +171,31 @@ always_comb begin
 	endcase
 end
 
+// The loader (3.3), $0600-$060B:
+//   $0600 JMP $0606 (FN_LOADER_BOOT), $0603 JMP ($FFFC) (FN_LOADER_CONFIG:
+//   no CONFIG here, so this program again), $0606 STA $0DFE (the hot swap),
+//   $0609 JMP $0609 (the core takes the console from there)
+logic [7:0] loader_b;
+always_comb begin
+	case (addr[3:0])
+		4'h0: loader_b = 8'h4C; 4'h1: loader_b = 8'h06; 4'h2: loader_b = 8'h06;
+		4'h3: loader_b = 8'h6C; 4'h4: loader_b = 8'hFC; 4'h5: loader_b = 8'hFF;
+		4'h6: loader_b = 8'h8D; 4'h7: loader_b = 8'hFE; 4'h8: loader_b = 8'h0D;
+		4'h9: loader_b = 8'h4C; 4'hA: loader_b = 8'h09; 4'hB: loader_b = 8'h06;
+		default: loader_b = 8'h00;
+	endcase
+end
+
 wire rd_reply  = addr[15:10] == 6'b0000_10;                // $0800-$0BFF
 wire rd_status = addr[15:8] == 8'h0C;
-assign bus_oe = app && rw && cs && (rd_reply || rd_status);
-assign bus_do = rd_status ? status_b : (rd_in_len ? rx_q : 8'd0);
+wire rd_loader = addr[15:4] == 12'h060 && addr[3:0] < 4'hC;
+assign bus_oe = app && rw && cs && (rd_reply || rd_status || rd_loader);
+assign bus_do = rd_status ? status_b : rd_loader ? loader_b : (rd_in_len ? rx_q : 8'd0);
 
 always_ff @(posedge clk) begin
 	start <= 1'b0;
+	bootlock_w <= reg_wr && reg_n == 7'h11 && wdata == 8'hB5;   // FN_REG_BOOTLOCK = FN_BOOTLOCK_MAGIC
+	hotswap_w <= hot_wr && addr[6:0] == 7'h7E;                 // FN_HOT_SWAP ($0DFE)
 	if (reset) begin
 		mb_device <= 8'd0;
 		mb_cmd <= 8'd0;
@@ -270,7 +319,8 @@ assign u_tx_data  = enc_second ? enc_next :
 //////////////////////////////  the engine  ////////////////////////////////
 
 typedef enum logic [3:0] {
-	E_IDLE, E_P1A, E_P1B, E_CK, E_SEND, E_FETCH, E_WAIT, E_DONE
+	E_IDLE, E_P1A, E_P1B, E_CK, E_SEND, E_FETCH, E_WAIT, E_DONE,
+	E_DBC, E_COPY, E_SYNC, E_BARE
 } estate_t;
 /* verilator lint_off PROCASSINIT */
 estate_t st = E_IDLE;
@@ -313,7 +363,7 @@ logic [16:0] ms_lim;
 // Reply parser
 logic        hunting, esc;
 logic [11:0] pos, raw_cnt;
-logic [7:0]  rsum, r_dev, r_cmd, r_ck, r_d0;
+logic [7:0]  rsum, r_dev, r_cmd, r_ck, r_d0, r_d1, r_d2, r_d3, r_d4;
 logic [15:0] r_len;
 logic [1:0]  dstate;       // 0 header, 1 descriptors, 2 fields, 3 data
 logic [4:0]  ndescr;
@@ -336,11 +386,38 @@ function automatic [3:0] fbytes(input [2:0] d);   // count * size, fujibus.c's t
 	endcase
 endfunction
 
+// The push: a device $FF frame's data is kept here, apart from the reply
+// window, and copied to the stager once the frame has proved good
+logic [7:0]  sbuf [0:511];
+logic        sb_we;
+logic [8:0]  sb_wa, sb_ra;
+logic [7:0]  sb_wd, sb_q;
+always_ff @(posedge clk) begin
+	if (sb_we) sbuf[sb_wa] <= sb_wd;
+	sb_q <= sbuf[sb_ra];
+end
+localparam [19:0] STG_MAX = 20'd524416;      // 512 KiB of ROM and a 128-byte header
+logic        stg_open, bare_nak, armed;
+logic [7:0]  dbc_cmd;
+logic [9:0]  cn, ci;                          // bytes to copy, copied
+logic [1:0]  cw;                              // the copy's pacing
+logic [19:0] pct_acc;
+logic [15:0] sync_t;
+// The FUJI claim in the pushed image: bytes $F70-$F75 of each 4K block of
+// the ROM (past the header), the last block's counting (as fujinet_claim)
+logic [4:0]  h_ok;                            // bytes 1-5 so far read "ATARI"
+logic [7:0]  csig [0:5];
+logic        c_ok;
+logic [7:0]  c_end;                           // that block's end, in 4K blocks
+wire  [19:0] po = got - (h_ok[4] ? 20'd128 : 20'd0);   // the byte's offset in the ROM
+
 wire slow_cmd = (mb_cmd == 8'hF8 || mb_cmd == 8'hD8);
 wire net_cmd  = (mb_device >= 8'h71 && mb_device <= 8'h78) &&
                 (mb_cmd == 8'h4F || mb_cmd == 8'h43 || mb_cmd == 8'h53 || mb_cmd == 8'h52);
 
 assign busy = st != E_IDLE;
+assign stg_size = tot;
+assign stg_ready = boot_state == 8'd2;
 wire rx_act = st == E_SEND || st == E_FETCH || st == E_WAIT;
 wire frame_end = u_rx_valid && u_rx_data == SLIP_END && !hunting && pos != 12'd0;
 
@@ -367,6 +444,19 @@ end
 
 always_ff @(posedge clk) begin
 	rx_we <= 1'b0;
+	sb_we <= 1'b0;
+	stg_start <= 1'b0;
+	stg_we <= 1'b0;
+	stg_sync <= 1'b0;
+	swap_go <= 1'b0;
+	swap_restart <= 1'b0;
+	// BOOTLOCK arms the swap only on a READY image; the hot swap starts it,
+	// or else restarts this program
+	if (bootlock_w && boot_state == 8'd2) armed <= 1'b1;
+	if (hotswap_w) begin
+		swap_go <= armed;
+		swap_restart <= !armed;
+	end
 	if (reset || !app) begin
 		st <= E_IDLE;
 		ackseq <= 8'd0;
@@ -375,6 +465,12 @@ always_ff @(posedge clk) begin
 		rxlen <= 11'd0;
 		boot_state <= 8'd0;
 		boot_err <= 8'd0;
+		boot_pct <= 8'd0;
+		got <= 20'd0;
+		tot <= 20'd0;
+		staged <= 8'd0;
+		stg_open <= 1'b0;
+		armed <= 1'b0;
 		if (reset) begin
 			link_seen <= 1'b0;
 			link_ever <= 1'b0;
@@ -394,6 +490,12 @@ always_ff @(posedge clk) begin
 		if (mb_cmd == 8'hF8) begin    // a MOUNT_IMAGE: an earlier verdict must not read as this one's
 			boot_state <= 8'd0;
 			boot_err <= 8'd0;
+			boot_pct <= 8'd0;
+			got <= 20'd0;
+			tot <= 20'd0;
+			staged <= 8'd0;
+			stg_open <= 1'b0;
+			armed <= 1'b0;
 		end
 		st <= E_P1A;
 	end
@@ -556,30 +658,18 @@ always_ff @(posedge clk) begin
 				err <= ERR_BADFRAME;
 				st <= E_DONE;
 			end else if (r_dev == 8'hFF && (r_cmd == 8'h4F || r_cmd == 8'h57 || r_cmd == 8'h43)) begin
-				// the FujiNet pushing an image (MOUNT_IMAGE): refused at its
-				// OPEN, as a cart with no room for it; the others are ACKed.
-				// The wait starts again, as fujibus_usb.c's.
-				if (r_cmd == 8'h4F) begin
-					boot_state <= 8'h80;   // FN_BOOT_FAILED
-					boot_err <= 8'd3;      // FN_BOOT_ERR_NOMAP
-				end
-				if (r_cmd == 8'h43 && dptr != 11'd0 && r_d0 == 8'h01) begin
-					boot_state <= 8'h80;
-					boot_err <= 8'd2;      // FN_BOOT_ERR_TRUNCATED
-				end
+				// the FujiNet pushing an image (MOUNT_IMAGE): handled in
+				// E_DBC, answered with a bare ACK or NAK; the wait then starts
+				// again, as fujibus_usb.c's
 				link_seen <= 1'b1;
 				link_ever <= 1'b1;
 				if (!lock_link && !lock_cart) begin
 					lock_link <= !last_cart;
 					lock_cart <= last_cart;
 				end
-				bare <= 1'b1;
-				s_dev <= 8'hFF;
-				s_cmd <= (r_cmd == 8'h4F) ? 8'h15 : 8'h06;
-				plen <= 16'd6;
-				sum <= cks(cks(8'hFF, (r_cmd == 8'h4F) ? 8'h15 : 8'h06), 8'h06);
-				step <= 5'd0;
-				st <= E_SEND;
+				dbc_cmd <= r_cmd;
+				cn <= dptr > 11'd512 ? 10'd512 : dptr[9:0];
+				st <= E_DBC;
 			end else begin
 				reply_cmd <= r_cmd;
 				rxlen <= dptr > 11'd1024 ? 11'd1024 : dptr;
@@ -593,6 +683,117 @@ always_ff @(posedge clk) begin
 				st <= E_DONE;
 			end
 		end
+	end
+
+	// A push frame (3.1)
+	E_DBC: begin
+		bare_nak <= 1'b0;
+		st <= E_BARE;
+		case (dbc_cmd)
+			8'h4F: if (r_d0 == 8'd0) begin          // OPEN, the image
+				if ({r_d4, r_d3, r_d2, r_d1} == 32'd0 || {r_d4, r_d3, r_d2, r_d1} > {12'd0, STG_MAX}) begin
+					bare_nak <= 1'b1;
+					boot_state <= 8'h80;            // FN_BOOT_FAILED
+					boot_err <= 8'd1;               // FN_BOOT_ERR_TOOBIG
+					stg_open <= 1'b0;
+				end else begin
+					tot <= {r_d3[3:0], r_d2, r_d1};
+					got <= 20'd0;
+					boot_pct <= 8'd0;
+					pct_acc <= 20'd0;
+					boot_state <= 8'd1;             // FN_BOOT_XFER
+					boot_err <= 8'd0;
+					staged <= 8'd0;
+					armed <= 1'b0;
+					h_ok <= 5'd0;
+					c_ok <= 1'b0;
+					c_end <= 8'd0;
+					stg_open <= 1'b1;
+					stg_start <= 1'b1;
+				end
+			end                                     // OPEN, the .cfg: ACKed and ignored
+			8'h57: if (stg_open && cn != 10'd0) begin   // WRITE
+				ci <= 10'd0;
+				cw <= 2'd0;
+				sb_ra <= 9'd0;
+				st <= E_COPY;
+			end
+			default: begin                          // CLOSE
+				if (stg_open) begin
+					stg_open <= 1'b0;
+					if ((cn != 10'd0 && r_d0 == 8'h01) || got != tot) begin
+						boot_state <= 8'h80;
+						boot_err <= 8'd2;           // FN_BOOT_ERR_TRUNCATED
+					end else begin
+						stg_sync <= 1'b1;
+						sync_t <= 16'd0;
+						st <= E_SYNC;
+					end
+				end
+			end
+		endcase
+	end
+
+	// The frame's data to the stager, a byte every 4 clocks
+	E_COPY: begin
+		// sb_q follows sb_ra a clock later: byte ci is there from cw 1
+		cw <= cw + 2'd1;
+		if (cw == 2'd3) begin
+			sb_ra <= ci[8:0] + 9'd1;
+			if (got < tot) begin
+				stg_we <= 1'b1;
+				stg_addr <= got;
+				stg_data <= sb_q;
+				got <= got + 20'd1;
+				if (pct_acc + 20'd100 >= tot) begin
+					pct_acc <= pct_acc + 20'd100 - tot;
+					if (boot_pct < 8'd100) boot_pct <= boot_pct + 8'd1;
+				end else
+					pct_acc <= pct_acc + 20'd100;
+				// "ATARI" at bytes 1-5: an A78 header
+				if (got >= 20'd1 && got <= 20'd5)
+					h_ok <= {h_ok[3:0], (got == 20'd1 || h_ok[0]) && sb_q ==
+					         (got == 20'd1 ? "A" : got == 20'd2 ? "T" : got == 20'd3 ? "A" : got == 20'd4 ? "R" : "I")};
+				if (!(h_ok[4] && got < 20'd128)) begin
+					if (po[11:0] >= 12'hF70 && po[11:0] <= 12'hF75)
+						csig[po[2:0]] <= sb_q;
+					if (po[11:0] == 12'hF76) begin
+						c_ok <= {csig[0], csig[1], csig[2], csig[3]} == "FUJI";
+						c_end <= po[19:12] + 8'd1;
+					end
+				end
+			end
+			ci <= ci + 10'd1;
+			if (ci + 10'd1 == cn) st <= E_BARE;
+		end
+	end
+
+	// The last byte stored: the image is READY
+	E_SYNC: begin
+		sync_t <= sync_t + 16'd1;
+		if (stg_synced) begin
+			boot_state <= 8'd2;                     // FN_BOOT_READY
+			boot_pct <= 8'd100;
+			// READY, the claim (its last 4K block ends where the ROM does),
+			// BIOS OK (the core boots any image)
+			staged <= {5'd0, 1'b1,
+			           c_ok && {c_end, 12'h000} == (tot - (h_ok[4] ? 20'd128 : 20'd0)), 1'b1};
+			st <= E_BARE;
+		end else if (sync_t == 16'hFFFF) begin
+			boot_state <= 8'h80;
+			boot_err <= 8'd4;                       // FN_BOOT_ERR_STOREBUSY
+			st <= E_BARE;
+		end
+	end
+
+	E_BARE: begin
+		bare <= 1'b1;
+		s_dev <= 8'hFF;
+		s_cmd <= bare_nak ? 8'h15 : 8'h06;
+		plen <= 16'd6;
+		sum <= cks(cks(8'hFF, bare_nak ? 8'h15 : 8'h06), 8'h06);
+		step <= 5'd0;
+		st <= E_SEND;
 	end
 
 	E_DONE: begin
@@ -660,8 +861,22 @@ always_ff @(posedge clk) begin
 				skip <= skip - 8'd1;
 				if (skip == 8'd1) dstate <= 2'd3;
 			end else if (dstate == 2'd3) begin
-				if (dptr == 11'd0) r_d0 <= rb;
-				if (dptr < 11'd1024) begin
+				case (dptr)
+					11'd0: r_d0 <= rb;
+					11'd1: r_d1 <= rb;
+					11'd2: r_d2 <= rb;
+					11'd3: r_d3 <= rb;
+					11'd4: r_d4 <= rb;
+					default: ;
+				endcase
+				if (r_dev == 8'hFF) begin
+					// a push frame: the stage buffer, not the reply window
+					if (dptr < 11'd512) begin
+						sb_we <= 1'b1;
+						sb_wa <= dptr[8:0];
+						sb_wd <= rb;
+					end
+				end else if (dptr < 11'd1024) begin
 					rx_we <= 1'b1;
 					rx_waddr <= dptr[9:0];
 					rx_wdata <= rb;
