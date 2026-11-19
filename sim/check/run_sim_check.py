@@ -2,7 +2,7 @@
 """Verdict of a run_sim.sh log, as one exit code (DARIA step 7, plan 1.2 row 3).
 
   run_sim_check.py LOG [--build plain|daria|auto] [--audf 0,7,14,31]
-                       [--ref REF_LOG] [--only daria]
+                       [--ref REF_LOG] [--only daria|fujinet]
 
 run_sim.sh prints measurements and a few verdicts (BIOS_BOOT, BUPCHIP_E2E,
 PLL_REGION, DARIA) and exits 0 whatever they say. This checks every case
@@ -58,6 +58,12 @@ a build without BUP_DEBUG.
 --only daria checks a run_sim.sh ONLY=daria log (tb_load and the DARIA
 section alone): the global rules and the DARIA section only. A log that
 says ONLY=daria fails without it, and one that does not fails with it.
+--only fujinet checks a run_sim.sh ONLY=fujinet log the same way: the
+global rules and the FujiNet section only. FujiNet section (docs/
+FUJINET_GAME_LOADING.md, step 4): in a POCKET_SRAM and POCKET_BUPCHIP
+build "FUJINET pass" and both runs' lines (the game pushed as an A78 and as
+a bare ROM, each booted through one swap); inactive in other builds, which
+is reported and is not a pass; absent from a log from before it, noted.
 --ref REF_LOG also compares every measurement and verdict line with another
 log (e.g. the same tree before a bench change): any difference fails.
 Exit status: 0 pass, 1 fail, 2 usage.
@@ -73,7 +79,7 @@ TONE = re.compile(r"^\s*TONE (?:AUDC0=4|from loaded cart) AUDF0=(\d+): measured 
 # (frame_ and overlay: lines of BUP_DEBUG builds only, so a reference log of
 # a build without BUP_DEBUG compares as before)
 VERDICT_LINE = re.compile(r"^\s*(TONE|FRAME|\+|LOAD|HSC|BOOT|IMAGE2|BIOS_BOOT|BUPCHIP|PCM|ours|song|reference|"
-                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay)")
+                          r"NTSC|PAL ->|PLL_REGION|AUDIO|AXIS|DARIA|smoke_|digital_|frame_|overlay|FUJINET)")
 OVL_RUNS = ("smoke_dpc", "smoke_cdf", "digital_cdfj", "frame_cdfj", "frame_cdfj_pattern", "frame_cdfj_retune")
 # What each run's overlay line must say it required and checked (run_sim.sh's
 # OVL table): a line that passes on a smaller requirement fails here.
@@ -257,6 +263,40 @@ def overlay_check(body, debug, bad, notes):
         notes.append("DARIA status overlay: " + agg[0])
 
 
+# The FujiNet section's two runs (run_sim.sh: the game pushed as an A78 and
+# as a bare ROM): each booted, through one swap of 16,512 bytes
+FN_RUN = (r"(a78|raw): boot mark 22 err 0 state 02 berr 0, swaps 1 bytes 16512, restarts 0, game mark 5a "
+          r"loops [1-9]\d*, claim 0, cart_size 16384, model pushes 1 bytes \d+ frames \d+ refused 0")
+
+
+def fujinet_check(L, sram_bup, required, bad, notes):
+    """FujiNet game loading end to end (docs/FUJINET_GAME_LOADING.md, step
+    4): in a POCKET_SRAM and POCKET_BUPCHIP build "FUJINET pass" and both
+    runs' lines. A log from before the section has none: noted, unless the
+    log is an ONLY=fujinet run."""
+    h, b = L.section("-- FujiNet")
+    if h is None:
+        if required:
+            bad.append("--only fujinet: the FujiNet section did not run")
+        else:
+            notes.append("FujiNet section: absent (a log from before it); not counted")
+        return
+    if "inactive" in h:
+        if sram_bup:
+            bad.append("POCKET_SRAM and POCKET_BUPCHIP build, but the FujiNet section is inactive")
+        else:
+            notes.append("FujiNet section: inactive (no POCKET_SRAM or POCKET_BUPCHIP); not counted as a pass")
+        return
+    s = [x.strip() for x in b]
+    runs = {re.fullmatch(FN_RUN, x).group(1) for x in s if re.fullmatch(FN_RUN, x)}
+    if runs != {"a78", "raw"}:
+        bad.append("FujiNet: missing or failing run line(s): " + ", ".join(sorted({"a78", "raw"} - runs)))
+    if "FUJINET pass" not in s:
+        bad.append("FujiNet: no 'FUJINET pass'")
+    if runs == {"a78", "raw"} and "FUJINET pass" in s:
+        notes.append("FujiNet section: pass (a game pushed as an A78 and as a bare ROM, booted)")
+
+
 def check(log, build, audfs, only=None):
     L = Log(log)
     bad, notes = [], []
@@ -284,10 +324,19 @@ def check(log, build, audfs, only=None):
     if build == "auto":
         build = "daria" if any(re.match(r"^-- run_sim\.sh: .*POCKET_DARIA 1,", x) for x in L.lines) else "plain"
     debug = any(re.match(r"^-- run_sim\.sh: .*defines:.* -DBUP_DEBUG( |$)", x) for x in L.lines)
-    said_only = any(x.startswith("-- run_sim.sh ONLY=daria") for x in L.lines)
-    if said_only != (only == "daria"):
-        bad.append("the log is a run_sim.sh ONLY=daria run: check it with --only daria" if said_only
-                   else "--only daria, but the log is not a run_sim.sh ONLY=daria run")
+    said = None
+    for x in L.lines:
+        m = re.match(r"^-- run_sim\.sh ONLY=(\w+)", x)
+        if m:
+            said = m.group(1)
+    if said != only:
+        bad.append(f"the log is a run_sim.sh ONLY={said} run: check it with --only {said}" if said
+                   else f"--only {only}, but the log is not a run_sim.sh ONLY={only} run")
+    sram_bup = any(re.match(r"^-- run_sim\.sh: .*defines:.* -DPOCKET_SRAM( |$)", x) for x in L.lines) and \
+        any(re.match(r"^-- run_sim\.sh: .*defines:.* -DPOCKET_BUPCHIP( |$)", x) for x in L.lines)
+    if only == "fujinet":
+        fujinet_check(L, sram_bup, True, bad, notes)
+        return bad, notes, build
     if only == "daria":
         h, b = L.section("-- DARIA")
         if build != "daria" or h is None or "inactive" in h:
@@ -412,6 +461,8 @@ def check(log, build, audfs, only=None):
         else:
             bad.append("plain build, but the DARIA section ran: " + h)
 
+    fujinet_check(L, sram_bup, False, bad, notes)
+
     # PLL retune
     h, b = L.section("-- PAL/NTSC PLL retune")
     need(b, r"NTSC -> PAL: fraction 737741760, reset held 3\.5 us before the start and 3\.5 us after relock", "PLL retune")
@@ -467,7 +518,7 @@ def main():
     p.add_argument("--build", choices=("plain", "daria", "auto"), default="auto")
     p.add_argument("--audf", default="0,7,14,31")
     p.add_argument("--ref")
-    p.add_argument("--only", choices=("daria",))
+    p.add_argument("--only", choices=("daria", "fujinet"))
     a = p.parse_args()
     bad, notes, build = check(a.log, a.build, [int(x) for x in a.audf.split(",")], a.only)
     if a.ref:

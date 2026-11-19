@@ -2,12 +2,14 @@
 
 How the core would load a game a FujiNet pushes (MOUNT_IMAGE), so that
 FujiNet's CONFIG, and any FujiNet program, can start games over the network.
-Status (2026-11-20): steps 1 to 3 are built and pass their benches. The
+Status (2026-11-20): steps 1 to 4 are built and pass in simulation. The
 receiver passes `sim/fujinet/run_fujinet.py`. Staging and the replay pass
-`sim/fujinet/run_fnstage.sh`: the PSRAM model, with capture writes and
-cache reads alongside, then the file read back through the loader with and
-without its header. The swap has not yet been run end to end in the whole
-core (step 4) or tried on a Pocket.
+`sim/fujinet/run_fnstage.sh`: the PSRAM model with capture writes and cache
+reads alongside, then the file read back through the loader with and
+without its header. End to end, `sim/run_sim.sh`'s FujiNet section
+(`ONLY=fujinet` alone) boots a game a FujiNet model pushes over the link
+port, as an A78 and as a bare ROM. Not yet fitted (step 5) or tried on a
+Pocket.
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
 PSRAM (cram0): a writer on clk_arm fed by messages from clk_sys
@@ -175,8 +177,12 @@ The staged file is fed through the core's own load path:
 3. **Loader and swap** (built): `$0600`, the hot swap, `fujinet_loader.sv`,
    the reader `fujinet_rd.sv` (ahead of `daria_smp`, which is unchanged), and
    the input mux in `core_top.v`.
-4. **End to end in `tb_load`:** a FujiNet model on the link that answers
-   MOUNT_IMAGE by pushing an `.a78`, a test cart that mounts, waits for READY,
-   arms and jumps to `$0600`, and the pushed game booting.
+4. **End to end in `tb_load`** (built): a FujiNet model on the link
+   (`sim/fujinet/fn_model.sv`) that answers MOUNT_IMAGE by pushing a file,
+   a test cart (`fn_boot.asm`) that mounts, waits for READY, arms and jumps
+   to `$0600`, and the pushed game (`fn_game.asm`) booting, pushed as an A78
+   and as a bare 16K ROM. The first run found the loader's data moving
+   ahead of its address (the header parser reads by address), now fixed and
+   checked in `run_fnstage.sh` too.
 5. **Fits and the full regression**, then a test build for CONFIG and
    fujinet-pc on a Pocket.

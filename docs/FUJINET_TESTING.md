@@ -130,7 +130,8 @@ screen. On the core:
   [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md) the image push is
   refused and CONFIG shows `?LOAD ERROR 03`; step 2 alone staged it and
   then left the console in the loader at `$0609`; from step 3 the staged
-  game is loaded as from the SD card (benches only so far).
+  game is loaded as from the SD card (in simulation, end to end; not yet
+  on a Pocket).
 - **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
   Pocket's HSC; switching it there does nothing.
 
