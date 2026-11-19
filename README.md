@@ -194,8 +194,8 @@ link:
   - **Cartridge slot:** pin 5 (GBA /CS) is TX, pin 31 (GBA /REQ) RX, pin 32
     ground. A device here must leave the slot's voltage switch (at one end
     of the connector) unpressed, as GBA cartridges do, so the slot stays at
-    3.3 V: a relief cut over the switch is enough, with clear depth so it is
-    never half pressed. Pin 5 is already an output held high in Analogue's
+    3.3 V: that corner GBA-shaped, cut a little deeper and wider than a GBA
+    cart's so the switch is never grazed or half pressed. Pin 5 is already an output held high in Analogue's
     template, so nothing changes direction.
   - A line counts once it has idled high for 1 ms (an undriven pin is never
     heard); the first good reply locks the core to that port, and a request
