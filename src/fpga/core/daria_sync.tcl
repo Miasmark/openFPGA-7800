@@ -25,7 +25,8 @@
 # Not here: the chains that carry the attribute in their RTL on a scalar
 # first stage (daria_fe's u_call.ret_s1 and u_audio.ack_s1, daria_smp's
 # req_s0, bup_dbg_snap's two first stages, the FujiNet staging channel's
-# bup_asset_wr st1 and fujinet_stage a1), and the guard's pd_rx, which
+# bup_asset_wr st1 and fujinet_stage a1, the FujiNet swap's fujinet_rd
+# req_s0 and fujinet_loader ack_s0), and the guard's pd_rx, which
 # is no synchroniser (SYNCHRONIZER_IDENTIFICATION OFF in daria_fe_guard.sv;
 # its SDC pair is in daria_constraints.sdc).
 #

@@ -213,11 +213,10 @@ link:
   about 0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which
   already has trouble when the Pocket is low on charge); an ESP32 on Wi-Fi
   averages more than that and peaks several times higher.
-- **Not done:** loading a game from the FujiNet (in progress: the core
-  takes MOUNT_IMAGE's image push into the PSRAM but does not start it yet;
-  [docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)) and the High
-  Score Cart's saves to the FujiNet's SD card. Images come from the
-  Pocket's SD card as always.
+- **In progress:** loading a game from the FujiNet (MOUNT_IMAGE's image
+  push, staged in the PSRAM and loaded as from the SD card; benches only so
+  far, [docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)).
+- **Not done:** the High Score Cart's saves to the FujiNet's SD card.
 - **No link:** a serial adapter gives no sign it is there, so the core
   counts the link as up once a good frame arrives. Until then a request
   that hears nothing ends after 1.5 s with "no link" (error 1).

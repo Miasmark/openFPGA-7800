@@ -245,6 +245,11 @@ assign cart_tran_bank2_dir = 1'b0;
 assign cart_tran_bank1 = 8'hzz;
 assign cart_tran_bank1_dir = 1'b0;
 wire fn_txd, fn_tx_en;  // the FujiNet's serial TX (below)
+// A FujiNet swap's cartridge load and console restart (atari7800_pocket.sv,
+// fujinet_loader.sv), clk_sys registers
+wire        fn_ld_dl, fn_ld_wr, fn_restart;
+wire [24:0] fn_ld_addr;
+wire  [7:0] fn_ld_dout;
 // Bank 0 is an output, held high, as the template leaves it. Bit 4
 // (cartridge pin 5, GBA /CS) is also the FujiNet's TX while a FujiNet
 // program runs (below); idle, a UART line is high too.
@@ -877,20 +882,22 @@ atari7800_pocket atari (
 `endif
     .pll_locked     ( pll_core_locked ),
     .pll_busy       ( pll_busy ),
-    .reset_in       ( core_reset ),
+    .reset_in       ( core_reset | fn_restart ),
 
-    .cart_download  ( cart_download ),
+    // fn_ld_*: a FujiNet swap's load (fujinet_loader.sv), ahead of the
+    // bridge's; all low unless one runs, so the bridge's pass unchanged
+    .cart_download  ( cart_download | fn_ld_dl ),
     .bios_download  ( bios_download ),
     .hscfw_download ( hscfw_download ),
     .arfw_download  ( arfw_download ),
 `ifdef POCKET_BUPCHIP
     .bupfw_download ( bupfw_download ),
-    .ioctl_wr_any   ( ioctl_wr_r ),
-    .ioctl_hi       ( ioctl_hi_r ),
+    .ioctl_wr_any   ( fn_ld_dl ? fn_ld_wr : ioctl_wr_r ),
+    .ioctl_hi       ( fn_ld_dl ? 3'd0 : ioctl_hi_r ),
 `endif
-    .ioctl_wr       ( ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
-    .ioctl_addr     ( ioctl_addr_r ),
-    .ioctl_dout     ( ioctl_dout_r ),
+    .ioctl_wr       ( fn_ld_dl ? fn_ld_wr : ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download) ),
+    .ioctl_addr     ( fn_ld_dl ? fn_ld_addr : ioctl_addr_r ),
+    .ioctl_dout     ( fn_ld_dl ? fn_ld_dout : ioctl_dout_r ),
 
     .swap_joysticks ( set_s2[17] ),
     .diff_left_b    ( set_s2[16] ),
@@ -909,6 +916,12 @@ atari7800_pocket atari (
     .fn_tx_en( fn_tx_en ),
     .fn_rxd_link( port_tran_si ),
     .fn_rxd_cart( cart_tran_pin31 ),
+    .fn_ld_dl( fn_ld_dl ),
+    .fn_ld_wr( fn_ld_wr ),
+    .fn_ld_addr( fn_ld_addr ),
+    .fn_ld_dout( fn_ld_dout ),
+    .fn_restart( fn_restart ),
+    .fn_host_dl( dl_s[1] ),
     .atarivox_setting( set_s2[36:35] ),
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),
@@ -1148,10 +1161,16 @@ sound_i2s #(
     wire    [31:0]  cfg_writedata;
     wire            pll_busy_w;
 
+// A FujiNet swap is a load sequence too: a retune waits for its end, as for
+// the bridge's (its region follows the header's byte 57 mid-load)
+    reg     [1:0]   fn_ld_74a = 2'b00;
+always @(posedge clk_74a)
+    fn_ld_74a <= {fn_ld_74a[0], fn_ld_dl};
+
 pll_region pll_region (
     .clk             ( clk_74a ),
     .is_pal          ( core_is_pal ),
-    .loading         ( is_downloading ),
+    .loading         ( is_downloading | fn_ld_74a[1] ),
     .pll_locked      ( pll_core_locked_s ),
     .busy            ( pll_busy_w ),
     .cfg_waitrequest ( cfg_waitrequest ),

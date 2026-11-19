@@ -49,7 +49,7 @@ build() {       # build NAME POCKET_SRC
 	local obj="$X/obj_$1"
 	local srcs=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
 		"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv" "$CORE/bup_load_probe.sv"
-		"$CORE/bup_asset_cache.sv" "$2" "$HERE/../psram_standin.sv" "$HERE/tb_xing.sv")
+		"$CORE/bup_asset_cache.sv" "$CORE/../fujinet_rd.sv" "$2" "$HERE/../psram_standin.sv" "$HERE/tb_xing.sv")
 	if ! [ -x "$obj/vtb" ] || [ -n "$(find "${srcs[@]}" "$0" -newer "$obj/vtb" 2>/dev/null)" ]; then
 		rm -rf "$obj"
 		nice -n "${NICE:-5}" "$VERILATOR" --binary --timing -O3 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \

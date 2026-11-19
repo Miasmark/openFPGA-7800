@@ -36,13 +36,13 @@ fujinet_mailbox #(.MS_DIV(MS)) dut (
 	.bus_oe (bus_oe), .bus_do (bus_do),
 	.txd (txd), .tx_en (tx_en), .rxd_link (loop ? txd : (on_cart ? 1'b0 : rxd)), .rxd_cart (on_cart ? rxd : rxd_c), .busy (busy),
 	.stg_start (stg_start), .stg_we (stg_we), .stg_addr (stg_addr), .stg_data (stg_data),
-	.stg_sync (stg_sync), .stg_synced (stg_synced), .stg_busy (stg_busy), .stg_size (stg_size), .stg_ready (stg_ready),
+	.stg_sync (stg_sync), .stg_synced (stg_synced), .stg_busy (stg_busy), .stg_size (stg_size), .stg_ready (stg_ready), .stg_hdr (stg_hdr),
 	.swap_go (swap_go), .swap_restart (swap_restart)
 );
 
 // The stager: a memory, busy for 0-12 clocks after each byte (as
 // fujinet_stage.sv while a halfword crosses), and SYNC answered 20 clocks later
-logic        stg_start, stg_we, stg_sync, stg_ready, swap_go, swap_restart;
+logic        stg_start, stg_we, stg_sync, stg_ready, stg_hdr, swap_go, swap_restart;
 logic        stg_synced = 1'b0;
 int          stg_hold = 0;
 wire         stg_busy = stg_hold != 0;
@@ -427,6 +427,7 @@ initial begin
 	for (int i = 0; i < 4224; i++) if (stage_mem[i] !== image[i]) bad++;
 	check("14 staged bytes wrong", bad, 0);
 	check("14 stg_size", int'(stg_size), 4224);
+	check("14 stg_hdr", int'(stg_hdr), 1);
 	send(18);
 	wait_ack(s, 4000000);
 	rd(st(8'h02), v); check("14 mount err", v, 0);

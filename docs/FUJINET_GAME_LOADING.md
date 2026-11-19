@@ -2,12 +2,12 @@
 
 How the core would load a game a FujiNet pushes (MOUNT_IMAGE), so that
 FujiNet's CONFIG, and any FujiNet program, can start games over the network.
-Status (2026-11-20): steps 1 and 2 are built. The push receiver passes
-`sim/fujinet/run_fujinet.py`, and the staging channel passes
-`sim/fujinet/run_fnstage.sh` (against the PSRAM model, with capture writes
-and cache reads alongside). A push now lands in the PSRAM and ends READY,
-but nothing yet starts the staged game: `$0600` restarts the running
-program until step 3 (the swap) is built.
+Status (2026-11-20): steps 1 to 3 are built and pass their benches. The
+receiver passes `sim/fujinet/run_fujinet.py`. Staging and the replay pass
+`sim/fujinet/run_fnstage.sh`: the PSRAM model, with capture writes and
+cache reads alongside, then the file read back through the loader with and
+without its header. The swap has not yet been run end to end in the whole
+core (step 4) or tried on a Pocket.
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
 PSRAM (cram0): a writer on clk_arm fed by messages from clk_sys
@@ -106,17 +106,33 @@ The write to `$0DFE` starts the swap if BOOTLOCK armed it (READY); otherwise
 the core restarts the running program (a reset), never leaving the console
 in the loop.
 
-### 3.4 The swap (atari7800_pocket.sv, a new fujinet_loader.sv)
+### 3.4 The swap (fujinet_loader.sv, fujinet_rd.sv, core_top.v)
 
 The staged file is fed through the core's own load path:
 
-- `cart_download` and `ioctl_wr` / `ioctl_addr` / `ioctl_dout` get a second
-  source, the loader, muxed in at `atari7800_pocket.sv`'s inputs. The loader
-  raises its download flag, reads the staged bytes in order through a second
-  requester in `daria_smp.sv` (beside the front end's samples and the
-  cache's fills, readable while the loader runs), and presents each as an
-  `ioctl_wr` at least 3 clk_sys after the last (the bridge's loader manages
-  one every 2.5; `bup_capture` relies on no faster).
+- **The reader:** `fujinet_rd.sv` (clk_arm) sits in front of
+  `bup_asset_wr`'s read port in `bupchip_pocket.sv`, ahead of `daria_smp.sv`
+  and the cache, which pass through it untouched unless a swap reads. The
+  loader posts one halfword address per request (a toggle, the address held)
+  and gets the halfword back the same way; a read of theirs in flight
+  finishes first, and while one of the swap's is out they see no `rd_ack`.
+  `daria_smp.sv` is unchanged.
+- **The loader:** `fujinet_loader.sv` (clk_sys) starts on the armed hot
+  swap. It raises its download flag, reads the file in order and presents
+  each byte as one `ioctl_wr` at least 4 clk_sys after the last (the
+  bridge's loader manages one every 2.5; `bup_capture` relies on no faster),
+  address and data held between strobes as the bridge's are. Before the
+  first byte its address is all ones, which no header parser takes for a
+  header byte.
+- **The mux** is in `core_top.v`, at `atari7800_pocket`'s inputs:
+  `cart_download | fn_ld_dl`, and `ioctl_wr`, `ioctl_addr`, `ioctl_dout`,
+  `ioctl_wr_any` and `ioctl_hi` (0, the cartridge slot) from the loader while
+  its flag is up. With the flag low, which it always is unless a swap runs,
+  the bridge's signals pass unchanged.
+- **The region PLL:** `pll_region` starts a retune only while no load is in
+  progress; the loader's flag joins the bridge's `is_downloading` there
+  (through two clk_74a flops), since an A78's region follows its header's
+  byte 57 mid-load.
 - Everything downstream sees an SD load: the A78 header and its flags, the
   extent, the SDRAM writes, region and the PLL retune, the High Score Cart,
   `bup_capture` (a Souper game's ARSC block is captured into die 0 below
@@ -124,11 +140,17 @@ The staged file is fed through the core's own load path:
   re-arms the mailbox only if the new game is a FujiNet program. The console
   is held in reset for the load and starts after it, through the BIOS or
   not as the settings say.
-- **A headerless image** (whole 16K banks) is given a generated header: A78
-  version 3, "ATARI7800", its size, and the SuperGame flag above 48 KiB.
-  Anything the header cannot say (a CRC-picked board) is a documented limit.
-- A Pocket load from the SD card during a swap wins: the bridge's
-  `cart_download` resets the loader.
+- **A headerless image** (bytes 1-5 not "ATARI": FujiNet pushes those only
+  in whole 16K banks) is given a generated header: version 3, "ATARI7800",
+  its size, the SuperGame flag above 48 KiB, two joysticks, NTSC; the file
+  follows from byte 128. Anything the header cannot say (a CRC-picked
+  board, a PAL game) is a documented limit.
+- **The restart:** an unarmed hot swap holds `reset_in` for 64 clk_sys, as
+  a menu reset does, so the running program starts again.
+- A Pocket load from the SD card during a swap wins: the bridge's load
+  sequence (`is_downloading`, two flops in) ends the replay two clk_sys
+  before its own `cart_download` rises, so every consumer sees the replay
+  end and the new load begin; a replay never starts during one.
 
 ## 4. Risks
 
@@ -150,8 +172,9 @@ The staged file is fed through the core's own load path:
 2. **Staging** (built): the second channel in `bup_asset_wr`, a bench against
    `sim/bupchip/s4/psram_model.sv` (`sim/fujinet/run_fnstage.sh`), and the
    BupChip / DARIA benches unchanged.
-3. **Loader and swap:** `$0600`, the hot swap, `fujinet_loader.sv`, the
-   requester in `daria_smp`, and the input mux.
+3. **Loader and swap** (built): `$0600`, the hot swap, `fujinet_loader.sv`,
+   the reader `fujinet_rd.sv` (ahead of `daria_smp`, which is unchanged), and
+   the input mux in `core_top.v`.
 4. **End to end in `tb_load`:** a FujiNet model on the link that answers
    MOUNT_IMAGE by pushing an `.a78`, a test cart that mounts, waits for READY,
    arms and jumps to `$0600`, and the pushed game booting.

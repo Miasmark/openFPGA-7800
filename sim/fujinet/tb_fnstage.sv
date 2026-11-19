@@ -13,6 +13,13 @@
 // After synced, the PSRAM must hold every staged byte at 4 MiB + offset,
 // nothing past the file's end written there, the capture's writes where
 // they went, and bup_asset_wr's overrun must be low.
+//
+// Then fujinet_loader.sv replays the file through fujinet_rd.sv (ahead of
+// the cache-style reads, as in bupchip_pocket.sv), once as an A78 (hdr) and
+// once without a header: every byte must come out in order at its address,
+// a generated header first in the second case, one wr each at least SPACE
+// clk_sys apart, with dl high throughout and addr all ones before the
+// first. Last, a replay ended by host_dl and a restart pulse.
 //   +seed=N +files=N     (defaults 1 and 6)
 // Prints "FNSTAGE ... fails N".
 //
@@ -53,7 +60,9 @@ module tb_fnstage;
 	logic        msg_tog = 0;
 	logic        rd_req = 0;
 	logic [21:0] rd_addr = 0;
-	wire         rd_ack;
+	wire         rd_ack;                        // the bench's reads, through fujinet_rd
+	wire         w_rd_req, w_rd_ack;            // the writer's read port
+	wire [21:0]  w_rd_addr;
 	wire         p_bank, p_we, p_hi, p_lo, p_re, p_avail, p_busy, overrun;
 	wire [21:0]  p_addr;
 	wire [15:0]  p_din, p_dout;
@@ -62,7 +71,7 @@ module tb_fnstage;
 		.clk(clk_arm), .msg_type, .msg_pl, .msg_tog,
 		.asset_ready(), .asset_size(), .fw_loaded(), .img_ready(), .img_size(),
 		.rom_we(), .rom_wa(), .rom_wd(), .win_we(), .win_wa(), .win_wd(), .win_be(),
-		.rd_req, .rd_addr, .rd_ack,
+		.rd_req(w_rd_req), .rd_addr(w_rd_addr), .rd_ack(w_rd_ack),
 		.psram_bank_sel(p_bank), .psram_addr(p_addr), .psram_write_en(p_we), .psram_data_in(p_din),
 		.psram_write_high_byte(p_hi), .psram_write_low_byte(p_lo), .psram_read_en(p_re),
 		.psram_busy(p_busy), .overrun, .fw_start(),
@@ -81,6 +90,24 @@ module tb_fnstage;
 	psram_model chip (
 		.cram_a, .cram_dq, .cram_wait, .cram_clk, .cram_adv_n, .cram_cre, .cram_ce0_n, .cram_ce1_n,
 		.cram_oe_n, .cram_we_n, .cram_ub_n, .cram_lb_n);
+
+	// ---- the swap: fujinet_loader (clk_sys) and fujinet_rd (clk_arm) --------------
+	logic        ld_go = 0, ld_rgo = 0, ld_hdr = 0, host_dl = 0;
+	logic [19:0] ld_size = 0;
+	wire         ld_dl, ld_wr, ld_restart, l_req, l_ack;
+	wire [24:0]  ld_addr;
+	wire  [7:0]  ld_dout;
+	wire [18:0]  l_haddr;
+	wire [15:0]  l_data;
+	fujinet_loader ld (
+		.clk(clk_sys), .go(ld_go), .restart_go(ld_rgo), .size(ld_size), .hdr(ld_hdr), .host_dl,
+		.dl(ld_dl), .wr(ld_wr), .addr(ld_addr), .dout(ld_dout), .restart(ld_restart),
+		.l_req, .l_haddr, .l_ack, .l_data);
+	fujinet_rd frd (
+		.clk(clk_arm), .l_req, .l_haddr, .l_ack, .l_data,
+		.u_rd_req(rd_req), .u_rd_addr(rd_addr), .u_rd_ack(rd_ack),
+		.rd_req(w_rd_req), .rd_addr(w_rd_addr), .rd_ack(w_rd_ack),
+		.rd_avail(p_avail), .rd_data(p_dout));
 
 	localparam int unsigned BASE = 32'h200000;      // the staging area's first halfword
 	localparam int unsigned RD_LO = 32'h100000;     // reads: pre-filled halfwords from here
@@ -163,6 +190,67 @@ module tb_fnstage;
 		disable fork;
 	endtask
 
+	// The loader's output, as the core's load path sees it
+	logic [7:0] got_b [0:65535 + 128];
+	int got_n = 0, ord_bad = 0, sp_bad = 0, dl_bad = 0, last_wr = -100, clk_n = 0;
+	bit pre_ok = 1, watching = 0;
+	always @(posedge clk_sys) begin
+		clk_n++;
+		if (watching) begin
+			if (!ld_dl && ld_wr) dl_bad++;
+			if (ld_dl && got_n == 0 && !ld_wr && ld_addr !== '1) pre_ok = 0;
+			if (ld_wr) begin
+				if (ld_addr != 25'(got_n)) ord_bad++;
+				if (clk_n - last_wr < 4) sp_bad++;
+				last_wr = clk_n;
+				got_b[got_n] = ld_dout;
+				got_n++;
+			end
+		end
+	end
+
+	function automatic logic [7:0] ghdr(input int a, input int n);
+		case (a)
+			0: return 8'd3;
+			1: return "A"; 2: return "T"; 3: return "A"; 4: return "R"; 5: return "I";
+			6: return "7"; 7: return "8"; 8: return "0"; 9: return "0";
+			50: return 8'(n >> 16); 51: return 8'(n >> 8); 52: return 8'(n);
+			54: return n > 'hC000 ? 8'h02 : 8'h00;
+			55, 56: return 8'd1;
+			default: return 8'd0;
+		endcase
+	endfunction
+
+	task automatic replay(input int n, input bit hdr, output int bad);
+		int exp_n, to;
+		bad = 0;
+		got_n = 0; ord_bad = 0; sp_bad = 0; dl_bad = 0; pre_ok = 1; last_wr = -100;
+		watching = 1;
+		@(posedge clk_sys);
+		ld_size <= 20'(n); ld_hdr <= hdr; ld_go <= 1;
+		@(posedge clk_sys);
+		ld_go <= 0;
+		to = 0;
+		do begin @(posedge clk_sys); to++; end while (!ld_dl && to < 100);
+		while (ld_dl && to < 4000000) begin @(posedge clk_sys); to++; end
+		repeat (4) @(posedge clk_sys);
+		watching = 0;
+		exp_n = hdr ? n : n + 128;
+		if (got_n != exp_n) begin $display("FNSTAGE replay: %0d bytes, expected %0d", got_n, exp_n); bad++; end
+		for (int i = 0; i < got_n && i < exp_n; i++) begin
+			logic [7:0] e;
+			e = (!hdr && i < 128) ? ghdr(i, n) : file[hdr ? i : i - 128];
+			if (got_b[i] !== e) begin
+				if (bad < 5) $display("FNSTAGE replay byte %0d: got %02x expected %02x", i, got_b[i], e);
+				bad++;
+			end
+		end
+		if (ord_bad || sp_bad || dl_bad || !pre_ok) begin
+			$display("FNSTAGE replay: out of order %0d, too close %0d, wr without dl %0d, addr before %0d", ord_bad, sp_bad, dl_bad, pre_ok);
+			bad++;
+		end
+	endtask
+
 	function automatic int check_file(input int n);
 		int bad = 0;
 		for (int i = 0; i < n; i++) begin
@@ -197,6 +285,46 @@ module tb_fnstage;
 			end
 			$display("FNSTAGE file %0d: %0d bytes, %0d wrong", f, n, bad);
 			if (bad != 0) fails++;
+			for (int h = 0; h < 2; h++) begin
+				int rb;
+				replay(n, h[0], rb);
+				$display("FNSTAGE file %0d replayed %s: %0d wrong", f, h[0] ? "as an A78" : "with a generated header", rb);
+				if (rb != 0) fails++;
+			end
+		end
+		// host_dl ends a replay at once; the loader is idle and works again after
+		begin
+			int to = 0, rb;
+			@(posedge clk_sys);
+			ld_size <= 20'd5000; ld_hdr <= 1; ld_go <= 1;
+			@(posedge clk_sys);
+			ld_go <= 0;
+			repeat (3000) @(posedge clk_sys);
+			host_dl <= 1;
+			repeat (2) @(posedge clk_sys);
+			if (ld_dl) begin $display("FNSTAGE FAIL: dl still high 2 clocks after host_dl"); fails++; end
+			@(posedge clk_sys);
+			ld_go <= 1;                     // refused while host_dl
+			@(posedge clk_sys);
+			ld_go <= 0;
+			repeat (50) @(posedge clk_sys);
+			if (ld_dl) begin $display("FNSTAGE FAIL: a replay started under host_dl"); fails++; end
+			host_dl <= 0;
+			repeat (200) @(posedge clk_sys);
+			// the restart: RESTART clocks of restart
+			ld_rgo <= 1;
+			@(posedge clk_sys);
+			ld_rgo <= 0;
+			while (!ld_restart && to < 10) begin @(posedge clk_sys); to++; end
+			to = 0;
+			while (ld_restart && to < 1000) begin @(posedge clk_sys); to++; end
+			$display("FNSTAGE abort and restart: restart held %0d clocks", to);
+			if (to < 60 || to > 70) fails++;
+			// and a replay after the abort is whole (the last file staged is the 5000+ one? restage)
+			stage_file(300);
+			replay(300, 1'b1, rb);
+			$display("FNSTAGE replay after the abort: %0d wrong", rb);
+			if (rb != 0) fails++;
 		end
 		cap_done = 1;
 		repeat (2000) @(posedge clk_arm);

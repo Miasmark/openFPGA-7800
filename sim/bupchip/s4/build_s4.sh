@@ -45,7 +45,7 @@ OBJ="$WORK/obj_s4_${PSRAM}_d${DEPTH}_pre${PRE}_pf${PF}"
 DEFS=(-DBUP_DEBUG -DPCM_DEPTH="$DEPTH" -DPREEMPT="$PRE" -DPREFETCH="$PF" -DBUP_THROTTLE="$THR")
 SRCS=("$RTL/arm7tdmi/arm7tdmi_pkg.sv" "$RTL/cache_ram.v" "$RTL/bupchip_peripheral.sv"
 	"$CORE/bup_cpu.sv" "$CORE/bup_tick48k.sv" "$CORE/bup_capture.sv" "$CORE/bup_asset_wr.sv" "$CORE/bup_load_probe.sv"
-	"$CORE/bup_asset_cache.sv" "$CORE/bupchip_pocket.sv")
+	"$CORE/bup_asset_cache.sv" "$CORE/../fujinet_rd.sv" "$CORE/bupchip_pocket.sv")
 if [ "${DARIA:-0}" != 0 ]; then
 	OBJ="${OBJ}_daria"
 	DEFS+=(-DPOCKET_DARIA)

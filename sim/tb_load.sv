@@ -214,18 +214,30 @@ module tb_load;
 	end
 `endif
 
+	// A FujiNet swap's load and restart (fujinet_loader.sv), muxed in as
+	// core_top.v does: all low unless a swap runs
+	wire        fn_ld_dl, fn_ld_wr, fn_restart;
+	wire [24:0] fn_ld_addr;
+	wire  [7:0] fn_ld_dout;
+	logic [2:0] tb_dl_s = 3'd0;     // core_top's dl_s: the bridge's load sequence, on clk_sys
+	always @(posedge clk_sys) tb_dl_s <= {tb_dl_s[1:0], cart_download | bios_download | hscfw_download | arfw_download | bupfw_download};
+
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
-		.clk_arm(clk_arm), .bupfw_download(bupfw_download), .ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
+		.clk_arm(clk_arm), .bupfw_download(bupfw_download),
+		.ioctl_wr_any(fn_ld_dl ? fn_ld_wr : ioctl_wr_r), .ioctl_hi(fn_ld_dl ? 3'd0 : ioctl_hi_r),
 		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
 		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
 		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
 `endif
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in),
-		.cart_download(cart_download), .bios_download(bios_download),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in | fn_restart),
+		.cart_download(cart_download | fn_ld_dl), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.ioctl_wr(fn_ld_dl ? fn_ld_wr : ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)),
+		.ioctl_addr(fn_ld_dl ? fn_ld_addr : ioctl_addr_r), .ioctl_dout(fn_ld_dl ? fn_ld_dout : ioctl_dout_r),
+		.fn_ld_dl(fn_ld_dl), .fn_ld_wr(fn_ld_wr), .fn_ld_addr(fn_ld_addr), .fn_ld_dout(fn_ld_dout),
+		.fn_restart(fn_restart), .fn_host_dl(tb_dl_s[1]),
 		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),

@@ -17,6 +17,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) a
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fujinet_uart.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fujinet_mailbox.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fujinet_stage.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fujinet_loader.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fujinet_rd.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) atari7800_pocket.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) virtual_axis5.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) sram_ctrl.sv]

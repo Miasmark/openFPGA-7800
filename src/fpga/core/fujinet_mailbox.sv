@@ -25,10 +25,13 @@
 // {size 1|2|4, value little endian}, then payload), then SEQ = ACKSEQ + 1.
 // When ACKSEQ echoes SEQ, ERR, REPLY_CMD, RXLEN and the reply are in place.
 //
-// What the RP2354B cartridge does and this does not: the loader at $0600
-// (and so MOUNT_IMAGE's image push: an image the FujiNet sends is refused,
-// BOOT_STATE FAILED, BOOT_ERR NOMAP), the High Score Cart's SD saves
-// (FN_REG_HSC is ignored), and the hot operations at $0D80-$0DFF.
+// MOUNT_IMAGE's image push (docs/FUJINET_GAME_LOADING.md): the frames to
+// device $FF are answered here, the bytes go to the stager (stg_*:
+// fujinet_stage.sv, into the PSRAM), and the loader at $0600 ends in the hot
+// swap ($0DFE), which fujinet_loader.sv carries out. What the RP2354B
+// cartridge does and this does not: the High Score Cart's SD saves
+// (FN_REG_HSC is ignored), and the hot operations at $0D80-$0DFF other than
+// the swap.
 //
 // "No link": a USB serial adapter gives no sign it is there, so the link
 // counts as up once a good frame has arrived. Until then a transaction waits
@@ -76,6 +79,7 @@ module fujinet_mailbox #(
 	input  logic        stg_busy,     // hold the next byte
 	output logic [19:0] stg_size,     // the staged file's bytes, once READY
 	output logic        stg_ready,
+	output logic        stg_hdr,      // it starts with an A78 header ("ATARI" at bytes 1-5)
 
 	// The loader at $0600 wrote the hot swap ($0DFE): start the staged image
 	// (armed: READY and BOOTLOCK), or else restart this one
@@ -406,11 +410,12 @@ logic [19:0] pct_acc;
 logic [15:0] sync_t;
 // The FUJI claim in the pushed image: bytes $F70-$F75 of each 4K block of
 // the ROM (past the header), the last block's counting (as fujinet_claim)
-logic [4:0]  h_ok;                            // bytes 1-5 so far read "ATARI"
+logic        h_ok;                            // bytes 1 to got-1 (up to 5) read "ATARI" so far
 logic [7:0]  csig [0:5];
 logic        c_ok;
 logic [7:0]  c_end;                           // that block's end, in 4K blocks
-wire  [19:0] po = got - (h_ok[4] ? 20'd128 : 20'd0);   // the byte's offset in the ROM
+wire         hdr = h_ok && got > 20'd5;               // the image has an A78 header
+wire  [19:0] po = got - (hdr ? 20'd128 : 20'd0);       // the byte's offset in the ROM
 
 wire slow_cmd = (mb_cmd == 8'hF8 || mb_cmd == 8'hD8);
 wire net_cmd  = (mb_device >= 8'h71 && mb_device <= 8'h78) &&
@@ -419,6 +424,7 @@ wire net_cmd  = (mb_device >= 8'h71 && mb_device <= 8'h78) &&
 assign busy = st != E_IDLE;
 assign stg_size = tot;
 assign stg_ready = boot_state == 8'd2;
+assign stg_hdr = hdr;
 wire rx_act = st == E_SEND || st == E_FETCH || st == E_WAIT;
 wire frame_end = u_rx_valid && u_rx_data == SLIP_END && !hunting && pos != 12'd0;
 
@@ -706,7 +712,7 @@ always_ff @(posedge clk) begin
 					boot_err <= 8'd0;
 					staged <= 8'd0;
 					armed <= 1'b0;
-					h_ok <= 5'd0;
+					h_ok <= 1'b0;
 					c_ok <= 1'b0;
 					c_end <= 8'd0;
 					stg_open <= 1'b1;
@@ -754,9 +760,9 @@ always_ff @(posedge clk) begin
 					pct_acc <= pct_acc + 20'd100;
 				// "ATARI" at bytes 1-5: an A78 header
 				if (got >= 20'd1 && got <= 20'd5)
-					h_ok <= {h_ok[3:0], (got == 20'd1 || h_ok[0]) && sb_q ==
-					         (got == 20'd1 ? "A" : got == 20'd2 ? "T" : got == 20'd3 ? "A" : got == 20'd4 ? "R" : "I")};
-				if (!(h_ok[4] && got < 20'd128)) begin
+					h_ok <= (got == 20'd1 || h_ok) && sb_q ==
+					         (got == 20'd1 ? "A" : got == 20'd2 ? "T" : got == 20'd3 ? "A" : got == 20'd4 ? "R" : "I");
+				if (!(hdr && got < 20'd128)) begin
 					if (po[11:0] >= 12'hF70 && po[11:0] <= 12'hF75)
 						csig[po[2:0]] <= sb_q;
 					if (po[11:0] == 12'hF76) begin
@@ -779,7 +785,7 @@ always_ff @(posedge clk) begin
 			// READY, the claim (its last 4K block ends where the ROM does),
 			// BIOS OK (the core boots any image)
 			staged <= {5'd0, 1'b1,
-			           c_ok && {c_end, 12'h000} == (tot - (h_ok[4] ? 20'd128 : 20'd0)), 1'b1};
+			           c_ok && {c_end, 12'h000} == (tot - (hdr ? 20'd128 : 20'd0)), 1'b1};
 			st <= E_BARE;
 		end else if (sync_t == 16'hFFFF) begin
 			boot_state <= 8'h80;

@@ -1,6 +1,6 @@
 #!/bin/bash
 # tb_fnstage: FujiNet staging (fujinet_stage.sv -> bup_asset_wr.sv -> psram.sv
-# on psram_model.sv), three seeds. Prints each run's result and "FNSTAGE pass"
+# on psram_model.sv) and its replay (fujinet_rd.sv -> fujinet_loader.sv), three seeds. Prints each run's result and "FNSTAGE pass"
 # or "FNSTAGE FAIL".   (WORK=dir, VERILATOR=bin optional)
 # SPDX-License-Identifier: MIT
 set -u
@@ -10,7 +10,7 @@ WORK="${WORK:-$HERE/../work/fnstage}"
 V="${VERILATOR:-$( [ -x /opt/verilator-5.040/bin/verilator ] && echo /opt/verilator-5.040/bin/verilator || echo verilator)}"
 mkdir -p "$WORK"
 "$V" --binary --timing -O2 -Wno-fatal -Wno-lint --top-module tb_fnstage -Mdir "$WORK/obj" -o vtb \
-	"$FPGA/core/fujinet_stage.sv" "$FPGA/core/bupchip/bup_asset_wr.sv" "$FPGA/pocket_utils/psram.sv" \
+	"$FPGA/core/fujinet_stage.sv" "$FPGA/core/fujinet_loader.sv" "$FPGA/core/fujinet_rd.sv" "$FPGA/core/bupchip/bup_asset_wr.sv" "$FPGA/pocket_utils/psram.sv" \
 	"$HERE/../bupchip/s4/psram_model.sv" "$HERE/tb_fnstage.sv" > "$WORK/build.log" 2>&1 \
 	|| { grep -m20 '%Error' "$WORK/build.log"; echo "FNSTAGE FAIL (build)"; exit 1; }
 ok=1

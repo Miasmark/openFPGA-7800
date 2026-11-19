@@ -117,6 +117,15 @@ module atari7800_pocket
 	output wire        fn_tx_en,        // drive TX
 	input  wire        fn_rxd_link,     // link SI
 	input  wire        fn_rxd_cart,     // cartridge pin 31
+	// FujiNet game loading (fujinet_loader.sv): the swap's load, which
+	// core_top.v muxes into cart_download / ioctl_* ahead of the bridge's (all
+	// low unless a swap runs), and a console restart for reset_in
+	output wire        fn_ld_dl,
+	output wire        fn_ld_wr,
+	output wire [24:0] fn_ld_addr,
+	output wire  [7:0] fn_ld_dout,
+	output wire        fn_restart,
+	input  wire        fn_host_dl,      // the bridge's load sequence starting (ends a swap)
 	input  wire  [1:0] atarivox_setting, // AtariVox voice: 0 off, 1 quiet, 2 normal, 3 loud
 	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
 	input  wire        sk_bridge_wr,
@@ -1293,7 +1302,8 @@ wire [15:0] bup_audio_l, bup_audio_r;
 
 // FujiNet: the mailbox, on the bus the cartridge sees (POCKET_SRAM builds)
 wire        fn_stg_start, fn_stg_we, fn_stg_sync, fn_stg_synced, fn_stg_busy;
-wire [19:0] fn_stg_addr;
+wire        fn_stg_hdr, fn_swap_go, fn_swap_restart;
+wire [19:0] fn_stg_addr, fn_stg_size;
 wire  [7:0] fn_stg_data;
 wire        bus_phi2, bus_cs_cart, fn_oe;
 wire  [7:0] fn_do;
@@ -1323,9 +1333,8 @@ fujinet_mailbox fujinet
 	.busy         (),
 	// game loading (docs/FUJINET_GAME_LOADING.md): a push is staged in the
 	// BupChip's PSRAM (fujinet_stage, below; without POCKET_BUPCHIP its SYNC
-	// goes unanswered and the push ends FAILED, BOOT_ERR 4). The swap is not
-	// built yet: its requests go nowhere, and $0600 leaves the console in
-	// the loader's loop
+	// goes unanswered and the push ends FAILED, BOOT_ERR 4), and the swap
+	// replays it through this core's load path (fujinet_loader, below)
 	.stg_start    (fn_stg_start),
 	.stg_we       (fn_stg_we),
 	.stg_addr     (fn_stg_addr),
@@ -1333,12 +1342,13 @@ fujinet_mailbox fujinet
 	.stg_sync     (fn_stg_sync),
 	.stg_synced   (fn_stg_synced),
 	.stg_busy     (fn_stg_busy),
+	.stg_size     (fn_stg_size),
 	/* verilator lint_off PINCONNECTEMPTY */
-	.stg_size     (),
 	.stg_ready    (),
-	.swap_go      (),
-	.swap_restart ()
 	/* verilator lint_on PINCONNECTEMPTY */
+	.stg_hdr      (fn_stg_hdr),
+	.swap_go      (fn_swap_go),
+	.swap_restart (fn_swap_restart)
 );
 
 // The staging's clk_sys side: the pushed image's bytes as halfword WRITEs to
@@ -1347,6 +1357,35 @@ wire        fn_s_tog, fn_s_sync, fn_s_ack;
 wire  [1:0] fn_s_lanes;
 wire [18:0] fn_s_haddr;
 wire [15:0] fn_s_data;
+wire        fn_l_req, fn_l_ack;
+wire [18:0] fn_l_haddr;
+wire [15:0] fn_l_data;
+
+// The swap: the staged file replayed as a cartridge load, and the restart.
+// Without POCKET_BUPCHIP nothing is ever staged, and an armed swap cannot
+// happen (READY needs the stager's answer).
+fujinet_loader fn_loader
+(
+	.clk        (clk_sys),
+`ifdef POCKET_BUPCHIP
+	.go         (fn_swap_go),
+`else
+	.go         (1'b0),
+`endif
+	.restart_go (fn_swap_restart),
+	.size       (fn_stg_size),
+	.hdr        (fn_stg_hdr),
+	.host_dl    (fn_host_dl),
+	.dl         (fn_ld_dl),
+	.wr         (fn_ld_wr),
+	.addr       (fn_ld_addr),
+	.dout       (fn_ld_dout),
+	.restart    (fn_restart),
+	.l_req      (fn_l_req),
+	.l_haddr    (fn_l_haddr),
+	.l_ack      (fn_l_ack),
+	.l_data     (fn_l_data)
+);
 `ifdef POCKET_BUPCHIP
 fujinet_stage fn_stage
 (
@@ -1368,6 +1407,8 @@ fujinet_stage fn_stage
 `else
 assign fn_stg_busy = 1'b0;
 assign fn_stg_synced = 1'b0;
+assign fn_l_ack = 1'b0;
+assign fn_l_data = 16'd0;
 `endif
 `else
 assign fn_oe = 1'b0;
@@ -1379,6 +1420,11 @@ assign fn_stg_data = 8'd0;
 assign fn_stg_sync = 1'b0;
 assign fn_txd = 1'b1;
 assign fn_tx_en = 1'b0;
+assign fn_ld_dl = 1'b0;
+assign fn_ld_wr = 1'b0;
+assign fn_ld_addr = 25'd0;
+assign fn_ld_dout = 8'd0;
+assign fn_restart = 1'b0;
 `endif
 
 Atari7800 main
@@ -1726,7 +1772,11 @@ bupchip_pocket bupchip
 	.fn_s_lanes            (fn_s_lanes),
 	.fn_s_haddr            (fn_s_haddr),
 	.fn_s_data             (fn_s_data),
-	.fn_s_ack              (fn_s_ack)
+	.fn_s_ack              (fn_s_ack),
+	.fn_l_req              (fn_l_req),
+	.fn_l_haddr            (fn_l_haddr),
+	.fn_l_ack              (fn_l_ack),
+	.fn_l_data             (fn_l_data)
 `ifdef POCKET_DARIA
 	,
 	.daria_profile  (daria_profile),

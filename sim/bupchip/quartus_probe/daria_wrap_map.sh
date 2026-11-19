@@ -43,7 +43,7 @@ C="$ROOT/src/fpga/core/bupchip"
 	[ "$KIND" = aria ] || echo 'set_global_assignment -name VERILOG_MACRO "POCKET_DARIA=1"'
 	for f in "$R/arm7tdmi/arm7tdmi_pkg.sv" "$R/bupchip_peripheral.sv" "$C/bup_cpu.sv" "$C/bup_tick48k.sv" \
 			"$C/bup_capture.sv" "$C/bup_asset_wr.sv" "$C/bup_load_probe.sv" "$C/bup_asset_cache.sv" \
-			"$C/daria_mem.sv" "$C/daria_call.sv" "$C/daria_mmio.sv" "$C/bupchip_pocket.sv"; do
+			"$C/daria_mem.sv" "$C/daria_call.sv" "$C/daria_mmio.sv" "$C/../fujinet_rd.sv" "$C/bupchip_pocket.sv"; do
 		echo "set_global_assignment -name SYSTEMVERILOG_FILE $(rel "$f")"
 	done
 	echo "set_global_assignment -name VERILOG_FILE $(rel "$R/cache_ram.v")"

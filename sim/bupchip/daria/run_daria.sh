@@ -122,7 +122,7 @@ if [ "${SHADOW:-0}" != 0 ]; then
 	if [ "${WRAPPER:-0}" != 0 ]; then
 		S4="$HERE/../s4"
 		SRCS+=("$RTL/bupchip_peripheral.sv" "$BUP/bup_tick48k.sv" "$BUP/bup_capture.sv" "$BUP/bup_asset_wr.sv"
-			"$BUP/bup_asset_cache.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv"
+			"$BUP/bup_asset_cache.sv" "$BUP/../fujinet_rd.sv" "$BUP/bupchip_pocket.sv" "$FPGA/pocket_utils/psram.sv" "$S4/psram_model.sv"
 			"$BUP/daria_smp.sv")
 		# lane I3's snapshot (plan P15), instantiated only under BUP_DEBUG; it
 		# arrives with commit D, so it is compiled once it exists

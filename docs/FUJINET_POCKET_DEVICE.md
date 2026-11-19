@@ -127,9 +127,9 @@ circuit, a WS2812-2020 status LED, RESET / BOOT buttons.
   device's protocols, app keys, everything that is a request and its reply.
 - **In progress:** MOUNT_IMAGE's image push. On FujiNet's own cartridge the
   device sends the game to device $FF and the cartridge's loader starts it.
-  The core now takes the push into the PSRAM and reports READY, but does
-  not yet start the staged game; that is step 3 of
-  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md).
+  The core now takes the push into the PSRAM and starts the game through
+  its own cartridge load path; this passes its benches but has not run end
+  to end or on a Pocket yet ([FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)).
 - **Not served:** the cartridge's hot operations other than the swap, and
   the High Score Cart's saves to the device's SD card (the Pocket's own HSC
   saves still work).
