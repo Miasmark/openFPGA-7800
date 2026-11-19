@@ -88,6 +88,19 @@ firmware version. The settings above come from fujinet-firmware's source
 (`fujinet_pc.cmake`, `lib/bus/rs232/rs232.cpp`, `lib/config/fnc_serial.cpp`,
 `lib/device/rs232/rs232Fuji.cpp`, which answers $C4).
 
+## 4. The network devices
+
+SELECT, after any result, runs an HTTP GET of `http://example.com/` on N1
+($71): OPEN (mode 4, no translation), STATUS until two readings agree and
+are not zero, READ of up to 180 bytes, shown as text, and CLOSE, always. Each
+step shows its ERR and REPLY.
+
+Expected with fujinet-pc (or any FujiNet) online: `OPEN ERR 00 REPLY 06`, a
+STATUS line with the bytes waiting, `READ ERR 00 REPLY 06 LEN 00B4`, the
+start of the page's HTML, `CLOSE ERR 00 REPLY 06`. In loopback the cart
+hears its own OPEN (`REPLY 4F`, not an ACK) and goes straight to CLOSE
+(`REPLY 43`), which is what simulation shows.
+
 ## Another cartridge in the slot
 
 - **Ordinary games:** the cartridge pins stay as Analogue's template sets

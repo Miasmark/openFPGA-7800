@@ -11,7 +11,12 @@
 ;     PORT CART;
 ;   - a FujiNet on a serial adapter: ERR 00, REPLY 06 (ACK), and its SSID,
 ;     IP address and firmware version.
-; Fire or Reset runs the transaction again.
+; Fire or Reset runs the transaction again. SELECT runs the network test:
+; an HTTP GET of URL (below) on N1 ($71) -- OPEN (mode 4, no translation),
+; STATUS until two readings agree and are not zero, READ up to 180 bytes,
+; shown as text, and CLOSE, always -- the network device's lifecycle as the
+; FujiNet 7800 programmer's handbook gives it (section 11). Each network
+; command may take 90 s; the cart waits 100 s for each.
 ; Build: python3 fn_font.py > fn_font.inc; dasm fn_test.asm -f3 -ofn_test.bin;
 ; sim/make_a78.py --bin fn_test.bin > fn_test.a78; sign it for a console.
 ; SPDX-License-Identifier: MIT
@@ -46,6 +51,7 @@ FN_LINK    = $0C15
 FN_TV      = $0C1E
 FN_PORT    = $0C30          ; this core's: 1 link port, 2 cartridge slot
 FN_REGSEL  = $0D00
+FN_TXDATA  = $0F00
 REG_DEVICE = $00
 REG_CMD    = $01
 REG_NPARAM = $02
@@ -61,6 +67,19 @@ seq      = $84
 frames   = $85          ; 2 bytes
 col      = $87
 len      = $88
+tcmd     = $89
+tnpr     = $8A
+nerr     = $8B
+ntry     = $8C
+nprev    = $8D          ; 2 bytes
+navail   = $8F          ; 2 bytes
+nconn    = $91
+nstat    = $92
+nlen     = $93
+trow     = $94
+tcol     = $95
+tidx     = $96
+tb       = $97
 
 	MAC PRINT               ; row, column, string
 	lda #{1}
@@ -280,29 +299,331 @@ pt2
 	jsr rstr
 
 again
-	PRINT 22, 1, t_again
+	PRINT 23, 1, t_again
 rel
 	jsr frame
-	jsr button
+	jsr buttons
 	bne rel
 press
 	jsr frame
-	jsr button
+	jsr buttons
 	beq press
+	and #$02
+	bne netgo
 	jmp txn
+netgo
+	jmp nettest
+
+; ------------------------------------------------------------ the network test
+nettest
+	ldx #6
+	jsr clrrows
+	PRINT 6, 1, t_http
+	; OPEN: mode 4 (read: HTTP GET), translation 0, the devicespec
+	lda #$71
+	ldx #$4F
+	ldy #2
+	jsr fnbeg
+	lda #4
+	jsr fnpb
+	lda #0
+	jsr fnpb
+	ldy #0
+nu1
+	lda url,y
+	beq nu2
+	sta FN_TXDATA
+	iny
+	bne nu1
+nu2
+	jsr fngo
+	sta nerr
+	PRINT 8, 1, t_open
+	jsr showres
+	lda nerr
+	bne nopenbad
+	lda FN_RCMD
+	cmp #$06
+	beq nopenok
+nopenbad
+	jmp nclose
+nopenok
+	; STATUS until two readings agree and are not zero (40 tries, 3 frames apart)
+	lda #40
+	sta ntry
+	lda #0
+	sta nprev
+	sta nprev+1
+nst
+	lda #$71
+	ldx #$53
+	ldy #2
+	jsr fnbeg
+	lda #0
+	jsr fnpb
+	lda #0
+	jsr fnpb
+	jsr fngo
+	sta nerr
+	bne nstbad
+	lda FN_RCMD
+	cmp #$06
+	bne nstbad
+	lda FN_DATA
+	sta navail
+	lda FN_DATA+1
+	sta navail+1
+	lda FN_DATA+2
+	sta nconn
+	lda FN_DATA+3
+	sta nstat
+	PRINT 10, 1, t_nstat
+	lda navail+1
+	jsr puthex
+	lda navail
+	jsr puthex
+	lda #<t_conn
+	ldy #>t_conn
+	jsr puts
+	lda nconn
+	jsr puthex
+	lda #<t_st
+	ldy #>t_st
+	jsr puts
+	lda nstat
+	jsr puthex
+	lda navail
+	cmp nprev
+	bne nagain
+	lda navail+1
+	cmp nprev+1
+	bne nagain
+	lda navail
+	ora navail+1
+	bne nread
+nagain
+	lda navail
+	sta nprev
+	lda navail+1
+	sta nprev+1
+	dec ntry
+	beq nnodata
+	jsr frame
+	jsr frame
+	jsr frame
+	jmp nst
+nstbad
+	PRINT 10, 1, t_nstat
+	jsr showres
+	jmp nclose
+nnodata
+	PRINT 12, 1, t_nodata
+	jmp nclose
+	; READ: no more than is waiting, and no more than 180 bytes (six rows)
+nread
+	lda navail+1
+	bne nrmax
+	lda navail
+	cmp #180
+	bcc nr1
+nrmax
+	lda #180
+nr1
+	sta nlen
+	lda #$71
+	ldx #$52
+	ldy #1
+	jsr fnbeg
+	lda nlen
+	ldx #0
+	jsr fnpw
+	jsr fngo
+	sta nerr
+	PRINT 12, 1, t_nread
+	jsr showres
+	lda #<t_len
+	ldy #>t_len
+	jsr puts
+	lda FN_RXHI
+	jsr puthex
+	lda FN_RXLO
+	jsr puthex
+	lda nerr
+	bne nclose
+	lda FN_RCMD
+	cmp #$06
+	bne nclose
+	jsr showtext
+	; CLOSE, whatever happened before
+nclose
+	lda #$71
+	ldx #$43
+	ldy #0
+	jsr fnbeg
+	jsr fngo
+	sta nerr
+	PRINT 14, 1, t_nclose
+	jsr showres
+	jmp again
+
+; "ERR xx REPLY xx" for the last transaction (nerr: FF = no ACKSEQ echo)
+showres
+	lda #<t_err
+	ldy #>t_err
+	jsr puts
+	lda nerr
+	jsr puthex
+	lda #<t_rep2
+	ldy #>t_rep2
+	jsr puts
+	lda FN_RCMD
+	jmp puthex
+
+; the reply as text, rows 16-21: LF a new row, CR skipped, 30 a row
+showtext
+	lda FN_RXLO
+	beq stdone
+	lda #16
+	sta trow
+	ldx #1
+	jsr at
+	lda #0
+	sta tcol
+	ldx #0
+st1
+	stx tidx
+	lda FN_DATA,x
+	cmp #13
+	beq stnext
+	cmp #10
+	beq stnl
+	cmp #$60
+	bcc st2
+	sbc #$20                ; lower case as upper
+st2
+	cmp #$20
+	bcc stdot
+	cmp #$60
+	bcc stput
+stdot
+	lda #"."
+stput
+	jsr putc
+	inc tcol
+	lda tcol
+	cmp #30
+	bne stnext
+stnl
+	inc trow
+	lda trow
+	cmp #22
+	beq stdone
+	ldx #1
+	jsr at
+	lda #0
+	sta tcol
+stnext
+	ldx tidx
+	inx
+	cpx FN_RXLO
+	bne st1
+stdone
+	rts
+
+; ------------------------------------------------------------ the mailbox
+; begin a transaction: device A, command X, NPARAM Y; rewinds the TX stream
+fnbeg
+	stx tcmd
+	sty tnpr
+	ldx #REG_DEVICE
+	sta FN_REGSEL,x         ; one store a register; never read-modify-write
+	lda tcmd
+	ldx #REG_CMD
+	sta FN_REGSEL,x
+	lda tnpr
+	ldx #REG_NPARAM
+	sta FN_REGSEL,x
+	lda #0
+	ldx #REG_RST
+	sta FN_REGSEL,x
+	rts
+
+fnpb                            ; a one-byte parameter, A
+	pha
+	lda #1
+	sta FN_TXDATA
+	pla
+	sta FN_TXDATA
+	rts
+
+fnpw                            ; a two-byte parameter, A low, X high
+	pha
+	lda #2
+	sta FN_TXDATA
+	pla
+	sta FN_TXDATA
+	txa
+	sta FN_TXDATA
+	rts
+
+; launch (SEQ = ACKSEQ + 1, never 0) and wait for the echo, up to 6144
+; frames (about 100 s, past the core's 90 s for network commands);
+; A = FN_ERR, or $FF when ACKSEQ never echoed
+fngo
+	lda FN_ACKSEQ
+	clc
+	adc #1
+	bne fg1
+	lda #1
+fg1
+	sta seq
+	ldx #REG_SEQ
+	sta FN_REGSEL,x
+	lda #0
+	sta frames
+	sta frames+1
+fg2
+	jsr frame
+	lda FN_ACKSEQ
+	cmp seq
+	beq fg3
+	inc frames
+	bne fg2
+	inc frames+1
+	lda frames+1
+	cmp #24
+	bcc fg2
+	lda #$FF
+	rts
+fg3
+	lda FN_ERR
+	rts
 
 ; ------------------------------------------------------------ routines
-; A = 1 (Z clear) while fire or Reset is held
-button
+; A: bit 0 fire or Reset held, bit 1 SELECT held (Z set: none)
+buttons
+	lda #0
+	sta tb
 	lda INPT4
-	bpl bdown
+	bmi bb1
+	lda #1
+	sta tb
+bb1
 	lda SWCHB
 	and #$01
-	beq bdown
-	lda #0
-	rts
-bdown
-	lda #1
+	bne bb2
+	lda tb
+	ora #$01
+	sta tb
+bb2
+	lda SWCHB
+	and #$02
+	bne bb3
+	lda tb
+	ora #$02
+	sta tb
+bb3
+	lda tb
 	rts
 
 ; wait for the start of the next vblank
@@ -441,7 +762,19 @@ t_pcart	dc.b "CART", 0
 t_ssid	dc.b "SSID ", 0
 t_ip	dc.b "IP   ", 0
 t_fw	dc.b "FW   ", 0
-t_again	dc.b "FIRE OR RESET: AGAIN", 0
+t_again	dc.b "FIRE: CONFIG   SELECT: HTTP", 0
+t_http	dc.b "HTTP GET EXAMPLE.COM ON N1", 0
+t_open	dc.b "OPEN   ", 0
+t_nstat	dc.b "STATUS ", 0
+t_nread	dc.b "READ   ", 0
+t_nclose dc.b "CLOSE  ", 0
+t_nodata dc.b "NO DATA (STATUS STAYED 0)", 0
+t_conn	dc.b " CONN ", 0
+t_st	dc.b " ST ", 0
+t_rep2	dc.b " REPLY ", 0
+t_len	dc.b " LEN ", 0
+; the devicespec: N1 from the device number, HTTP GET of example.com
+url	dc.b "N:http://example.com/", 0
 t_ackw	dc.b "ACK", 0
 t_nak	dc.b "NAK", 0
 t_loop	dc.b "LOOPBACK", 0

@@ -229,7 +229,11 @@ link:
   against a model of the FujiBus format.
   [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md) has the wiring and the
   steps, up to a FujiNet running on a PC (fujinet-pc's RS232 build) through
-  a USB serial adapter.
+  a USB serial adapter, and the test cart's HTTP test of the network
+  devices (SELECT).
+- **A device for the Pocket:** [docs/FUJINET_POCKET_DEVICE.md](docs/FUJINET_POCKET_DEVICE.md)
+  specifies one: an ESP32-S3 on FujiNet's RS232 firmware, a GB-cart-sized
+  body with a GBA corner, its own LiPo.
 - **Tested on a Pocket (2026-11-19):** NO LINK with nothing attached, the
   link-port loopback, and a full request to fujinet-pc through an FT232H
   on the link port (its SSID and firmware version came back).
