@@ -597,7 +597,7 @@ fi
 if [ -z "${ONLY:-}" ] || [ "${ONLY:-}" = fujinet ]; then
 	if [ "${SRAM:-1}" = 1 ] && [[ " $BUP_DEFS " == *" -DPOCKET_BUPCHIP "* ]]; then
 		echo "-- FujiNet: a game pushed over the link port and booted (fujinet/fn_model.sv, fn_boot.asm, fn_game.asm):"
-		FN="$WORK/fujinet"
+		FN="$WORK/fnboot"
 		mkdir -p "$FN"; ln -sfn "$WORK/rtl" "$FN/rtl"
 		fn_ok=1
 		command -v dasm > /dev/null || { echo "  dasm not found"; fn_ok=0; }

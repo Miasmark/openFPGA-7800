@@ -18,8 +18,8 @@
 // the cache-style reads, as in bupchip_pocket.sv), once as an A78 (hdr) and
 // once without a header: every byte must come out in order at its address,
 // a generated header first in the second case, one wr each at least SPACE
-// clk_sys apart, with dl high throughout and addr all ones before the
-// first. Last, a replay ended by host_dl and a restart pulse.
+// clk_sys apart, dout changing only with addr (the header parser reads by
+// address), with dl high throughout and addr all ones before the first. Last, a replay ended by host_dl and a restart pulse.
 //   +seed=N +files=N     (defaults 1 and 6)
 // Prints "FNSTAGE ... fails N".
 //
@@ -192,13 +192,19 @@ module tb_fnstage;
 
 	// The loader's output, as the core's load path sees it
 	logic [7:0] got_b [0:65535 + 128];
-	int got_n = 0, ord_bad = 0, sp_bad = 0, dl_bad = 0, last_wr = -100, clk_n = 0;
+	int got_n = 0, ord_bad = 0, sp_bad = 0, dl_bad = 0, hold_bad = 0, last_wr = -100, clk_n = 0;
+	logic [24:0] p_ad = '1;
+	logic  [7:0] p_do = 8'd0;
 	bit pre_ok = 1, watching = 0;
 	always @(posedge clk_sys) begin
 		clk_n++;
 		if (watching) begin
 			if (!ld_dl && ld_wr) dl_bad++;
 			if (ld_dl && got_n == 0 && !ld_wr && ld_addr !== '1) pre_ok = 0;
+			// the header parser reads by address: dout moves only with addr
+			if (ld_dl && ld_addr == p_ad && ld_dout != p_do) hold_bad++;
+			p_ad = ld_addr;
+			p_do = ld_dout;
 			if (ld_wr) begin
 				if (ld_addr != 25'(got_n)) ord_bad++;
 				if (clk_n - last_wr < 4) sp_bad++;
@@ -224,7 +230,7 @@ module tb_fnstage;
 	task automatic replay(input int n, input bit hdr, output int bad);
 		int exp_n, to;
 		bad = 0;
-		got_n = 0; ord_bad = 0; sp_bad = 0; dl_bad = 0; pre_ok = 1; last_wr = -100;
+		got_n = 0; ord_bad = 0; sp_bad = 0; dl_bad = 0; hold_bad = 0; pre_ok = 1; last_wr = -100;
 		watching = 1;
 		@(posedge clk_sys);
 		ld_size <= 20'(n); ld_hdr <= hdr; ld_go <= 1;
@@ -245,8 +251,9 @@ module tb_fnstage;
 				bad++;
 			end
 		end
-		if (ord_bad || sp_bad || dl_bad || !pre_ok) begin
-			$display("FNSTAGE replay: out of order %0d, too close %0d, wr without dl %0d, addr before %0d", ord_bad, sp_bad, dl_bad, pre_ok);
+		if (ord_bad || sp_bad || dl_bad || hold_bad || !pre_ok) begin
+			$display("FNSTAGE replay: out of order %0d, too close %0d, wr without dl %0d, dout without addr %0d, addr before %0d",
+				ord_bad, sp_bad, dl_bad, hold_bad, pre_ok);
 			bad++;
 		end
 	endtask

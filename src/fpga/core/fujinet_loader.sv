@@ -9,9 +9,10 @@
 // order through fujinet_rd.sv (clk_arm, a halfword per request) and
 // presents each byte as one wr pulse at least SPACE clk_sys after the last
 // (the bridge's data_loader manages one every 2.5 clk_sys; bup_capture.sv
-// and the SDRAM writes rely on no faster). addr and dout are held from one
-// pulse to the next, as the bridge's are: the header parser reads them by
-// address, not by strobe. Before the first byte addr is all ones, which no
+// and the SDRAM writes rely on no faster). addr and dout change together, on
+// the clock wr rises, and are held from one pulse to the next, as the
+// bridge's are: the header parser reads them by address, not by strobe, so
+// a dout that moved ahead of its addr would land in the last byte's field. Before the first byte addr is all ones, which no
 // parser takes for a header byte.
 //
 // A file without an A78 header (hdr low: bytes 1-5 are not "ATARI") is
@@ -69,6 +70,7 @@ module fujinet_loader #(
 	logic        gen = 1'b0;         // a generated header comes first
 	logic [20:0] i = 21'd0;          // the next byte out
 	logic  [7:0] hb = 8'd0;          // the halfword's high byte, for the odd offset
+	logic  [7:0] nb = 8'd0;          // the next byte out, until addr moves with it
 	logic  [6:0] cnt = 7'd0;
 	logic  [6:0] rcnt = 7'd0;
 	initial begin
@@ -131,7 +133,7 @@ module fujinet_loader #(
 				else cnt <= cnt - 7'd1;
 			S_NEXT:
 				if (gen && i < 21'd128) begin
-					dout <= ghdr(i[6:0], n);
+					nb <= ghdr(i[6:0], n);
 					st <= S_EMIT;
 				end else if (src >= {1'b0, n}) begin
 					cnt <= 7'd15;
@@ -141,17 +143,18 @@ module fujinet_loader #(
 					l_req <= ~l_req;
 					st <= S_READ;
 				end else begin
-					dout <= hb;
+					nb <= hb;
 					st <= S_EMIT;
 				end
 			S_READ:
 				if (!open_rq) begin
 					hb <= l_data[15:8];
-					dout <= l_data[7:0];
+					nb <= l_data[7:0];
 					st <= S_EMIT;
 				end
-			S_EMIT: begin
+			S_EMIT: begin                // addr and dout change together, on the strobe's clock
 				addr <= {4'd0, i};
+				dout <= nb;
 				wr <= 1'b1;
 				i <= i + 21'd1;
 				cnt <= 7'(SPACE - 2);
