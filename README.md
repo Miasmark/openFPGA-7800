@@ -218,7 +218,12 @@ link:
   ([docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)); seen on a
   Pocket with fujinet-pc (2026-11-20). CONFIG's PLAY GAME LOBBY needs a 7800
   lobby on FujiNet's server, which has none yet.
-- **Not done:** the High Score Cart's saves to the FujiNet's SD card.
+- **The High Score Cart:** games the FujiNet boots use the core's own HSC
+  and its `hsc.sav` on the Pocket's SD card, as any game; on Auto the
+  game's header decides, so for hosted copies without the HSC flag set
+  High Score Cart to On (seen on a Pocket, 2026-11-20). Not done: CONFIG's
+  HSC switch and the HSC kept on the FujiNet's SD card (FujiNet's own
+  cartridge stores it as 32 AppKeys).
 - **No link:** a serial adapter gives no sign it is there, so the core
   counts the link as up once a good frame arrives. Until then a request
   that hears nothing ends after 1.5 s with "no link" (error 1).
@@ -279,11 +284,16 @@ link:
     hardware does the same.
   - **A pushed game keeps its A78 header's settings,** as from the SD card:
     a copy whose header lacks the POKEY flag plays without its POKEY music
-    (the NTSC Commando on FujiNet's server; its PAL copy plays it).
+    (the NTSC Commando on FujiNet's server; its PAL copy plays it), and on
+    Auto a copy whose header lacks the High Score Cart flag gets no HSC.
+    Set High Score Cart to On to save scores from such games: they go to
+    the Pocket's own `hsc.sav`, as any game's do. (FujiNet's own cartridge
+    gives every game the HSC, and finds POKEY from a list of known games.)
   - **Alien Brigade and Crossbow** pick joystick or light gun when they
     start, and CONFIG needs the joystick: set Port 1 to Light Gun in the
     menu while the FujiNet loads the game, or Reset from the menu after.
-  - Not served: the High Score Cart's saves to the FujiNet's SD card.
+  - Not served: CONFIG's High Score Cart switch, and saving the HSC to the
+    FujiNet's SD card; the core's own HSC and its save serve instead.
 - **The light gun's crosshair with Composite in 2600 mode** lines up: the
   decoded 2600 picture trails the RGB one by 12 clk_sys, not MARIA's 14,
   so the crosshair landed half a TIA pixel late. 7800 games and the

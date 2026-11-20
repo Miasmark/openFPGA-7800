@@ -142,6 +142,14 @@ screen. On the core:
     (a headerless copy, given a generated header, would be too). The PAL
     Commando plays its music, and so does Ballblazer, whose music is
     POKEY's alone. Not the core.
+  - **High Score Cart saves need High Score Cart set to On** for hosted
+    copies whose header lacks the HSC flag: on Auto the core follows the
+    header (byte 58), as for the SD card. With On, scores from a game the
+    FujiNet booted are kept in the Pocket's `hsc.sav`, as any game's
+    (seen 2026-11-20). FujiNet's own cartridge gives every game the HSC
+    and corrects POKEY from a list of known games (fujinet-firmware
+    `pico/atari-7800/firmware/src/fuji_load.c`, `a78map_db.c`, from MAME's
+    software list); the core has no such list.
   - **Alien Brigade and Crossbow need Reset from the menu before the light
     gun works**; the other light gun games do not. Both games have a
     joystick mode and a light gun mode and pick one when they start. A

@@ -132,8 +132,10 @@ circuit, a WS2812-2020 status LED, RESET / BOOT buttons.
   Pocket with fujinet-pc (2026-11-20). PLAY GAME LOBBY waits for a 7800
   lobby on FujiNet's server.
 - **Not served:** the cartridge's hot operations other than the swap, and
-  the High Score Cart's saves to the device's SD card (the Pocket's own HSC
-  saves still work).
+  the High Score Cart kept on the device's SD card. The core's own HSC and
+  its save on the Pocket's SD card serve instead, for games the FujiNet
+  boots too; set High Score Cart to On for a game whose header lacks the
+  flag.
 - **CONFIG**, FujiNet's own 7800 menu, runs as an `.a78` from the Pocket's SD
   card (in simulation, 2026-11-19), all but booting games
   ([FUJINET_TESTING.md](FUJINET_TESTING.md), section 5).
