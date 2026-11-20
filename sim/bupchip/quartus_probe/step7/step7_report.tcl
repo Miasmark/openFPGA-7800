@@ -120,7 +120,9 @@ proc regs {label pattern {nodup 0}} {
 # pattern, present in Build B (daria), present in Q5 (DARIA + BUP_DEBUG).
 # f3_crossings.txt holds the same presence per kind (selftest.sh compares
 # the two). cap_err_a is absent from Q5 too: it feeds only the status
-# word's bit 11, which bup_status_osd.sv does not show (plan 2.7).
+# word's bit 11, which bup_status_osd.sv does not show (plan 2.7). The last
+# four rows are FujiNet's (docs/FUJINET_GAME_LOADING.md 3.2, 3.4), after
+# plan 2.7: the staging channel's st1 and a1, the swap's req_s0 and ack_s0.
 set ff_table {
 	{*|bupchip_pocket:bupchip|hold_a[0]} 1 1
 	{*|bupchip_pocket:bupchip|pause_a[0]} 0 0
@@ -144,6 +146,10 @@ set ff_table {
 	{*|daria_fe_audio:u_audio|ack_s1} 1 1
 	{*|bup_dbg_snap:*|ak_s0} 0 1
 	{*|daria_fe_guard:u_guard|pd_rx} 1 1
+	{*|bup_asset_wr:writer|st1} 1 1
+	{*|fujinet_stage:fn_stage|a1} 1 1
+	{*|fujinet_rd:fn_rd|req_s0} 1 1
+	{*|fujinet_loader:fn_loader|ack_s0} 1 1
 }
 
 # The known bounds of the guard pair pd_tog -> pd_rx (docs/daria_fe/design.md
@@ -452,7 +458,43 @@ foreach x [names $c26 8] { say "    $x" }
 set rdb [get_nets -nowarn {*|main|read_DB*}]
 say "  nets of top.sv's read_DB (*|main|read_DB*): [csize $rdb]"
 foreach x [names $rdb 4] { say "    $x" }
+# read_DB is combinational (top.sv's always_comb). A register that the
+# fitter's retiming moves across one of its LUTs takes that LUT's name
+# (read_DB~N_NEW_REG..., its output read_DB~N_OTERM..., the LUTs it
+# changes read_DB~N_RTM...), so its own output net matches read_DB*, and
+# every path from it then counts as "through read_DB" although it crosses
+# none of the bus's logic. On the FujiNet game-loading build (2026-11-19,
+# every seed) synthesis shared an address decode LUT between the read mux
+# and the 7800 cart RAM's select; the CPU's retimed address registers took
+# its name, and their ordinary path cartram_cs -> sram_ctrl -> sram_a gave
+# 150 paths, as on Q-mut's tape_num register (docs/daria_step10/plan.md
+# 3.1). The leg below counts paths through read_DB's own nets: those
+# registers' output nets are left out, and listed. A retimed register whose
+# path goes on through read_DB's logic, or through cart2600's, still counts
+# (the read_DB and cart2600 legs); g.legs keeps every read_DB net.
+set rdb_rt [get_nets -nowarn {*|main|read_DB*_NEW_REG* *|main|read_DB*_OTERM*}]
+set rdb_g [expr {[csize $rdb_rt] > 0 ? [remove_from_collection $rdb $rdb_rt] : $rdb}]
+say "  of them the outputs of registers the fitter's retiming created (not counted as read_DB by (g)): [csize $rdb_rt]"
+foreach x [names $rdb_rt 8] { say "    $x" }
+# The same for cart2600's names (amended 2026-11-20, the owner's decision):
+# on the FujiNet build with the YM2151's phase shift register in flip-flops,
+# seed 3's 150 paths started at cart2600|mapper_P2|Equal4~0_OTERM2698, the
+# CPU's retimed address registers again, now named after a mapper_P2
+# comparator LUT they were moved across, on the same 7800 cart RAM request
+# (Q-mut's mapper_AR tape_num register was this case). A register the
+# retiming created is not counted as one of cart2600's by its name, and its
+# own output net is not counted as passing through cart2600; any of
+# cart2600's or read_DB's own logic further on still counts. The left-out
+# registers and a few of their paths are listed for review.
+set c26_rt [get_nets -nowarn {*|cart2600|*_NEW_REG* *|cart2600|*_OTERM*}]
+set c26_g [expr {[csize $c26_rt] > 0 ? [remove_from_collection $c26 $c26_rt] : $c26}]
+say "  nets in cart2600 that are the outputs of registers the fitter's retiming created (not counted as cart2600's by (g)): [csize $c26_rt]"
+foreach x [names $c26_rt 8] { say "    $x" }
 set c26r [regs "cart2600's registers" {*|cart2600:cart2600|*}]
+set c26r_rt [get_registers -nowarn {*|cart2600:cart2600|*_OTERM* *|cart2600:cart2600|*_NEW_REG*}]
+set c26r_g [expr {[csize $c26r_rt] > 0 ? [remove_from_collection $c26r $c26r_rt] : $c26r}]
+say "  of cart2600's registers, ones the fitter's retiming created (not counted by (g)): [csize $c26r_rt]"
+foreach x [names $c26r_rt 8] { say "    $x" }
 set sram_all [regs "sram_ctrl's registers" {*|sram_ctrl:sram|*}]
 set tq [regs "sram|t_*_q" {*|sram_ctrl:sram|t_*_q*}]
 # remove_from_collection fails (a warning, and no removal) when the second
@@ -470,12 +512,25 @@ if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
 	foreach {lab coll} [list "sram_ctrl registers (not t_*_q)" $sram_end "SRAM pads" $pads] {
 		if {[csize $coll] == 0} { continue }
 		set n 0
-		foreach_in_collection p [get_timing_paths -setup -through $c26 -to $coll -npaths 100000 -pairs_only] {
+		foreach_in_collection p [get_timing_paths -setup -through $c26_g -to $coll -npaths 100000 -pairs_only] {
 			if {$n < 10} {
 				say [format "    %s: slack %.3f %d levels %s -> %s" $lab [get_path_info $p -slack] [get_path_info $p -num_logic_levels] \
 					[get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
 			}
 			incr n
+		}
+		# for review: the paths of the retimed registers left out (above)
+		if {[csize $c26r_rt] > 0} {
+			set nx 0
+			foreach_in_collection p [get_timing_paths -setup -from $c26r_rt -to $coll -npaths 100000 -pairs_only] {
+				if {$nx < 4} {
+					say [format "    (review) from a retimed register named in cart2600 into %s: slack %.3f %d levels %s -> %s" $lab \
+						[get_path_info $p -slack] [get_path_info $p -num_logic_levels] [get_node_info -name [get_path_info $p -from]] \
+						[get_node_info -name [get_path_info $p -to]]]
+				}
+				incr nx
+			}
+			say "  (information) paths from retimed registers named in cart2600 into $lab: $nx"
 		}
 		say "  paths through cart2600 into $lab: $n"
 		incr ng $n
@@ -483,8 +538,8 @@ if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
 		# "from cart2600 cells"); the count above also takes in paths that
 		# pass through cart2600's logic from outside it.
 		set nr 0
-		if {[csize $c26r] > 0} {
-			foreach_in_collection p [get_timing_paths -setup -from $c26r -to $coll -npaths 100000 -pairs_only] {
+		if {[csize $c26r_g] > 0} {
+			foreach_in_collection p [get_timing_paths -setup -from $c26r_g -to $coll -npaths 100000 -pairs_only] {
 				if {$nr < 10} {
 					say [format "    from a cart2600 register into %s: slack %.3f %d levels %s -> %s" $lab [get_path_info $p -slack] \
 						[get_path_info $p -num_logic_levels] [get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
@@ -495,7 +550,7 @@ if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
 		say "  of them from cart2600's registers into $lab: $nr"
 		# the data leg by top.sv's names (above): counted as well
 		set nd 0
-		foreach_in_collection p [get_timing_paths -setup -through $rdb -to $coll -npaths 100000 -pairs_only] {
+		foreach_in_collection p [get_timing_paths -setup -through $rdb_g -to $coll -npaths 100000 -pairs_only] {
 			if {$nd < 10} {
 				say [format "    through read_DB into %s: slack %.3f %d levels %s -> %s" $lab [get_path_info $p -slack] \
 					[get_path_info $p -num_logic_levels] [get_node_info -name [get_path_info $p -from]] [get_node_info -name [get_path_info $p -to]]]
@@ -504,8 +559,15 @@ if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
 		}
 		say "  paths through top.sv's read_DB into $lab: $nd"
 		incr ng $nd
-		if {$n > 0} { report_timing -setup -through $c26 -to $coll -npaths 20 -detail full_path -append -file fixb.rpt }
-		if {$nd > 0} { report_timing -setup -through $rdb -to $coll -npaths 10 -detail full_path -append -file fixb.rpt }
+		# for information: the same with the retimed registers' own nets (as
+		# (g) counted before 2026-11-20)
+		if {[csize $rdb_rt] > 0} {
+			set nrt 0
+			foreach_in_collection p [get_timing_paths -setup -through $rdb -to $coll -npaths 100000 -pairs_only] { incr nrt }
+			say "  (information) paths through every read_DB net, the retimed registers' included, into $lab: $nrt"
+		}
+		if {$n > 0} { report_timing -setup -through $c26_g -to $coll -npaths 20 -detail full_path -append -file fixb.rpt }
+		if {$nd > 0} { report_timing -setup -through $rdb_g -to $coll -npaths 10 -detail full_path -append -file fixb.rpt }
 	}
 	set nch 0
 	set wch ""
@@ -523,7 +585,7 @@ if {$n26 == 0 || [csize $rdb] == 0 || [csize $sram_all] == 0} {
 		foreach_in_collection p [get_timing_paths -setup -through $c26 -to $tq -npaths 100000 -pairs_only] { incr nt }
 	}
 	say "  paths through cart2600 into sram|t_*_q (allowed): $nt"
-	check "g" [expr {$ng == 0 ? "PASS" : "FAIL"}] "$ng path(s) from cart2600 (through its nets, from its registers, or through top.sv's read_DB) into sram_ctrl or the SRAM pads other than through t_*_q (on aeee6d2, Q0, this must find the merged request's paths: the negative control)"
+	check "g" [expr {$ng == 0 ? "PASS" : "FAIL"}] "$ng path(s) from cart2600 (through its nets, from its registers, or through top.sv's read_DB, not counting [csize $rdb_rt] retimed register output(s) named after read_DB and [csize $c26r_rt] retimed register(s) named in cart2600) into sram_ctrl or the SRAM pads other than through t_*_q (on aeee6d2, Q0, this must find the merged request's paths: the negative control)"
 }
 # g.legs: each leg of the 2600 request (address, strobe, data) reaches its
 # t_*_q group from the 2600 side, so that (g)'s zero is not vacuous; and

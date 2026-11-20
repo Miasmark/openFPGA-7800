@@ -1,0 +1,207 @@
+# Testing the FujiNet link
+
+How to check the core's FujiNet support (`src/fpga/core/fujinet_mailbox.sv`;
+README, "FujiNet over the link port or cartridge slot") on a Pocket, from no
+hardware at all up to a FujiNet running on a PC.
+
+The test program is `sim/fujinet/fn_test.asm`. Build it with `dasm` and sign
+it (the header of the file has the commands); the test packages carry it as
+`Assets/7800/common/fn_test.a78`. It claims the FujiNet mailbox, shows the
+status page, asks the FujiNet for its adapter configuration
+(GET_ADAPTERCONFIG_EXTENDED, $C4 to device $70) and shows the answer. Fire
+or Reset asks again.
+
+## 1. Nothing attached
+
+Expected: `ERR 01 NO LINK` about 1.5 s (90 frames) after the request,
+`PORT -`. This shows the core found the claim, serves the mailbox, and gives
+up on a silent line. (Seen on a Pocket, 2026-11-17.)
+
+## 2. Loopback
+
+Join the core's TX to its RX through a 330 ohm to 1 k resistor (not a bare
+wire: a slip onto ground or VCC then only passes a few mA):
+
+- **Link port:** pin 2 (SO) to pin 3 (SI). With a GBC link cable, plug one
+  end into the Pocket and put the resistor across the free end's SO and SI
+  contacts; the cable crosses them over. Find the contacts with a
+  multimeter on continuity, and keep away from pin 1 (VCC).
+- **Cartridge slot:** pin 5 (GBA /CS) to pin 31 (GBA /REQ), on a GBA
+  cartridge breakout board.
+
+Expected: `ERR 00 OK`, `REPLY C4 LOOPBACK`, `RXLEN 0000`, `LINK 01`, and
+`PORT LINK` or `PORT CART`. The core heard its own request come back as a
+good frame, so its TX and RX both work on that port.
+
+Seen on a Pocket (2026-11-19) on the link port, with a GBC link cable cut
+open and 1 k across its SIN and SOUT. A first cable that did not seat
+fully in the Pocket's port gave NO LINK: check the contact before anything
+else, and solder or crimp a cut cable's wires rather than holding them.
+
+If the loopback still reports NO LINK, note which port fails: the link
+port's translators may need power the core does not ask for, or a
+direction bit may be wrong.
+
+## 3. A FujiNet on a PC
+
+FujiNet's firmware repository builds a PC version of the FujiNet. Its RS232
+target (`FUJINET_TARGET=RS232`; `./build.sh -p RS232` in fujinet-firmware)
+speaks the same protocol as FujiNet's own 7800 cartridge (`lib/bus/rs232`:
+SLIP-framed FujiBus packets at 115,200 baud) and can use a real serial port
+as well as a TCP connection (BoIP).
+
+**Wiring** (a 3.3 V USB serial adapter, logic level 3.3 V):
+
+| Pocket link port | Adapter |
+|---|---|
+| pin 2, SO (the core's TX) | RX, through a ~330 ohm resistor |
+| pin 3, SI (the core's RX) | TX, through a ~330 ohm resistor |
+| pin 6, GND | GND |
+| pin 1, VCC | not connected |
+
+The adapter is powered by the PC; nothing is drawn from the Pocket.
+
+**fujinet-pc's configuration** (`fnconfig.ini`, beside the program), as its
+config reader names the keys:
+
+```
+[BOIP]
+enabled=0
+
+[Serial]
+port=/dev/ttyUSB0
+baud=115200
+```
+
+(`port` is the adapter's device: `/dev/ttyUSB0` or `/dev/ttyACM0` on Linux,
+`/dev/cu.usbserial-*` on macOS. 115,200 is also the RS232 build's default
+baud rate.)
+
+Expected: `ERR 00 OK`, `REPLY 06 ACK`, `RXLEN 00F0` (the 240-byte adapter
+configuration), and the SSID, IP address and firmware version fujinet-pc
+reports.
+
+Seen on a Pocket (2026-11-19): an FT232H on a cut GBC link cable, fujinet-pc
+firmware `v1.6-33a532da1`; the test cart showed SSID `dummy cafe`
+(fujinet-pc's stand-in, a PC having no Wi-Fi radio of its own) and that
+firmware version. The settings above come from fujinet-firmware's source
+(`fujinet_pc.cmake`, `lib/bus/rs232/rs232.cpp`, `lib/config/fnc_serial.cpp`,
+`lib/device/rs232/rs232Fuji.cpp`, which answers $C4).
+
+## 4. The network devices
+
+SELECT, after any result, runs an HTTP GET of `http://example.com/` on N1
+($71): OPEN (mode 4, no translation), STATUS until two readings agree and
+are not zero, READ of up to 180 bytes, shown as text, and CLOSE, always. Each
+step shows its ERR and REPLY.
+
+Expected with fujinet-pc (or any FujiNet) online: `OPEN ERR 00 REPLY 06`, a
+STATUS line with the bytes waiting, `READ ERR 00 REPLY 06 LEN 00B4`, the
+start of the page's HTML, `CLOSE ERR 00 REPLY 06`. Seen on a Pocket
+(2026-11-19) through the FT232H to fujinet-pc: `STATUS 0241 CONN 00 ST 01`
+(577 bytes waiting, the server done with the connection), `READ ... LEN
+00B4` and example.com's HTML from `<!doctype html>`. In loopback the cart
+hears its own OPEN (`REPLY 4F`, not an ACK) and goes straight to CLOSE
+(`REPLY 43`), which is what simulation shows.
+
+## 5. FujiNet's own CONFIG
+
+FujiNet's 7800 menu (fujinet-config `atari7800/`: Wi-Fi setup, host slots,
+file browsing, the game lobby) is a 32K program at $8000 with the FUJI claim
+and 16K of RAM at $4000, both of which the core gives a claimed image. Its
+public source needs fujinet-lib-experimental's `atari7800` target, which is
+not published yet (2026-11), but fujinet-firmware carries a built copy:
+
+```
+sim/fujinet/mk_config_a78.py FUJINET_FIRMWARE_DIR fujinet_config.a78 \
+    --sign ../miasmark/a7800-toolkit/tools/sign7800.py
+```
+
+reads it out of `pico/atari-7800/firmware/baked/fujiconfigrom.h`, wraps it
+as an A78 and signs it (the claim sits below the signature). CONFIG is
+FujiNet's, under the GPL-3.0; this repository does not carry the image.
+
+In simulation with nothing attached (2026-11-19) it shows its banner, asks
+for the Wi-Fi state (NO LINK after 1.5 s) and goes on to its HOST SLOTS
+screen. On the core:
+
+- **Runs:** Wi-Fi setup, host slots, browsing, renaming, copying, INFO.
+- **Booting a game works** (on a Pocket, 2026-11-20, test build
+  `fujinet_test3_gameload`: fujinet-pc through the FT232H on the link
+  port): CONFIG mounts the game, the FujiNet pushes it, BOOT_STATE goes
+  READY, and the core loads it through its own cartridge path, as from the
+  SD card. Battleship, a FujiNet network game booted this way, runs its HTTP
+  requests on N1. Before game loading (up to step 1 of
+  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)) the push was refused:
+  `?LOAD ERROR 03`.
+- **Seen with games the FujiNet booted** (2026-11-20; for 2.2.7's release
+  notes):
+  - **Commando has no music: the hosted copy's header.** The core turns
+    POKEY on from the A78 header's flags; the hosted NTSC copy's header
+    lacks the POKEY flag, so it is silent, as it would be from the SD card
+    (a headerless copy, given a generated header, would be too). The PAL
+    Commando plays its music, and so does Ballblazer, whose music is
+    POKEY's alone. Not the core.
+  - **High Score Cart saves need High Score Cart set to On** for hosted
+    copies whose header lacks the HSC flag: on Auto the core follows the
+    header (byte 58), as for the SD card. With On, scores from a game the
+    FujiNet booted are kept in the Pocket's `hsc.sav`, as any game's
+    (seen 2026-11-20). FujiNet's own cartridge gives every game the HSC
+    and corrects POKEY from a list of known games (fujinet-firmware
+    `pico/atari-7800/firmware/src/fuji_load.c`, `a78map_db.c`, from MAME's
+    software list); the core has no such list.
+  - **Alien Brigade and Crossbow need Reset from the menu before the light
+    gun works**; the other light gun games do not. Both games have a
+    joystick mode and a light gun mode and pick one when they start. A
+    cartridge load, from the SD card or the FujiNet alike, resets the gun's
+    aim to the middle of the screen (`virtual_axis5`), which a menu Reset
+    keeps where it was; and a port changed to Light Gun in the menu after
+    the game started is seen only by a restart. With the port on Auto the
+    core takes the controller from the game's header (byte 55), which is
+    why the other light gun games need nothing; these two presumably
+    declare a joystick. CONFIG is played with the joystick, so the port
+    stays a joystick while the game is chosen, but CONFIG only waits while
+    the FujiNet pushes the game (a few seconds). Release note: for Alien
+    Brigade and Crossbow, set the port to Light Gun in the menu while the
+    FujiNet loads the game, or Reset from the menu after setting it.
+- **PLAY GAME LOBBY fails:** CONFIG mounts the host `ec.tnfs.io` and boots
+  `/atari7800/lobby.a78` from it (fujinet-config `atari7800/st_lobby.c`,
+  `constants.h`), and that server has no 7800 lobby yet (2026-11-20: an
+  `atari` folder of `.xex` files and an `intv` folder). Seen as
+  `?HOST ERROR 00` and earlier `?MOUNT ERROR 00`: error 00 is the mailbox's
+  "transaction done", so the FujiNet answered with a NAK. Upstream content,
+  not the core: a FujiNet Go 7800 behaves roughly the same (2026-11-20).
+  Its host list differs from fujinet-pc's because each FujiNet keeps its
+  own host slots (fujinet-pc in its `fnconfig.ini`).
+- **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
+  Pocket's HSC; switching it there does nothing.
+
+## Another cartridge in the slot
+
+- **Ordinary games:** the cartridge pins stay as Analogue's template sets
+  them (bank 0 an output held high, the rest inputs), so an inserted
+  cartridge sees no access. Cart power is on (`cartridge_adapter` 0), so it
+  is powered while the core runs.
+- **A FujiNet program:** TX toggles cartridge pin 5. On a GBA cart that is
+  ROM /CS, on a GB/GBC cart the save RAM's select; /WR and /CS2 never move,
+  so nothing is written. Analogue's own adapters (Game Gear, Lynx, ...) use
+  the pins their own way: take them out first. A cartridge that drives pin
+  31 (GBA /REQ, GB audio in) can garble replies until the core locks to the
+  link port.
+- **Voltage:** a GB or GBC cartridge presses the Pocket's voltage switch, and
+  the whole rail goes to 5 V, the link port included. An FT232H's inputs
+  take that; an ESP32 or any other 3.3 V-only device does not. With such a
+  device on the link port, leave the slot empty or use a GBA cartridge. A
+  device in the cartridge slot keeps the rail at 3.3 V as long as it leaves
+  the voltage switch (at one end of the connector) unpressed: that corner
+  GBA-shaped, cut about 0.5-1 mm deeper and wider than a GBA cart's so the
+  switch is never grazed or half pressed, with enough side wall left to
+  guide the cart straight. Check the fit with a printed blank first.
+
+## Power for a real FujiNet
+
+A FujiNet device should bring its own power (USB or a LiPo) and share only
+ground, TX and RX. The Pocket's cartridge rail has been seen to supply about
+0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which already has
+trouble when the Pocket is low on charge); an ESP32 on Wi-Fi averages more
+and peaks several times higher.

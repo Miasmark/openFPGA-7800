@@ -13,6 +13,15 @@
 //   $8007 command    clk_sys -> clk_arm   byte held, toggle, change detect
 //   hold, pause      clk_sys -> clk_arm   two flops
 //   capture messages clk_sys -> clk_arm   bup_capture / bup_asset_wr
+//   FujiNet staging  clk_sys -> clk_arm   fujinet_stage (core/) / bup_asset_wr:
+//                                         a toggle and a payload held until
+//                                         the answer, fn_s_ack, back through
+//                                         two clk_sys flops in fujinet_stage
+//   FujiNet swap     clk_sys -> clk_arm   fujinet_loader (core/) / fujinet_rd
+//                                         (core/): a request toggle, the
+//                                         halfword address held; the
+//                                         halfword held and an answer toggle
+//                                         back, two flops each way
 //   48 kHz tick      clk_74a -> clk_arm   bup_tick48k
 //   audio frame      clk_arm -> clk_sys   frame held, toggle, captured on the
 //                                         change between the second and third
@@ -185,7 +194,22 @@ module bupchip_pocket #(
 	output wire        psram_read_en,
 	input  wire        psram_read_avail,
 	input  wire [15:0] psram_data_out,
-	input  wire        psram_busy
+	input  wire        psram_busy,
+
+	// FujiNet staging (docs/FUJINET_GAME_LOADING.md, 3.2): fujinet_stage's
+	// messages, from clk_sys, to bup_asset_wr; fn_s_ack answers (clk_arm)
+	input  wire        fn_s_tog,
+	input  wire        fn_s_sync,
+	input  wire  [1:0] fn_s_lanes,
+	input  wire [18:0] fn_s_haddr,
+	input  wire [15:0] fn_s_data,
+	output wire        fn_s_ack,
+	// FujiNet swap (3.4): fujinet_loader's reads of the staged file, a
+	// halfword per request (fujinet_rd, ahead of every other reader)
+	input  wire        fn_l_req,
+	input  wire [18:0] fn_l_haddr,
+	output wire        fn_l_ack,
+	output wire [15:0] fn_l_data
 `ifdef POCKET_DARIA
 	,
 	// DARIA, clk_sys: the profile, and the front ends' side of the CPU.
@@ -296,6 +320,9 @@ module bupchip_pocket #(
 	wire [31:0] rom_wd;
 	wire        rd_req, rd_ack;
 	wire [21:0] rd_addr;
+	// bup_asset_wr's own read port, behind fujinet_rd
+	wire        w_rd_req, w_rd_ack;
+	wire [21:0] w_rd_addr;
 
 	wire        win_we;
 	wire [14:0] win_wa;
@@ -308,10 +335,21 @@ module bupchip_pocket #(
 		.asset_ready, .asset_size, .fw_loaded, .img_ready, .img_size,
 		.rom_we, .rom_wa, .rom_wd,
 		.win_we, .win_wa, .win_wd, .win_be,
-		.rd_req, .rd_addr, .rd_ack,
+		.rd_req(w_rd_req), .rd_addr(w_rd_addr), .rd_ack(w_rd_ack),
 		.psram_bank_sel, .psram_addr, .psram_write_en, .psram_data_in,
 		.psram_write_high_byte, .psram_write_low_byte, .psram_read_en, .psram_busy,
-		.overrun(wr_overrun), .fw_start(wr_fw_start));
+		.overrun(wr_overrun), .fw_start(wr_fw_start),
+		.s_tog(fn_s_tog), .s_sync(fn_s_sync), .s_lanes(fn_s_lanes), .s_haddr(fn_s_haddr),
+		.s_data(fn_s_data), .s_ack(fn_s_ack));
+
+	// The swap's reader: passes rd_* (the cache's, or daria_smp's) through
+	// untouched unless a swap is reading
+	fujinet_rd fn_rd (
+		.clk(clk_arm),
+		.l_req(fn_l_req), .l_haddr(fn_l_haddr), .l_ack(fn_l_ack), .l_data(fn_l_data),
+		.u_rd_req(rd_req), .u_rd_addr(rd_addr), .u_rd_ack(rd_ack),
+		.rd_req(w_rd_req), .rd_addr(w_rd_addr), .rd_ack(w_rd_ack),
+		.rd_avail(psram_read_avail), .rd_data(psram_data_out));
 
 	// ---- the CPU and its memories -------------------------------------------------------
 `ifdef POCKET_DARIA

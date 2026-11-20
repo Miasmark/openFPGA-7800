@@ -244,7 +244,17 @@ assign cart_tran_bank2 = 8'hzz;
 assign cart_tran_bank2_dir = 1'b0;
 assign cart_tran_bank1 = 8'hzz;
 assign cart_tran_bank1_dir = 1'b0;
-assign cart_tran_bank0 = 4'hf;
+wire fn_txd, fn_tx_en;  // the FujiNet's serial TX (below)
+// A FujiNet swap's cartridge load and console restart (atari7800_pocket.sv,
+// fujinet_loader.sv), clk_sys registers
+wire        fn_ld_dl, fn_ld_wr, fn_restart;
+wire        fn_sel;     // the swap's load selected (below, with the loader's registers)
+wire [24:0] fn_ld_addr;
+wire  [7:0] fn_ld_dout;
+// Bank 0 is an output, held high, as the template leaves it. Bit 4
+// (cartridge pin 5, GBA /CS) is also the FujiNet's TX while a FujiNet
+// program runs (below); idle, a UART line is high too.
+assign cart_tran_bank0 = {3'b111, fn_tx_en ? fn_txd : 1'b1};
 assign cart_tran_bank0_dir = 1'b1;
 assign cart_tran_pin30 = 1'b0;      // reset or cs2, we let the hw control it by itself
 assign cart_tran_pin30_dir = 1'bz;
@@ -252,10 +262,15 @@ assign cart_pin30_pwroff_reset = 1'b0;  // hardware can control this
 assign cart_tran_pin31 = 1'bz;      // input
 assign cart_tran_pin31_dir = 1'b0;  // input
 
-// link port is unused, set to input only to be safe
-// each bit may be bidirectional in some applications
-assign port_tran_so = 1'bz;
-assign port_tran_so_dir = 1'b0;     // SO is output only
+// FujiNet (atari7800_pocket.sv, fujinet_mailbox.sv): a FujiNet program
+// talks to a FujiNet device over a 115,200 baud serial line, on the link
+// port (TX on SO, RX on SI) or in the cartridge slot (TX on pin 5, RX on
+// pin 31). TX goes out on both; the mailbox listens to the one that
+// answers. SO is driven only while such a program is loaded; otherwise the
+// link port stays as the template leaves it (cartridge pin 5 is the
+// template's output, held high, either way).
+assign port_tran_so = fn_tx_en ? fn_txd : 1'bz;
+assign port_tran_so_dir = fn_tx_en;
 assign port_tran_si = 1'bz;
 assign port_tran_si_dir = 1'b0;     // SI is input only
 assign port_tran_sck = 1'bz;
@@ -720,14 +735,11 @@ data_loader #(
 // parser, 2600 mapper detection) had to settle within one clk_sdram period
 // (17.5 ns) instead of one clk_sys period (69.8 ns): those crossings were
 // all of the build's tightest setup paths.
+// (The registers themselves are below, after the slot flags: a FujiNet
+// swap's load is selected at their inputs.)
     reg             ioctl_wr_r = 1'b0;
     reg     [24:0]  ioctl_addr_r = 25'd0;
     reg     [7:0]   ioctl_dout_r = 8'd0;
-always @(posedge clk_sys) begin
-    ioctl_wr_r   <= ioctl_wr;
-    ioctl_addr_r <= ioctl_addr[24:0];
-    ioctl_dout_r <= ioctl_dout;
-end
 `ifdef POCKET_BUPCHIP
 // The BupChip takes its bytes by their own bridge address, not by the slot
 // flags below: bits 27:25 tell the slots apart (data.json's addresses), and
@@ -735,8 +747,6 @@ end
 // requestwrite or allcomplete moves the flags (bup_capture.sv, "Which bytes
 // are the BupChip's").
     reg     [2:0]   ioctl_hi_r = 3'd0;
-always @(posedge clk_sys)
-    ioctl_hi_r   <= ioctl_addr[27:25];
 `endif
 
 // Into clk_sys
@@ -758,14 +768,33 @@ always @(posedge clk_sys) begin
     rst_s  <= {rst_s[1:0],  reset_n};
     mrst_s <= {mrst_s[1:0], menu_reset_cnt != 0};
 
-    cart_download <= dl_s[2] & cart_s[2];
+    cart_download <= (dl_s[2] & cart_s[2]) | fn_sel;   // fn_sel: a FujiNet swap's load (below)
     bios_download <= dl_s[2] & bios_s[2];
     hscfw_download <= dl_s[2] & hscfw_s[2];
     arfw_download <= dl_s[2] & arfw_s[2];
 `ifdef POCKET_BUPCHIP
     bupfw_download <= dl_s[2] & bupfw_s[2];
 `endif
-    core_reset    <= ~rst_s[2] | mrst_s[2];
+    core_reset    <= ~rst_s[2] | mrst_s[2] | fn_restart;
+end
+
+// The loader's registers (above), and a FujiNet swap's load
+// (fujinet_loader.sv, docs/FUJINET_GAME_LOADING.md 3.4) selected at their
+// inputs, so that atari7800_pocket's load inputs stay registers, as
+// cart_download (above) takes it too: fn_sel while a swap runs, until the
+// bridge's next load sequence starts (dl_s[1], a clock before dl_s[2]:
+// cart_download then falls for a clock between the two loads). With fn_sel
+// low, which it is unless a swap runs, every one of these registers takes
+// the bridge's value as before. A swap's bytes reach the core a clock after
+// the loader sends them, its download flag with them.
+assign fn_sel = fn_ld_dl & ~dl_s[1];
+always @(posedge clk_sys) begin
+    ioctl_wr_r   <= fn_sel ? fn_ld_wr   : ioctl_wr;
+    ioctl_addr_r <= fn_sel ? fn_ld_addr : ioctl_addr[24:0];
+    ioctl_dout_r <= fn_sel ? fn_ld_dout : ioctl_dout;
+`ifdef POCKET_BUPCHIP
+    ioctl_hi_r   <= fn_sel ? 3'd0       : ioctl_addr[27:25];
+`endif
 end
 
 // Settings into clk_sys. They change rarely and only ever from the menu;
@@ -870,6 +899,8 @@ atari7800_pocket atari (
     .pll_busy       ( pll_busy ),
     .reset_in       ( core_reset ),
 
+    // cart_download and ioctl_*_r carry a FujiNet swap's load as well as
+    // the bridge's (above)
     .cart_download  ( cart_download ),
     .bios_download  ( bios_download ),
     .hscfw_download ( hscfw_download ),
@@ -896,6 +927,16 @@ atari7800_pocket atari (
     .flicker_blend  ( set_s2[4] ),
     .pokey_irq      ( set_s2[3] ),
     .savekey_setting( set_s2[2:1] ),
+    .fn_txd( fn_txd ),
+    .fn_tx_en( fn_tx_en ),
+    .fn_rxd_link( port_tran_si ),
+    .fn_rxd_cart( cart_tran_pin31 ),
+    .fn_ld_dl( fn_ld_dl ),
+    .fn_ld_wr( fn_ld_wr ),
+    .fn_ld_addr( fn_ld_addr ),
+    .fn_ld_dout( fn_ld_dout ),
+    .fn_restart( fn_restart ),
+    .fn_host_dl( dl_s[1] ),
     .atarivox_setting( set_s2[36:35] ),
     .clear_random   ( set_s2[20] ),
     .decomb         ( set_s2[21] ),
@@ -1135,10 +1176,16 @@ sound_i2s #(
     wire    [31:0]  cfg_writedata;
     wire            pll_busy_w;
 
+// A FujiNet swap is a load sequence too: a retune waits for its end, as for
+// the bridge's (its region follows the header's byte 57 mid-load)
+    reg     [1:0]   fn_ld_74a = 2'b00;
+always @(posedge clk_74a)
+    fn_ld_74a <= {fn_ld_74a[0], fn_ld_dl};
+
 pll_region pll_region (
     .clk             ( clk_74a ),
     .is_pal          ( core_is_pal ),
-    .loading         ( is_downloading ),
+    .loading         ( is_downloading | fn_ld_74a[1] ),
     .pll_locked      ( pll_core_locked_s ),
     .busy            ( pll_busy_w ),
     .cfg_waitrequest ( cfg_waitrequest ),

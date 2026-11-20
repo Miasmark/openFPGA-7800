@@ -167,6 +167,138 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
   PAL games stay RGB.
 
+### FujiNet over the link port or cartridge slot (2.2.7)
+
+FujiNet programs for the 7800 talk to a FujiNet device through a mailbox
+their cartridge serves below $1000 (the FujiNet 7800 programmer's handbook,
+section 19). The core can now be that cartridge, with the FujiNet on the
+Pocket's link port or in its cartridge slot instead of on a cartridge's USB
+link:
+
+- **When:** only for an image that claims the mailbox ("FUJI" at $FF70, as
+  FujiNet's own tools put it; the core finds it while the image loads).
+  Every other image runs exactly as before, and the link port's pins stay
+  undriven.
+- **What it does** (`src/fpga/core/fujinet_mailbox.sv`): the mailbox as
+  FujiNet's RP2354B cartridge serves it (reply window at $0800, status page
+  at $0C00, registers at $0D00, the request stream at $0F00, the
+  SEQ / ACKSEQ handshake, per-command time limits), plus POKEY at $0450 and,
+  if the claim asks, 16K of RAM at $4000. Each request goes out as a
+  FujiBus packet in a SLIP frame at 115,200 baud 8N1, the format every
+  FujiNet uses (`lib/bus/rs232`).
+- **Where:** the core sends on both ports and listens to the one that
+  answers, so it needs no setting:
+  - **Link port:** pin 2 (SO) is the core's TX, pin 3 (SI) its RX, pin 6
+    ground. Easiest for testing, with a link cable and a 3.3 V USB serial
+    adapter.
+  - **Cartridge slot:** pin 5 (GBA /CS) is TX, pin 31 (GBA /REQ) RX, pin 32
+    ground. A device here must leave the slot's voltage switch (at one end
+    of the connector) unpressed, as GBA cartridges do, so the slot stays at
+    3.3 V: that corner GBA-shaped, cut a little deeper and wider than a GBA
+    cart's so the switch is never grazed or half pressed. Pin 5 is already an output held high in Analogue's
+    template, so nothing changes direction.
+  - A line counts once it has idled high for 1 ms (an undriven pin is never
+    heard); the first good reply locks the core to that port, and a request
+    that hears nothing unlocks it. Status byte $0C30 (this core's own) says
+    which: 1 link, 2 cartridge.
+- **Cartridge power:** `core.json` now asks for it (`cartridge_adapter` 0,
+  as Analogizer cores do), since the cartridge slot's level translators, and
+  probably the link port's, run on that rail. With the template's pin
+  settings this is safe with any cartridge left in the slot. A GB or GBC
+  cartridge in the slot puts that rail, and the link port, at 5 V: keep
+  3.3 V-only devices off the link port then (see
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md)).
+- **Power for the FujiNet itself:** it should bring its own (a USB supply
+  or a LiPo). The Pocket's cartridge rail has only been seen to supply
+  about 0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which
+  already has trouble when the Pocket is low on charge); an ESP32 on Wi-Fi
+  averages more than that and peaks several times higher.
+- **Booting games from the FujiNet:** CONFIG's MOUNT_IMAGE pushes the game,
+  the core stages it in the PSRAM and loads it as from the SD card
+  ([docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)); seen on a
+  Pocket with fujinet-pc (2026-11-20). CONFIG's PLAY GAME LOBBY needs a 7800
+  lobby on FujiNet's server, which has none yet.
+- **The High Score Cart:** games the FujiNet boots use the core's own HSC
+  and its `hsc.sav` on the Pocket's SD card, as any game; on Auto the
+  game's header decides, so for hosted copies without the HSC flag set
+  High Score Cart to On (seen on a Pocket, 2026-11-20). Not done: CONFIG's
+  HSC switch and the HSC kept on the FujiNet's SD card (FujiNet's own
+  cartridge stores it as 32 AppKeys).
+- **No link:** a serial adapter gives no sign it is there, so the core
+  counts the link as up once a good frame arrives. Until then a request
+  that hears nothing ends after 1.5 s with "no link" (error 1).
+- **Testing it:** `sim/fujinet/fn_test.asm` (built as
+  `sim/fujinet/fn_test.a78`) shows the mailbox and runs one request.
+  With nothing attached it reports NO LINK; with a wire between link pins
+  2 and 3 (or cartridge pins 5 and 31) it hears its own request and
+  reports LOOPBACK and the port.
+  `sim/fujinet/run_fujinet.py` checks the mailbox and every frame it sends
+  against a model of the FujiBus format; `sim/fujinet/run_fnstage.sh` the
+  staging of a pushed game in the PSRAM and its replay; and `run_sim.sh`'s
+  FujiNet section (`ONLY=fujinet` alone) a game pushed over the link and
+  booted in the whole core.
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md) has the wiring and the
+  steps, up to a FujiNet running on a PC (fujinet-pc's RS232 build) through
+  a USB serial adapter, and the test cart's HTTP test of the network
+  devices (SELECT).
+- **A device for the Pocket:** [docs/FUJINET_POCKET_DEVICE.md](docs/FUJINET_POCKET_DEVICE.md)
+  specifies one: an ESP32-S3 on FujiNet's RS232 firmware, a GB-cart-sized
+  body with a GBA corner, its own LiPo.
+- **Tested on a Pocket (2026-11-19):** NO LINK with nothing attached, the
+  link-port loopback, and a full request to fujinet-pc through an FT232H
+  on the link port (its SSID and firmware version came back), then an HTTP
+  GET of example.com on N1: OPEN, STATUS, READ and CLOSE, with the page's
+  first 180 bytes on screen. **(2026-11-20)** FujiNet's CONFIG, booting
+  games the FujiNet pushes (Battleship, Ballblazer and others), against
+  fujinet-pc through the same FT232H; PLAY GAME LOBBY waits for a 7800
+  lobby on FujiNet's server, as on FujiNet's own 7800 hardware.
+
+### New in 2.2.7
+
+2.2.7 is 2.2.6 with FujiNet support and one light gun fix:
+
+- **FujiNet over the link port or the cartridge slot.** A 7800 program
+  that claims FujiNet's mailbox ("FUJI" at $FF70) talks to a FujiNet: the
+  core serves the mailbox FujiNet's own 7800 cartridge has, and sends each
+  request as a FujiBus packet at 115,200 baud on the link port (SO / SI) or
+  cartridge pins 5 and 31, using whichever answers. So FujiNet's 7800
+  CONFIG runs on the core (Wi-Fi setup, host slots, browsing, copying), its
+  network devices work (HTTP tested, as FujiNet programs such as
+  Battleship use it), and **CONFIG boots games**: the FujiNet pushes the
+  game, the core holds it in the PSRAM and loads it through the same path
+  as a game from the SD card, so its A78 header decides the hardware as
+  there. Every other image runs as before, and the core drives the
+  FujiNet lines only while a FujiNet program runs. Tested on a Pocket with
+  fujinet-pc (FujiNet's PC version) through a USB serial adapter on a link
+  cable. There is no FujiNet for the Pocket's slot to buy yet; one is
+  specified in
+  [docs/FUJINET_POCKET_DEVICE.md](docs/FUJINET_POCKET_DEVICE.md). See
+  *FujiNet over the link port or cartridge slot* and
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md).
+  - **Cartridge power is now on** while the core runs (`core.json`
+    `cartridge_adapter` 0): the slot's level translators need it. With any
+    cartridge left in the slot this is safe; a GB or GBC cartridge puts the
+    rail, the link port's included, at 5 V.
+  - **PLAY GAME LOBBY** fails (`?MOUNT ERROR 00`): CONFIG boots the lobby
+    from FujiNet's server, which has no 7800 lobby yet. FujiNet's own 7800
+    hardware does the same.
+  - **A pushed game keeps its A78 header's settings,** as from the SD card:
+    a copy whose header lacks the POKEY flag plays without its POKEY music
+    (the NTSC Commando on FujiNet's server; its PAL copy plays it), and on
+    Auto a copy whose header lacks the High Score Cart flag gets no HSC.
+    Set High Score Cart to On to save scores from such games: they go to
+    the Pocket's own `hsc.sav`, as any game's do. (FujiNet's own cartridge
+    gives every game the HSC, and finds POKEY from a list of known games.)
+  - **Alien Brigade and Crossbow** pick joystick or light gun when they
+    start, and CONFIG needs the joystick: set Port 1 to Light Gun in the
+    menu while the FujiNet loads the game, or Reset from the menu after.
+  - Not served: CONFIG's High Score Cart switch, and saving the HSC to the
+    FujiNet's SD card; the core's own HSC and its save serve instead.
+- **The light gun's crosshair with Composite in 2600 mode** lines up: the
+  decoded 2600 picture trails the RGB one by 12 clk_sys, not MARIA's 14,
+  so the crosshair landed half a TIA pixel late. 7800 games and the
+  picture without a light gun are unchanged.
+
 ### New in 2.2.6
 
 2.2.6 is 2.2.5 with artifact colour and one MARIA change:
@@ -230,7 +362,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
 |---|---|
 | 2600 BUS and ELF cartridges | The core shows its unsupported-cartridge screen for them, as MiSTer does for BUS0. No released game uses BUS. ELF targets a Cortex-M0+ cartridge, which needs another CPU than DARIA ([docs/DARIA_CORE.md](docs/DARIA_CORE.md), decision 6). Up to 2.1.3 every 2600 ARM scheme got this screen. |
 | Trackball, keypad, mice | These need input the Pocket doesn't have. Joysticks, paddles, driving controllers and the light gun are emulated (see *Controls*). |
-| Composite options | MiSTer's Composite Smear, AGC and Comb settings: the Pocket's menu is full, so *Composite* uses their defaults. PAL composite: upstream's model and decoder are NTSC only. |
+| Composite options | MiSTer's Composite Smear, AGC and Comb settings: the Pocket's menu is full, so *Composite* uses their defaults. PAL composite: upstream's model and decoder are NTSC only. In 2600 mode *Composite* is built from the TIA's colour codes, so *Flicker Blend* and *De-comb*, which work on the RGB picture, do not reach it. |
 
 #### Why MiSTer's BupChip doesn't fit, and ARIA
 
@@ -306,6 +438,7 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 | Virtual controller axis | a 16 ms tap moves 1 step of 256; holding crosses the range in 0.5 s (0.26 s with Y); the driving code steps at most every 25 ms (D-pad) or 32 ms (stick) |
 | Dual stick, Booster Grip, turbo | Dual Stick: the face buttons fire on port 2 (A right, X up, Y left) and the left stick moves port 1, with the fire buttons off. Booster Grip: X reads on INPT0 as the pot line. Turbo: Y held for 500 ms toggles fire 1 15 times on Fast, 8 on Slow |
 | Firmware slots | `highscor.rom` (4 KiB), `hsc.a78` (header skipped; also a 16 KiB payload, last 4 KiB kept) and `supercharger.bin` (2 KiB) land in the ROMs with 0 bytes different; without HSC firmware the HSC stays off even when set On. Triple Punch finds the loaded HSC as it did the built-in one |
+| FujiNet game loading, end to end | A boot cart claims the mailbox and sends MOUNT_IMAGE; a FujiNet model on the link port pushes a 16K game as fujinet-firmware does (35 frames, each ACKed); BOOT_STATE goes READY, the cart arms the swap and jumps to $0600, the core replays the staged file through its cartridge load path, and the pushed game runs, its 16K cart a 7800 image without the FUJI claim. Pushed as an A78 and as a bare ROM, which gets a generated header. Simulation only (`run_sim.sh`, FujiNet section) |
 | BupChip, end to end (2.1.1) | The firmware slot after the cartridge, as the Pocket loads them, then a game-free Souper cartridge with a synthetic music block: the ROM equals the firmware file, the block's 5,192 bytes are in the PSRAM model with no timing violation, and the song's PCM equals the Python model's frame for frame, as pushed and as returned to the core clock. Without the firmware the same cartridge leaves the BupChip held and silent. `sim/bupchip/` checks the CPU in lockstep with MiSTer's ARM7TDMI and the wrapper with Rikki & Vikki's songs (`s1/check.sh`, `s4/check.sh`) |
 | 2600 ARM cartridges, whole core (2.2.1) | The 15 Champ Games demos and Stratovox, 1,500 frames each (frames 1-1,499 compared, 23,984 in all), against MiSTer's core with its ARM7TDMI: frame length, picture and RIOT RAM equal on every frame (the first frame's picture excused on 3 games, whose first call holds the console for a different time), and every ARM call runs the same number of instructions. Spiders is late on the same 16 calls as on MiSTer. The sound is the same writes at slightly other times: 8,928 of the 23,984 frames (37.2%) carry an audio difference, 0 on Elevator Agent and 1,025 on Zaxxon. No CPU halt, no PSRAM timing violation |
 | Spiders and Galagon at 38.18 MHz (2.2.4) | The same comparison, 1,500 frames each: Spiders' frames 557-572 stay 262-line frames with no late call, where MiSTer's core is late on 16 calls and draws 354 lines; frame length, picture and RIOT RAM equal on every other frame, every call the same number of instructions (2,999 calls each), and the front end's shared-edge guard locked with 0 unlocks. Galagon passes the same way. The sound is counted, not compared, as in the row above: 678 of Spiders' frames and 285 of Galagon's carry an audio difference. The release campaign ran the full set of 16 images the same way, with the guard locked and Spiders on time: every image passed (on the ÷18 tree before the merge of 2.2.2, whose DARIA side the merge does not change) |
@@ -318,8 +451,20 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of 2.2.6 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+The Quartus build of 2.2.7 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
 meets timing on all four corners. Worst setup slack at the worse slow
+corner: +3.151 ns on clk_sdram (gate +1.5 ns), +2.436 ns on DARIA's CPU
+clock (gate +0.5 ns), and +3.402 ns on DARIA's phase detector (bounded at
+8.0 / 0.5 ns; hold +0.349 ns). Worst hold slack +0.074 ns. Seeds 1 and 2
+pass every check too, with +2.424 and +2.680 ns on clk_sdram; seed 3 has
+the most, which decides. It uses 16,666 of 18,480 ALMs (90%), 222 of 308
+M10K blocks and 43 DSP blocks. Its bitstream is the hardware test build's
+(`fujinet_test3_gameload`). Step 7's check (g) was amended for it: a
+register the fitter's retiming creates no longer counts as the 2600
+cartridge's by its name ([docs/daria_step7/plan.md](docs/daria_step7/plan.md)
+5.4 (g), with the negative control refitted).
+The Quartus build of 2.2.6 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+met timing on all four corners. Worst setup slack at the worse slow
 corner: +2.764 ns on clk_sdram (gate +1.5 ns), +2.059 ns on DARIA's CPU
 clock (gate +0.5 ns), and +3.308 ns on DARIA's phase detector (bounded at
 8.0 / 0.5 ns; hold +0.365 ns). Worst hold slack +0.104 ns. Seeds 1 and 2
@@ -383,7 +528,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.2.6, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.7, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -414,6 +559,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Composite and Artifact palettes (2.2.6's test builds, 2026-11-07 and 2026-11-08) | Tower Toppler's tower shows its artifact colour on both; light gun games aim as before with Composite on; the owner's verdict on the Artifact build: "it works good" |
+| FujiNet (2.2.7's test builds, 2026-11-17 to 2026-11-20) | fujinet-pc through an FT232H on a link cable: NO LINK with nothing attached, the link loopback, the adapter configuration and an HTTP GET from the test cart; FujiNet's CONFIG browses hosts and boots the games it pushes (Battleship over the network, Ballblazer with its POKEY music); PLAY GAME LOBBY fails for want of a 7800 lobby on FujiNet's server, as on a FujiNet Go 7800 |
 | Colour register accesses (2.2.6, 2026-11) | `sim/mstat/cram_test.asm` on the Pocket shows the reads' dots where the console's photo has them, and nothing from writes |
 | MARIA DMA timing (2.2.5's test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |

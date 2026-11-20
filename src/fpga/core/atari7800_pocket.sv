@@ -111,6 +111,21 @@ module atari7800_pocket
 
 	// SaveKey EEPROM (24LC256) RAM, second port for its save slot (clk_74a)
 	input  wire  [1:0] savekey_setting, // 0 auto (A78 header), 1 on, 2 off
+	// FujiNet (fujinet_mailbox.sv): its serial line, on the link port or the
+	// cartridge slot (core_top.v sends TX to both)
+	output wire        fn_txd,
+	output wire        fn_tx_en,        // drive TX
+	input  wire        fn_rxd_link,     // link SI
+	input  wire        fn_rxd_cart,     // cartridge pin 31
+	// FujiNet game loading (fujinet_loader.sv): the swap's load, which
+	// core_top.v muxes into cart_download / ioctl_* ahead of the bridge's (all
+	// low unless a swap runs), and a console restart for reset_in
+	output wire        fn_ld_dl,
+	output wire        fn_ld_wr,
+	output wire [24:0] fn_ld_addr,
+	output wire  [7:0] fn_ld_dout,
+	output wire        fn_restart,
+	input  wire        fn_host_dl,      // the bridge's load sequence starting (ends a swap)
 	input  wire  [1:0] atarivox_setting, // AtariVox voice: 0 off, 1 quiet, 2 normal, 3 loud
 	input  wire [12:0] sk_bridge_addr,  // 32 bit word address
 	input  wire        sk_bridge_wr,
@@ -454,6 +469,46 @@ wire  [7:0] din;
 
 wire [24:0] cart_write_addr = (ioctl_addr >= 25'd128) && cart_is_7800 ?
 	(ioctl_addr - 25'd128) : ioctl_addr;
+
+// FujiNet claim: "FUJI" and 6 flag bytes at CPU $FF70 make an image a
+// FujiNet program (APP mode; fujinet_mailbox.sv). The bytes are found as
+// the image loads: $FF70 is 0x90 bytes from the end of the ROM, so in the
+// last 4K block at block offset $F70, for any ROM a whole number of 4K
+// blocks long (every 7800 ROM). Each block's bytes at $F70-$F76 are kept;
+// at the end the last block's count only if it ends where the cartridge
+// does. Flag byte 2, bit 0: 16K of cartridge RAM at $4000.
+reg  [7:0] fn_sig [0:5];
+reg        fn_blk_ok = 1'b0, fn_blk_ram = 1'b0;
+reg  [7:0] fn_blk_kind = 8'd0;
+reg [12:0] fn_blk_end = 13'd0;
+reg        fn_app = 1'b0, fn_ram = 1'b0;
+reg  [7:0] fn_kind = 8'd0;
+always @(posedge clk_sys) begin
+	if (cart_download && ~old_cart_download) begin
+		fn_blk_ok <= 1'b0;
+		fn_app <= 1'b0;
+		fn_ram <= 1'b0;
+	end
+	if (cart_download && ioctl_wr && cart_is_7800 && ioctl_addr >= 25'd128) begin
+		if (cart_write_addr[11:0] >= 12'hF70 && cart_write_addr[11:0] <= 12'hF75)
+			fn_sig[cart_write_addr[2:0]] <= ioctl_dout;
+		if (cart_write_addr[11:0] == 12'hF76) begin
+			fn_blk_ok <= {fn_sig[0], fn_sig[1], fn_sig[2], fn_sig[3]} == "FUJI";
+			fn_blk_kind <= fn_sig[5];
+			fn_blk_ram <= ioctl_dout[0];
+			fn_blk_end <= cart_write_addr[24:12] + 13'd1;
+		end
+	end
+	if (old_cart_download && ~cart_download) begin
+		fn_app <= cart_is_7800 && fn_blk_ok && cart_size == {7'd0, fn_blk_end, 12'h000};
+		fn_ram <= fn_blk_ram;
+		fn_kind <= fn_blk_kind;
+	end
+end
+// A claimed image gets the POKEY at $0450 (header bit 6) and, if it asks,
+// the RAM at $4000 (bit 2), as the FujiNet cartridge gives it.
+wire [15:0] fn_flags = fn_app ? {9'd0, 1'b1, 3'd0, fn_ram, 2'd0} : 16'd0;
+
 
 // The "no cartridge" image MiSTer boots into when nothing is loaded. The
 // Pocket's cartridge slot is required, so the core never runs without a
@@ -1245,6 +1300,133 @@ wire  [7:0] bup_cmd_data;
 wire [15:0] bup_audio_l, bup_audio_r;
 `endif
 
+// FujiNet: the mailbox, on the bus the cartridge sees (POCKET_SRAM builds)
+wire        fn_stg_start, fn_stg_we, fn_stg_sync, fn_stg_synced, fn_stg_busy;
+wire        fn_stg_hdr, fn_swap_go, fn_swap_restart;
+wire [19:0] fn_stg_addr, fn_stg_size;
+wire  [7:0] fn_stg_data;
+wire        bus_phi2, bus_cs_cart, fn_oe;
+wire  [7:0] fn_do;
+`ifdef POCKET_SRAM
+fujinet_mailbox fujinet
+(
+	.clk          (clk_sys),
+	.reset        (cart_download),
+	.app          (fn_app && ~tia_mode),
+	.pal          (region_pll),
+	.tv_pal       (region_select),
+	.claim_kind   (fn_kind),
+	.hsc_rom      (hscfw_loaded),
+	.hsc_on       (hsc_en),
+	.bios_skipped (~use_bios),
+	.addr         (bios_addr),
+	.wdata        (din),
+	.rw           (RW),
+	.phi2         (bus_phi2),
+	.cs           (bus_cs_cart),
+	.bus_oe       (fn_oe),
+	.bus_do       (fn_do),
+	.txd          (fn_txd),
+	.tx_en        (fn_tx_en),
+	.rxd_link     (fn_rxd_link),
+	.rxd_cart     (fn_rxd_cart),
+	.busy         (),
+	// game loading (docs/FUJINET_GAME_LOADING.md): a push is staged in the
+	// BupChip's PSRAM (fujinet_stage, below; without POCKET_BUPCHIP its SYNC
+	// goes unanswered and the push ends FAILED, BOOT_ERR 4), and the swap
+	// replays it through this core's load path (fujinet_loader, below)
+	.stg_start    (fn_stg_start),
+	.stg_we       (fn_stg_we),
+	.stg_addr     (fn_stg_addr),
+	.stg_data     (fn_stg_data),
+	.stg_sync     (fn_stg_sync),
+	.stg_synced   (fn_stg_synced),
+	.stg_busy     (fn_stg_busy),
+	.stg_size     (fn_stg_size),
+	/* verilator lint_off PINCONNECTEMPTY */
+	.stg_ready    (),
+	/* verilator lint_on PINCONNECTEMPTY */
+	.stg_hdr      (fn_stg_hdr),
+	.swap_go      (fn_swap_go),
+	.swap_restart (fn_swap_restart)
+);
+
+// The staging's clk_sys side: the pushed image's bytes as halfword WRITEs to
+// the BupChip's PSRAM writer (POCKET_BUPCHIP), staged from 4 MiB on die 0
+wire        fn_s_tog, fn_s_sync, fn_s_ack;
+wire  [1:0] fn_s_lanes;
+wire [18:0] fn_s_haddr;
+wire [15:0] fn_s_data;
+wire        fn_l_req, fn_l_ack;
+wire [18:0] fn_l_haddr;
+wire [15:0] fn_l_data;
+
+// The swap: the staged file replayed as a cartridge load, and the restart.
+// Without POCKET_BUPCHIP nothing is ever staged, and an armed swap cannot
+// happen (READY needs the stager's answer).
+fujinet_loader fn_loader
+(
+	.clk        (clk_sys),
+`ifdef POCKET_BUPCHIP
+	.go         (fn_swap_go),
+`else
+	.go         (1'b0),
+`endif
+	.restart_go (fn_swap_restart),
+	.size       (fn_stg_size),
+	.hdr        (fn_stg_hdr),
+	.host_dl    (fn_host_dl),
+	.dl         (fn_ld_dl),
+	.wr         (fn_ld_wr),
+	.addr       (fn_ld_addr),
+	.dout       (fn_ld_dout),
+	.restart    (fn_restart),
+	.l_req      (fn_l_req),
+	.l_haddr    (fn_l_haddr),
+	.l_ack      (fn_l_ack),
+	.l_data     (fn_l_data)
+);
+`ifdef POCKET_BUPCHIP
+fujinet_stage fn_stage
+(
+	.clk     (clk_sys),
+	.start   (fn_stg_start),
+	.we      (fn_stg_we),
+	.addr    (fn_stg_addr),
+	.data    (fn_stg_data),
+	.sync    (fn_stg_sync),
+	.busy    (fn_stg_busy),
+	.synced  (fn_stg_synced),
+	.s_tog   (fn_s_tog),
+	.s_sync  (fn_s_sync),
+	.s_lanes (fn_s_lanes),
+	.s_haddr (fn_s_haddr),
+	.s_data  (fn_s_data),
+	.s_ack   (fn_s_ack)
+);
+`else
+assign fn_stg_busy = 1'b0;
+assign fn_stg_synced = 1'b0;
+assign fn_l_ack = 1'b0;
+assign fn_l_data = 16'd0;
+`endif
+`else
+assign fn_oe = 1'b0;
+assign fn_do = 8'hFF;
+assign fn_stg_start = 1'b0;
+assign fn_stg_we = 1'b0;
+assign fn_stg_addr = 20'd0;
+assign fn_stg_data = 8'd0;
+assign fn_stg_sync = 1'b0;
+assign fn_txd = 1'b1;
+assign fn_tx_en = 1'b0;
+assign fn_ld_dl = 1'b0;
+assign fn_ld_wr = 1'b0;
+assign fn_ld_addr = 25'd0;
+assign fn_ld_dout = 8'd0;
+assign fn_restart = 1'b0;
+`endif
+
 Atari7800 main
 (
 	// HSC firmware and Supercharger BIOS: built without them
@@ -1318,7 +1500,7 @@ Atari7800 main
 	.cart_read    (cart_read),
 	.cart_size    (cart_size),
 	.cart_addr_out(cart_addr),
-	.cart_flags   (cart_is_7800 ? cart_flags : 16'd0),
+	.cart_flags   (cart_is_7800 ? (cart_flags | fn_flags) : 16'd0),
 	.cart_mapper  (cart_mapper),
 	.cart_save    (cart_save),
 	.cart_din     (cart_din),
@@ -1339,6 +1521,10 @@ Atari7800 main
 	.cartram_wrdata26_out (cartram_wrdata26),
 	.mclk1_out      (mclk1),
 	.bios_sel_out   (bios_sel),
+	.phi2_out       (bus_phi2),
+	.cs_cart_out    (bus_cs_cart),
+	.fn_oe          (fn_oe),
+	.fn_do          (fn_do),
 	.fb_addr        (fb_addr),
 	.fb_we          (fb_we),
 	.fb_wdata       (fb_wdata),
@@ -1580,7 +1766,17 @@ bupchip_pocket bupchip
 	.psram_read_en         (psr_re),
 	.psram_read_avail      (psr_avail),
 	.psram_data_out        (psr_dout),
-	.psram_busy            (psr_busy)
+	.psram_busy            (psr_busy),
+	.fn_s_tog              (fn_s_tog),
+	.fn_s_sync             (fn_s_sync),
+	.fn_s_lanes            (fn_s_lanes),
+	.fn_s_haddr            (fn_s_haddr),
+	.fn_s_data             (fn_s_data),
+	.fn_s_ack              (fn_s_ack),
+	.fn_l_req              (fn_l_req),
+	.fn_l_haddr            (fn_l_haddr),
+	.fn_l_ack              (fn_l_ack),
+	.fn_l_data             (fn_l_data)
 `ifdef POCKET_DARIA
 	,
 	.daria_profile  (daria_profile),
@@ -1850,12 +2046,14 @@ composite_decoder #(.SPC(4)) comp_dec
 );
 
 // The light gun's crosshair, moved to where the decoded picture is. The
-// decoded picture's HBlank trails the RGB one by 14 clk_sys (tb_load
-// +composite measures it); the crosshair is taken one clk_sys before the
-// pixel it lands on is registered, so 13 here.
-localparam integer COMP_GUN_DELAY = 13;
+// decoded picture's HBlank trails the RGB one by 14 clk_sys on MARIA and 12
+// on the TIA (tb_load +composite measures it); the crosshair is taken one
+// clk_sys before the pixel it lands on is registered, so 13 and 11 here.
+localparam integer COMP_GUN_DELAY     = 13;
+localparam integer COMP_GUN_DELAY_TIA = 11;
 reg [COMP_GUN_DELAY-1:0] gun_dly = '0;
 always @(posedge clk_sys) gun_dly <= {gun_dly[COMP_GUN_DELAY-2:0], gun_en & gun_target};
+wire gun_comp = tia_en ? gun_dly[COMP_GUN_DELAY_TIA-1] : gun_dly[COMP_GUN_DELAY-1];
 
 wire       use_comp = composite && ~video_pal_o;
 wire [1:0] comp_last = tia_en ? 2'd3 : 2'd1;   // samples per pixel, less one
@@ -1879,7 +2077,7 @@ always @(posedge clk_sys) begin
 		comp_ph  <= (cd_hb || comp_ph == comp_last) ? 2'd0 : comp_ph + 2'd1;
 		if (!cd_hb && comp_ph == comp_last) begin
 			comp_ce <= 1'b1;
-			if (gun_dly[COMP_GUN_DELAY-1]) begin
+			if (gun_comp) begin
 				comp_r <= 8'd255; comp_g <= 8'd0; comp_b <= 8'd0;
 			end else if (tia_en) begin
 				comp_r <= comp_nr[9:2]; comp_g <= comp_ng[9:2]; comp_b <= comp_nb[9:2];

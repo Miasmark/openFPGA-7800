@@ -25,6 +25,17 @@
 //   FWWRITE   writes the word into the ROM through port B
 //   FWEND     sets fw_loaded if at least 8 bytes arrived
 //
+// FujiNet staging (docs/FUJINET_GAME_LOADING.md, 3.2) is a second message
+// channel, from fujinet_stage.sv on clk_sys: a toggle, a payload the sender
+// holds until s_ack answers, so one message at a time. WRITE puts a halfword
+// at the staging area's halfword s_haddr (die 0, from byte 4 MiB: halfword
+// $200000 + s_haddr), with the byte lanes s_lanes; SYNC answers once the
+// controller has been idle two clocks after the last of them, so every
+// earlier write is in the PSRAM. The capture's writes go first; a staging
+// write takes the controller only when no capture WRITE waits. With s_tog
+// constant (no FujiNet program pushing) nothing here changes: the capture's
+// stream and the cache's reads are as before, bit for bit.
+//
 // A released CPU can therefore never read a halfword or a word that has not
 // been written. asset_ready, asset_size, img_ready, img_size, fw_loaded, the
 // ROM and the window survive holds, console resets and PAL retunes: only a
@@ -93,7 +104,15 @@ module bup_asset_wr (
 	input  wire         psram_busy,
 
 	output logic        overrun, // sticky: a message arrived before the last was done
-	output wire         fw_start        // FWSTART handled (BUP_DEBUG's firmware check)
+	output wire         fw_start,       // FWSTART handled (BUP_DEBUG's firmware check)
+
+	// FujiNet staging, from clk_sys (above): held until s_ack toggles
+	input  wire         s_tog,
+	input  wire         s_sync,         // 1 SYNC, 0 WRITE
+	input  wire   [1:0] s_lanes,        // [1] upper, [0] lower byte lane
+	input  wire  [18:0] s_haddr,        // halfword in the staging area
+	input  wire  [15:0] s_data,
+	output logic        s_ack
 );
 	// Power-up values. Quartus ignores an initializer on an output port
 	// declaration and, with Power-Up Don't Care, may pick either level.
@@ -103,6 +122,7 @@ module bup_asset_wr (
 	initial img_ready = 1'b0;
 	initial img_size = 20'd0;
 	initial overrun = 1'b0;
+	initial s_ack = 1'b0;
 	// Message types (bup_capture.sv has the same list).
 	localparam logic [2:0] M_START = 3'd1, M_WRITE = 3'd2, M_END = 3'd3;
 	localparam logic [2:0] M_FWSTART = 3'd4, M_FWWRITE = 3'd5, M_FWEND = 3'd6;
@@ -114,10 +134,36 @@ module bup_asset_wr (
 
 	wire new_msg = t2 != seen;
 	wire m_wr    = m_v && m_type == M_WRITE;
+
+	// The staging channel: the toggle through two flops, the payload copied
+	// when its change is seen (stable since: the sender holds it until s_ack)
+	(* altera_attribute = "-name SYNCHRONIZER_IDENTIFICATION FORCED" *)
+	logic        st1 = 1'b0;
+	logic        st2 = 1'b0, s_seen = 1'b0, s_v = 1'b0, s_t = 1'b0;
+	logic  [1:0] s_l = 2'd0;
+	logic [18:0] s_a = 19'd0;
+	logic [15:0] s_d = 16'd0;
+	logic  [1:0] s_idle = 2'd0;          // clocks the controller has been idle, up to 2
+	wire         s_wr = s_v && !s_t && !m_wr;
 	// A write, or END, needs the controller idle; everything else takes one clock.
 	wire done    = m_v && (!(m_type == M_WRITE || m_type == M_END) || !psram_busy);
 
 	always_ff @(posedge clk) begin
+		st1 <= s_tog;
+		st2 <= st1;
+		s_idle <= psram_busy || psram_write_en ? 2'd0 : (s_idle == 2'd2 ? s_idle : s_idle + 2'd1);
+		if (st2 != s_seen && !s_v) begin
+			s_seen <= st2;
+			s_v <= 1'b1;
+			s_t <= s_sync;
+			s_l <= s_lanes;
+			s_a <= s_haddr;
+			s_d <= s_data;
+		end
+		if ((s_wr && !psram_busy) || (s_v && s_t && s_idle == 2'd2)) begin
+			s_v <= 1'b0;
+			s_ack <= ~s_ack;
+		end
 		t1 <= msg_tog;
 		t2 <= t1;
 		if (done) begin
@@ -155,19 +201,19 @@ module bup_asset_wr (
 	assign rom_wd = m_pl[31:0];
 
 	// The window: with the PSRAM write, for an image mode WRITE below 128 KiB.
-	assign win_we = psram_write_en && m_pl[40] && m_pl[37:32] == 6'd0 && !img_ready;
+	assign win_we = psram_write_en && m_wr && m_pl[40] && m_pl[37:32] == 6'd0 && !img_ready;
 	assign win_wa = m_pl[31:17];
 	assign win_wd = {m_pl[15:0], m_pl[15:0]};
 	assign win_be = m_pl[16] ? {m_pl[39:38], 2'b00} : {2'b00, m_pl[39:38]};
 
 	assign psram_bank_sel        = 1'b0;		// die 0 (ce0_n)
-	assign psram_write_en        = m_wr && !psram_busy;
-	assign psram_read_en         = rd_req && !psram_busy && !m_wr;
+	assign psram_write_en        = (m_wr || s_wr) && !psram_busy;
+	assign psram_read_en         = rd_req && !psram_busy && !m_wr && !s_wr;
 	assign rd_ack                = psram_read_en;
-	assign psram_addr            = m_wr ? m_pl[37:16] : rd_addr;
-	assign psram_data_in         = m_pl[15:0];
-	assign psram_write_high_byte = m_pl[39];
-	assign psram_write_low_byte  = m_pl[38];
+	assign psram_addr            = m_wr ? m_pl[37:16] : s_wr ? {3'b100, s_a} : rd_addr;
+	assign psram_data_in         = s_wr ? s_d : m_pl[15:0];
+	assign psram_write_high_byte = s_wr ? s_l[1] : m_pl[39];
+	assign psram_write_low_byte  = s_wr ? s_l[0] : m_pl[38];
 endmodule
 
 `default_nettype wire

@@ -294,6 +294,23 @@ is required. That frees 256 M10K blocks.
   JTAG port and the editor a hub: about 350 ALMs of hub, plus 40-60 ALMs per
   memory.
 
+### `rtl/top.sv`: the FujiNet mailbox on the cartridge bus (`POCKET_SRAM`)
+
+Not yet in a release (2026-11). `../core/fujinet_mailbox.sv` is a FujiNet
+cartridge's mailbox: for an image that claims it ("FUJI" at $FF70) it serves
+reads at $0800-$0CFF and takes writes at $0D00-$0FFF, and passes requests to
+a FujiNet over a serial line on the link port. `top.sv` gets four ports in
+its `POCKET_SRAM` group:
+
+- `phi2_out` (`pclk0`) and `cs_cart_out` (`cs_cart`): the mailbox takes
+  writes as `cart.sv` does, on `pclk0` with the address in cartridge space.
+- `fn_oe` / `fn_do`: the mailbox's read data. `cart.sv`'s `dout` / `dout_oe`
+  now land on `cart_7800_DB_c` / `cart_7800_DB_oe_c`, and
+  `cart_7800_DB_out` / `cart_7800_DB_oe` take the mailbox's byte (all lines
+  driven) when `fn_oe` is set, otherwise `cart.sv`'s. `fn_oe` is set only
+  for a read in cartridge space while a claimed image runs; at any other
+  time the bus is upstream's.
+
 ### `rtl/cart2600.sv`: ARM front ends out with the ARM (`NO_ARM_MAPPER`)
 
 Upstream's `NO_ARM_MAPPER` leaves out the ARM (`arm_mapper_subsystem`), but

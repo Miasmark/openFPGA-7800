@@ -144,12 +144,24 @@ module tb_load;
 		.write_en(ioctl_wr), .write_addr(ioctl_addr), .write_data(ioctl_dout)
 	);
 
-	// core_top registers the loader's output on clk_sys
+	// core_top registers the loader's output on clk_sys, and a FujiNet
+	// swap's load (fujinet_loader.sv) is selected at those registers' inputs
+	// (fn_sel), its download flag and the restart registered with them
+	wire        fn_ld_dl, fn_ld_wr, fn_restart;
+	wire [24:0] fn_ld_addr;
+	wire  [7:0] fn_ld_dout;
+	logic [2:0] tb_dl_s = 3'd0;     // core_top's dl_s: the bridge's load sequence, on clk_sys
+	wire        fn_sel = fn_ld_dl & ~tb_dl_s[1];
+	logic       fn_sel_q = 1'b0, fn_restart_q = 1'b0;
 	logic ioctl_wr_r = 0; logic [24:0] ioctl_addr_r = 0; logic [7:0] ioctl_dout_r = 0;
 	logic [2:0] ioctl_hi_r = 0;	// POCKET_BUPCHIP: bits 27:25, which slot's address
 	always @(posedge clk_sys) begin
-		ioctl_wr_r <= ioctl_wr; ioctl_addr_r <= ioctl_addr[24:0]; ioctl_dout_r <= ioctl_dout;
-		ioctl_hi_r <= ioctl_addr[27:25];
+		ioctl_wr_r <= fn_sel ? fn_ld_wr : ioctl_wr;
+		ioctl_addr_r <= fn_sel ? fn_ld_addr : ioctl_addr[24:0];
+		ioctl_dout_r <= fn_sel ? fn_ld_dout : ioctl_dout;
+		ioctl_hi_r <= fn_sel ? 3'd0 : ioctl_addr[27:25];
+		fn_sel_q <= fn_sel;
+		fn_restart_q <= fn_restart;
 	end
 
 	// ---------------- system ----------------
@@ -175,18 +187,111 @@ module tb_load;
 		.cram_we_n(cram0_we_n), .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n));
 `endif
 
+	// FujiNet (fujinet_mailbox.sv): the link port's serial line. +fnloop
+	// joins SO to SI, as a wire between link pins 2 and 3 does; otherwise
+	// SI idles high, nothing attached (or, with +fnpush=FILE, the FujiNet
+	// model below answers on SI). Each transaction's end is logged.
+	logic fn_txd, fn_tx_en;
+	bit   fn_loop = 0;
+	bit   fn_cartloop = 0;
+	initial fn_loop = $test$plusargs("fnloop");
+	// +fncartloop joins cartridge pin 5 to pin 31 instead; otherwise pin 31
+	// reads low, as an undriven pin might (the mailbox must leave it out)
+	initial fn_cartloop = $test$plusargs("fncartloop");
+`ifdef POCKET_SRAM
+	logic [7:0] fn_ack_seen = 8'd0;
+	int fn_txbytes = 0, fn_rd_n = 0, fn_wr_n = 0;
+	initial begin
+		#40ms;
+		if (dut.fn_app) $display("FN claim found: blk_end %0d, cart_size %0d, RAM %0d", dut.fn_blk_end, dut.cart_size, dut.fn_ram);
+	end
+	logic fn_txd_d = 1'b1;
+	always @(posedge clk_sys) begin
+		fn_txd_d <= fn_txd;
+		if (fn_txd_d && !fn_txd) fn_txbytes++;    // start bits, roughly
+		if (dut.fn_oe && dut.bus_phi2 && fn_rd_n < 12) begin
+			fn_rd_n++;
+			$display("FN read $%04x = $%02x", dut.bios_addr, dut.fn_do);
+		end
+		if (dut.fujinet.reg_wr && fn_wr_n < 12) begin
+			fn_wr_n++;
+			$display("FN reg %02x = $%02x", dut.fujinet.reg_n, dut.din);
+		end
+		if (dut.fujinet.ackseq != fn_ack_seen) begin
+			fn_ack_seen <= dut.fujinet.ackseq;
+			$display("FN %0d ms: ackseq %0d err %0d reply_cmd %02x rxlen %0d link %0d port %s, ~%0d bytes sent, app %0d",
+				$time / 1000000, dut.fujinet.ackseq, dut.fujinet.err, dut.fujinet.reply_cmd,
+				dut.fujinet.rxlen, dut.fujinet.link_seen,
+				dut.fujinet.lock_link ? "link" : dut.fujinet.lock_cart ? "cart" : "none", fn_txbytes, dut.fn_app);
+		end
+	end
+`endif
+
+	// ---------------- FujiNet game loading, end to end (+fnpush=FILE) ----------------
+	// sim/fujinet/fn_model.sv on the link port answers a MOUNT_IMAGE by
+	// pushing FILE; sim/fujinet/fn_boot.a78 asks for it, arms the swap and
+	// jumps to $0600; the pushed game (fn_game.asm) writes $5A to $2201.
+	// One line at the end: the boot cart's markers ($2200 $11 started, $22
+	// READY and jumping, $EE not; then ERR, BOOT_STATE, BOOT_ERR), the swap's
+	// loads (fn_ld_dl rises) and bytes, the restarts, the game's marker and
+	// loop count, whether the claim was dropped, and the model's counts.
+	wire  fnm_tx;
+	fn_model fnm (.clk(clk_sys), .rx(fn_txd), .tx(fnm_tx));
+	logic [7:0] fnb_mark = 8'd0, fnb_err = 8'd0, fnb_state = 8'd0, fnb_berr = 8'd0, fng_mark = 8'd0;
+	int   fng_loops = 0, fn_swaps = 0, fn_swap_bytes = 0, fn_restarts = 0;
+	logic fn_ld_q = 1'b0, fn_rs_q = 1'b0;
+	always @(posedge clk_sys) begin
+		fn_ld_q <= fn_ld_dl;
+		fn_rs_q <= fn_restart;
+		if (fn_ld_dl && !fn_ld_q) begin
+			fn_swaps++;
+			$display("FNBOOT %0d ms: swap load starts (%0d bytes staged, header %0d)", $time / 1000000,
+				dut.fn_stg_size, dut.fn_stg_hdr);
+		end
+		if (!fn_ld_dl && fn_ld_q)
+			$display("FNBOOT %0d ms: swap load ends, %0d bytes, cart_size %0d, cart_is_7800 %0d",
+				$time / 1000000, fn_swap_bytes, dut.cart_size, dut.cart_is_7800);
+		if (fn_ld_dl && fn_ld_wr) fn_swap_bytes++;
+		if (fn_restart && !fn_rs_q) fn_restarts++;
+		if (dut.bus_phi2 && !dut.RW) case (dut.bios_addr)
+			16'h2200: begin
+				if (dut.din != fnb_mark) $display("FNBOOT %0d ms: boot cart mark $%02x", $time / 1000000, dut.din);
+				fnb_mark <= dut.din;
+			end
+			16'h2201: begin
+				if (dut.din != fng_mark) $display("FNBOOT %0d ms: game mark $%02x", $time / 1000000, dut.din);
+				fng_mark <= dut.din;
+			end
+			16'h2202: fnb_err <= dut.din;
+			16'h2203: fnb_state <= dut.din;
+			16'h2204: fnb_berr <= dut.din;
+			16'h2205: fng_loops++;
+			default: ;
+		endcase
+	end
+	final if (fnm.on)
+		$display("FNBOOT result: boot mark %02x err %0d state %02x berr %0d, swaps %0d bytes %0d, restarts %0d, game mark %02x loops %0d, claim %0d, cart_size %0d, model pushes %0d bytes %0d frames %0d refused %0d",
+			fnb_mark, fnb_err, fnb_state, fnb_berr, fn_swaps, fn_swap_bytes, fn_restarts, fng_mark, fng_loops,
+			dut.fn_app, dut.cart_size, fnm.pushes, fnm.push_bytes, fnm.push_frames, fnm.push_bad);
+
+	always @(posedge clk_sys) tb_dl_s <= {tb_dl_s[1:0], cart_download | bios_download | hscfw_download | arfw_download | bupfw_download};
+
 	atari7800_pocket dut (
 `ifdef POCKET_BUPCHIP
-		.clk_arm(clk_arm), .bupfw_download(bupfw_download), .ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
+		.clk_arm(clk_arm), .bupfw_download(bupfw_download),
+		.ioctl_wr_any(ioctl_wr_r), .ioctl_hi(ioctl_hi_r),
 		.cram0_a(cram0_a), .cram0_dq(cram0_dq), .cram0_wait(cram0_wait), .cram0_clk(cram0_clk),
 		.cram0_adv_n(cram0_adv_n), .cram0_cre(cram0_cre), .cram0_ce0_n(cram0_ce0_n),
 		.cram0_ce1_n(cram0_ce1_n), .cram0_oe_n(cram0_oe_n), .cram0_we_n(cram0_we_n),
 		.cram0_ub_n(cram0_ub_n), .cram0_lb_n(cram0_lb_n),
 `endif
-		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in),
-		.cart_download(cart_download), .bios_download(bios_download),
+		.clk_sys(clk_sys), .clk_sdram(clk_sdram), .pll_locked(pll_locked_tb), .pll_busy(pll_busy_tb), .reset_in(reset_in | fn_restart_q),
+		.cart_download(cart_download | fn_sel_q), .bios_download(bios_download),
 		.hscfw_download(hscfw_download), .arfw_download(arfw_download),
-		.ioctl_wr(ioctl_wr_r & (cart_download | bios_download | hscfw_download | arfw_download | bupfw_download)), .ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.ioctl_wr(ioctl_wr_r & (cart_download | fn_sel_q | bios_download | hscfw_download | arfw_download | bupfw_download)),
+		.ioctl_addr(ioctl_addr_r), .ioctl_dout(ioctl_dout_r),
+		.fn_ld_dl(fn_ld_dl), .fn_ld_wr(fn_ld_wr), .fn_ld_addr(fn_ld_addr), .fn_ld_dout(fn_ld_dout),
+		.fn_restart(fn_restart), .fn_host_dl(tb_dl_s[1]),
 		.region_setting(region_tb), .palette_temp(2'd0), .hsc_setting(hsc_setting), .show_overscan(overscan_on),
 		.hide_border(1'b0), .stereo_tia(1'b0), .swap_joysticks(1'b0), .diff_left_b(1'b1),
 		.diff_right_b(1'b1), .skip_bios(skip_bios), .flicker_blend(blend_on), .pokey_irq(pokey_irq_on), .pause_core(1'b0),
@@ -200,6 +305,8 @@ module tb_load;
 		.AUDIO_L(AUDIO_L), .AUDIO_R(AUDIO_R),
 		.clk_74a(clk_74a), .hsc_bridge_addr(hsc_addr), .hsc_bridge_wr(hsc_wr), .hsc_bridge_rd(hsc_rd), .hsc_bridge_din(hsc_din),
 		.hsc_bridge_dout(hsc_dout), .hsc_active(),
+		.fn_txd(fn_txd), .fn_tx_en(fn_tx_en), .fn_rxd_link(fn_loop ? fn_txd : fnm.on ? fnm_tx : 1'b1),
+		.fn_rxd_cart(fn_cartloop ? fn_txd : 1'b0),
 		.savekey_setting(sk_setting), .atarivox_setting(vox_setting), .sk_bridge_addr(sk_addr), .sk_bridge_wr(sk_wr), .sk_bridge_rd(sk_rd),
 		.sk_bridge_din(sk_din), .sk_bridge_dout(sk_dout),
 		.fa2_bridge_addr(fa2_addr), .fa2_bridge_wr(fa2_wr), .fa2_bridge_rd(fa2_rd), .fa2_bridge_din(fa2_din),
@@ -1064,6 +1171,17 @@ module tb_load;
 		$display("CRAM row %0d col %0d %s $%02x", `DP_SYNC.row, `DP_SYNC.col,
 			dut.RW ? "r" : "w", dut.bios_addr[7:0]);
 		dp_cram <= dp_cram + 1;
+	end
+	// +ccprobe (with +dmaprobe): frame cram_frame's MARIA colour output (YC)
+	// on rows 14-30, as runs: each change with its row and column, for the
+	// closed caption test cart (sim/mstat/cc_test.asm)
+	bit cc_on = 0;
+	logic [7:0] cc_yc = 8'd0;
+	initial cc_on = $test$plusargs("ccprobe");
+	always @(posedge clk_sys) if (cc_on && dp_on && !reset_in && dp_frame == cram_frame
+			&& `DP_SYNC.row >= 14 && `DP_SYNC.row <= 30 && dut.main.maria_inst.YC != cc_yc) begin
+		cc_yc <= dut.main.maria_inst.YC;
+		$display("PIX row %0d col %0d YC $%02x", `DP_SYNC.row, `DP_SYNC.col, dut.main.maria_inst.YC);
 	end
 	// The test carts' loop count, stored at $90/$91 once a frame
 	always @(posedge clk_sys) if (dp_on && !reset_in && dut.main.cpu_inst.phi2_en

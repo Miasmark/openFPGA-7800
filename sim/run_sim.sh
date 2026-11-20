@@ -26,6 +26,7 @@
 #                  status overlay checks (sim/tb_frames.sv's header). The
 #                  build writes WORK/obj_frames.mode ("FRAMES_DEBUG=0|1 md5
 #                  <the binary's>"), which sim/run_frames.sh checks
+#   ONLY=fujinet   build tb_load alone and run only the FujiNet section (below)
 #   ONLY=daria     build tb_load alone and run only the DARIA section (below),
 #                  e.g. the BUP_DEBUG overlay check at another divider or on
 #                  a scratch tree (sim/bupchip/dstat/run_ovl.sh); its log is
@@ -110,7 +111,7 @@ SRCS=(
 	"$RTL/cart2600.sv" "$PATCHED/banks2600.sv" "$PATCHED/video_mux.sv"
 	"$RTL/detect2600.sv" "$RTL/a78_cart_extent.sv" "$PATCHED/RIOT/M6532.sv"
 	"$RTL/top.sv"
-	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/artifact_color.sv" "$FPGA/core/atari7800_pocket.sv"
+	"$RTL/EEPROM_24LC256.sv" "$FPGA/core/artifact_color.sv" "$FPGA/core/fujinet_uart.sv" "$FPGA/core/fujinet_mailbox.sv" "$FPGA/core/fujinet_stage.sv" "$FPGA/core/fujinet_loader.sv" "$FPGA/core/fujinet_rd.sv" "$FPGA/core/atari7800_pocket.sv" "$HERE/fujinet/fn_model.sv"
 	"$FPGA/core/atarivox/avox_rx.sv" "$FPGA/core/atarivox/avox_engine.sv" "$FPGA/core/atarivox/atarivox.sv"
 	"$FPGA/core/virtual_axis.sv" "$FPGA/core/virtual_axis5.sv" "$FPGA/core/stick_dirs.sv" "$FPGA/core/sram_ctrl.sv" "$PATCHED/paddles.sv" "$RTL/lightgun.sv"
 	"$FPGA/pocket_utils/data_loader.sv"
@@ -194,7 +195,8 @@ case "${ONLY:-}" in
 	"") ;;
 	daria) [ "$DARIA_ON" = 1 ] || { echo "run_sim.sh: ONLY=daria needs the DARIA build (DARIA=1)" >&2; exit 1; }
 		echo "-- run_sim.sh ONLY=daria: tb_load and the DARIA section alone, not a whole run" ;;
-	*) echo "run_sim.sh: ONLY=$ONLY: daria is the one section that runs alone" >&2; exit 1 ;;
+	fujinet) echo "-- run_sim.sh ONLY=fujinet: tb_load and the FujiNet section alone, not a whole run" ;;
+	*) echo "run_sim.sh: ONLY=$ONLY: daria and fujinet are the sections that run alone" >&2; exit 1 ;;
 esac
 if [ -n "${BUILD_TOP:-}" ]; then
 	case "$BUILD_TOP" in
@@ -478,7 +480,9 @@ fi   # ONLY
 # requirement OVL gives it.
 # Only in the DARIA build; without POCKET_DARIA the section is inactive,
 # which is not a pass (run_sim_check.py).
-if [ "$DARIA_ON" = 1 ]; then
+if [ "${ONLY:-}" = fujinet ]; then
+	:
+elif [ "$DARIA_ON" = 1 ]; then
 	echo "-- DARIA: synthetic ARM images in the whole core (fe_dir/mkimg.py):"
 	DR="$WORK/daria"
 	mkdir -p "$DR"; ln -sfn "$WORK/rtl" "$DR/rtl"
@@ -576,6 +580,50 @@ if [ "$DARIA_ON" = 1 ]; then
 	[ "$daria_ok" = 1 ] && echo "DARIA pass" || echo "DARIA FAIL"
 else
 	echo "-- DARIA: inactive (POCKET_DARIA is not in the qsf; DARIA=1 builds it): not run, and not a pass"
+fi
+
+# FujiNet game loading, end to end (docs/FUJINET_GAME_LOADING.md, step 4).
+# sim/fujinet/fn_boot.asm claims the mailbox, sends MOUNT_IMAGE and, once
+# BOOT_STATE is READY, arms the swap and jumps to $0600, as FujiNet's CONFIG
+# does; fn_model.sv on the link port answers by pushing a game
+# (fn_game.asm), frame by frame as fujinet-firmware's push_image does. Two
+# runs: the game as an A78, header and all, and as the bare 16K ROM (the
+# loader's generated header). Each must end with the boot cart's READY
+# mark, one swap load of 16,512 bytes, no restart, the game's marker and
+# its loop running, the FUJI claim dropped (the game has none), a 16K cart
+# and every push frame ACKed. Needs dasm, and the POCKET_SRAM and
+# POCKET_BUPCHIP build (the mailbox and the PSRAM); otherwise inactive,
+# which is not a pass.
+if [ -z "${ONLY:-}" ] || [ "${ONLY:-}" = fujinet ]; then
+	if [ "${SRAM:-1}" = 1 ] && [[ " $BUP_DEFS " == *" -DPOCKET_BUPCHIP "* ]]; then
+		echo "-- FujiNet: a game pushed over the link port and booted (fujinet/fn_model.sv, fn_boot.asm, fn_game.asm):"
+		FN="$WORK/fnboot"
+		mkdir -p "$FN"; ln -sfn "$WORK/rtl" "$FN/rtl"
+		fn_ok=1
+		command -v dasm > /dev/null || { echo "  dasm not found"; fn_ok=0; }
+		for c in fn_boot fn_game; do
+			[ "$fn_ok" = 1 ] || break
+			dasm "$HERE/fujinet/$c.asm" -f3 -o"$FN/$c.bin" > "$FN/$c.dasm.log" 2>&1 \
+				&& python3 "$HERE/make_a78.py" --bin "$FN/$c.bin" > "$FN/$c.a78" \
+				|| { echo "  $c: build failed ($FN/$c.dasm.log)"; fn_ok=0; }
+		done
+		if [ "$fn_ok" = 1 ]; then
+			(cd "$FN" && sim ./../obj_load/vtb +image=fn_boot.a78 +fnpush=fn_game.a78 +skipbios=1 +wav="${FN_MS:-2200}" $(fp fujinet_a78) > a78.log) &
+			(cd "$FN" && sim ./../obj_load/vtb +image=fn_boot.a78 +fnpush=fn_game.bin +skipbios=1 +wav="${FN_MS:-2200}" $(fp fujinet_raw) > raw.log) &
+			wait
+			for r in a78 raw; do
+				l="$(grep -m1 '^FNBOOT result:' "$FN/$r.log")"
+				echo "  $r: ${l#FNBOOT result: }"
+				[[ "$l" == *"boot mark 22 err 0 state 02 berr 0, swaps 1 bytes 16512, restarts 0, game mark 5a"* ]] \
+					&& [[ "$l" == *", claim 0, cart_size 16384, model pushes 1 "* ]] && [[ "$l" == *" refused 0" ]] \
+					&& ! [[ "$l" == *" loops 0,"* ]] || { echo "  $r: FAIL ($FN/$r.log)"; fn_ok=0; }
+				grep -qi 'psram_model.*viol' "$FN/$r.log" && { echo "  $r: PSRAM model violations"; fn_ok=0; }
+			done
+		fi
+		[ "$fn_ok" = 1 ] && echo "FUJINET pass" || echo "FUJINET FAIL"
+	else
+		echo "-- FujiNet: inactive (needs POCKET_SRAM and POCKET_BUPCHIP): not run, and not a pass"
+	fi
 fi
 
 [ -z "${ONLY:-}" ] || exit 0
