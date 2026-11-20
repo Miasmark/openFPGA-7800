@@ -213,9 +213,11 @@ link:
   about 0.2 W (an EZ-Flash Omega, the hungriest common flash cart, which
   already has trouble when the Pocket is low on charge); an ESP32 on Wi-Fi
   averages more than that and peaks several times higher.
-- **In progress:** loading a game from the FujiNet (MOUNT_IMAGE's image
-  push, staged in the PSRAM and loaded as from the SD card; benches only so
-  far, [docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)).
+- **Booting games from the FujiNet:** CONFIG's MOUNT_IMAGE pushes the game,
+  the core stages it in the PSRAM and loads it as from the SD card
+  ([docs/FUJINET_GAME_LOADING.md](docs/FUJINET_GAME_LOADING.md)); seen on a
+  Pocket with fujinet-pc (2026-11-20). CONFIG's PLAY GAME LOBBY needs a 7800
+  lobby on FujiNet's server, which has none yet.
 - **Not done:** the High Score Cart's saves to the FujiNet's SD card.
 - **No link:** a serial adapter gives no sign it is there, so the core
   counts the link as up once a good frame arrives. Until then a request

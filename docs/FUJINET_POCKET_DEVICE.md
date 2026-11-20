@@ -4,7 +4,8 @@ What a FujiNet device has to be for this core's FujiNet support
 (`src/fpga/core/fujinet_mailbox.sv`; README, "FujiNet over the link port or
 cartridge slot"). Nothing here is built yet. The link itself is proven: on a
 Pocket (2026-11-19) the core exchanged requests and replies with fujinet-pc
-through an FT232H on the link port ([FUJINET_TESTING.md](FUJINET_TESTING.md)).
+through an FT232H on the link port, and (2026-11-20) booted games the
+FujiNet pushed ([FUJINET_TESTING.md](FUJINET_TESTING.md)).
 
 ## 1. What it is
 
@@ -125,12 +126,11 @@ circuit, a WS2812-2020 status LED, RESET / BOOT buttons.
   FujiNet device ($70) and the network devices N1-N8 ($71-$78): adapter
   configuration, Wi-Fi setup commands, HTTP, TCP, the rest of the network
   device's protocols, app keys, everything that is a request and its reply.
-- **In progress:** MOUNT_IMAGE's image push. On FujiNet's own cartridge the
-  device sends the game to device $FF and the cartridge's loader starts it.
-  The core now takes the push into the PSRAM and starts the game through
-  its own cartridge load path; in simulation a pushed game boots end to
-  end, but it has not been tried on a Pocket yet
-  ([FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)).
+- **Booting games:** MOUNT_IMAGE's image push. The core takes the pushed
+  game into the PSRAM and starts it through its own cartridge load path
+  ([FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)); seen working on a
+  Pocket with fujinet-pc (2026-11-20). PLAY GAME LOBBY waits for a 7800
+  lobby on FujiNet's server.
 - **Not served:** the cartridge's hot operations other than the swap, and
   the High Score Cart's saves to the device's SD card (the Pocket's own HSC
   saves still work).

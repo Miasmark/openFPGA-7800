@@ -126,12 +126,21 @@ for the Wi-Fi state (NO LINK after 1.5 s) and goes on to its HOST SLOTS
 screen. On the core:
 
 - **Runs:** Wi-Fi setup, host slots, browsing, renaming, copying, INFO.
-- **Booting a game:** in builds up to step 1 of
-  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md) the image push is
-  refused and CONFIG shows `?LOAD ERROR 03`; step 2 alone staged it and
-  then left the console in the loader at `$0609`; from step 3 the staged
-  game is loaded as from the SD card (in simulation, end to end; not yet
-  on a Pocket).
+- **Booting a game works** (on a Pocket, 2026-11-20, test build
+  `fujinet_test3_gameload`: fujinet-pc through the FT232H on the link
+  port): CONFIG mounts the game, the FujiNet pushes it, BOOT_STATE goes
+  READY, and the core loads it through its own cartridge path, as from the
+  SD card. Battleship, a FujiNet network game booted this way, runs its HTTP
+  requests on N1. Before game loading (up to step 1 of
+  [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)) the push was refused:
+  `?LOAD ERROR 03`.
+- **PLAY GAME LOBBY fails:** CONFIG mounts the host `ec.tnfs.io` and boots
+  `/atari7800/lobby.a78` from it (fujinet-config `atari7800/st_lobby.c`,
+  `constants.h`), and that server has no 7800 lobby yet (2026-11-20: an
+  `atari` folder of `.xex` files and an `intv` folder). Seen as
+  `?HOST ERROR 00` and earlier `?MOUNT ERROR 00`: error 00 is the mailbox's
+  "transaction done", so the FujiNet answered with a NAK. Upstream content,
+  not the core.
 - **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
   Pocket's HSC; switching it there does nothing.
 

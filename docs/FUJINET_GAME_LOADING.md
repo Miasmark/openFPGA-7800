@@ -9,8 +9,9 @@ section (`ONLY=fujinet` alone) boots a game a FujiNet model pushes over the
 link port, as an A78 and as a bare ROM. The fits pass every gate and every
 step-7 check on seeds 1-3 (clk_sdram +2.424 / +2.680 / +3.151 ns, clk_arm
 +1.807 / +2.192 / +2.436 ns, worst hold +0.074 / +0.045 / +0.074 ns,
-16,639-16,666 ALMs; section 4 has what it took). Not yet tried on a
-Pocket.
+16,639-16,666 ALMs; section 4 has what it took). **Works on a Pocket**
+(2026-11-20, the test build from seed 3: CONFIG through fujinet-pc on the
+link port boots games; FUJINET_TESTING.md, section 5).
 
 The approach reuses what the BupChip and DARIA already have on the Pocket's
 PSRAM (cram0): a writer on clk_arm fed by messages from clk_sys
@@ -207,4 +208,5 @@ The staged file is fed through the core's own load path:
    ahead of its address (the header parser reads by address), now fixed and
    checked in `run_fnstage.sh` too.
 5. **Fits and the full regression** (fits done, 2026-11-20: seeds 1-3 pass),
-   then a test build for CONFIG and fujinet-pc on a Pocket.
+   then a test build for CONFIG and fujinet-pc on a Pocket (done: games
+   boot, 2026-11-20).
