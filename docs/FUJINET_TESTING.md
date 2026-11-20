@@ -148,9 +148,14 @@ screen. On the core:
     cartridge load, from the SD card or the FujiNet alike, resets the gun's
     aim to the middle of the screen (`virtual_axis5`), which a menu Reset
     keeps where it was; and a port changed to Light Gun in the menu after
-    the game started is seen only by a restart. Release note: for these two
-    games, choose the light gun before they start, or Reset from the menu
-    after choosing it.
+    the game started is seen only by a restart. With the port on Auto the
+    core takes the controller from the game's header (byte 55), which is
+    why the other light gun games need nothing; these two presumably
+    declare a joystick. CONFIG is played with the joystick, so the port
+    stays a joystick while the game is chosen, but CONFIG only waits while
+    the FujiNet pushes the game (a few seconds). Release note: for Alien
+    Brigade and Crossbow, set the port to Light Gun in the menu while the
+    FujiNet loads the game, or Reset from the menu after setting it.
 - **PLAY GAME LOBBY fails:** CONFIG mounts the host `ec.tnfs.io` and boots
   `/atari7800/lobby.a78` from it (fujinet-config `atari7800/st_lobby.c`,
   `constants.h`), and that server has no 7800 lobby yet (2026-11-20: an
