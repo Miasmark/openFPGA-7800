@@ -140,7 +140,9 @@ screen. On the core:
   `atari` folder of `.xex` files and an `intv` folder). Seen as
   `?HOST ERROR 00` and earlier `?MOUNT ERROR 00`: error 00 is the mailbox's
   "transaction done", so the FujiNet answered with a NAK. Upstream content,
-  not the core.
+  not the core: a FujiNet Go 7800 behaves roughly the same (2026-11-20).
+  Its host list differs from fujinet-pc's because each FujiNet keeps its
+  own host slots (fujinet-pc in its `fnconfig.ini`).
 - **INFO:** INPTCTRL shows 00, and the High Score Cart line follows the
   Pocket's HSC; switching it there does nothing.
 
