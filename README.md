@@ -173,7 +173,7 @@ FujiNet programs for the 7800 talk to a FujiNet device through a mailbox
 their cartridge serves below $1000 (the FujiNet 7800 programmer's handbook,
 section 19). The core can now be that cartridge, with the FujiNet on the
 Pocket's link port or in its cartridge slot instead of on a cartridge's USB
-link:
+link. To set one up, see [docs/FUJINET_SETUP.md](docs/FUJINET_SETUP.md).
 
 - **When:** only for an image that claims the mailbox ("FUJI" at $FF70, as
   FujiNet's own tools put it; the core finds it while the image loads).
@@ -273,8 +273,11 @@ link:
   cable. There is no FujiNet for the Pocket's slot to buy yet; one is
   specified in
   [docs/FUJINET_POCKET_DEVICE.md](docs/FUJINET_POCKET_DEVICE.md). See
-  *FujiNet over the link port or cartridge slot* and
-  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md).
+  *FujiNet over the link port or cartridge slot*.
+  - **To connect one yourself:**
+    [docs/FUJINET_SETUP.md](docs/FUJINET_SETUP.md) covers fujinet-pc, the
+    wiring of a USB serial adapter to the link port, and making FujiNet's
+    CONFIG into an `.a78`.
   - **Cartridge power is now on** while the core runs (`core.json`
     `cartridge_adapter` 0): the slot's level translators need it. With any
     cartridge left in the slot this is safe; a GB or GBC cartridge puts the
