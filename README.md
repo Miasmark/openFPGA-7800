@@ -451,8 +451,20 @@ system) under Verilator at the Pocket's clock rates. Latest results:
 Pitch is measured to the 5 Hz resolution of the test window. The old core
 would read about half these frequencies, an octave down.
 
-The Quartus build of 2.2.6 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+The Quartus build of 2.2.7 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
 meets timing on all four corners. Worst setup slack at the worse slow
+corner: +3.151 ns on clk_sdram (gate +1.5 ns), +2.436 ns on DARIA's CPU
+clock (gate +0.5 ns), and +3.402 ns on DARIA's phase detector (bounded at
+8.0 / 0.5 ns; hold +0.349 ns). Worst hold slack +0.074 ns. Seeds 1 and 2
+pass every check too, with +2.424 and +2.680 ns on clk_sdram; seed 3 has
+the most, which decides. It uses 16,666 of 18,480 ALMs (90%), 222 of 308
+M10K blocks and 43 DSP blocks. Its bitstream is the hardware test build's
+(`fujinet_test3_gameload`). Step 7's check (g) was amended for it: a
+register the fitter's retiming creates no longer counts as the 2600
+cartridge's by its name ([docs/daria_step7/plan.md](docs/daria_step7/plan.md)
+5.4 (g), with the negative control refitted).
+The Quartus build of 2.2.6 (fitter seed 3, DARIA's CPU clock at 38.18 MHz)
+met timing on all four corners. Worst setup slack at the worse slow
 corner: +2.764 ns on clk_sdram (gate +1.5 ns), +2.059 ns on DARIA's CPU
 clock (gate +0.5 ns), and +3.308 ns on DARIA's phase detector (bounded at
 8.0 / 0.5 ns; hold +0.365 ns). Worst hold slack +0.104 ns. Seeds 1 and 2
