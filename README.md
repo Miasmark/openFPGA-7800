@@ -167,7 +167,7 @@ Everything the MiSTer core does for 7800 cartridges, except as noted below:
   *Composite*'s picture of Tower Toppler. NTSC MARIA games only: 2600 and
   PAL games stay RGB.
 
-### FujiNet over the link port or cartridge slot (in development, not in a release yet)
+### FujiNet over the link port or cartridge slot (2.2.7)
 
 FujiNet programs for the 7800 talk to a FujiNet device through a mailbox
 their cartridge serves below $1000 (the FujiNet 7800 programmer's handbook,
@@ -243,7 +243,51 @@ link:
   link-port loopback, and a full request to fujinet-pc through an FT232H
   on the link port (its SSID and firmware version came back), then an HTTP
   GET of example.com on N1: OPEN, STATUS, READ and CLOSE, with the page's
-  first 180 bytes on screen.
+  first 180 bytes on screen. **(2026-11-20)** FujiNet's CONFIG, booting
+  games the FujiNet pushes (Battleship, Ballblazer and others), against
+  fujinet-pc through the same FT232H; PLAY GAME LOBBY waits for a 7800
+  lobby on FujiNet's server, as on FujiNet's own 7800 hardware.
+
+### New in 2.2.7
+
+2.2.7 is 2.2.6 with FujiNet support and one light gun fix:
+
+- **FujiNet over the link port or the cartridge slot.** A 7800 program
+  that claims FujiNet's mailbox ("FUJI" at $FF70) talks to a FujiNet: the
+  core serves the mailbox FujiNet's own 7800 cartridge has, and sends each
+  request as a FujiBus packet at 115,200 baud on the link port (SO / SI) or
+  cartridge pins 5 and 31, using whichever answers. So FujiNet's 7800
+  CONFIG runs on the core (Wi-Fi setup, host slots, browsing, copying), its
+  network devices work (HTTP tested, as FujiNet programs such as
+  Battleship use it), and **CONFIG boots games**: the FujiNet pushes the
+  game, the core holds it in the PSRAM and loads it through the same path
+  as a game from the SD card, so its A78 header decides the hardware as
+  there. Every other image runs as before, and the core drives the
+  FujiNet lines only while a FujiNet program runs. Tested on a Pocket with
+  fujinet-pc (FujiNet's PC version) through a USB serial adapter on a link
+  cable. There is no FujiNet for the Pocket's slot to buy yet; one is
+  specified in
+  [docs/FUJINET_POCKET_DEVICE.md](docs/FUJINET_POCKET_DEVICE.md). See
+  *FujiNet over the link port or cartridge slot* and
+  [docs/FUJINET_TESTING.md](docs/FUJINET_TESTING.md).
+  - **Cartridge power is now on** while the core runs (`core.json`
+    `cartridge_adapter` 0): the slot's level translators need it. With any
+    cartridge left in the slot this is safe; a GB or GBC cartridge puts the
+    rail, the link port's included, at 5 V.
+  - **PLAY GAME LOBBY** fails (`?MOUNT ERROR 00`): CONFIG boots the lobby
+    from FujiNet's server, which has no 7800 lobby yet. FujiNet's own 7800
+    hardware does the same.
+  - **A pushed game keeps its A78 header's settings,** as from the SD card:
+    a copy whose header lacks the POKEY flag plays without its POKEY music
+    (the NTSC Commando on FujiNet's server; its PAL copy plays it).
+  - **Alien Brigade and Crossbow** pick joystick or light gun when they
+    start, and CONFIG needs the joystick: set Port 1 to Light Gun in the
+    menu while the FujiNet loads the game, or Reset from the menu after.
+  - Not served: the High Score Cart's saves to the FujiNet's SD card.
+- **The light gun's crosshair with Composite in 2600 mode** lines up: the
+  decoded 2600 picture trails the RGB one by 12 clk_sys, not MARIA's 14,
+  so the crosshair landed half a TIA pixel late. 7800 games and the
+  picture without a light gun are unchanged.
 
 ### New in 2.2.6
 
@@ -462,7 +506,7 @@ the In-System Memory Content Editor is gone. 2.0.20 used 75% of the ALMs and
 all 308 M10K blocks. The PLL produces the NTSC and PAL master clocks
 exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 
-### Hardware testing (2.0.2 to 2.2.6, Analogue Pocket)
+### Hardware testing (2.0.2 to 2.2.7, Analogue Pocket)
 
 | Test | Result |
 |---|---|
@@ -493,6 +537,7 @@ exactly (14.3181818 and 14.1875800 MHz, to the PLL's 32-bit fraction).
 | SRAM memories (2.0.21) | BIOS boot, SuperGame and Souper cartridge RAM, SaveKey save and reload, a blank SaveKey, and Flicker Blend all pass, with Watson's POKEY and again with upstream's |
 | Upstream POKEY at half level (2.0.21) | Ballblazer, Commando and the earlier POKEY games sound right; Commando no longer loud |
 | Composite and Artifact palettes (2.2.6's test builds, 2026-11-07 and 2026-11-08) | Tower Toppler's tower shows its artifact colour on both; light gun games aim as before with Composite on; the owner's verdict on the Artifact build: "it works good" |
+| FujiNet (2.2.7's test builds, 2026-11-17 to 2026-11-20) | fujinet-pc through an FT232H on a link cable: NO LINK with nothing attached, the link loopback, the adapter configuration and an HTTP GET from the test cart; FujiNet's CONFIG browses hosts and boots the games it pushes (Battleship over the network, Ballblazer with its POKEY music); PLAY GAME LOBBY fails for want of a 7800 lobby on FujiNet's server, as on a FujiNet Go 7800 |
 | Colour register accesses (2.2.6, 2026-11) | `sim/mstat/cram_test.asm` on the Pocket shows the reads' dots where the console's photo has them, and nothing from writes |
 | MARIA DMA timing (2.2.5's test build, 2026-10-31) | The 15 DMA timing test carts count on the Pocket exactly what the simulation predicts, one below the owner's console on every case: 1836 to 1593 for the cases within the line's limit, 685-686 at the limit, and 425-426 over it (418-419 before the cut-off moved; the console 426-427) |
 | Display modes | CRT and the three LCD looks all work (2.0.14+) |
