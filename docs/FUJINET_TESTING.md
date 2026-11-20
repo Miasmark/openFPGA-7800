@@ -134,6 +134,20 @@ screen. On the core:
   requests on N1. Before game loading (up to step 1 of
   [FUJINET_GAME_LOADING.md](FUJINET_GAME_LOADING.md)) the push was refused:
   `?LOAD ERROR 03`.
+- **Seen with games the FujiNet booted** (2026-11-20; for 2.2.7's release
+  notes, once each is settled):
+  - **Commando has no music.** The core turns POKEY on from the A78
+    header's flags, so a hosted copy whose header lacks the POKEY flag is
+    silent, as it would be from the SD card. A headerless copy is given a
+    generated header, which cannot know of POKEY either. Ballblazer, whose
+    header has it, plays its music. To check: the same file from the SD
+    card.
+  - **A light gun game needs Reset from the menu** before the gun works.
+    Every block a menu Reset resets also resets with a cartridge load, the
+    swap's included, so the cause is not yet known. To check: the same
+    game from the SD card. If it works there without the Reset, the swap
+    misses something a load does and is to be fixed; if not, it is the
+    core's light gun in general.
 - **PLAY GAME LOBBY fails:** CONFIG mounts the host `ec.tnfs.io` and boots
   `/atari7800/lobby.a78` from it (fujinet-config `atari7800/st_lobby.c`,
   `constants.h`), and that server has no 7800 lobby yet (2026-11-20: an
