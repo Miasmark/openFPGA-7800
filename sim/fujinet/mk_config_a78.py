@@ -12,10 +12,9 @@ signature and survives it).
   mk_config_a78.py FUJINET_FIRMWARE_DIR OUT.a78 [--sign SIGN7800_PY]
 
 CONFIG is FujiNet's (fujinet-config, atari7800/), under their license; this
-repository does not carry it. On the Pocket core everything but booting a
-game runs: a game's MOUNT_IMAGE ends in "?LOAD ERROR 03" (the core refuses
-the image push), and the INFO screen's INPTCTRL and High Score Cart lines
-show defaults. See docs/FUJINET_TESTING.md.
+repository does not carry it. On the Pocket core (2.2.7) it runs and boots
+games; the INFO screen's INPTCTRL and High Score Cart lines show defaults.
+See docs/FUJINET_SETUP.md and docs/FUJINET_TESTING.md.
 SPDX-License-Identifier: MIT
 """
 import argparse, os, re, subprocess, sys
